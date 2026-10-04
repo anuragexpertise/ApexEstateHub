@@ -44,7 +44,10 @@ from app.dash_apps.drilldown.drillin import (
 from app.dash_apps.drilldown.schema_introspect import ENTITY_TABLE_MAP
 from app.dash_apps.drilldown.registry import to_plural
 from app.security.guards import require_session
-from app.security.audit_context import get_current_society_id
+from app.security.audit_context import (
+    get_current_linked_id, get_current_society_id, get_current_user_role)
+from app.security.authorization import Cap
+from app.security.service_guard import blocks, check, scoped_get
 from database.db_manager import db
 
 
@@ -53,6 +56,46 @@ def _physical_table(entity: str) -> str:
     table DRILLIN_CONFIG is keyed on (e.g. 'receipts')."""
     plural = to_plural(entity)
     return ENTITY_TABLE_MAP.get(plural, plural)
+
+
+def resolve_dues_scope(requested_apartment_id):
+    """Server-derived (society_id, apartment_id) for the Pay Dues bill picker,
+    or None when the caller may not browse that flat's dues.
+
+    RWA3 WP4 item 2 (resident slice). The picker used to trust two values the
+    browser controls - the `entity_id` form field and the society/apartment
+    pair stored in `pay-dues-bill-store` - so any resident could list the
+    unpaid bills of ANY flat in the society (or, via a tampered store, another
+    society). Now:
+      * society always comes from the Flask-Login session;
+      * a resident is pinned to their own server-linked flat whatever the form
+        or store claims (the capability check below also has to pass);
+      * an admin may pick a flat, but only one inside their own society,
+        resolved with a tenant-qualified lookup;
+      * every other role has no dues picker.
+    """
+    society_id = get_current_society_id()
+    if society_id is None:
+        return None
+    role = get_current_user_role() or ""
+    if role == "apartment":
+        unit_id = get_current_linked_id()
+        if not unit_id:
+            return None
+        decision = check(Cap.FINANCE_SELF_VIEW, "unit_ledger", unit_id,
+                         target_society_id=society_id, attributes={"unit_id": unit_id})
+        if blocks(decision):
+            return None
+        return society_id, int(unit_id)
+    if role == "admin":
+        try:
+            apt_id = int(requested_apartment_id)
+        except (TypeError, ValueError):
+            return None
+        if scoped_get("apartments", apt_id, society_id, columns=["id"]) is None:
+            return None
+        return society_id, apt_id
+    return None
 
 
 def _card_style(color: str) -> dict:
@@ -516,9 +559,12 @@ def register_pay_dues_bill_callbacks(app):
     def open_pay_dues_bill_modal(n_clicks, apartment_id):
         if not n_clicks:
             raise PreventUpdate
-        society_id = get_current_society_id()
+        scope = resolve_dues_scope(apartment_id)
+        if scope is None:
+            raise PreventUpdate
+        society_id, apt_id = scope
         store = {
-            "apartment_id": int(apartment_id) if apartment_id else None,
+            "apartment_id": apt_id,
             "society_id": society_id,
             "selected_bill": None,
         }
@@ -573,11 +619,13 @@ def register_pay_dues_bill_callbacks(app):
         if not is_open:
             raise PreventUpdate
         store = store or {}
-        apartment_id = store.get("apartment_id")
-        society_id = store.get("society_id")
-        if not apartment_id or not society_id:
+        # The store is a browser dcc.Store: it only NAMES the flat the user
+        # asked for. Society and flat are re-derived server-side every call.
+        scope = resolve_dues_scope(store.get("apartment_id"))
+        if scope is None:
             return html.P("No apartment selected.", className="text-muted text-center",
                           style={"padding": "30px"})
+        society_id, apartment_id = scope
 
         try:
             from database.db_manager import db
@@ -645,24 +693,36 @@ def register_pay_dues_bill_callbacks(app):
 
         bill_group_id = triggered.get("bill_group_id")
         store = store or {}
-        society_id = store.get("society_id")
+        scope = resolve_dues_scope(store.get("apartment_id"))
+        if scope is None:
+            raise PreventUpdate
+        society_id, apartment_id = scope
 
         label = None
         if bill_group_id and society_id:
             try:
                 from database.db_manager import db
+                # Bound to the resolved flat: a bill group id that belongs to
+                # another flat resolves to nothing, so it can neither be
+                # previewed nor written into the form's hidden field.
                 row = db._execute("""
                     SELECT MIN(period_month)::TEXT as period_month,
                            STRING_AGG(description, ', ') as desc,
                            SUM(amount - paid_amount)::FLOAT as amount
                       FROM receivables
-                     WHERE society_id = %s AND bill_group_id = %s
+                     WHERE society_id = %s AND entity_id = %s AND role = 'apartment'
+                       AND bill_group_id = %s
                      GROUP BY bill_group_id
-                """, (society_id, bill_group_id), fetch_one=True)
+                """, (society_id, apartment_id, bill_group_id), fetch_one=True)
                 if row:
                     label = f"{row['period_month']} — {row['desc']} (₹{row['amount']:,.2f})"
             except Exception:
                 pass
+
+        if bill_group_id and label is None:
+            # Not one of THIS flat's unpaid bills (foreign id, stale id or a
+            # lookup failure): never write it into the form. Fail closed.
+            raise PreventUpdate
 
         display_text = label if label else "Tap to select bill…"
         button_children = html.Div([

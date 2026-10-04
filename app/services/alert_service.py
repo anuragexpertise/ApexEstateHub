@@ -67,7 +67,7 @@ def create_alert_channel(
 
         # Auto-subscribe creator apartment if provided
         if apartment_id:
-            subscribe_channel(channel_id, apartment_id)
+            subscribe_channel(channel_id, apartment_id, society_id)
 
         return channel_id, "Channel created successfully"
     except Exception as e:
@@ -75,9 +75,45 @@ def create_alert_channel(
         return None, str(e)
 
 
-def subscribe_channel(channel_id: int, apartment_id: int):
-    """Subscribe an apartment to an alert channel."""
+def _channel_membership_error(channel_id: int, apartment_id: int, society_id=None):
+    """Return (error, channel_row). `error` is None when `apartment_id` may be
+    (un)subscribed to `channel_id`, else a user-safe reason.
+
+    Tenant invariant (RWA3 §3.3 rule 2): the channel and the apartment must
+    live in the SAME society, and - when the caller supplies the principal's
+    society - in THAT society. A foreign-tenant channel and a nonexistent one
+    are indistinguishable to the caller, so channel ids cannot be probed.
+    Previously a resident could subscribe their flat to another society's
+    channel by id alone, which put the flat on that society's alert roster.
+    """
+    ch = db._execute(
+        "SELECT society_id, active FROM alert_channels WHERE id = %s",
+        (channel_id,), fetch_one=True)
+    apt = db._execute(
+        "SELECT society_id FROM apartments WHERE id = %s",
+        (apartment_id,), fetch_one=True)
+    if not ch or not apt:
+        return "Channel not found", None
+    if ch["society_id"] != apt["society_id"]:
+        return "Channel not found", None
+    if society_id is not None and ch["society_id"] != society_id:
+        return "Channel not found", None
+    return None, ch
+
+
+def subscribe_channel(channel_id: int, apartment_id: int, society_id: int = None):
+    """Subscribe an apartment to an alert channel (same-society only).
+
+    Pass `society_id` from the SERVER principal at every user-facing call
+    site; it is checked against both the channel and the apartment. Inactive
+    channels cannot gain new subscribers. Idempotent: re-subscribing succeeds.
+    """
     try:
+        bad, ch = _channel_membership_error(channel_id, apartment_id, society_id)
+        if bad:
+            return False, bad
+        if not ch.get("active", True):
+            return False, "This channel is no longer active"
         db._execute("""
             INSERT INTO alert_subscriptions (channel_id, apartment_id)
             VALUES (%s, %s)
@@ -85,19 +121,24 @@ def subscribe_channel(channel_id: int, apartment_id: int):
         """, (channel_id, apartment_id))
         return True, "Subscribed successfully"
     except Exception as e:
-        return False, str(e)
+        logger.error(f"subscribe_channel error: {e}")
+        return False, "Unable to update the subscription"
 
 
-def unsubscribe_channel(channel_id: int, apartment_id: int):
-    """Unsubscribe an apartment from an alert channel."""
+def unsubscribe_channel(channel_id: int, apartment_id: int, society_id: int = None):
+    """Unsubscribe an apartment from an alert channel (same-society only)."""
     try:
+        bad, _ch = _channel_membership_error(channel_id, apartment_id, society_id)
+        if bad:
+            return False, bad
         db._execute("""
             DELETE FROM alert_subscriptions
              WHERE channel_id = %s AND apartment_id = %s
         """, (channel_id, apartment_id))
         return True, "Unsubscribed successfully"
     except Exception as e:
-        return False, str(e)
+        logger.error(f"unsubscribe_channel error: {e}")
+        return False, "Unable to update the subscription"
 
 
 def list_channels(society_id: int, apartment_id: int = None, is_admin: bool = False):

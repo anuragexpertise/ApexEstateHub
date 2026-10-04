@@ -58,7 +58,16 @@ SHADOW = "shadow"
 # Resident-facing actions whose policy departs from legacy behaviour (e.g. only
 # owners may vote). They start in shadow so the first staging replay shows who
 # would be denied before enforcement is switched on.
-SHADOW_BY_DEFAULT: frozenset[str] = frozenset({Cap.POLL_VOTE, Cap.GATE_VISITOR_PROCESS})
+SHADOW_BY_DEFAULT: frozenset[str] = frozenset({
+    Cap.POLL_VOTE, Cap.GATE_VISITOR_PROCESS,
+    # Resident slice (RWA3 PR 6). Policy is stricter than legacy for some user
+    # types: only owners hold finance.self.view (tenants/family/visitors saw
+    # their flat's dues via role='apartment'), visitors cannot raise concerns,
+    # and security staff never held event.ticket.purchase although the UI was
+    # opened to them in 2026-08. Shadow first, enforce after a staging replay.
+    # Tenant isolation does NOT depend on these: it is enforced regardless of mode.
+    Cap.FINANCE_SELF_VIEW, Cap.CONCERN_CREATE, Cap.EVENT_TICKET_PURCHASE,
+})
 
 
 class AuthorizationDenied(PermissionError):
@@ -339,6 +348,7 @@ for _spec in (
     TenantTable("concerns_assigns",
                 ("concern_id", "role", "entity_id", "status", "assigned_by", "invited_by"),
                 ("status",)),
+    TenantTable("alert_channels", ("name", "channel_type", "apartment_id", "active"), ()),
     TenantTable("apartments", ("flat_number", "active"), ()),
     TenantTable("vendors", ("business_name", "active"), ()),
     TenantTable("security_staff", ("name", "active"), ()),

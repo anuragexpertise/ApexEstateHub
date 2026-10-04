@@ -1572,15 +1572,38 @@ def register_drilldown_callbacks(app):
                     return store, content, bc, {"display": "none"}, toast
 
                 from app.services.alert_service import list_channels, subscribe_channel, unsubscribe_channel
+                from app.security.authorization import Cap as _Cap
+                from app.security.service_guard import (
+                    audit_event as _audit, authorize_resource as _authz_res, blocks as _blocks)
+
+                # Action-level authorization (RWA3 WP4 item 2): resolve the
+                # channel in the caller's own society before any write, so a
+                # forged pk from another tenant is a plain "not found".
+                try:
+                    _chan_id = int(pk)
+                except (TypeError, ValueError):
+                    _chan_id = None
+                _dec, _ = _authz_res(_Cap.CHANNEL_SUBSCRIBE, "alert_channel",
+                                     "alert_channels", _chan_id)
+                if _chan_id is None or _blocks(_dec):
+                    toast = {"_toast": {"type": "error", "message": "Channel not found"}}
+                    return store, content, bc, {"display": "none"}, toast
 
                 channels = list_channels(sid, apartment_id=apartment_id, is_admin=False)
-                ch = next((c for c in channels if c["id"] == int(pk)), None)
+                ch = next((c for c in channels if c["id"] == _chan_id), None)
                 currently_subscribed = ch.get("is_subscribed", False) if ch else False
 
                 if currently_subscribed:
-                    ok, msg = unsubscribe_channel(channel_id=int(pk), apartment_id=apartment_id)
+                    ok, msg = unsubscribe_channel(channel_id=_chan_id, apartment_id=apartment_id,
+                                                  society_id=sid)
+                    _verb = "channel.unsubscribe"
                 else:
-                    ok, msg = subscribe_channel(channel_id=int(pk), apartment_id=apartment_id)
+                    ok, msg = subscribe_channel(channel_id=_chan_id, apartment_id=apartment_id,
+                                                society_id=sid)
+                    _verb = "channel.subscribe"
+                if ok:
+                    _audit(_verb, "alert_channel", _chan_id, after={"apartment_id": apartment_id},
+                           permission_used=_Cap.CHANNEL_SUBSCRIBE)
 
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg or "Action failed"}}
@@ -1929,7 +1952,36 @@ def register_drilldown_callbacks(app):
                 {"type": "error", "message": "You don't have permission to do that."},
                 no_update,
             )
-        
+
+        # ── Action-level authorization (RWA3 WP4 item 2, resident slice) ─────
+        # The role sets above only say "an apartment may touch this entity".
+        # They cannot tell an owner from a visitor, nor a tenant from an owner.
+        # Resident-initiated creates are therefore also checked against the
+        # capability policy, using the DB-verified user_type from the server
+        # principal. Admin paths are unchanged here (admin slice, PR 5).
+        # concern.create / event.ticket.purchase depart from legacy for a few
+        # user types, so they start in shadow (see SHADOW_BY_DEFAULT).
+        from app.security.authorization import Cap as _Cap
+        from app.security.service_guard import blocks, check
+        _cap_gate = None
+        if _actor_role == "apartment" and entity_singular == "concern" and "edit" not in card_id:
+            _cap_gate = (_Cap.CONCERN_CREATE, "concern")
+        elif (_actor_role in ("apartment", "vendor", "security")
+              and entity_singular in ("event_ticket", "event_ticket_new")):
+            _cap_gate = (_Cap.EVENT_TICKET_PURCHASE, "event_ticket")
+        if _cap_gate is not None:
+            _gate = (check(_Cap.CONCERN_CREATE, "concern", target_society_id=sid)
+                     if _cap_gate[0] == _Cap.CONCERN_CREATE
+                     else check(_Cap.EVENT_TICKET_PURCHASE, "event_ticket", target_society_id=sid))
+            if blocks(_gate):
+                return (
+                    store,
+                    no_update,
+                    no_update,
+                    {"type": "error", "message": "You don't have permission to do that."},
+                    no_update,
+                )
+
 
         # ── 1. Collect form-field values for THIS entity only ────────────────
         form_data: dict = {}

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "unclassified_baseline": 139,
+  "unclassified_baseline": 133,
   "endpoints": {
     "callback:account_callbacks.py::handle_change_password": {
       "classification": "unclassified"
@@ -120,7 +120,10 @@
       "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
     },
     "callback:channel_callbacks.py::toggle_channel_subscription": {
-      "classification": "unclassified"
+      "classification": "action",
+      "actions": [
+        "channel.subscribe"
+      ]
     },
     "callback:concern_bid_callbacks.py::close_bid_modal": {
       "classification": "exempt",
@@ -217,7 +220,11 @@
       "classification": "unclassified"
     },
     "callback:drilldown_callbacks.py::handle_form_submit": {
-      "classification": "unclassified"
+      "classification": "action",
+      "actions": [
+        "concern.create",
+        "event.ticket.purchase"
+      ]
     },
     "callback:drilldown_callbacks.py::handle_image_upload": {
       "classification": "unclassified"
@@ -235,7 +242,10 @@
       "classification": "unclassified"
     },
     "callback:drilldown_callbacks.py::route_drilldown": {
-      "classification": "unclassified"
+      "classification": "action",
+      "actions": [
+        "channel.subscribe"
+      ]
     },
     "callback:drilldown_callbacks.py::select_pass_type": {
       "classification": "unclassified"
@@ -261,13 +271,22 @@
       "classification": "unclassified"
     },
     "callback:drillin_callbacks.py::open_pay_dues_bill_modal": {
-      "classification": "unclassified"
+      "classification": "action",
+      "actions": [
+        "finance.self.view"
+      ]
     },
     "callback:drillin_callbacks.py::populate_pay_dues_bill_list": {
-      "classification": "unclassified"
+      "classification": "action",
+      "actions": [
+        "finance.self.view"
+      ]
     },
     "callback:drillin_callbacks.py::select_pay_dues_bill": {
-      "classification": "unclassified"
+      "classification": "action",
+      "actions": [
+        "finance.self.view"
+      ]
     },
     "callback:drillin_callbacks.py::validate_pay_dues_bill_group": {
       "classification": "exempt",

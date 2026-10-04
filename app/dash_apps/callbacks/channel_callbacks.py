@@ -20,6 +20,8 @@ from app.security.audit_context import (
     get_current_linked_id,
 )
 from app.utils.ux_toasts import error_toast
+from app.security.authorization import Cap
+from app.security.service_guard import audit_event, authorize_resource, blocks
 
 logger = logging.getLogger(__name__)
 
@@ -188,14 +190,35 @@ def register_channel_callbacks(app):
             return {"type": "error", "message": "Apartment not found."}
         society_id = get_current_society_id()
         try:
-            from app.services.alert_service import get_channel_subscribers, subscribe_channel, unsubscribe_channel
+            channel_id = int(channel_id)
+        except (TypeError, ValueError):
+            return {"type": "error", "message": "Channel not found."}
+        # Action-level authorization (RWA3 WP4 item 2): the channel is resolved
+        # INSIDE the caller's own society first, so a forged channel_id from
+        # another tenant is indistinguishable from a missing one and never
+        # reaches the write below.
+        decision, _row = authorize_resource(Cap.CHANNEL_SUBSCRIBE, "alert_channel",
+                                            "alert_channels", channel_id)
+        if blocks(decision):
+            return {"type": "error", "message": "You cannot change subscriptions for this channel."}
+        try:
+            from app.services.alert_service import (
+                get_channel_subscribers, subscribe_channel, unsubscribe_channel)
             result = get_channel_subscribers(channel_id=channel_id, society_id=society_id)
             subscribers = result.get("subscribers", [])
             is_subscribed = any(s.get("apartment_id") == apartment_id for s in subscribers)
             if is_subscribed:
-                ok, msg = unsubscribe_channel(channel_id=channel_id, apartment_id=apartment_id)
+                ok, msg = unsubscribe_channel(channel_id=channel_id, apartment_id=apartment_id,
+                                              society_id=society_id)
+                verb = "channel.unsubscribe"
             else:
-                ok, msg = subscribe_channel(channel_id=channel_id, apartment_id=apartment_id)
+                ok, msg = subscribe_channel(channel_id=channel_id, apartment_id=apartment_id,
+                                            society_id=society_id)
+                verb = "channel.subscribe"
+            if ok:
+                audit_event(verb, "alert_channel", channel_id,
+                            after={"apartment_id": apartment_id},
+                            permission_used=Cap.CHANNEL_SUBSCRIBE)
             return {"type": "success" if ok else "error", "message": msg or "Action failed"}
         except Exception as e:
             logger.error(f"toggle_channel_subscription error: {e}")
