@@ -17,7 +17,7 @@
 -- SECTION 1: CORE SCHEMA
 -- ════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS societies (
+CREATE TABLE societies (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL UNIQUE,
     PAN_number VARCHAR(10),
@@ -59,17 +59,14 @@ CREATE TABLE IF NOT EXISTS societies (
     -- remains a separate, still-open gap (thresholds table has no
     -- per-state row differentiation to key off of yet).
     state VARCHAR(50),
-    -- signing_secret_enc (renamed 2026-09 from qr_signing_secret_hash):
-    -- this society's own QR SIGNING_SECRET, Fernet-encrypted (reversible)
-    -- under the deployment's SECRET_VAULT_KEY — see
-    -- app/services/secret_vault.py. The old column stored a one-way
-    -- werkzeug hash and could only ever function as a "setup completed"
-    -- flag, never as real HMAC key material (a hash can't be turned back
-    -- into the key). NULL means this society hasn't completed the Setup
-    -- Wizard yet (or hasn't set a signing secret) — QR codes for that
-    -- society stay unsigned until it is set. Also doubles as the
-    -- "has this society finished onboarding" flag the Setup Wizard
-    -- trigger checks, same role the old column played.
+    -- signing_secret_enc: this society's own QR SIGNING_SECRET, Fernet-encrypted
+    -- (reversible) under the deployment's SECRET_VAULT_KEY — see
+    -- app/services/secret_vault.py. It must be reversible, because an HMAC key
+    -- cannot be recovered from a hash: a one-way value could only ever act as a
+    -- "setup completed" flag, never as real key material. NULL means this society
+    -- hasn't completed the Setup Wizard yet (or hasn't set a signing secret), so
+    -- its QR codes stay unsigned until it is. Also doubles as the "has this
+    -- society finished onboarding" flag the Setup Wizard trigger checks.
     signing_secret_enc TEXT,
     primary_bank_account_id INT,
     -- Per-society override of the legal regime's cash-payment enforcement:
@@ -79,7 +76,7 @@ CREATE TABLE IF NOT EXISTS societies (
     cash_limit_mode VARCHAR(5) CHECK (cash_limit_mode IN ('warn', 'block'))
 );
 
-CREATE TABLE IF NOT EXISTS users (
+CREATE TABLE users (
     id SERIAL PRIMARY KEY,
     society_id INT REFERENCES societies (id) ON DELETE CASCADE,
     email VARCHAR(30) NOT NULL UNIQUE,
@@ -120,25 +117,11 @@ CREATE TABLE IF NOT EXISTS users (
     created_by INT REFERENCES users (id)
 );
 
--- qr_version is now a random 4-digit nonce, not a sequential counter, and
+-- qr_version is a random 4-digit nonce, not a sequential counter, and
 -- only ever changes via an explicit admin revoke/reissue action — see
--- app/services/qr_service.py revoke_and_reissue. ALTER COLUMN ... SET
--- DEFAULT (not relying on the CREATE TABLE's DEFAULT alone) because
--- CREATE TABLE IF NOT EXISTS is a no-op against an already-provisioned
--- database — same convention as societies.primary_bank_account_id below.
--- Existing rows keep whatever qr_version they already had (no bulk
--- backfill/mass-reissue here by design — see the qr_reissue_log comment
--- further down); only NEW rows and future explicit revokes get a random
--- value.
---
--- last_printed_at/last_emailed_at (2026-09, DROPPED again same release):
--- briefly added here to back an auto-reissue-on-repeat-print/save design
--- that was reverted before shipping — Print/Save/Email are pure reads
--- again, so there's nothing left that reads or writes these two columns.
--- Dropped rather than left dangling on an already-provisioned database
--- that may have run the earlier version of this migration.
+-- app/services/qr_service.py revoke_and_reissue.
 
-CREATE TABLE IF NOT EXISTS push_subscriptions (
+CREATE TABLE push_subscriptions (
     id SERIAL PRIMARY KEY,
     user_id INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     endpoint TEXT NOT NULL,
@@ -155,7 +138,7 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 -- grouping). It is NOT used as a category or filter key anywhere in the engine.
 -- Categorisation is entirely determined by acc_id + drcr_account at the point
 -- of use — there is no `category` column on this table.
-CREATE TABLE IF NOT EXISTS accounts (
+CREATE TABLE accounts (
     id SERIAL,
     PRIMARY KEY (society_id, id),
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -199,7 +182,7 @@ CREATE TABLE IF NOT EXISTS accounts (
         CHECK (statutory_lock_pct >= 0 AND statutory_lock_pct <= 100)
 );
 
-CREATE TABLE IF NOT EXISTS apartments (
+CREATE TABLE apartments (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     flat_number VARCHAR(20) NOT NULL,
@@ -225,7 +208,7 @@ CREATE TABLE IF NOT EXISTS apartments (
     CONSTRAINT uq_apartment_society_flat UNIQUE (society_id, flat_number)
 );
 
-CREATE TABLE IF NOT EXISTS vendors (
+CREATE TABLE vendors (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     business_name VARCHAR(100) NOT NULL,
@@ -250,7 +233,7 @@ CREATE TABLE IF NOT EXISTS vendors (
     payee_type VARCHAR(20) CHECK (payee_type IN ('individual', 'huf', 'company', 'firm', 'llp', 'other')) DEFAULT 'other'
 );
 
-CREATE TABLE IF NOT EXISTS security_staff (
+CREATE TABLE security_staff (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
@@ -274,7 +257,7 @@ CREATE TABLE IF NOT EXISTS security_staff (
 -- comment block for why last_printed_at/last_emailed_at are being
 -- removed again in the same release they were added.
 
-CREATE TABLE IF NOT EXISTS assets (
+CREATE TABLE assets (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     company_name VARCHAR(100),
@@ -311,7 +294,7 @@ CREATE TABLE IF NOT EXISTS assets (
 -- and future ledger-posting functions can follow the exact same pattern as
 -- fn_buy_asset/fn_dispose_asset. No admin create/dispose UI wired up yet —
 -- see fn_deposit_holdings_fy's comment.
-CREATE TABLE IF NOT EXISTS deposits (
+CREATE TABLE deposits (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     deposit_name VARCHAR(100) NOT NULL, -- e.g. "SBI FD 40021", "HDFC Liquid Fund"
@@ -338,10 +321,6 @@ CREATE TABLE IF NOT EXISTS deposits (
 -- fn_buy_deposit: create a new intangible investment (FD, bond, MF unit, etc.)
 -- Mirrors fn_buy_asset but for the `deposits` table; posts Dr investment account,
 -- Cr cash/bank, and an expense row for the purchase.
-DROP FUNCTION IF EXISTS fn_buy_deposit(
-    INT, VARCHAR, VARCHAR, VARCHAR, NUMERIC,
-    INT, DATE, VARCHAR, INT, TEXT
-) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_buy_deposit(
     p_society_id        INT,
@@ -421,9 +400,6 @@ $$;
 -- fn_dispose_deposit: dispose/mature an intangible investment (FD maturity, bond sale, MF redemption)
 -- Mirrors fn_dispose_asset but for the `deposits` table; posts Dr cash/bank, Cr investment account,
 -- and records gain/loss via STCG/LTCG per the 36-month test (sec 2(42A)).
-DROP FUNCTION IF EXISTS fn_dispose_deposit(
-    INT, NUMERIC, VARCHAR, INT, DATE, TEXT, INT, NUMERIC
-) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_dispose_deposit(
     p_deposit_id    INT,
@@ -519,7 +495,7 @@ BEGIN
 END;
 $$;
 
-CREATE TABLE IF NOT EXISTS events (
+CREATE TABLE events (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     title VARCHAR(200) NOT NULL,
@@ -538,7 +514,7 @@ CREATE TABLE IF NOT EXISTS events (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS concerns (
+CREATE TABLE concerns (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     apartment_id INT REFERENCES apartments (id) ON DELETE SET NULL,
@@ -612,7 +588,7 @@ CREATE TABLE IF NOT EXISTS concerns (
 -- assignment rows rather than from this column alone.
 -- ════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS concerns_assigns (
+CREATE TABLE concerns_assigns (
     id SERIAL PRIMARY KEY,
     concern_id INT NOT NULL REFERENCES concerns (id) ON DELETE CASCADE,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -649,7 +625,7 @@ CREATE TABLE IF NOT EXISTS concerns_assigns (
 -- The workflow service (app/services/workflow.py) is the only writer: it rejects
 -- illegal jumps and is idempotent on (assignment_id, from_state, to_state, actor).
 -- ════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS concern_transitions (
+CREATE TABLE concern_transitions (
     id              SERIAL PRIMARY KEY,
     concern_id      INT NOT NULL REFERENCES concerns (id) ON DELETE CASCADE,
     assignment_id   INT REFERENCES concerns_assigns (id) ON DELETE SET NULL,
@@ -668,15 +644,15 @@ CREATE TABLE IF NOT EXISTS concern_transitions (
     correlation_id  UUID,
     created_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_concern_transitions_concern
+CREATE INDEX idx_concern_transitions_concern
     ON concern_transitions (concern_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_concern_transitions_assignment
+CREATE INDEX idx_concern_transitions_assignment
     ON concern_transitions (assignment_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_concern_transitions_society
+CREATE INDEX idx_concern_transitions_society
     ON concern_transitions (society_id, created_at);
 
 -- ── security_roster & attendance (needed before payables FK) ──
-CREATE TABLE IF NOT EXISTS security_roster (
+CREATE TABLE security_roster (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     security_id INT NOT NULL REFERENCES security_staff (id) ON DELETE CASCADE,
@@ -738,7 +714,7 @@ CREATE TABLE IF NOT EXISTS security_roster (
 --   oldest pending/partial rows; a credit row flips to 'paid' once fully
 --   consumed (paid_amount = amount), same terminal state as a settled due.
 -- ════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS receivables (
+CREATE TABLE receivables (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     entity_id INT NOT NULL,
@@ -802,7 +778,7 @@ CREATE TABLE IF NOT EXISTS receivables (
 -- one upload so a bad upload can be identified together, though rows
 -- are not deleted as a batch (a matched row shouldn't vanish once a
 -- receipt/expense depends on it).
-CREATE TABLE IF NOT EXISTS bank_statement_lines (
+CREATE TABLE bank_statement_lines (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     txn_date DATE NOT NULL,
@@ -844,7 +820,7 @@ CREATE TABLE IF NOT EXISTS bank_statement_lines (
 );
 
 -- ── RECEIPTS — manual credits, deemed paid on creation ────────
-CREATE TABLE IF NOT EXISTS receipts (
+CREATE TABLE receipts (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id),
@@ -911,7 +887,7 @@ COMMENT ON COLUMN receipts.user_id IS 'User who recorded/submitted this receipt 
 -- when, for which apartment), and a status a security guard's scan can
 -- check (valid / expired / revoked) — mirrors the receipts/expenses
 -- pattern (qr_payload, last_printed_at, last_emailed_at) already in use.
-CREATE TABLE IF NOT EXISTS nocs (
+CREATE TABLE nocs (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
@@ -947,7 +923,7 @@ COMMENT ON COLUMN nocs.status IS 'valid/expired are derived by validate_noc_qr()
 -- later profile edit (secretary changes, address changes) never rewrites
 -- what was actually agreed to and signed at onboarding. UNIQUE(society_id)
 -- — one agreement per society, get-or-create, not reissued.
-CREATE TABLE IF NOT EXISTS society_agreements (
+CREATE TABLE society_agreements (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL UNIQUE REFERENCES societies (id) ON DELETE CASCADE,
     agreement_no VARCHAR(64) UNIQUE,
@@ -967,7 +943,7 @@ CREATE TABLE IF NOT EXISTS society_agreements (
 );
 
 -- ── EXPENSES — manual debits, deemed paid on creation ─────────
-CREATE TABLE IF NOT EXISTS expenses (
+CREATE TABLE expenses (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id),
@@ -1027,7 +1003,7 @@ CREATE TABLE IF NOT EXISTS expenses (
 );
 
 -- ── FUND UTILIZATIONS — admin-only withdrawals from Capital/Reserve/Sinking/Repair/Corpus funds ─────────
-CREATE TABLE IF NOT EXISTS fund_utilizations (
+CREATE TABLE fund_utilizations (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id), -- admin who initiated
@@ -1084,7 +1060,7 @@ CREATE TABLE IF NOT EXISTS fund_utilizations (
 -- opt-in and every existing society keeps working unchanged until an admin
 -- sets one.
 -- ═══════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS fund_bank_account_map (
+CREATE TABLE fund_bank_account_map (
     society_id  INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     fund_acc_id INT NOT NULL,
     bank_acc_id INT NOT NULL,
@@ -1110,7 +1086,7 @@ CREATE TABLE IF NOT EXISTS fund_bank_account_map (
 -- from_income_acc_id -> to_fund_acc_id direction instead of
 -- fund_acc_id -> expense_acc_id.
 -- ═══════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS fund_appropriations (
+CREATE TABLE fund_appropriations (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id), -- admin who initiated
@@ -1134,13 +1110,13 @@ CREATE TABLE IF NOT EXISTS fund_appropriations (
 -- The card's appropriation log (and the pending-confirm scan behind it)
 -- reads this table newest-first per society; without this it is a seq scan
 -- over every appropriation ever made, on every Fund Management render.
-CREATE INDEX IF NOT EXISTS idx_fund_appropr_society_created
+CREATE INDEX idx_fund_appropr_society_created
     ON fund_appropriations (society_id, created_at DESC, id DESC);
 
 -- Partial on the rows that actually have work outstanding — pending rows
 -- are a small slice of the table but are the only ones ever looked up by
 -- status.
-CREATE INDEX IF NOT EXISTS idx_fund_appropr_pending
+CREATE INDEX idx_fund_appropr_pending
     ON fund_appropriations (society_id, created_at DESC)
     WHERE status = 'pending';
 
@@ -1164,7 +1140,7 @@ CREATE INDEX IF NOT EXISTS idx_fund_appropr_pending
 -- rather than relying only on a read-then-write check, which would be racy
 -- under two admins clicking at once.
 -- ═══════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS fy_closures (
+CREATE TABLE fy_closures (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     financial_year SMALLINT NOT NULL, -- START year of FY, e.g. 2026 = FY 1-Apr-2026..31-Mar-2027
@@ -1211,9 +1187,9 @@ CREATE TABLE IF NOT EXISTS fy_closures (
         REFERENCES accounts (society_id, id) ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_fy_closures_society ON fy_closures (society_id, financial_year DESC);
+CREATE INDEX idx_fy_closures_society ON fy_closures (society_id, financial_year DESC);
 
-CREATE TABLE IF NOT EXISTS rcm_liability (
+CREATE TABLE rcm_liability (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     expense_id INT REFERENCES expenses (id) ON DELETE SET NULL,
@@ -1252,7 +1228,7 @@ CREATE TABLE IF NOT EXISTS rcm_liability (
 -- used by the GSTR/RCM export and the RCM Liability Register card. Without
 -- it every such query scans the whole table; with it the range predicate
 -- is an index-only scan once the society is pinned.
-CREATE INDEX IF NOT EXISTS idx_rcm_liability_society_date ON rcm_liability (society_id, liability_date);
+CREATE INDEX idx_rcm_liability_society_date ON rcm_liability (society_id, liability_date);
 
 -- rcm_rates (2026-09, Phase 2): per-category RCM rate configuration,
 -- replacing the inline CASE WHEN v_rcm_cat ... 5.00/18.00 previously
@@ -1261,7 +1237,7 @@ CREATE INDEX IF NOT EXISTS idx_rcm_liability_society_date ON rcm_liability (soci
 -- gst_rates). society_id NULL rows are statutory defaults (Notification
 -- No. 13/2017-Central Tax (Rate)) used until a society configures its
 -- own override; society_id-scoped rows take priority when present.
-CREATE TABLE IF NOT EXISTS rcm_rates (
+CREATE TABLE rcm_rates (
     id SERIAL PRIMARY KEY,
     society_id INT REFERENCES societies (id) ON DELETE CASCADE,
     rcm_category VARCHAR(50) NOT NULL,
@@ -1271,7 +1247,7 @@ CREATE TABLE IF NOT EXISTS rcm_rates (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_rcm_rates_lookup ON rcm_rates (rcm_category, effective_from);
+CREATE INDEX idx_rcm_rates_lookup ON rcm_rates (rcm_category, effective_from);
 
 -- Statutory default rates (society_id NULL = global fallback), seeded
 -- once at schema load. A society can override any of these by inserting
@@ -1299,16 +1275,16 @@ WHERE
 COMMENT ON
 TABLE bank_statement_lines IS 'One row per line of an uploaded bank statement (CSV/XLSX). matched_id/matched_entity are set once reconciled against a receipts or expenses row; unmatched rows remain visible as reconciliation candidates. bank_acc_id names the account the statement was drawn from; NULL means the society primary account (the pre-2026-09 behaviour).';
 
-CREATE INDEX IF NOT EXISTS idx_bank_lines_society_unmatched ON bank_statement_lines (society_id, matched_id)
+CREATE INDEX idx_bank_lines_society_unmatched ON bank_statement_lines (society_id, matched_id)
 WHERE
     matched_id IS NULL;
 
-CREATE INDEX IF NOT EXISTS idx_bank_lines_batch ON bank_statement_lines (batch_id);
+CREATE INDEX idx_bank_lines_batch ON bank_statement_lines (batch_id);
 
 -- Per-account statement lookup (2026-09). Partial on matched_id IS NULL
 -- because that is the only state the reconciliation screens ever filter by,
 -- and it keeps the index small on a table that keeps every historical line.
-CREATE INDEX IF NOT EXISTS idx_bank_lines_account ON bank_statement_lines (society_id, bank_acc_id, txn_date)
+CREATE INDEX idx_bank_lines_account ON bank_statement_lines (society_id, bank_acc_id, txn_date)
 WHERE
     matched_id IS NULL;
 
@@ -1318,9 +1294,9 @@ WHERE
 -- bank line found/uploaded yet) stamps reconciled_at/reconciled_by with
 -- no line reference.
 
-CREATE INDEX IF NOT EXISTS idx_receipts_reconciled ON receipts (society_id, reconciled_at);
+CREATE INDEX idx_receipts_reconciled ON receipts (society_id, reconciled_at);
 
-CREATE INDEX IF NOT EXISTS idx_expenses_reconciled ON expenses (society_id, reconciled_at);
+CREATE INDEX idx_expenses_reconciled ON expenses (society_id, reconciled_at);
 
 -- ════════════════════════════════════════════════════════════════
 -- payables  — auto-debits (security payroll from roster).
@@ -1334,7 +1310,7 @@ CREATE INDEX IF NOT EXISTS idx_expenses_reconciled ON expenses (society_id, reco
 --   NO payment_type column — acc_id IS the type.
 --   roster_id    → UNIQUE, prevents double-billing one shift.
 -- ════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS payables (
+CREATE TABLE payables (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     entity_id INT, -- security_staff.id
@@ -1377,7 +1353,7 @@ CREATE TABLE IF NOT EXISTS payables (
 -- (receipts / expenses / receivables / payables).
 -- journal_id links the paired Dr + Cr lines of one financial event
 -- for double-entry bookkeeping.
-CREATE TABLE IF NOT EXISTS transactions (
+CREATE TABLE transactions (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     entry_side VARCHAR(2),
@@ -1434,7 +1410,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 
 -- ── Vendor passes ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS vendor_passes (
+CREATE TABLE vendor_passes (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT NOT NULL REFERENCES users (id),
@@ -1464,7 +1440,7 @@ CREATE TABLE IF NOT EXISTS vendor_passes (
 -- recorded via the usual receipts/transactions pair (acc_id = the
 -- event's account_id, e.g. "Holi" = 23191 under "Event
 -- Ticket" = 2319), same pattern as vendor_passes -> receipts.
-CREATE TABLE IF NOT EXISTS event_tickets (
+CREATE TABLE event_tickets (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     event_id INT NOT NULL REFERENCES events (id) ON DELETE CASCADE,
@@ -1480,7 +1456,7 @@ CREATE TABLE IF NOT EXISTS event_tickets (
 );
 
 -- ── Apartment charges / fines basis ───────────────────────────
-CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
+CREATE TABLE apt_charges_fines_basis (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     apt_id INT REFERENCES apartments (id),
@@ -1511,7 +1487,7 @@ CREATE TABLE IF NOT EXISTS apt_charges_fines_basis (
 );
 
 -- ── Vendor charges ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS ven_charges_fines_basis (
+CREATE TABLE ven_charges_fines_basis (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     ven_id INT REFERENCES vendors (id),
@@ -1528,7 +1504,7 @@ CREATE TABLE IF NOT EXISTS ven_charges_fines_basis (
 );
 
 -- ── Gate access & other tables ─────────────────────────────────
-CREATE TABLE IF NOT EXISTS gate_access (
+CREATE TABLE gate_access (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     entity_id INTEGER NOT NULL,
@@ -1539,7 +1515,7 @@ CREATE TABLE IF NOT EXISTS gate_access (
     updated_by INT
 );
 
-CREATE TABLE IF NOT EXISTS brought_forward (
+CREATE TABLE brought_forward (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     financial_year SMALLINT NOT NULL, -- START year of FY, e.g. 2025 = FY 1-Apr-2025..31-Mar-2026
@@ -1568,20 +1544,17 @@ CREATE TABLE IF NOT EXISTS brought_forward (
 -- society-scoped authorization lives in the tables below and is consumed by
 -- app/security/policy.py's can_do() engine, applied ONLY on the security-critical
 -- surface (financial actions, role grants, period close, concern resolution,
--- poll declaration). The legacy role_permissions columns (card_id /
--- view-create-edit-delete enum) are retained until every reader migrates — see
--- Migration §4: no column drops until parity passes.
+-- poll declaration).
 --
 -- Declaration order matters here and is top-down: role_definitions and
 -- permissions are declared before role_permissions so role_permissions' grant
--- columns can carry their foreign keys inline. A column added by a later
--- ALTER is silently absent from any database whose table already existed.
+-- columns can carry their foreign keys inline.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 -- 1. role_definitions — the society-scoped / platform role vocabulary.
 --    scope 'platform' => applies system-wide (NULL society in assignments).
 --    scope 'society'  => must carry a society_id in user_role_assignments.
-CREATE TABLE IF NOT EXISTS role_definitions (
+CREATE TABLE role_definitions (
     id          SERIAL PRIMARY KEY,
     code        VARCHAR(40) NOT NULL,
     scope       VARCHAR(10) NOT NULL CHECK (scope IN ('platform', 'society')),
@@ -1590,13 +1563,13 @@ CREATE TABLE IF NOT EXISTS role_definitions (
     created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (code, scope)
 );
-CREATE INDEX IF NOT EXISTS idx_role_definitions_code ON role_definitions (code);
-CREATE INDEX IF NOT EXISTS idx_role_definitions_scope ON role_definitions (scope);
+CREATE INDEX idx_role_definitions_code ON role_definitions (code);
+CREATE INDEX idx_role_definitions_scope ON role_definitions (scope);
 
 -- 2. permissions — (resource, action) pairs the policy engine checks.
 --    resource is namespaced (e.g. 'concern', 'poll', 'finance', 'enrollment',
 --    'role', 'visitor'). action is the verb on that resource.
-CREATE TABLE IF NOT EXISTS permissions (
+CREATE TABLE permissions (
     id          SERIAL PRIMARY KEY,
     resource    VARCHAR(60) NOT NULL,
     action      VARCHAR(60) NOT NULL,
@@ -1604,7 +1577,7 @@ CREATE TABLE IF NOT EXISTS permissions (
     created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (resource, action)
 );
-CREATE INDEX IF NOT EXISTS idx_permissions_resource ON permissions (resource);
+CREATE INDEX idx_permissions_resource ON permissions (resource);
 
 -- 3. role_permissions — GRANT: which role_definition may do which permission.
 --    scope_society_id NULL  => the grant applies wherever the role is held
@@ -1612,58 +1585,41 @@ CREATE INDEX IF NOT EXISTS idx_permissions_resource ON permissions (resource);
 --    scope_society_id set  => the grant only applies to that one society.
 --    min_amount          => money amount at/above which the action needs approval.
 --    approval_threshold  => max amount this role may approve without escalation.
---    Legacy columns (society_id/role/card_id/permission) are retained for
---    backward compatibility until the card-catalogue readers migrate.
-CREATE TABLE IF NOT EXISTS role_permissions (
+--    One row shape only. The earlier card-catalogue grant columns (society_id,
+--    role, card_id, permission) had no readers — policy.can_do joins on
+--    role_definition_id + permission_id — so they are gone rather than left
+--    nullable; keeping them only meant every grant row carried a NULL past the
+--    old NOT NULL constraint. Both grant columns are therefore NOT NULL, and
+--    uniqueness is enforced by the two partial indexes below (a plain UNIQUE
+--    cannot cover it, because NULLs compare as distinct).
+CREATE TABLE role_permissions (
     id SERIAL PRIMARY KEY,
-    society_id INT REFERENCES societies (id) ON DELETE CASCADE,
-    -- role/card_id/permission are the LEGACY card-catalogue grant shape and are
-    -- NULL on an RBAC grant row (which is identified by role_definition_id +
-    -- permission_id instead). They were NOT NULL when only the legacy shape
-    -- existed, which made every RBAC grant seed below fail on the not-null
-    -- constraint before ON CONFLICT was ever reached.
-    role VARCHAR(10),
-    card_id VARCHAR(100),
-    permission VARCHAR(20) CHECK (
-        permission IN (
-            'view',
-            'create',
-            'edit',
-            'delete'
-        )
-    ),
-    created_at TIMESTAMP DEFAULT NOW(),
-    role_definition_id INT REFERENCES role_definitions (id) ON DELETE CASCADE,
-    permission_id INT REFERENCES permissions (id) ON DELETE CASCADE,
+    role_definition_id INT NOT NULL REFERENCES role_definitions (id) ON DELETE CASCADE,
+    permission_id INT NOT NULL REFERENCES permissions (id) ON DELETE CASCADE,
     scope_society_id INT REFERENCES societies (id) ON DELETE CASCADE,
     min_amount NUMERIC(12,2),
     approval_threshold NUMERIC(12,2),
-    UNIQUE (
-        society_id,
-        role,
-        card_id,
-        permission
-    )
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_role_permissions_role_def  ON role_permissions (role_definition_id);
-CREATE INDEX IF NOT EXISTS idx_role_permissions_perm      ON role_permissions (permission_id);
-CREATE INDEX IF NOT EXISTS idx_role_permissions_scope     ON role_permissions (scope_society_id);
+CREATE INDEX idx_role_permissions_role_def  ON role_permissions (role_definition_id);
+CREATE INDEX idx_role_permissions_perm      ON role_permissions (permission_id);
+CREATE INDEX idx_role_permissions_scope     ON role_permissions (scope_society_id);
 -- A grant must be unique, or a re-run silently stacks duplicates that the
 -- policy engine then has to de-duplicate at read time. NULL scope_society_id
 -- means "applies wherever the role is held" (platform-wide), and NULLs compare
 -- as distinct in a plain unique index, so the two cases need two partial
 -- indexes. The grant seeds below name them explicitly in ON CONFLICT.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_role_permissions_grant_global
+CREATE UNIQUE INDEX uq_role_permissions_grant_global
     ON role_permissions (role_definition_id, permission_id)
     WHERE scope_society_id IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_role_permissions_grant_scoped
+CREATE UNIQUE INDEX uq_role_permissions_grant_scoped
     ON role_permissions (role_definition_id, permission_id, scope_society_id)
     WHERE scope_society_id IS NOT NULL;
 
 -- 4. user_role_assignments — effective-dated membership of a user in a role.
 --    The auth-store / users.role gate the PORTAL; these rows drive policy.can_do.
 --    NULL society_id is only valid for a platform-scoped role_definition.
-CREATE TABLE IF NOT EXISTS user_role_assignments (
+CREATE TABLE user_role_assignments (
     id                SERIAL PRIMARY KEY,
     user_id           INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     role_definition_id INT NOT NULL REFERENCES role_definitions (id) ON DELETE CASCADE,
@@ -1678,17 +1634,16 @@ CREATE TABLE IF NOT EXISTS user_role_assignments (
     CONSTRAINT uq_ura_user_role_society_entity UNIQUE
         (user_id, role_definition_id, society_id, entity_link, effective_from)
 );
-CREATE INDEX IF NOT EXISTS idx_ura_user_active
+CREATE INDEX idx_ura_user_active
     ON user_role_assignments (user_id, status) WHERE status = 'active';
-CREATE INDEX IF NOT EXISTS idx_ura_role_society
+CREATE INDEX idx_ura_role_society
     ON user_role_assignments (role_definition_id, society_id, status);
-CREATE INDEX IF NOT EXISTS idx_ura_effective
-    ON user_role_assignments (user_id, role_definition_id, society_id) WHERE status = 'active'
-        AND (effective_to IS NULL OR effective_to > NOW());
+CREATE INDEX idx_ura_effective
+    ON user_role_assignments (user_id, role_definition_id, society_id) WHERE status = 'active';
 
 -- 5. delegations — maker/checker hand-over: delegator grants a permission to a
 --    delegatee for a bounded scope + time window.
-CREATE TABLE IF NOT EXISTS delegations (
+CREATE TABLE delegations (
     id              SERIAL PRIMARY KEY,
     delegator_id    INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     delegatee_id    INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
@@ -1702,17 +1657,16 @@ CREATE TABLE IF NOT EXISTS delegations (
     CONSTRAINT uq_delegation UNIQUE
         (delegator_id, delegatee_id, permission_id, society_id, effective_from)
 );
-CREATE INDEX IF NOT EXISTS idx_delegations_delegatee
-    ON delegations (delegatee_id) WHERE revoked_at IS NULL
-        AND (effective_to IS NULL OR effective_to > NOW());
-CREATE INDEX IF NOT EXISTS idx_delegations_delegator
+CREATE INDEX idx_delegations_delegatee
+    ON delegations (delegatee_id) WHERE revoked_at IS NULL;
+CREATE INDEX idx_delegations_delegator
     ON delegations (delegator_id) WHERE revoked_at IS NULL;
 
 -- 6. societies_memberships — normalised link between a user and the entity they
 --    act through (apartment / vendor / security) in a society. This is the
 --    long-term home for what users.linked_id currently models; existing callers
 --    keep using linked_id until the migration is complete (deferred per D1).
-CREATE TABLE IF NOT EXISTS societies_memberships (
+CREATE TABLE societies_memberships (
     id                 SERIAL PRIMARY KEY,
     society_id         INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id            INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
@@ -1727,9 +1681,9 @@ CREATE TABLE IF NOT EXISTS societies_memberships (
     CONSTRAINT uq_sm_society_entity UNIQUE (society_id, entity_type, entity_id),
     CONSTRAINT uq_sm_society_user    UNIQUE (society_id, user_id)
 );
-CREATE INDEX IF NOT EXISTS idx_sm_entity   ON societies_memberships (entity_type, entity_id);
-CREATE INDEX IF NOT EXISTS idx_sm_user     ON societies_memberships (society_id, user_id);
-CREATE INDEX IF NOT EXISTS idx_sm_active   ON societies_memberships (society_id, user_id, status)
+CREATE INDEX idx_sm_entity   ON societies_memberships (entity_type, entity_id);
+CREATE INDEX idx_sm_user     ON societies_memberships (society_id, user_id);
+CREATE INDEX idx_sm_active   ON societies_memberships (society_id, user_id, status)
     WHERE status = 'active';
 
 -- Seed reference data for the RBAC vocabulary (mirrors
@@ -1819,7 +1773,7 @@ ON CONFLICT (role_definition_id, permission_id) WHERE scope_society_id IS NULL D
 --    the trigger below is what actually stops an ordinary code path from
 --    rewriting history. Back this table up separately from the rest of the
 --    database and test retrieval after restore.
-CREATE TABLE IF NOT EXISTS audit_events (
+CREATE TABLE audit_events (
     id                BIGSERIAL PRIMARY KEY,
     society_id        INT REFERENCES societies (id) ON DELETE SET NULL,
     actor_id          INT REFERENCES users (id) ON DELETE SET NULL,
@@ -1844,15 +1798,15 @@ CREATE TABLE IF NOT EXISTS audit_events (
     ip_address        VARCHAR(45),
     created_at        TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_audit_events_society_time
+CREATE INDEX idx_audit_events_society_time
     ON audit_events (society_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_events_resource
+CREATE INDEX idx_audit_events_resource
     ON audit_events (resource_type, resource_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_events_actor
+CREATE INDEX idx_audit_events_actor
     ON audit_events (actor_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_events_correlation
+CREATE INDEX idx_audit_events_correlation
     ON audit_events (correlation_id) WHERE correlation_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_audit_events_action
+CREATE INDEX idx_audit_events_action
     ON audit_events (action, created_at DESC);
 
 CREATE OR REPLACE FUNCTION trg_audit_events_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -1860,7 +1814,7 @@ BEGIN
     RAISE EXCEPTION 'audit_events is append-only (attempted %)', TG_OP;
 END
 $$;
-DROP TRIGGER IF EXISTS audit_events_immutable ON audit_events;
+
 CREATE TRIGGER audit_events_immutable BEFORE UPDATE OR DELETE ON audit_events
     FOR EACH ROW EXECUTE FUNCTION trg_audit_events_immutable();
 
@@ -1870,7 +1824,7 @@ CREATE TRIGGER audit_events_immutable BEFORE UPDATE OR DELETE ON audit_events
 --    requested_by/decided_by is deliberately absent: a maker who is also the
 --    approver is exactly the case the application must reject, and a
 --    constraint here would block recording the attempt rather than prevent it.
-CREATE TABLE IF NOT EXISTS approval_steps (
+CREATE TABLE approval_steps (
     id                SERIAL PRIMARY KEY,
     society_id        INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     resource_type     VARCHAR(60) NOT NULL,
@@ -1898,9 +1852,9 @@ CREATE TABLE IF NOT EXISTS approval_steps (
         OR decided_by IS NOT NULL
     )
 );
-CREATE INDEX IF NOT EXISTS idx_approval_steps_resource
+CREATE INDEX idx_approval_steps_resource
     ON approval_steps (society_id, resource_type, resource_id, step_no);
-CREATE INDEX IF NOT EXISTS idx_approval_steps_pending
+CREATE INDEX idx_approval_steps_pending
     ON approval_steps (society_id, outcome) WHERE outcome = 'pending';
 
 -- 9. outbox — transactional hand-off. The business change and this row commit
@@ -1908,7 +1862,7 @@ CREATE INDEX IF NOT EXISTS idx_approval_steps_pending
 --    (event_type, aggregate_type, aggregate_id) so a redelivery cannot repeat a
 --    business transition, and a notification failure can never roll back — or
 --    silently lose — the workflow change that produced it.
-CREATE TABLE IF NOT EXISTS outbox (
+CREATE TABLE outbox (
     id                BIGSERIAL PRIMARY KEY,
     society_id        INT REFERENCES societies (id) ON DELETE CASCADE,
     event_type        VARCHAR(80) NOT NULL,
@@ -1933,14 +1887,14 @@ CREATE TABLE IF NOT EXISTS outbox (
     -- row and the guarantee would silently evaporate.
     CONSTRAINT uq_outbox_event UNIQUE (event_type, aggregate_type, aggregate_id)
 );
-CREATE INDEX IF NOT EXISTS idx_outbox_ready
+CREATE INDEX idx_outbox_ready
     ON outbox (available_at, id) WHERE status IN ('pending', 'failed');
-CREATE INDEX IF NOT EXISTS idx_outbox_society
+CREATE INDEX idx_outbox_society
     ON outbox (society_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_outbox_correlation
+CREATE INDEX idx_outbox_correlation
     ON outbox (correlation_id) WHERE correlation_id IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS Dashboard_settings (
+CREATE TABLE Dashboard_settings (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     key VARCHAR(100) NOT NULL,
@@ -1949,7 +1903,7 @@ CREATE TABLE IF NOT EXISTS Dashboard_settings (
     UNIQUE (society_id, key)
 );
 
-CREATE TABLE IF NOT EXISTS society_compliance_settings (
+CREATE TABLE society_compliance_settings (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     sinking_fund_rate_basis VARCHAR(20) DEFAULT 'per_sq_ft' CHECK (
@@ -1989,7 +1943,7 @@ CREATE TABLE IF NOT EXISTS society_compliance_settings (
 -- ════════════════════════════════════════════════════════════════════════════
 -- GST RATES — Society-specific GST rates with effective dates
 -- ════════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS gst_rates (
+CREATE TABLE gst_rates (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     cgst_rate_pct NUMERIC(5, 2) NOT NULL,
@@ -2008,7 +1962,7 @@ CREATE TABLE IF NOT EXISTS gst_rates (
 -- nationwide. The banner renderer joins these by category + state at render
 -- time.
 -- ════════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS kpi_rule_links (
+CREATE TABLE kpi_rule_links (
     id SERIAL PRIMARY KEY,
     category VARCHAR(50) NOT NULL CHECK (
         category IN (
@@ -2065,7 +2019,7 @@ CREATE TABLE IF NOT EXISTS kpi_rule_links (
 -- (e.g., UP sinking fund has no fixed percentage — it's whatever the AOA
 -- bye-laws specify).
 -- ════════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS state_compliance_thresholds (
+CREATE TABLE state_compliance_thresholds (
     id SERIAL PRIMARY KEY,
     state VARCHAR(10) NOT NULL CHECK (
         state IN (
@@ -2133,7 +2087,7 @@ CREATE TABLE IF NOT EXISTS state_compliance_thresholds (
 -- Maharashtra Co-operative Societies Act). Each profile defines the legal
 -- basis, applicable acts/rules/bye-laws, and effective dates.
 -- ═══════════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS legal_regime_profiles (
+CREATE TABLE legal_regime_profiles (
     code VARCHAR(30) PRIMARY KEY,
     state_code VARCHAR(2) NOT NULL,
     name VARCHAR(120) NOT NULL,
@@ -2155,7 +2109,7 @@ CREATE TABLE IF NOT EXISTS legal_regime_profiles (
 -- (e.g., UP_AOA_2010). This determines which statutory head catalog and
 -- compliance thresholds apply. Effective dates allow historical changes.
 -- ═══════════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS society_legal_regime (
+CREATE TABLE society_legal_regime (
     society_id INT PRIMARY KEY REFERENCES societies (id) ON DELETE CASCADE,
     regime_code VARCHAR(30) NOT NULL REFERENCES legal_regime_profiles (code),
     effective_from DATE NOT NULL,
@@ -2169,7 +2123,7 @@ CREATE TABLE IF NOT EXISTS society_legal_regime (
 -- Each head maps to a statement section (Assets, Liabilities, Equity, Income, Expenditure)
 -- and defines display order. Parent heads allow hierarchical statutory grouping.
 -- ═══════════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS statutory_head_catalog (
+CREATE TABLE statutory_head_catalog (
     regime_code VARCHAR(30) NOT NULL REFERENCES legal_regime_profiles (code) ON DELETE CASCADE,
     head_code VARCHAR(50) NOT NULL,
     parent_head_code VARCHAR(50),
@@ -2198,7 +2152,7 @@ CREATE TABLE IF NOT EXISTS statutory_head_catalog (
 -- statutory heads. One account can map to one statutory head per regime.
 -- This is orthogonal to the parent_account_id hierarchy (which drives arithmetic).
 -- ═══════════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS account_statutory_mappings (
+CREATE TABLE account_statutory_mappings (
     society_id INT NOT NULL,
     account_id INT NOT NULL,
     regime_code VARCHAR(30) NOT NULL,
@@ -2218,11 +2172,11 @@ CREATE TABLE IF NOT EXISTS account_statutory_mappings (
     FOREIGN KEY (regime_code, head_code) REFERENCES statutory_head_catalog (regime_code, head_code) ON DELETE RESTRICT
 );
 
-CREATE INDEX IF NOT EXISTS idx_account_statutory_mappings_society ON account_statutory_mappings (society_id);
+CREATE INDEX idx_account_statutory_mappings_society ON account_statutory_mappings (society_id);
 
-CREATE INDEX IF NOT EXISTS idx_account_statutory_mappings_regime ON account_statutory_mappings (regime_code);
+CREATE INDEX idx_account_statutory_mappings_regime ON account_statutory_mappings (regime_code);
 
-CREATE INDEX IF NOT EXISTS idx_statutory_head_catalog_regime ON statutory_head_catalog (regime_code);
+CREATE INDEX idx_statutory_head_catalog_regime ON statutory_head_catalog (regime_code);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- LEGAL INSTRUMENT CATALOG — one row per Act / Rules / Bye-law / Notification
@@ -2231,7 +2185,7 @@ CREATE INDEX IF NOT EXISTS idx_statutory_head_catalog_regime ON statutory_head_c
 -- Populated by periodic web research (see the Master Portal → "RWA
 -- Compliance (UP)" tab) and pushed live via Master Settings → Integrate to DB.
 -- ═══════════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS legal_instrument_catalog (
+CREATE TABLE legal_instrument_catalog (
     id SERIAL PRIMARY KEY,
     regime_code VARCHAR(30) NOT NULL REFERENCES legal_regime_profiles (code) ON DELETE CASCADE,
     instrument_type VARCHAR(30) NOT NULL CHECK (
@@ -2256,9 +2210,9 @@ CREATE TABLE IF NOT EXISTS legal_instrument_catalog (
     CONSTRAINT uq_legal_instrument UNIQUE (regime_code, title, enactment_year)
 );
 
-CREATE INDEX IF NOT EXISTS idx_legal_instrument_catalog_regime ON legal_instrument_catalog (regime_code);
+CREATE INDEX idx_legal_instrument_catalog_regime ON legal_instrument_catalog (regime_code);
 
-CREATE TABLE IF NOT EXISTS notifications (
+CREATE TABLE notifications (
     id SERIAL PRIMARY KEY,
     user_id INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     society_id INT REFERENCES societies (id) ON DELETE CASCADE,
@@ -2270,7 +2224,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS event_ticket_items (
+CREATE TABLE event_ticket_items (
     id SERIAL PRIMARY KEY,
     event_ticket_id INT NOT NULL REFERENCES event_tickets (id) ON DELETE CASCADE,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -2289,7 +2243,7 @@ CREATE TABLE IF NOT EXISTS event_ticket_items (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS visitors (
+CREATE TABLE visitors (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     apartment_id INT REFERENCES apartments (id) ON DELETE SET NULL,
@@ -2321,7 +2275,7 @@ CREATE TABLE IF NOT EXISTS visitors (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS alert_channels (
+CREATE TABLE alert_channels (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     channel_type VARCHAR(30) NOT NULL CHECK (
@@ -2339,7 +2293,7 @@ CREATE TABLE IF NOT EXISTS alert_channels (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS alert_subscriptions (
+CREATE TABLE alert_subscriptions (
     id SERIAL PRIMARY KEY,
     channel_id INT NOT NULL REFERENCES alert_channels (id) ON DELETE CASCADE,
     apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
@@ -2347,7 +2301,7 @@ CREATE TABLE IF NOT EXISTS alert_subscriptions (
     UNIQUE (channel_id, apartment_id)
 );
 
-CREATE TABLE IF NOT EXISTS alert_events (
+CREATE TABLE alert_events (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     channel_id INT REFERENCES alert_channels (id) ON DELETE CASCADE,
@@ -2376,7 +2330,7 @@ CREATE TABLE IF NOT EXISTS alert_events (
 -- channel_event_transitions — D2 append-only audit for alert_channels events.
 -- alert_events.state is a read-only materialized cache; this table is the source
 -- of truth (pending -> arrived/calling -> resolved/denied/expired).
-CREATE TABLE IF NOT EXISTS channel_event_transitions (
+CREATE TABLE channel_event_transitions (
     id              SERIAL PRIMARY KEY,
     event_id        INT NOT NULL REFERENCES alert_events (id) ON DELETE CASCADE,
     society_id      INT REFERENCES societies (id) ON DELETE CASCADE,
@@ -2389,12 +2343,12 @@ CREATE TABLE IF NOT EXISTS channel_event_transitions (
     correlation_id  UUID,
     created_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_cet_event
+CREATE INDEX idx_cet_event
     ON channel_event_transitions (event_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_cet_society
+CREATE INDEX idx_cet_society
     ON channel_event_transitions (society_id, created_at);
 
-CREATE TABLE IF NOT EXISTS patrol_locations (
+CREATE TABLE patrol_locations (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     location_name VARCHAR(100) NOT NULL,
@@ -2417,7 +2371,7 @@ CREATE TABLE IF NOT EXISTS patrol_locations (
     -- per _PORTAL_PERMS (no self-service role).
 );
 
-CREATE TABLE IF NOT EXISTS patrol_scans (
+CREATE TABLE patrol_scans (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     location_id INT NOT NULL REFERENCES patrol_locations (id) ON DELETE CASCADE,
@@ -2426,7 +2380,7 @@ CREATE TABLE IF NOT EXISTS patrol_scans (
     notes TEXT
 );
 
-CREATE TABLE IF NOT EXISTS polls (
+CREATE TABLE polls (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     -- created_by removed: save_poll requires role=="admin" explicitly;
@@ -2470,14 +2424,14 @@ CREATE TABLE IF NOT EXISTS polls (
 --                       timestamp. Admins get counts through the fn_* poll
 --                       functions only; no function returns individual rows.
 -- Both rows are written inside fn_cast_vote's single transaction.
-CREATE TABLE IF NOT EXISTS poll_participation (
+CREATE TABLE poll_participation (
     poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
     apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
     cast_on DATE NOT NULL DEFAULT CURRENT_DATE,
     PRIMARY KEY (poll_id, apartment_id)
 );
 
-CREATE TABLE IF NOT EXISTS poll_ballots (
+CREATE TABLE poll_ballots (
     poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
     choice SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5)
 );
@@ -2492,7 +2446,7 @@ CREATE TABLE IF NOT EXISTS poll_ballots (
 -- a later change to an apartment's dues standing can't retroactively widen or
 -- narrow who could vote on an already-cast ballot.
 -- ════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS poll_transitions (
+CREATE TABLE poll_transitions (
     id              SERIAL PRIMARY KEY,
     poll_id         INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
     society_id      INT REFERENCES societies (id) ON DELETE CASCADE,
@@ -2507,12 +2461,12 @@ CREATE TABLE IF NOT EXISTS poll_transitions (
     correlation_id  UUID,
     created_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_poll_transitions_poll
+CREATE INDEX idx_poll_transitions_poll
     ON poll_transitions (poll_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_poll_transitions_society
+CREATE INDEX idx_poll_transitions_society
     ON poll_transitions (society_id, created_at);
 
-CREATE TABLE IF NOT EXISTS poll_eligibility_snapshot (
+CREATE TABLE poll_eligibility_snapshot (
     id          SERIAL PRIMARY KEY,
     poll_id     INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
     apartment_id INT NOT NULL REFERENCES apartments (id),
@@ -2521,23 +2475,8 @@ CREATE TABLE IF NOT EXISTS poll_eligibility_snapshot (
     captured_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (poll_id, apartment_id)
 );
-CREATE INDEX IF NOT EXISTS idx_poll_elig_poll
+CREATE INDEX idx_poll_elig_poll
     ON poll_eligibility_snapshot (poll_id, apartment_id);
-
--- One-time inline migration from the old linked poll_votes table (kept
--- minimal: clean-schema pilots skip it because poll_votes never exists).
--- Ballots are copied in random order so the old id order cannot re-link them.
-DO $$
-BEGIN
-    IF to_regclass('public.poll_votes') IS NOT NULL THEN
-        INSERT INTO poll_participation (poll_id, apartment_id, cast_on)
-        SELECT poll_id, apartment_id, cast_at::DATE FROM poll_votes
-        ON CONFLICT DO NOTHING;
-        INSERT INTO poll_ballots (poll_id, choice)
-        SELECT poll_id, choice FROM poll_votes ORDER BY RANDOM();
-        DROP TABLE poll_votes;
-    END IF;
-END $$;
 
 -- SECTION 15: INDIAN CHS/RWA COMPLIANCE — TDS (Phase 4)
 -- ════════════════════════════════════════════════════════════════
@@ -2555,7 +2494,7 @@ END $$;
 -- invalidating historical FY reports). A NULL effective_to means
 -- "currently active". The lookup functions below resolve the row
 -- effective as of a given date.
-CREATE TABLE IF NOT EXISTS tds_section_rates (
+CREATE TABLE tds_section_rates (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     section VARCHAR(10) NOT NULL,
@@ -2596,29 +2535,18 @@ CREATE TABLE IF NOT EXISTS tds_section_rates (
 -- header account. Per-mode bank routing (UPI -> ICICI, Cheque -> SBI,
 -- etc.) may replace this single column later; for now every non-cash
 -- mode routes through it uniformly.
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'fk_primary_bank_account'
-    ) THEN
-        ALTER TABLE societies
-            ADD CONSTRAINT fk_primary_bank_account
-            FOREIGN KEY (id, primary_bank_account_id)
-            REFERENCES accounts (society_id, id);
-    END IF;
-END;
-$$;
+-- Forward reference: accounts is declared later in this file, so this FK
+-- cannot be inline on societies.
+ALTER TABLE societies
+    ADD CONSTRAINT fk_primary_bank_account
+    FOREIGN KEY (id, primary_bank_account_id)
+    REFERENCES accounts (society_id, id);
 
--- societies.signing_secret_enc / secretary_email (2026-09) — clean cutover,
--- no signed QR codes or society rows existed in production yet, so this is
--- a straight rename+retype rather than a data-preserving migration:
---   * qr_signing_secret_hash (one-way werkzeug hash, VARCHAR(255) — see the
---     now-superseded 2026-09 widen note this replaces) -> signing_secret_enc
---     (Fernet ciphertext, TEXT — reversible, so it can actually be used as
---     an HMAC key; see app/services/secret_vault.py and qr_service.py).
---   * secretary_email added — needed for the post-onboarding society
---     Agreement (see society_agreements below), which had no email field
---     to print/send to at all before this.
+-- societies.signing_secret_enc / secretary_email: signing_secret_enc holds
+-- Fernet ciphertext (reversible, so it can actually be used as an HMAC key; see
+-- app/services/secret_vault.py and qr_service.py). secretary_email backs the
+-- post-onboarding society Agreement (see society_agreements below), which needs
+-- an email field to print/send to.
 
 -- concerns/receipts/expenses/assets/nocs qr_version (2026-09 security fix):
 -- these five document-verification QR roles (CON/RPT/EXP/AST/NOC) were left
@@ -2639,148 +2567,148 @@ $$;
 -- SECTION 2B: NUMBERING SEQUENCES & TRIGGERS
 -- Auto-generate human-friendly receipt_number / transaction_number.
 -- ════════════════════════════════════════════════════════════════
-CREATE SEQUENCE IF NOT EXISTS seq_receipt_number;
+CREATE SEQUENCE seq_receipt_number;
 
-CREATE SEQUENCE IF NOT EXISTS seq_transaction_number;
-
--- SECTION 2: INDEXES
--- ════════════════════════════════════════════════════════════════
-
-CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions (user_id);
-
-CREATE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions (endpoint);
-
-CREATE INDEX IF NOT EXISTS idx_society_compliance_settings_society ON society_compliance_settings (society_id);
-
-CREATE INDEX IF NOT EXISTS idx_kpi_rule_links_category ON kpi_rule_links (category);
-
-CREATE INDEX IF NOT EXISTS idx_kpi_rule_links_state ON kpi_rule_links (state);
-
-CREATE INDEX IF NOT EXISTS idx_kpi_rule_links_active ON kpi_rule_links (is_active);
-
-CREATE INDEX IF NOT EXISTS idx_state_compliance_state ON state_compliance_thresholds (state);
-
-CREATE INDEX IF NOT EXISTS idx_state_compliance_key ON state_compliance_thresholds (threshold_key);
-
-CREATE INDEX IF NOT EXISTS idx_state_compliance_active ON state_compliance_thresholds (is_active);
+CREATE SEQUENCE seq_transaction_number;
 
 -- SECTION 2: INDEXES
 -- ════════════════════════════════════════════════════════════════
 
+CREATE INDEX idx_push_subscriptions_user ON push_subscriptions (user_id);
+
+CREATE INDEX idx_push_subscriptions_endpoint ON push_subscriptions (endpoint);
+
+CREATE INDEX idx_society_compliance_settings_society ON society_compliance_settings (society_id);
+
+CREATE INDEX idx_kpi_rule_links_category ON kpi_rule_links (category);
+
+CREATE INDEX idx_kpi_rule_links_state ON kpi_rule_links (state);
+
+CREATE INDEX idx_kpi_rule_links_active ON kpi_rule_links (is_active);
+
+CREATE INDEX idx_state_compliance_state ON state_compliance_thresholds (state);
+
+CREATE INDEX idx_state_compliance_key ON state_compliance_thresholds (threshold_key);
+
+CREATE INDEX idx_state_compliance_active ON state_compliance_thresholds (is_active);
+
 -- SECTION 2: INDEXES
 -- ════════════════════════════════════════════════════════════════
-CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_qr ON assets (qr_payload);
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_receivable_entity_month ON receivables (entity_id, role, period_month);
+-- SECTION 2: INDEXES
+-- ════════════════════════════════════════════════════════════════
+CREATE UNIQUE INDEX idx_assets_qr ON assets (qr_payload);
 
-CREATE INDEX IF NOT EXISTS idx_transactions_journal ON transactions (journal_id);
+CREATE UNIQUE INDEX uq_receivable_entity_month ON receivables (entity_id, role, period_month);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_qr ON expenses (qr_payload);
+CREATE INDEX idx_transactions_journal ON transactions (journal_id);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_qr ON receipts (qr_payload);
+CREATE UNIQUE INDEX idx_expenses_qr ON expenses (qr_payload);
 
-CREATE INDEX IF NOT EXISTS idx_bf_society_fy ON brought_forward (society_id, financial_year);
+CREATE UNIQUE INDEX idx_receipts_qr ON receipts (qr_payload);
 
-CREATE INDEX IF NOT EXISTS idx_visitors_society_date ON visitors (society_id, visit_date);
+CREATE INDEX idx_bf_society_fy ON brought_forward (society_id, financial_year);
 
-CREATE INDEX IF NOT EXISTS idx_event_ticket_items_qr ON event_ticket_items (qr_payload);
+CREATE INDEX idx_visitors_society_date ON visitors (society_id, visit_date);
 
-CREATE INDEX IF NOT EXISTS idx_event_tickets_event ON event_tickets (event_id);
+CREATE INDEX idx_event_ticket_items_qr ON event_ticket_items (qr_payload);
 
-CREATE INDEX IF NOT EXISTS idx_event_tickets_user ON event_tickets (user_id);
+CREATE INDEX idx_event_tickets_event ON event_tickets (event_id);
 
-CREATE INDEX IF NOT EXISTS idx_concerns_assigns_concern ON concerns_assigns (concern_id);
+CREATE INDEX idx_event_tickets_user ON event_tickets (user_id);
 
-CREATE INDEX IF NOT EXISTS idx_concerns_assigns_society ON concerns_assigns (society_id);
+CREATE INDEX idx_concerns_assigns_concern ON concerns_assigns (concern_id);
 
-CREATE INDEX IF NOT EXISTS idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id);
+CREATE INDEX idx_concerns_assigns_society ON concerns_assigns (society_id);
 
-CREATE INDEX IF NOT EXISTS idx_concerns_assigns_status ON concerns_assigns (concern_id, status);
+CREATE INDEX idx_concerns_assigns_lookup ON concerns_assigns (society_id, role, entity_id);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_concerns_qr ON concerns (qr_payload);
+CREATE INDEX idx_concerns_assigns_status ON concerns_assigns (concern_id, status);
 
-CREATE INDEX IF NOT EXISTS idx_apt_charges_society ON apt_charges_fines_basis (society_id, apt_id);
+CREATE UNIQUE INDEX idx_concerns_qr ON concerns (qr_payload);
 
-CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (
+CREATE INDEX idx_apt_charges_society ON apt_charges_fines_basis (society_id, apt_id);
+
+CREATE INDEX idx_notifications_user ON notifications (
     user_id,
     read,
     created_at DESC
 );
 
-CREATE INDEX IF NOT EXISTS idx_gate_entity_role_time ON gate_access (entity_id, role, time_in);
+CREATE INDEX idx_gate_entity_role_time ON gate_access (entity_id, role, time_in);
 
-CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+CREATE INDEX idx_users_email ON users (email);
 
-CREATE INDEX IF NOT EXISTS idx_users_society_role ON users (society_id, role);
+CREATE INDEX idx_users_society_role ON users (society_id, role);
 
-CREATE INDEX IF NOT EXISTS idx_apartments_society ON apartments (society_id);
+CREATE INDEX idx_apartments_society ON apartments (society_id);
 
-CREATE INDEX IF NOT EXISTS idx_apartments_active ON apartments (society_id, active);
+CREATE INDEX idx_apartments_active ON apartments (society_id, active);
 
-CREATE INDEX IF NOT EXISTS idx_vendors_society ON vendors (society_id);
+CREATE INDEX idx_vendors_society ON vendors (society_id);
 
-CREATE INDEX IF NOT EXISTS idx_security_society ON security_staff (society_id);
+CREATE INDEX idx_security_society ON security_staff (society_id);
 
-CREATE INDEX IF NOT EXISTS idx_accounts_society ON accounts (society_id);
+CREATE INDEX idx_accounts_society ON accounts (society_id);
 
-CREATE INDEX IF NOT EXISTS idx_accounts_drcr ON accounts (society_id, drcr_account);
+CREATE INDEX idx_accounts_drcr ON accounts (society_id, drcr_account);
 
-CREATE INDEX IF NOT EXISTS idx_transactions_society_date ON transactions (society_id, trx_date DESC);
+CREATE INDEX idx_transactions_society_date ON transactions (society_id, trx_date DESC);
 
-CREATE INDEX IF NOT EXISTS idx_transactions_source ON transactions (source_table, source_id);
+CREATE INDEX idx_transactions_source ON transactions (source_table, source_id);
 
-CREATE INDEX IF NOT EXISTS idx_transactions_acc_date ON transactions (acc_id, trx_date);
+CREATE INDEX idx_transactions_acc_date ON transactions (acc_id, trx_date);
 
-CREATE INDEX IF NOT EXISTS idx_txn_unreconciled_bank ON transactions (society_id, acc_id, trx_date)
+CREATE INDEX idx_txn_unreconciled_bank ON transactions (society_id, acc_id, trx_date)
 WHERE
     bank_reconciled = FALSE;
 
-CREATE INDEX IF NOT EXISTS idx_transactions_entity_date ON transactions (entity_id, trx_date);
+CREATE INDEX idx_transactions_entity_date ON transactions (entity_id, trx_date);
 
-CREATE INDEX IF NOT EXISTS idx_payables_society_status ON payables (society_id, status);
+CREATE INDEX idx_payables_society_status ON payables (society_id, status);
 
-CREATE INDEX IF NOT EXISTS idx_payables_roster ON payables (roster_id);
+CREATE INDEX idx_payables_roster ON payables (roster_id);
 
-CREATE INDEX IF NOT EXISTS idx_receipts_society_status ON receipts (society_id, status);
+CREATE INDEX idx_receipts_society_status ON receipts (society_id, status);
 
-CREATE INDEX IF NOT EXISTS idx_receipts_entity_role ON receipts (entity_id, role);
+CREATE INDEX idx_receipts_entity_role ON receipts (entity_id, role);
 
-CREATE INDEX IF NOT EXISTS idx_expenses_society_status ON expenses (society_id, status);
+CREATE INDEX idx_expenses_society_status ON expenses (society_id, status);
 
-CREATE INDEX IF NOT EXISTS idx_expenses_entity_role ON expenses (entity_id, role);
+CREATE INDEX idx_expenses_entity_role ON expenses (entity_id, role);
 
-CREATE INDEX IF NOT EXISTS idx_payables_entity_role ON payables (entity_id, role);
+CREATE INDEX idx_payables_entity_role ON payables (entity_id, role);
 
-CREATE INDEX IF NOT EXISTS idx_receivables_society_status ON receivables (society_id, status);
+CREATE INDEX idx_receivables_society_status ON receivables (society_id, status);
 
-CREATE INDEX IF NOT EXISTS idx_receivables_entity ON receivables (entity_id, role);
+CREATE INDEX idx_receivables_entity ON receivables (entity_id, role);
 
-CREATE INDEX IF NOT EXISTS idx_receivables_due_date ON receivables (due_date);
+CREATE INDEX idx_receivables_due_date ON receivables (due_date);
 
-CREATE INDEX IF NOT EXISTS idx_receivables_entity_status_date ON receivables (
+CREATE INDEX idx_receivables_entity_status_date ON receivables (
     entity_id,
     role,
     status,
     due_date
 );
 
-CREATE INDEX IF NOT EXISTS idx_events_society_date ON events (society_id, event_date);
+CREATE INDEX idx_events_society_date ON events (society_id, event_date);
 
-CREATE INDEX IF NOT EXISTS idx_concerns_society_status ON concerns (society_id, status);
+CREATE INDEX idx_concerns_society_status ON concerns (society_id, status);
 
-CREATE INDEX IF NOT EXISTS idx_gate_society_time ON gate_access (society_id, time_in);
+CREATE INDEX idx_gate_society_time ON gate_access (society_id, time_in);
 
-CREATE INDEX IF NOT EXISTS idx_security_roster_date ON security_roster (society_id, roster_date);
+CREATE INDEX idx_security_roster_date ON security_roster (society_id, roster_date);
 
-CREATE INDEX IF NOT EXISTS idx_ven_charges_society ON ven_charges_fines_basis (society_id, ven_id);
+CREATE INDEX idx_ven_charges_society ON ven_charges_fines_basis (society_id, ven_id);
 
-CREATE INDEX IF NOT EXISTS idx_ven_charges_status ON ven_charges_fines_basis (society_id, ven_status);
+CREATE INDEX idx_ven_charges_status ON ven_charges_fines_basis (society_id, ven_status);
 
-CREATE INDEX IF NOT EXISTS idx_vendor_passes_user ON vendor_passes (user_id, valid_until);
+CREATE INDEX idx_vendor_passes_user ON vendor_passes (user_id, valid_until);
 
-CREATE INDEX IF NOT EXISTS idx_assets_society ON assets (society_id, disposed);
+CREATE INDEX idx_assets_society ON assets (society_id, disposed);
 
-CREATE INDEX IF NOT EXISTS idx_dashboard_settings_lookup ON Dashboard_settings (society_id, key);
+CREATE INDEX idx_dashboard_settings_lookup ON Dashboard_settings (society_id, key);
 
 -- SECTION 3: EVENT QR TICKETS, VISITORS & SUBSCRIBABLE ALERTS
 -- ════════════════════════════════════════════════════════════════
@@ -2788,15 +2716,15 @@ CREATE INDEX IF NOT EXISTS idx_dashboard_settings_lookup ON Dashboard_settings (
 -- POLLING SYSTEM
 -- ════════════════════════════════════════════════════════════════
 
-CREATE INDEX IF NOT EXISTS idx_polls_society ON polls (society_id);
+CREATE INDEX idx_polls_society ON polls (society_id);
 
-CREATE INDEX IF NOT EXISTS idx_polls_status ON polls (status);
+CREATE INDEX idx_polls_status ON polls (status);
 
-CREATE INDEX IF NOT EXISTS idx_poll_participation_apartment ON poll_participation (apartment_id);
+CREATE INDEX idx_poll_participation_apartment ON poll_participation (apartment_id);
 
-CREATE INDEX IF NOT EXISTS idx_poll_ballots_poll ON poll_ballots (poll_id, choice);
+CREATE INDEX idx_poll_ballots_poll ON poll_ballots (poll_id, choice);
 
-CREATE INDEX IF NOT EXISTS idx_tds_section_rates_lookup ON tds_section_rates (
+CREATE INDEX idx_tds_section_rates_lookup ON tds_section_rates (
     society_id,
     section,
     discriminator,
@@ -2805,8 +2733,6 @@ CREATE INDEX IF NOT EXISTS idx_tds_section_rates_lookup ON tds_section_rates (
 
 -- SECTION 3: FUNCTIONS
 -- ════════════════════════════════════════════════════════════════
-
-DROP FUNCTION IF EXISTS fn_trg_validate_primary_bank_account () CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_trg_validate_primary_bank_account()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -2841,21 +2767,6 @@ $$;
 -- ════════════════════════════════════════════════════════════════
 
 -- ── Chain hash helpers ─────────────────────────────────────────
-DROP FUNCTION IF EXISTS fn_compute_receipt_hash (
-    TEXT,
-    TEXT,
-    TEXT,
-    TEXT,
-    TEXT,
-    TEXT,
-    TEXT,
-    TEXT,
-    TEXT,
-    TEXT,
-    TEXT,
-    TEXT,
-    TEXT
-) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_compute_receipt_hash(
     p_society_id       TEXT,
@@ -2894,7 +2805,6 @@ END;
 $$;
 
 -- Get the previous receipt hash in the same (society_id, acc_id) chain.
-DROP FUNCTION IF EXISTS fn_get_chain_previous_hash (INT, INT, TIMESTAMP) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_get_chain_previous_hash(
     p_society_id   INT,
@@ -2925,7 +2835,6 @@ END;
 $$;
 
 -- Issue the immutable SHA256 receipt_number for a confirmed receipt.
-DROP FUNCTION IF EXISTS fn_issue_receipt_hash_for_receipt (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_issue_receipt_hash_for_receipt(p_receipt_id INT)
 RETURNS VARCHAR(64) LANGUAGE plpgsql AS $$
@@ -2982,7 +2891,6 @@ END;
 $$;
 
 -- AFTER UPDATE trigger: activate event tickets when receipt is confirmed.
-DROP FUNCTION IF EXISTS fn_trg_receipt_confirm_activate_tickets () CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_trg_receipt_confirm_activate_tickets()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -2998,7 +2906,6 @@ END;
 $$;
 
 -- BEFORE INSERT/UPDATE trigger: auto-issue receipt_number when status flips to 'confirmed'.
-DROP FUNCTION IF EXISTS fn_trg_receipt_hash_issue () CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_trg_receipt_hash_issue()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -3065,7 +2972,6 @@ END;
 $$;
 
 -- Fallback BEFORE INSERT trigger: if a receipt is inserted already confirmed, issue number immediately.
-DROP FUNCTION IF EXISTS fn_trg_receipt_hash_insert () CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_trg_receipt_hash_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -3131,7 +3037,6 @@ END;
 $$;
 
 -- Same for expenses: placeholder no-op triggers (expense hash feature not yet fully implemented).
-DROP FUNCTION IF EXISTS fn_trg_expense_hash_issue () CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_trg_expense_hash_issue()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -3140,16 +3045,12 @@ BEGIN
 END;
 $$;
 
-DROP FUNCTION IF EXISTS fn_trg_expense_hash_insert () CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_trg_expense_hash_insert()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
     RETURN NEW;
 END;
 $$;
-
-DROP FUNCTION IF EXISTS fn_trg_transaction_number () CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_trg_transaction_number()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -3165,8 +3066,6 @@ $$;
 -- SECTION 3: APARTMENT HELPER FUNCTIONS (used by trigger + gate pass + NOC)
 -- ════════════════════════════════════════════════════════════════
 
-DROP FUNCTION IF EXISTS fn_apartment_outstanding CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_apartment_outstanding(p_apartment_id INT)
 RETURNS NUMERIC(15,2) LANGUAGE SQL STABLE AS $$
     SELECT COALESCE(SUM(amount - paid_amount), 0)::NUMERIC(15,2)
@@ -3174,8 +3073,6 @@ RETURNS NUMERIC(15,2) LANGUAGE SQL STABLE AS $$
     WHERE r.entity_id = p_apartment_id AND r.role = 'apartment'
       AND r.status IN ('pending','partial');
 $$;
-
-DROP FUNCTION IF EXISTS fn_apartment_overdue_outstanding CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_apartment_overdue_outstanding(p_apartment_id INT)
 RETURNS NUMERIC(15,2) LANGUAGE SQL STABLE AS $$
@@ -3208,7 +3105,6 @@ END;
 $$;
 
 -- Generic updated_at stamping trigger factory
-DROP FUNCTION IF EXISTS fn_trg_set_updated_at () CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_trg_set_updated_at()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -3226,7 +3122,7 @@ $$;
 -- app/services/qr_service.py revoke_and_reissue. Exported as an xlsx
 -- via database/qr_reissue_export.py.
 -- ════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS qr_reissue_log (
+CREATE TABLE qr_reissue_log (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     role_code VARCHAR(5) NOT NULL, -- APT / VND / SEC / ADM / PTL
@@ -3247,7 +3143,7 @@ CREATE TABLE IF NOT EXISTS qr_reissue_log (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_qr_reissue_log_society ON qr_reissue_log (society_id, created_at DESC);
+CREATE INDEX idx_qr_reissue_log_society ON qr_reissue_log (society_id, created_at DESC);
 
 -- ════════════════════════════════════════════════════════════════
 -- QR PAYLOAD AUTO-GENERATION TRIGGERS
@@ -3325,8 +3221,6 @@ $$;
 -- SECTION 3B: GATE-PASS EVALUATION
 -- ════════════════════════════════════════════════════════════════
 
-DROP FUNCTION IF EXISTS fn_evaluate_gate_pass CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_evaluate_gate_pass(p_role VARCHAR, p_entity_id INT)
 RETURNS TABLE(passed BOOLEAN, reason TEXT, amount_due NUMERIC(15,2))
 LANGUAGE plpgsql STABLE AS $$
@@ -3393,8 +3287,6 @@ $$;
 -- SECTION 3C: NOC ELIGIBILITY
 -- ════════════════════════════════════════════════════════════════
 
-DROP FUNCTION IF EXISTS fn_check_noc_eligibility CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_check_noc_eligibility(p_apartment_id INT)
 RETURNS TABLE(eligible BOOLEAN, reason TEXT, outstanding NUMERIC(15,2))
 LANGUAGE plpgsql STABLE AS $$
@@ -3420,8 +3312,6 @@ $$;
 
 -- SECTION 4: RECEIVABLES ENGINE (apartment maintenance, monthly)
 -- ════════════════════════════════════════════════════════════════
-
-DROP FUNCTION IF EXISTS fn_apply_advance_credit CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_apply_advance_credit(
     p_entity_id INT,
@@ -3494,7 +3384,6 @@ $$;
 -- Generates multi-line receivable rows per apartment per calendar month.
 -- Each bill is split into: maintenance + sinking fund + repair fund + GST
 -- (if applicable). All lines for one apartment/period share one bill_group_id.
-DROP FUNCTION IF EXISTS fn_auto_generate_receivables CASCADE;
 
 -- ════════════════════════════════════════════════════════════════
 -- fn_post_receivable_accrual — accrual-side posting for a single
@@ -3523,15 +3412,6 @@ DROP FUNCTION IF EXISTS fn_auto_generate_receivables CASCADE;
 -- first, mirroring how the fund/GST account resolution in
 -- fn_auto_generate_receivables already tolerates "not configured".
 -- ════════════════════════════════════════════════════════════════
-DROP FUNCTION IF EXISTS fn_post_receivable_accrual (
-    INT,
-    INT,
-    INT,
-    VARCHAR,
-    INT,
-    NUMERIC,
-    TEXT
-) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_post_receivable_accrual(
     p_society_id     INT,
@@ -3908,7 +3788,6 @@ END;
 $$;
 
 -- Applies SIMPLE INTEREST monthly on overdue residual.
-DROP FUNCTION IF EXISTS fn_apply_receivable_interest (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_apply_receivable_interest(p_society_id INT)
 RETURNS VOID
@@ -4032,10 +3911,6 @@ $$;
 --   mode='bank' → SBI A/c - Society (6311) if present, else first Dr account
 --   otherwise   → Cash-in-hand (633) if present, else first Dr account
 -- ════════════════════════════════════════════════════════════════
-DROP FUNCTION IF EXISTS fn_resolve_cash_account (INT, VARCHAR) CASCADE;
-
-DROP FUNCTION IF EXISTS fn_resolve_bank_leg (INT, VARCHAR) CASCADE;
-DROP FUNCTION IF EXISTS fn_resolve_bank_leg (INT, VARCHAR, INT) CASCADE;
 
 -- fn_resolve_bank_leg
 -- ====================
@@ -4140,7 +4015,6 @@ $$;
 -- must exist for every mode, cash included. Falls back to the
 -- "Sundry Debtors" control account itself if a society hasn't been
 -- migrated to the 81/82 split yet, so this never blocks a payment.
-DROP FUNCTION IF EXISTS fn_resolve_sdr_leg (INT, VARCHAR) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_resolve_sdr_leg(p_society_id INT, p_mode VARCHAR)
 RETURNS INT LANGUAGE plpgsql STABLE AS $$
@@ -4182,7 +4056,6 @@ $$;
 --   - fn_dashboard_stats (live cash_balance)
 -- so all three are guaranteed to always agree — none of them re-derive
 -- this formula independently.
-DROP FUNCTION IF EXISTS fn_cih_balance_asof (INT, DATE) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_cih_balance_asof(p_society_id INT, p_as_of_date DATE)
 RETURNS NUMERIC(15,2) LANGUAGE plpgsql STABLE AS $$
@@ -4225,8 +4098,6 @@ $$;
 --   anyone else  -> 'pending', no transactions yet
 -- fn_save_receipt_pending is removed; its logic is subsumed.
 -- ════════════════════════════════════════════════════════════════
-
-DROP FUNCTION IF EXISTS fn_verify_receipt CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_verify_receipt(
     p_receipt_id   INT,
@@ -4297,7 +4168,6 @@ END;
 $$;
 
 -- Verify a pending expense: posts Dr expense + Cr cash/bank, then issues hash.
-DROP FUNCTION IF EXISTS fn_verify_expense CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_verify_expense(
     p_expense_id   INT,
@@ -4400,7 +4270,6 @@ END;
 $$;
 
 -- Single-row verify. Writes the income side(s), then the cash/bank Dr side.
-DROP FUNCTION IF EXISTS fn_verify_receivable CASCADE;
 
 -- fn_verify_receivable: entry_side + actual-amount-received support
 -- ============================================
@@ -4517,7 +4386,6 @@ $$;
 -- calling fn_verify_receivable per row (FIFO within the group). Low-risk
 -- because it reuses the already-correct single-row primitive rather than
 -- reimplementing posting logic.
-DROP FUNCTION IF EXISTS fn_verify_receivable_by_bill_group (UUID, INT, VARCHAR, NUMERIC) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_verify_receivable_by_bill_group(
     p_bill_group_id UUID,
@@ -4624,7 +4492,6 @@ $$;
 -- the trial balance is wrong. Also routes advance-credit overpayment to the
 -- maintenance account explicitly, not "whichever row was oldest", and keeps
 -- the journal balanced (overpayment is recognized as a maintenance Cr leg).
-DROP FUNCTION IF EXISTS fn_pay_apartment_dues_fifo CASCADE;
 
 -- fn_apply_apartment_dues_fifo_core: shared FIFO allocation + posting engine.
 -- Extracted (2026-08) so both the admin-immediate path
@@ -4876,13 +4743,6 @@ $$;
 -- Thin wrapper over fn_apply_apartment_dues_fifo_core — behavior/signature
 -- unchanged from before the core was extracted (2026-08); source_table stays
 -- 'receivables' with no source_id override, matching the original.
-DROP FUNCTION IF EXISTS fn_pay_apartment_dues_fifo (
-    INT,
-    NUMERIC,
-    VARCHAR,
-    INT,
-    TEXT
-) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_pay_apartment_dues_fifo(
     p_apartment_id INT,
@@ -5292,8 +5152,6 @@ $$;
 -- SECTION 5: payables ENGINE (security payroll, roster-driven)
 -- ════════════════════════════════════════════════════════════════
 
-DROP FUNCTION IF EXISTS fn_auto_generate_payables CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_auto_generate_payables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE
@@ -5397,8 +5255,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS payable_update_amount ON payables;
-
 CREATE TRIGGER payable_update_amount BEFORE UPDATE ON payables
 FOR EACH ROW EXECUTE FUNCTION trg_payable_update_amount();
 
@@ -5421,8 +5277,6 @@ FOR EACH ROW EXECUTE FUNCTION trg_payable_update_amount();
 -- Left as an open question rather than guessed at.
 --
 -- STATUS: draft, not yet run against a live PG16 instance.
-
-DROP FUNCTION IF EXISTS fn_verify_payment CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_verify_payment(
     p_payment_id   INT,
@@ -5527,7 +5381,6 @@ $$;
 
 -- SECTION 6: VENDOR PASS SALE
 -- ════════════════════════════════════════════════════════════════
-DROP FUNCTION IF EXISTS fn_sell_vendor_pass CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_sell_vendor_pass(
     p_user_id     INT,
@@ -5678,8 +5531,6 @@ $$;
 -- income account and per-unit price both come from the event
 -- row itself instead of a rate table.
 -- ════════════════════════════════════════════════════════════════
-
-DROP FUNCTION IF EXISTS fn_sell_event_ticket CASCADE;
 
 -- 2026-08: generalized from apartment-only to apartment/vendor/security so
 -- "Buy Tickets" can be opened to every portal. Eligibility is now gated by
@@ -5847,8 +5698,6 @@ $$;
 -- receipt and updates event_tickets + event_ticket_items to 'active'.
 -- ════════════════════════════════════════════════════════════════════════════
 
-DROP FUNCTION IF EXISTS fn_verify_event_ticket CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_verify_event_ticket(
     p_event_ticket_id INT,
     p_confirmed_by    INT,
@@ -5920,8 +5769,6 @@ $$;
 --   fn_buy_asset(sid, name, sno, value, acc_id, date, mode, by, particulars)
 --   fn_dispose_asset(id, value, mode, by, date, particulars, acc_id)
 -- ════════════════════════════════════════════════════════════════
-
-DROP FUNCTION IF EXISTS fn_buy_asset CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_buy_asset(
     p_society_id        INT,
@@ -6004,8 +5851,6 @@ BEGIN
 END;
 $$;
 
-DROP FUNCTION IF EXISTS fn_dispose_asset CASCADE;
-
 -- fn_asset_gst_disposal_liability (2026-09, CA compliance pass)
 -- ==============================================
 -- Sec. 18(6) CGST Act / Rule 44(6): when capital goods on which ITC was
@@ -6023,7 +5868,6 @@ DROP FUNCTION IF EXISTS fn_dispose_asset CASCADE;
 --
 -- Quarter count: (days elapsed + 1) / 91, rounded up — any part-quarter
 -- counts as a full quarter per the statute's "or part thereof" wording.
-DROP FUNCTION IF EXISTS fn_asset_gst_disposal_liability (INT, NUMERIC, DATE) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_asset_gst_disposal_liability(
     p_asset_id   INT,
@@ -6280,8 +6124,6 @@ $$;
 -- SECTION 8: MANUAL RECEIPT / EXPENSE SAVE HELPER (double-entry)
 -- ════════════════════════════════════════════════════════════════
 
-DROP FUNCTION IF EXISTS fn_save_receipt CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_save_receipt(
     p_society_id       INT,
     p_acc_id           INT,
@@ -6413,8 +6255,6 @@ BEGIN
     RETURN NEXT;
 END;
 $$;
-
-DROP FUNCTION IF EXISTS fn_save_expense CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_save_expense(
     p_society_id       INT,
@@ -6616,12 +6456,10 @@ $$;
 -- a fully-locked corpus correctly reports zero headroom and the admin is
 -- pointed at the interest income instead.
 --
--- Both available_amount and locked_amount are returned (additively — existing
--- callers SELECT * and read status/journal_id, so widening the return type is
--- backward compatible) so the Fund Management card can show the restriction
--- before the admin types an amount, instead of only rejecting it after.
+-- Both available_amount and locked_amount are returned, so the Fund Management
+-- card can show the restriction before the admin types an amount, instead of
+-- only rejecting it after.
 -- ═════════════════════════════════════════════════════════════════════════
-DROP FUNCTION IF EXISTS fn_process_fund_utilization CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_process_fund_utilization(
     p_society_id       INT,
@@ -6803,7 +6641,6 @@ $$;
 -- mapping can't be saved from the UI layer, whatever calls this.
 -- p_bank_acc_id = NULL clears the mapping for that fund (reverts it to
 -- primary_bank_account_id).
-DROP FUNCTION IF EXISTS fn_set_fund_bank_mapping (INT, INT, INT, INT) CASCADE;
 
 -- OUT columns are prefixed out_* (rather than fund_acc_id/bank_acc_id) —
 -- names matching fund_bank_account_map's own columns made the ON CONFLICT
@@ -6922,7 +6759,6 @@ $$;
 -- matches how the reports already present a header's balance (the trial
 -- balance rolls each parent's own movement up on top of its children), so
 -- the check and the resulting statement agree.
-DROP FUNCTION IF EXISTS fn_appropriate_income_to_fund CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_appropriate_income_to_fund(
     p_society_id       INT,
@@ -7082,7 +6918,6 @@ $$;
 -- time (income can be appropriated away by someone else in the interim),
 -- re-checks that the two accounts still exist and are still Cr-natured,
 -- and refuses to run twice on the same row.
-DROP FUNCTION IF EXISTS fn_confirm_fund_appropriation (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_confirm_fund_appropriation(
     p_appropriation_id INT,
@@ -7205,7 +7040,6 @@ $$;
 -- row, so a posted journal can never be orphaned by "cancelling" it after
 -- the fact — reversing a confirmed appropriation is a separate, deliberate
 -- act, not something a status flip should be able to do.
-DROP FUNCTION IF EXISTS fn_cancel_fund_appropriation (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_cancel_fund_appropriation(
     p_appropriation_id INT,
@@ -7260,7 +7094,6 @@ $$;
 -- name matches '%Equity%' so it's the recursion ROOT, never a row in the
 -- tree) and any Dr-natured child (e.g. "Gifts Given") that isn't itself a
 -- fund/equity balance.
-DROP FUNCTION IF EXISTS fn_funds_account_fy (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_funds_account_fy(
     p_society_id INT,
@@ -7378,7 +7211,6 @@ $$;
 -- with no statutory mappings at all, and returns NULL if neither finds
 -- anything — callers must treat NULL as "cannot appropriate", not as an
 -- error to swallow.
-DROP FUNCTION IF EXISTS fn_resolve_reserve_account (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_resolve_reserve_account(p_society_id INT)
 RETURNS INT
@@ -7439,7 +7271,6 @@ $$;
 -- the appropriation lands in the same accumulator the closing report
 -- already understands, rather than inventing a new balancing account.
 -- Name fallback covers a chart where tab_name was renamed.
-DROP FUNCTION IF EXISTS fn_resolve_inexp_appropriation_account (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_resolve_inexp_appropriation_account(p_society_id INT)
 RETURNS INT
@@ -7467,7 +7298,6 @@ $$;
 -- Everything the FY Closing card needs to decide whether to enable its
 -- "Close Year & Transfer to Reserve" button, and to explain itself if the
 -- button is disabled. STABLE, writes nothing.
-DROP FUNCTION IF EXISTS fn_fy_close_preview (INT, INT, NUMERIC) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_fy_close_preview(
     p_society_id  INT,
@@ -7608,7 +7438,6 @@ $$;
 -- The remaining 75% (or whatever is left) deliberately stays in the P&L and
 -- keeps showing up as "Reserves & Surplus" on the Balance Sheet — this
 -- function appropriates a share, it does not close the books.
-DROP FUNCTION IF EXISTS fn_fy_close_reserve_appropriation (INT, INT, NUMERIC, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_fy_close_reserve_appropriation(
     p_society_id  INT,
@@ -7941,7 +7770,6 @@ $$;
 -- reconciliation impossible from the books alone. itc_acc_id is a
 -- Dr-normal asset account for GST that is recoverable as Input Tax
 -- Credit (see fn_compute_rcm_liability's itc_eligible gate).
-DROP FUNCTION IF EXISTS fn_resolve_rcm_gst_accounts (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_resolve_rcm_gst_accounts(p_society_id INT)
 RETURNS TABLE(cgst_acc_id INT, sgst_acc_id INT, igst_acc_id INT, itc_acc_id INT)
@@ -7970,7 +7798,6 @@ $$;
 -- effective window covering p_date. Falls back to 18% with a warning
 -- only if a category has no matching row at all (should not happen —
 -- schema load seeds all nine statutory categories).
-DROP FUNCTION IF EXISTS fn_resolve_rcm_rate (INT, VARCHAR, DATE) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_resolve_rcm_rate(
     p_society_id  INT,
@@ -8015,7 +7842,6 @@ $$;
 -- unconditionally. Splits into CGST+SGST (intra-state) or IGST
 -- (inter-state) by comparing vendor.state to societies.state.
 -- ════════════════════════════════════════════════════════════════
-DROP FUNCTION IF EXISTS fn_compute_rcm_liability (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_compute_rcm_liability(
     p_society_id  INT,
@@ -8136,7 +7962,6 @@ $$;
 -- distinguishable from the society's own outward-supply GST in the
 -- trial balance.
 -- ════════════════════════════════════════════════════════════════
-DROP FUNCTION IF EXISTS fn_post_rcm_liability (INT, INT, NUMERIC, NUMERIC) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_post_rcm_liability(
     p_society_id   INT,
@@ -8280,13 +8105,6 @@ $$;
 -- filed. Per Sec. 49(4)/Rule 85, RCM liability must be discharged in
 -- cash — this function has no ITC-ledger offset path by design.
 -- ════════════════════════════════════════════════════════════════
-DROP FUNCTION IF EXISTS fn_pay_rcm_liability (
-    INT,
-    DATE,
-    VARCHAR,
-    VARCHAR,
-    INT
-) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_pay_rcm_liability(
     p_society_id INT,
@@ -8373,8 +8191,6 @@ $$;
 -- SECTION 9: LIST FUNCTIONS (apartments, vendors, security)
 -- ════════════════════════════════════════════════════════════════
 
-DROP FUNCTION IF EXISTS fn_apartments_list CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_apartments_list(
     p_society_id INT,
     p_search     TEXT    DEFAULT NULL,
@@ -8414,8 +8230,6 @@ BEGIN
     ORDER BY a.flat_number;
 END;
 $$;
-
-DROP FUNCTION IF EXISTS fn_vendors_list CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_vendors_list(
     p_society_id INT,
@@ -8466,8 +8280,6 @@ BEGIN
 END;
 $$;
 
-DROP FUNCTION IF EXISTS fn_security_list CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_security_list(p_society_id INT, p_search TEXT DEFAULT NULL)
 RETURNS TABLE (
     id INT, user_id INT, email VARCHAR(100), society_id INT, name VARCHAR(100),
@@ -8506,8 +8318,6 @@ $$;
 
 -- SECTION 10: NAMED RECEIVABLES / payables
 -- ════════════════════════════════════════════════════════════════
-
-DROP FUNCTION IF EXISTS fn_receivables_named CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_receivables_named(
     p_society_id  INT, p_search TEXT DEFAULT NULL, p_status TEXT DEFAULT NULL,
@@ -8562,8 +8372,6 @@ BEGIN
 END;
 $$;
 
-DROP FUNCTION IF EXISTS fn_payables_named CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_payables_named(
     p_society_id  INT, p_search TEXT DEFAULT NULL,
     p_status      TEXT DEFAULT NULL, p_entity_role TEXT DEFAULT NULL,
@@ -8605,8 +8413,6 @@ $$;
 
 -- SECTION 11: RECEIPTS / EXPENSES LIST FUNCTIONS
 -- ════════════════════════════════════════════════════════════════
-
-DROP FUNCTION IF EXISTS fn_receipts_list CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_receipts_list(
     p_society_id  INT,
@@ -8663,8 +8469,6 @@ BEGIN
     ORDER BY r.receipt_date DESC, r.id DESC;
 END;
 $$;
-
-DROP FUNCTION IF EXISTS fn_expenses_list CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_expenses_list(
     p_society_id  INT,
@@ -8728,7 +8532,6 @@ $$;
 -- "function ... does not exist / no function matches" as a result. INT
 -- is what a literal/Python int actually resolves to, so this — and every
 -- other function in this FY-parameter family below — now takes INT.
-DROP FUNCTION IF EXISTS fn_resolve_bf_amount_fy (INT, INT, SMALLINT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_resolve_bf_amount_fy(
     p_society_id     INT,
@@ -8809,14 +8612,10 @@ $$;
 --      the block for that year. This function returns 0 in that case;
 --      the STCG figure itself is surfaced by fn_fixed_asset_register_fy
 --      (this function's contract is just the P&L depreciation figure).
-DROP FUNCTION IF EXISTS fn_account_depreciation (INT, INT, SMALLINT) CASCADE;
-
-DROP FUNCTION IF EXISTS fn_account_depreciation (INT, INT, INT) CASCADE;
 
 -- fn_asset_gets_full_year_dep: TRUE if an asset put to use on p_purchase_date
 -- has been used for 180 days or more by p_fy_end (statutory test for full
 -- vs. half depreciation), FALSE otherwise.
-DROP FUNCTION IF EXISTS fn_asset_gets_full_year_dep (DATE, DATE) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_asset_gets_full_year_dep(
     p_purchase_date DATE,
@@ -8832,12 +8631,6 @@ $$;
 -- WDV + pre-cutoff additions), any excess against the half-rate base
 -- (post-cutoff additions), and any further excess is sec. 50(1) STCG with
 -- both bases floored at 0.
-DROP FUNCTION IF EXISTS fn_block_dep_base (
-    NUMERIC,
-    NUMERIC,
-    NUMERIC,
-    NUMERIC
-) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_block_dep_base(
     p_opening_wdv NUMERIC,
@@ -8928,7 +8721,6 @@ $$;
 -- call sites (fn_fy_closing_report, fn_trial_balance, fn_balance_sheet)
 -- all consume it as a plain scalar in a SUM/aggregate context, not
 -- something that would benefit from the split.
-DROP FUNCTION IF EXISTS fn_account_depreciation_split (INT, INT, INT) CASCADE;
 
 -- Same block-netted base as fn_account_depreciation (see that function's
 -- header notes for the 2026-09 compliance fixes) — just returned as the
@@ -8999,7 +8791,6 @@ $$;
 -- Ledger screen (via loaders.py, plain `%s` placeholders passing a
 -- Python int), which was silently broken by this exact type-resolution
 -- issue every time it was called.
-DROP FUNCTION IF EXISTS fn_account_ledger_fy (INT, INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_account_ledger_fy(
     p_society_id     INT,
@@ -9255,7 +9046,6 @@ $$;
 -- Used everywhere a view/function needs "today's" BF without the
 -- caller having to pass one in explicitly.
 -- ════════════════════════════════════════════════════════════════
-DROP FUNCTION IF EXISTS fn_current_financial_year () CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_current_financial_year()
 RETURNS SMALLINT LANGUAGE SQL STABLE AS $$
@@ -9274,14 +9064,6 @@ $$;
 -- directly — a function that doesn't exist in the database — which broke
 -- the live Cashbook list view for every portal. Fixed alongside this
 -- comment; see loaders.py's `entity == "cashbook"` branches.)
-DROP FUNCTION IF EXISTS fn_cashbook_paired_v3 (
-    INT,
-    INT,
-    TEXT,
-    TEXT,
-    DATE,
-    DATE
-) CASCADE;
 
 -- fn_cashbook_paired_v3
 -- ======================
@@ -9568,15 +9350,6 @@ $$;
 -- month_opening_balance = month_closing_balance, total_row_count = 0)
 -- instead of an empty result set, so the card always has something to
 -- render B/F and C/F from.
-DROP FUNCTION IF EXISTS fn_cashbook_month_page (
-    INT,
-    INT,
-    INT,
-    INT,
-    TEXT,
-    INT,
-    INT
-) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_cashbook_month_page(
     p_society_id  INT,
@@ -9661,7 +9434,7 @@ BEGIN
     -- A second call in the same transaction (a loop over months, a report
     -- that fetches several pages) used to fail with "relation _cb_month_rows
     -- already exists" because ON COMMIT DROP only fires at commit.
-    DROP TABLE IF EXISTS _cb_month_rows;
+
     CREATE TEMP TABLE _cb_month_rows ON COMMIT DROP AS
     WITH cr_rows AS (
         -- mode <> 'journal' excludes pure book entries (e.g. depreciation)
@@ -9819,21 +9592,17 @@ $$;
 -- a hard error signal, not something to silently absorb.
 --
 -- Dep is resolved by an ILIKE name lookup (fn_resolve_depreciation_account
--- below), same convention as fn_resolve_cash_account — reversing the
--- earlier "pass the account id in explicitly" approach, which needed a new
--- societies.dep_account_id column and broke on already-provisioned
--- databases (CREATE TABLE IF NOT EXISTS doesn't retroactively add columns
--- to an existing table, so the FK migration failed with "column
--- dep_account_id ... does not exist" against real environments).
+-- below), same convention as fn_resolve_cash_account. Passing the account id
+-- in explicitly would need a dedicated societies.dep_account_id column that
+-- nothing else reads; the chart of accounts is already the source of truth for
+-- which account a society uses for a given purpose.
 -- Income & Expenditure and Capital Account are still reached purely via
 -- the parent_account_id hierarchy walk below, not by name at all.
 
 -- Resolves a society's 'Dep' (Depreciation) account by name, same ILIKE
 -- convention as fn_resolve_cash_account. No dedicated societies column
--- needed — CREATE TABLE IF NOT EXISTS is a no-op against an existing
--- database, so a new column there requires an explicit ALTER TABLE
--- migration on every already-provisioned society's DB; a name lookup
--- avoids that entirely.
+-- needed — a name lookup keeps the Depreciation account's home in the
+-- chart of accounts instead of in societies.
 CREATE OR REPLACE FUNCTION fn_resolve_depreciation_account(p_society_id INT)
 RETURNS INT LANGUAGE plpgsql STABLE AS $$
 DECLARE
@@ -9847,26 +9616,12 @@ BEGIN
 END;
 $$;
 
--- Fixed (2026-08): two issues compounded here.
--- 1. p_fy was SMALLINT — same resolution failure as the other three
---    functions above ("function fn_fy_closing_report(integer, integer)
---    does not exist" when called with plain integers, which is what
---    both loaders.py and any raw SQL literal test naturally pass).
--- 2. CREATE OR REPLACE FUNCTION only replaces a function whose signature
---    (name + exact parameter types) already matches. This function's
---    signature changed twice across recent patches — first losing its
---    p_depreciation_acc_id third parameter, now changing p_fy's type —
---    and neither change was paired with a DROP FUNCTION IF EXISTS for
---    the signature being replaced, so every prior version is still
---    sitting in the database as an orphaned overload rather than being
---    replaced. Both are dropped explicitly below before the current
---    (INT, INT) version is created.
-DROP FUNCTION IF EXISTS fn_fy_closing_report (INT, SMALLINT, INT) CASCADE;
-
--- original: explicit p_depreciation_acc_id param
-DROP FUNCTION IF EXISTS fn_fy_closing_report (INT, SMALLINT) CASCADE;
-
--- previous patch: ILIKE fix, still SMALLINT
+-- Fixed (2026-08): p_fy was SMALLINT, so a plain integer argument ("function
+-- fn_fy_closing_report(integer, integer) does not exist") failed to resolve —
+-- which is what both loaders.py and any raw SQL literal test naturally pass.
+-- p_fy is INT below. Depreciation is resolved by name
+-- (fn_resolve_depreciation_account) rather than taken as a caller-supplied
+-- parameter; see that function's comment.
 
 CREATE OR REPLACE FUNCTION fn_fy_closing_report(
     p_society_id             INT,
@@ -10061,8 +9816,6 @@ $$;
 -- Journal entries (mode='journal') are excluded (non-cash).
 -- Traditional two-column format: Dr column = Receipts, Cr column = Payments.
 
-DROP FUNCTION IF EXISTS fn_receipts_payments_fy (INT, INT) CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_receipts_payments_fy(
     p_society_id INT,
     p_fy         INT
@@ -10198,8 +9951,6 @@ $$;
 --   - Amount = ABS(total_closing) from fn_fy_closing_report
 --   Surplus/Deficit = Total Income - Total Expenditure
 
-DROP FUNCTION IF EXISTS fn_income_expenditure_fy (INT, INT) CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_income_expenditure_fy(
     p_society_id INT,
     p_fy         INT
@@ -10298,8 +10049,6 @@ $$;
 --   Liabilities: drcr_account='Cr' AND NOT under Capital Account
 --   Equity: Capital Account (tab_name='CapAc') + Surplus/Deficit from I&E
 --   Amount = ABS(total_closing) with proper sign per section
-
-DROP FUNCTION IF EXISTS fn_balance_sheet_fy (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_balance_sheet_fy(
     p_society_id INT,
@@ -10436,7 +10185,6 @@ $$;
 -- Trailing / FY-scoped turnover from Cr-side income transactions.
 -- Used for the GST threshold check (society-level ₹20L) and for
 -- determining filing cadence. Computed on demand, never stored.
-DROP FUNCTION IF EXISTS fn_society_turnover_fy (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_society_turnover_fy(
     p_society_id INT,
@@ -10493,21 +10241,14 @@ $$;
 --      Expenditure A/c and the one-off Capital-Account-direct items.
 --      STILL OPEN — verify against the live schema before relying on
 --      real closing figures.
---   2. Not tested against a live PG16 instance — run pglast + a real DB
---      pass, including a case with a depreciable asset that has both
---      opening WDV and an in-year purchase, to confirm
---      fn_account_depreciation's two components both flow through
---      correctly. STILL OPEN.
---
--- (Previously a 3rd item here said fn_resolve_bf_amount_fy's no-row
--- fallback still summed children via drcr_account rather than
--- entry_side. That's been fixed — see fn_resolve_bf_amount_fy's own
--- comment — so it's removed rather than left as a misleading TODO.)
+--   2. The full schema + seed now installs cleanly against a live PG16
+--      instance, but the specific fixture below is still unverified:
+--      a depreciable asset with both opening WDV and an in-year purchase,
+--      to confirm fn_account_depreciation's two components both flow
+--      through correctly.
 -- ═════════════════════════════════════════════════
 -- SECTION 13: GATE LOGS
 -- ════════════════════════════════════════════════════════════════
-
-DROP FUNCTION IF EXISTS fn_gate_logs_named CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_gate_logs_named(
     p_society_id INT,
@@ -10587,7 +10328,6 @@ $$;
 -- computed via fn_cih_balance_asof(CURRENT_DATE) instead — same shared
 -- formula the Cashbook card's CIH Running and the ledger's CiH branch
 -- already use.
-DROP FUNCTION IF EXISTS fn_accounts_hierarchy (INT, TEXT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_accounts_hierarchy(
     p_society_id INT,
@@ -10707,8 +10447,6 @@ BEGIN
 END;
 $$;
 
-DROP FUNCTION IF EXISTS fn_account_profile CASCADE;
-
 -- NOTE (fixed 2026-08): previously took only p_account_id with no tenant
 -- check — same IDOR class as fn_concern_profile / fn_get_poll_detail
 -- (see migration_fn_concern_profile_scope.sql / migration_poll_security_fixes.sql).
@@ -10761,8 +10499,6 @@ $$;
 -- SECTION 15: SOCIETIES LIST / PROFILE
 -- ════════════════════════════════════════════════════════════════
 
-DROP FUNCTION IF EXISTS fn_societies_list CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_societies_list(
     p_search     TEXT    DEFAULT NULL,
     p_plan       VARCHAR DEFAULT NULL,
@@ -10807,8 +10543,6 @@ BEGIN
 END;
 $$;
 
-DROP FUNCTION IF EXISTS fn_society_profile CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_society_profile(p_society_id INT)
 RETURNS TABLE (
     id INT, name VARCHAR(100), logo VARCHAR(100), login_background VARCHAR(100),
@@ -10842,8 +10576,6 @@ $$;
 -- SECTION 16: EVENTS / CONCERNS
 -- ════════════════════════════════════════════════════════════════
 
-DROP FUNCTION IF EXISTS fn_events_list CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_events_list(
     p_society_id INT, p_search TEXT DEFAULT NULL, p_status VARCHAR DEFAULT NULL
 )
@@ -10872,8 +10604,6 @@ BEGIN
 END;
 $$;
 
-DROP FUNCTION IF EXISTS fn_event_profile CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_event_profile(p_event_id INT)
 RETURNS TABLE (
     id INT, society_id INT, title VARCHAR(200), description TEXT, event_date DATE,
@@ -10893,8 +10623,6 @@ LANGUAGE SQL STABLE AS $$
            (event_date::TEXT||' '||COALESCE(event_time::TEXT,''))::TEXT
     FROM events WHERE id = p_event_id;
 $$;
-
-DROP FUNCTION IF EXISTS fn_concern_profile (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_concern_profile(p_concern_id INT, p_society_id INT)
 RETURNS TABLE (
@@ -10930,8 +10658,6 @@ LANGUAGE SQL STABLE AS $$
       AND c.society_id = p_society_id;
 $$;
 
-DROP FUNCTION IF EXISTS fn_concern_assignments CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_concern_assignments(p_concern_id INT)
 RETURNS TABLE (
     id INT, concern_id INT, society_id INT, role VARCHAR(10),
@@ -10959,14 +10685,9 @@ $$;
 -- readers) are RETIRED as of the 2026-07 unification — fn_concern_assignments
 -- above is now the single source for a concern's assignee list, at every
 -- lifecycle stage (invited/bid_submitted/assigned/resolved/closed).
-DROP FUNCTION IF EXISTS fn_concern_invite_profile CASCADE;
-
-DROP FUNCTION IF EXISTS fn_concern_invite_assignments CASCADE;
 
 -- SECTION 17: ASSET REGISTER LIST / PROFILE
 -- ════════════════════════════════════════════════════════════════
-
-DROP FUNCTION IF EXISTS fn_asset_list CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_asset_list(
     p_society_id INT,
@@ -11029,7 +10750,6 @@ $$;
 -- together (e.g. an export workbook) so a reader doesn't mistake one for
 -- overriding the other. p_fy is accepted for interface symmetry with the
 -- other statements but unused: this is an all-time register, not FY-scoped.
-DROP FUNCTION IF EXISTS fn_asset_holdings_fy (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_asset_holdings_fy(
     p_society_id INT,
@@ -11102,7 +10822,6 @@ $$;
 -- form or admin card wired up) — this function and the "ALL Deposits"
 -- statement row will correctly show empty until that admin UI is built
 -- (tracked as a follow-up; see the patch notes).
-DROP FUNCTION IF EXISTS fn_deposit_holdings_fy (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_deposit_holdings_fy(
     p_society_id INT,
@@ -11156,8 +10875,6 @@ $$;
 -- SECTION 19: APT CHARGES LIST / VEN CHARGES LIST
 -- ════════════════════════════════════════════════════════════════
 
-DROP FUNCTION IF EXISTS fn_apt_charges_list CASCADE;
-
 CREATE OR REPLACE FUNCTION fn_apt_charges_list(
     p_society_id INT,
     p_apt_id     INT DEFAULT NULL
@@ -11200,8 +10917,6 @@ BEGIN
     ORDER BY acf.apt_id NULLS FIRST, acf.start_date DESC;
 END;
 $$;
-
-DROP FUNCTION IF EXISTS fn_ven_charges_list CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_ven_charges_list(
     p_society_id INT,
@@ -11288,7 +11003,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Dashboard stats for a society.
-DROP FUNCTION IF EXISTS fn_dashboard_stats (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_dashboard_stats(p_society_id INT)
 RETURNS TABLE (
@@ -11338,8 +11052,6 @@ $$;
 
 -- SECTION 22: VENDOR LEDGER
 -- ════════════════════════════════════════════════════════════════
-
-DROP FUNCTION IF EXISTS fn_vendor_ledger (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_vendor_ledger(p_society_id INT, p_vendor_id INT)
 RETURNS TABLE (
@@ -11397,7 +11109,6 @@ $$;
 -- ════════════════════════════════════════════════════════════════
 
 -- Apartments with no owning user row (orphan apartments).
-DROP FUNCTION IF EXISTS fn_check_orphan_apartments (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_check_orphan_apartments(p_society_id INT)
 RETURNS TABLE (apartment_id INT, flat_number VARCHAR(20), issue TEXT) LANGUAGE SQL STABLE AS $$
@@ -11411,7 +11122,6 @@ RETURNS TABLE (apartment_id INT, flat_number VARCHAR(20), issue TEXT) LANGUAGE S
 $$;
 
 -- Ledger entries (transactions) referencing accounts/users that no longer exist.
-DROP FUNCTION IF EXISTS fn_check_orphan_ledger_entries (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_check_orphan_ledger_entries(p_society_id INT)
 RETURNS TABLE (transaction_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
@@ -11429,7 +11139,6 @@ RETURNS TABLE (transaction_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
 $$;
 
 -- Receipts whose acc_id (income account) no longer exists.
-DROP FUNCTION IF EXISTS fn_check_orphan_receipts (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_check_orphan_receipts(p_society_id INT)
 RETURNS TABLE (receipt_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
@@ -11441,7 +11150,6 @@ RETURNS TABLE (receipt_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
 $$;
 
 -- Vendors with no linked user account.
-DROP FUNCTION IF EXISTS fn_check_orphan_vendors (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_check_orphan_vendors(p_society_id INT)
 RETURNS TABLE (vendor_id INT, business_name VARCHAR(100), issue TEXT) LANGUAGE SQL STABLE AS $$
@@ -11455,7 +11163,6 @@ RETURNS TABLE (vendor_id INT, business_name VARCHAR(100), issue TEXT) LANGUAGE S
 $$;
 
 -- Receivables pointing at a missing apartment/vendor/security entity.
-DROP FUNCTION IF EXISTS fn_check_orphan_receivables (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_check_orphan_receivables(p_society_id INT)
 RETURNS TABLE (receivable_id INT, role VARCHAR(10), entity_id INT, issue TEXT) LANGUAGE SQL STABLE AS $$
@@ -11479,7 +11186,6 @@ RETURNS TABLE (receivable_id INT, role VARCHAR(10), entity_id INT, issue TEXT) L
 $$;
 
 -- Duplicate receivable rows for the same entity/role/period_month.
-DROP FUNCTION IF EXISTS fn_check_duplicate_receivables (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_check_duplicate_receivables(p_society_id INT)
 RETURNS TABLE (entity_id INT, role VARCHAR(10), period_month DATE, acc_id INT, dup_count BIGINT, issue TEXT) LANGUAGE SQL STABLE AS $$
@@ -11492,7 +11198,6 @@ RETURNS TABLE (entity_id INT, role VARCHAR(10), period_month DATE, acc_id INT, d
 $$;
 
 -- Journal ids that do not have exactly one Dr and one Cr line (unbalanced).
-DROP FUNCTION IF EXISTS fn_check_duplicate_journals (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_check_duplicate_journals(p_society_id INT)
 RETURNS TABLE (journal_id INT, dr_count BIGINT, cr_count BIGINT, dr_sum NUMERIC(15,2), cr_sum NUMERIC(15,2), issue TEXT) LANGUAGE SQL STABLE AS $$
@@ -11513,7 +11218,6 @@ RETURNS TABLE (journal_id INT, dr_count BIGINT, cr_count BIGINT, dr_sum NUMERIC(
 $$;
 
 -- Broken foreign keys across the major tables.
-DROP FUNCTION IF EXISTS fn_check_broken_fks (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_check_broken_fks(p_society_id INT)
 RETURNS TABLE (table_name TEXT, row_id INT, column_name TEXT, issue TEXT) LANGUAGE SQL STABLE AS $$
@@ -11573,14 +11277,12 @@ $$;
 -- close is wanted later (locking a year's numbers so they don't shift if
 -- a back-dated transaction is entered), rebuild it keyed off entry_side
 -- from scratch rather than resurrecting this version.
-DROP FUNCTION IF EXISTS fn_close_financial_year (INT, SMALLINT, BOOLEAN) CASCADE;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SECTION 2E: AUDITOR VERIFICATION — Parallel (society_id, acc_id) SHA256 chains
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 -- Verify a single confirmed receipt's hash and chain link.
-DROP FUNCTION IF EXISTS fn_verify_receipt_chain (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_verify_receipt_chain(
     p_society_id INT,
@@ -11682,7 +11384,6 @@ END;
 $$;
 
 -- Verify ALL parallel chains for a society.
-DROP FUNCTION IF EXISTS fn_verify_all_receipt_chains (INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_verify_all_receipt_chains(p_society_id INT)
 RETURNS TABLE(
@@ -11725,7 +11426,6 @@ END;
 $$;
 
 -- Reconcile receipts in a chain (society, acc_id) against their transaction lines.
-DROP FUNCTION IF EXISTS fn_reconcile_receipt_chain (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_reconcile_receipt_chain(
     p_society_id INT,
@@ -11762,7 +11462,6 @@ END;
 $$;
 
 -- Auditor helper: full integrity report for one (society, acc_id) chain.
-DROP FUNCTION IF EXISTS fn_audit_receipt_chain (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_audit_receipt_chain(
     p_society_id INT,
@@ -11842,19 +11541,6 @@ $$;
 -- fn_create_poll: Admin creates a new poll.
 -- No p_created_by param: poll creation is admin-only (save_poll requires
 -- role=="admin"), so a creator column/param adds no value.
-DROP FUNCTION IF EXISTS fn_create_poll (
-    INT,
-    VARCHAR,
-    TEXT,
-    SMALLINT,
-    VARCHAR,
-    VARCHAR,
-    VARCHAR,
-    VARCHAR,
-    VARCHAR,
-    TIMESTAMP,
-    VARCHAR
-);
 
 CREATE OR REPLACE FUNCTION fn_create_poll(
     p_society_id   INT,
@@ -11945,7 +11631,6 @@ $$;
 -- DROP required: same params, but RETURNS TABLE column set changed
 -- (added winning_choice) — CREATE OR REPLACE alone errors on a
 -- return-type change in Postgres.
-DROP FUNCTION IF EXISTS fn_polls_list (INT, VARCHAR, VARCHAR);
 
 CREATE OR REPLACE FUNCTION fn_polls_list(
     p_society_id INT,
@@ -12016,7 +11701,6 @@ $$;
 
 -- fn_get_poll_detail: Get a single poll with vote counts per choice
 -- (tenant-scoped — see migration_poll_security_fixes.sql)
-DROP FUNCTION IF EXISTS fn_get_poll_detail (INT, INT);
 
 CREATE OR REPLACE FUNCTION fn_get_poll_detail(p_poll_id INT, p_user_id INT, p_society_id INT)
 RETURNS TABLE (
@@ -12093,7 +11777,6 @@ END;
 $$;
 
 -- fn_cast_vote: User casts a vote (server-side auth via p_user_id)
-DROP FUNCTION IF EXISTS fn_cast_vote (INT, INT, SMALLINT);
 
 CREATE OR REPLACE FUNCTION fn_cast_vote(
     p_poll_id  INT,
@@ -12244,7 +11927,6 @@ $$;
 -- (tenant-scoped + no-op guard against re-declaring — see
 -- migration_poll_security_fixes.sql)
 -- Phase 4: Now checks quorum and majority requirements
-DROP FUNCTION IF EXISTS fn_declare_results (INT, INT, INT);
 
 CREATE OR REPLACE FUNCTION fn_declare_results(p_poll_id INT, p_user_id INT, p_society_id INT)
 RETURNS TABLE (success BOOLEAN, message TEXT, results JSONB) LANGUAGE plpgsql AS $$
@@ -12346,7 +12028,6 @@ $$;
 
 -- fn_close_poll: Admin closes a poll (tenant-scoped — see
 -- migration_poll_security_fixes.sql)
-DROP FUNCTION IF EXISTS fn_close_poll (INT, INT);
 
 CREATE OR REPLACE FUNCTION fn_close_poll(p_poll_id INT, p_user_id INT, p_society_id INT)
 RETURNS BOOLEAN LANGUAGE plpgsql AS $$
@@ -12372,7 +12053,6 @@ END;
 $$;
 
 -- fn_declare_expired_polls: Auto-declare results for polls that have passed their end time
-DROP FUNCTION IF EXISTS fn_declare_expired_polls ();
 
 CREATE OR REPLACE FUNCTION fn_declare_expired_polls(p_society_id INT DEFAULT NULL)
 RETURNS TABLE (id INT, society_id INT, title VARCHAR(200)) LANGUAGE plpgsql AS $$
@@ -12494,7 +12174,6 @@ END;
 $$;
 
 -- ── Resolve the active rate row for a section as of a given date ──
-DROP FUNCTION IF EXISTS fn_tds_section_rate (INT, VARCHAR, VARCHAR, DATE) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_tds_section_rate(
     p_society_id INT,
@@ -12530,13 +12209,6 @@ $$;
 -- the FY, excluding the row being edited (so a re-save doesn't double
 -- count itself). Drives the "has this vendor crossed the F1,00,000 annual
 -- aggregate" check. Threshold 0 in the rate row means "no aggregate test".
-DROP FUNCTION IF EXISTS fn_vendor_tds_cumulative_fy (
-    INT,
-    INT,
-    VARCHAR,
-    VARCHAR,
-    INT
-) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_vendor_tds_cumulative_fy(
     p_society_id INT,
@@ -12576,15 +12248,6 @@ $$;
 -- Returns 0 (and applies=FALSE) otherwise, so callers pre-fill the form
 -- with 0 and don't split. no_pan_uplift applies the higher rate when the
 -- vendor has no PAN on file (the caller passes p_pan_captured).
-DROP FUNCTION IF EXISTS fn_compute_tds_pct (
-    INT,
-    INT,
-    VARCHAR,
-    VARCHAR,
-    VARCHAR,
-    NUMERIC,
-    BOOLEAN
-) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_compute_tds_pct(
     p_society_id      INT,
@@ -12661,7 +12324,6 @@ $$;
 -- account itself) is a BS-header tab (MAs/ImAs/CurAs/SCr/CapAc/Bal...
 -- i.e. NOT the InExp node and not a child of it), it's a balance-sheet
 -- account → capital.
-DROP FUNCTION IF EXISTS fn_is_capital_account (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_is_capital_account(
     p_society_id INT,
@@ -12716,7 +12378,6 @@ $$;
 -- Source: receivables (taxable/exempt split, joined via bill_group_id)
 -- and transactions (actual Cr legs on the CGST/SGST payable accounts,
 -- resolved via fn_resolve_gst_accounts).
-DROP FUNCTION IF EXISTS fn_gst_summary_fy (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_gst_summary_fy(
     p_society_id INT,
@@ -12820,7 +12481,6 @@ $$;
 -- p_fy (the FY START year, e.g. 2026 = FY 1-Apr-2026..31-Mar-2027).
 --
 -- no_pan is flagged so the export can highlight filing-blocking rows.
-DROP FUNCTION IF EXISTS fn_tds_summary_fy (INT, VARCHAR, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_tds_summary_fy(
     p_society_id INT,
@@ -13047,167 +12707,119 @@ GROUP BY
 -- SECTION 5: TRIGGERS
 -- ════════════════════════════════════════════════════════════════
 
-DROP TRIGGER IF EXISTS trg_validate_primary_bank_account ON societies;
-
 CREATE TRIGGER trg_validate_primary_bank_account
     BEFORE INSERT OR UPDATE OF primary_bank_account_id ON societies
     FOR EACH ROW EXECUTE FUNCTION fn_trg_validate_primary_bank_account();
-
-DROP TRIGGER IF EXISTS trg_receipt_hash_issue ON receipts;
 
 CREATE TRIGGER trg_receipt_hash_issue
     BEFORE UPDATE OF status ON receipts
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_receipt_hash_issue();
 
-DROP TRIGGER IF EXISTS trg_receipt_hash_insert ON receipts;
-
 CREATE TRIGGER trg_receipt_hash_insert
     BEFORE INSERT ON receipts
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_receipt_hash_insert();
-
-DROP TRIGGER IF EXISTS trg_receipt_confirm_activate_tickets ON receipts;
 
 CREATE TRIGGER trg_receipt_confirm_activate_tickets
     AFTER UPDATE OF status ON receipts
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_receipt_confirm_activate_tickets();
 
-DROP TRIGGER IF EXISTS trg_expense_hash_issue ON expenses;
-
 CREATE TRIGGER trg_expense_hash_issue
     BEFORE UPDATE OF status ON expenses
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_expense_hash_issue();
-
-DROP TRIGGER IF EXISTS trg_expense_hash_insert ON expenses;
 
 CREATE TRIGGER trg_expense_hash_insert
     BEFORE INSERT ON expenses
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_expense_hash_insert();
 
-DROP TRIGGER IF EXISTS trg_transaction_number ON transactions;
-
 CREATE TRIGGER trg_transaction_number
     BEFORE INSERT ON transactions
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_transaction_number();
-
-DROP TRIGGER IF EXISTS trg_apartment_active_guard ON apartments;
 
 CREATE TRIGGER trg_apartment_active_guard
     BEFORE UPDATE ON apartments
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_apartment_active_guard();
 
-DROP TRIGGER IF EXISTS trg_vendors_updated ON vendors;
-
 CREATE TRIGGER trg_vendors_updated
     BEFORE UPDATE ON vendors
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_security_updated ON security_staff;
 
 CREATE TRIGGER trg_security_updated
     BEFORE UPDATE ON security_staff
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_assets_updated ON assets;
-
 CREATE TRIGGER trg_assets_updated
     BEFORE UPDATE ON assets
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_events_updated ON events;
 
 CREATE TRIGGER trg_events_updated
     BEFORE UPDATE ON events
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_concerns_updated ON concerns;
-
 CREATE TRIGGER trg_concerns_updated
     BEFORE UPDATE ON concerns
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_concerns_assigns_updated ON concerns_assigns;
 
 CREATE TRIGGER trg_concerns_assigns_updated
     BEFORE UPDATE ON concerns_assigns
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_apt_charges_updated ON apt_charges_fines_basis;
-
 CREATE TRIGGER trg_apt_charges_updated
     BEFORE UPDATE ON apt_charges_fines_basis
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_ven_charges_updated ON ven_charges_fines_basis;
 
 CREATE TRIGGER trg_ven_charges_updated
     BEFORE UPDATE ON ven_charges_fines_basis
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_concerns_qr ON concerns;
-
 CREATE TRIGGER trg_concerns_qr
     BEFORE INSERT ON concerns
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_concerns_qr();
-
-DROP TRIGGER IF EXISTS trg_receipts_qr ON receipts;
 
 CREATE TRIGGER trg_receipts_qr
     BEFORE INSERT ON receipts
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_receipts_qr();
 
-DROP TRIGGER IF EXISTS trg_expenses_qr ON expenses;
-
 CREATE TRIGGER trg_expenses_qr
     BEFORE INSERT ON expenses
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_expenses_qr();
-
-DROP TRIGGER IF EXISTS trg_assets_qr ON assets;
 
 CREATE TRIGGER trg_assets_qr
     BEFORE INSERT ON assets
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_assets_qr();
 
-DROP TRIGGER IF EXISTS trg_visitors_qr ON visitors;
-
 CREATE TRIGGER trg_visitors_qr
     BEFORE INSERT ON visitors
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_visitors_qr();
-
-DROP TRIGGER IF EXISTS trg_patrol_locations_qr ON patrol_locations;
 
 CREATE TRIGGER trg_patrol_locations_qr
     BEFORE INSERT ON patrol_locations
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_patrol_locations_qr();
 
-DROP TRIGGER IF EXISTS trg_polls_qr ON polls;
-
 CREATE TRIGGER trg_polls_qr
     BEFORE UPDATE ON polls
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_polls_qr();
-
-DROP TRIGGER IF EXISTS trg_concerns_assigns_sync_status ON concerns_assigns;
 
 CREATE TRIGGER trg_concerns_assigns_sync_status
     AFTER INSERT OR UPDATE OF status OR DELETE ON concerns_assigns
@@ -13424,7 +13036,6 @@ $$;
 --     Both are separate from ordinary P&L depreciation/income and need
 --     their own line in the tax computation — this register surfaces
 --     them, it does not post them anywhere.
-DROP FUNCTION IF EXISTS fn_fixed_asset_register_fy (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_fixed_asset_register_fy(
     p_society_id INT,
@@ -13536,8 +13147,6 @@ BEGIN
     ORDER BY base.acc_name;
 END;
 $$;
-
-DROP FUNCTION IF EXISTS fn_fixed_assets_list_fy (INT, INT) CASCADE;
 
 CREATE OR REPLACE FUNCTION fn_fixed_assets_list_fy(
     p_society_id INT,
@@ -13908,7 +13517,7 @@ WHERE
 -- NOT relied on anywhere.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS regime_rule_parameters (
+CREATE TABLE regime_rule_parameters (
     regime_code      VARCHAR(30) NOT NULL,   -- deliberately no FK: loadable before seed.py creates the regime row
     rule_key         VARCHAR(60) NOT NULL,
     value            NUMERIC(14, 4),
@@ -14102,7 +13711,7 @@ BEGIN
     RETURN 3270;
 END $$;
 
-CREATE TABLE IF NOT EXISTS apartment_transfers (
+CREATE TABLE apartment_transfers (
     id                  SERIAL PRIMARY KEY,
     society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     apartment_id        INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
@@ -14119,7 +13728,7 @@ CREATE TABLE IF NOT EXISTS apartment_transfers (
     created_by          INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_apartment_transfers_society ON apartment_transfers (society_id, apartment_id);
+CREATE INDEX idx_apartment_transfers_society ON apartment_transfers (society_id, apartment_id);
 
 CREATE OR REPLACE FUNCTION fn_record_apartment_transfer(
     p_society_id INT, p_apartment_id INT, p_transfer_date DATE, p_transfer_value NUMERIC,
@@ -14251,7 +13860,7 @@ END $$;
 -- ───────────────────────────────────────────────────────────────────────────────
 -- 4. Section 22 — procedure before cutting an essential service
 -- ───────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS service_cutoff_proceedings (
+CREATE TABLE service_cutoff_proceedings (
     id                         SERIAL PRIMARY KEY,
     society_id                 INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     apartment_id               INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
@@ -14272,7 +13881,7 @@ CREATE TABLE IF NOT EXISTS service_cutoff_proceedings (
     created_by                 INT REFERENCES users (id),
     created_at                 TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_service_cutoff_society ON service_cutoff_proceedings (society_id, apartment_id);
+CREATE INDEX idx_service_cutoff_society ON service_cutoff_proceedings (society_id, apartment_id);
 
 -- Does NOT cut anything: returns whether the s.22 preconditions are satisfied as of
 -- p_asof, what blocks it, and the earliest date it could lawfully happen.
@@ -14341,7 +13950,7 @@ END $$;
 -- ───────────────────────────────────────────────────────────────────────────────
 -- 5. Cash / cheque limits (bye-laws 46-52)
 -- ───────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS compliance_flags (
+CREATE TABLE compliance_flags (
     id           SERIAL PRIMARY KEY,
     society_id   INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     rule_code    VARCHAR(40) NOT NULL,
@@ -14351,7 +13960,7 @@ CREATE TABLE IF NOT EXISTS compliance_flags (
     flagged_at   TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_compliance_flag UNIQUE (source_table, source_id, rule_code)
 );
-CREATE INDEX IF NOT EXISTS idx_compliance_flags_society ON compliance_flags (society_id, rule_code);
+CREATE INDEX idx_compliance_flags_society ON compliance_flags (society_id, rule_code);
 
 CREATE OR REPLACE FUNCTION fn_cash_limit_mode(p_society_id INT)
 RETURNS TEXT LANGUAGE sql STABLE AS $$
@@ -14384,7 +13993,7 @@ END $$;
 -- 6. Bye-law 49 filing calendar (statements by 31 Jul, authority copy by 15 Aug,
 --    owner summaries within 15 days of publication). Indian FY (April-March).
 -- ───────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS aoa_statutory_filings (
+CREATE TABLE aoa_statutory_filings (
     id                       SERIAL PRIMARY KEY,
     society_id               INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     fy_start_year            INT NOT NULL,
@@ -14440,7 +14049,7 @@ END $$;
 -- ───────────────────────────────────────────────────────────────────────────────
 -- 7. Owner list and loanee list (annexures to the bye-law 49 statement)
 -- ───────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS owner_loans (
+CREATE TABLE owner_loans (
     id                SERIAL PRIMARY KEY,
     society_id        INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     apartment_id      INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
@@ -14517,7 +14126,7 @@ $$;
 -- ── (b) Owner loans: ledger posting (bye-law 3(1)(f) lets the association lend to owners) ──
 -- owner_loans.ledger_posted / disbursal_mode / journal_id are declared inline
 -- on the owner_loans CREATE TABLE earlier in this file.
-CREATE TABLE IF NOT EXISTS owner_loan_repayments (
+CREATE TABLE owner_loan_repayments (
     id               SERIAL PRIMARY KEY,
     loan_id          INT NOT NULL REFERENCES owner_loans (id) ON DELETE CASCADE,
     society_id       INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -14732,7 +14341,7 @@ $$;
 -- (* = default). Clause numbers follow the Model Bye-Laws notified 16 Nov 2011 (No. 3977/8-1-11-115D.A./02T.C.-I).
 -- Bye-law 7 itself governs Board elections, not polls: poll eligibility is engine policy.
 -- ═══════════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS society_policy_settings (
+CREATE TABLE society_policy_settings (
     id              BIGSERIAL PRIMARY KEY,
     society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     policy_key      VARCHAR(40) NOT NULL,
@@ -14746,8 +14355,8 @@ CREATE TABLE IF NOT EXISTS society_policy_settings (
 -- An earlier draft had UNIQUE (society_id, policy_key, effective_from): a provisional choice dated today then
 -- failed to insert beside an active row of the same date. One open (unresolved) choice per policy instead —
 -- enforced by the partial unique index below.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_society_policy_provisional ON society_policy_settings (society_id, policy_key) WHERE resolution_id IS NULL;
-CREATE INDEX IF NOT EXISTS idx_society_policy_lookup ON society_policy_settings (society_id, policy_key, effective_from DESC, id DESC);
+CREATE UNIQUE INDEX uq_society_policy_provisional ON society_policy_settings (society_id, policy_key) WHERE resolution_id IS NULL;
+CREATE INDEX idx_society_policy_lookup ON society_policy_settings (society_id, policy_key, effective_from DESC, id DESC);
 
 CREATE OR REPLACE FUNCTION fn_society_policy(p_society_id INT, p_key VARCHAR, p_on DATE DEFAULT CURRENT_DATE)
 RETURNS TEXT LANGUAGE sql STABLE AS $$
@@ -14798,7 +14407,7 @@ END $$;
 -- Backs Master Portal → "AOA Rule Editor" (app/services/regime_rules_admin.py).
 -- Idempotent: safe to re-run, safe to paste into Master Settings → Integrate to DB.
 -- ═══════════════════════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS regime_rule_audit (
+CREATE TABLE regime_rule_audit (
     id              BIGSERIAL PRIMARY KEY,
     target_table    VARCHAR(40) NOT NULL CHECK (target_table IN
                         ('regime_rule_parameters', 'legal_instrument_catalog', 'societies.cash_limit_mode', 'society_bye_laws', 'meetings', 'resolutions', 'society_policy_settings')),
@@ -14813,16 +14422,16 @@ CREATE TABLE IF NOT EXISTS regime_rule_audit (
     changed_by_role VARCHAR(20),
     changed_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_regime_rule_audit_changed_at ON regime_rule_audit (changed_at DESC);
--- target_table's allowed-value CHECK is declared inline above; an already-provisioned
--- database keeps whichever list it was created with until it is re-provisioned.
+CREATE INDEX idx_regime_rule_audit_changed_at ON regime_rule_audit (changed_at DESC);
+-- target_table's allowed-value CHECK is declared inline above; changing that
+-- list means re-provisioning from this file.
 
 CREATE OR REPLACE FUNCTION trg_regime_rule_audit_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     RAISE EXCEPTION 'regime_rule_audit is append-only';
 END
 $$;
-DROP TRIGGER IF EXISTS regime_rule_audit_immutable ON regime_rule_audit;
+
 CREATE TRIGGER regime_rule_audit_immutable BEFORE UPDATE OR DELETE ON regime_rule_audit
     FOR EACH ROW EXECUTE FUNCTION trg_regime_rule_audit_immutable();
 
@@ -14874,7 +14483,7 @@ BEGIN
     RETURN NULL;
 END
 $$;
-DROP TRIGGER IF EXISTS societies_sync_regime ON societies;
+
 CREATE TRIGGER societies_sync_regime AFTER INSERT OR UPDATE OF state ON societies
     FOR EACH ROW EXECUTE FUNCTION trg_societies_sync_regime();
 
@@ -14887,7 +14496,7 @@ SELECT fn_sync_society_regime(id) FROM societies;
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 -- 1. decision_types — whitelisted decision codes (seeded below)
-CREATE TABLE IF NOT EXISTS decision_types (
+CREATE TABLE decision_types (
     id                  SERIAL PRIMARY KEY,
     code                VARCHAR(40) NOT NULL UNIQUE,
     label               VARCHAR(120) NOT NULL,
@@ -14898,7 +14507,7 @@ CREATE TABLE IF NOT EXISTS decision_types (
 );
 
 -- 2. meetings — GBM / EGM / MC records
-CREATE TABLE IF NOT EXISTS meetings (
+CREATE TABLE meetings (
     id                  SERIAL PRIMARY KEY,
     society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     type                VARCHAR(10) NOT NULL CHECK (type IN ('GBM', 'EGM', 'MC')),
@@ -14908,10 +14517,10 @@ CREATE TABLE IF NOT EXISTS meetings (
     created_by          INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_meetings_society ON meetings (society_id, held_on DESC);
+CREATE INDEX idx_meetings_society ON meetings (society_id, held_on DESC);
 
 -- 3. resolutions — Decisions linked to meetings and bye-law clauses
-CREATE TABLE IF NOT EXISTS resolutions (
+CREATE TABLE resolutions (
     id                  SERIAL PRIMARY KEY,
     meeting_id          INT NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
     clause_id           VARCHAR(30),
@@ -14924,26 +14533,18 @@ CREATE TABLE IF NOT EXISTS resolutions (
     created_by          INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_resolutions_meeting ON resolutions (meeting_id);
-CREATE INDEX IF NOT EXISTS idx_resolutions_clause ON resolutions (clause_id);
+CREATE INDEX idx_resolutions_meeting ON resolutions (meeting_id);
+CREATE INDEX idx_resolutions_clause ON resolutions (clause_id);
 
 -- society_policy_settings is defined earlier in this file than the governance
--- tables, so its resolution_id FK cannot be declared inline — same single
+-- tables, so its resolution_id FK cannot be declared inline — the same single
 -- forward reference as societies.fk_primary_bank_account above.
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'society_policy_settings_resolution_id_fkey'
-    ) THEN
-        ALTER TABLE society_policy_settings
-            ADD CONSTRAINT society_policy_settings_resolution_id_fkey
-            FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
-    END IF;
-END;
-$$;
+ALTER TABLE society_policy_settings
+    ADD CONSTRAINT society_policy_settings_resolution_id_fkey
+    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
 
 -- 4. resolution_effects — Enactment queue (whitelisted handlers only)
-CREATE TABLE IF NOT EXISTS resolution_effects (
+CREATE TABLE resolution_effects (
     id                  SERIAL PRIMARY KEY,
     resolution_id       INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
     handler_name        VARCHAR(60) NOT NULL CHECK (handler_name IN ('set_regime_param', 'set_society_policy', 'set_board_param')),
@@ -14953,14 +14554,14 @@ CREATE TABLE IF NOT EXISTS resolution_effects (
     error_message       TEXT,
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_resolution_effects_resolution ON resolution_effects (resolution_id);
+CREATE INDEX idx_resolution_effects_resolution ON resolution_effects (resolution_id);
 
 -- 5. society_bye_laws — Clause-level bye-law register (4-layer hierarchy)
 --    Layer 0: Statute (UP Apartment Act 2010) — LOCKED, not stored here
 --    Layer 1: Model Bye-Laws 2011 — per clause: Adopt as-is | Adopt with variation | Not adopted
 --    Layer 2: Society Policies — GBM resolution required; can tighten Layer 1, never loosen
 --    Layer 3: Board Decisions — MC resolution; operational parameters within policy bounds
-CREATE TABLE IF NOT EXISTS society_bye_laws (
+CREATE TABLE society_bye_laws (
     id                  BIGSERIAL PRIMARY KEY,
     society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     clause_id           VARCHAR(30) NOT NULL,
@@ -14980,8 +14581,8 @@ CREATE TABLE IF NOT EXISTS society_bye_laws (
     updated_at          TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (society_id, clause_id, layer, effective_from)
 );
-CREATE INDEX IF NOT EXISTS idx_society_bye_laws_lookup ON society_bye_laws (society_id, clause_id, layer, effective_from DESC);
-CREATE INDEX IF NOT EXISTS idx_society_bye_laws_provisional ON society_bye_laws (society_id, status) WHERE status = 'provisional';
+CREATE INDEX idx_society_bye_laws_lookup ON society_bye_laws (society_id, clause_id, layer, effective_from DESC);
+CREATE INDEX idx_society_bye_laws_provisional ON society_bye_laws (society_id, status) WHERE status = 'provisional';
 
 -- 6. Seed decision_types (10 rows) — whitelisted codes for resolutions
 INSERT INTO decision_types (code, label, required_body, majority_pct, description) VALUES
@@ -15010,7 +14611,7 @@ ON CONFLICT (code) DO NOTHING;
 --   Layer 3: Board Decisions — society_bye_laws layer=3 (operational params within policy bounds)
 -- Returns first non-NULL value reading Layer 0 → 1 → 2 → 3. Enforces "lower never loosens higher".
 -- ───────────────────────────────────────────────────────────────────────────────
-DROP FUNCTION IF EXISTS fn_resolve_rule(INT, VARCHAR, DATE);
+
 CREATE OR REPLACE FUNCTION fn_resolve_rule(
     p_society_id INT,
     p_clause_id  VARCHAR,
@@ -15063,7 +14664,6 @@ BEGIN
     RETURN;
 END $$;
 
-
 -- ───────────────────────────────────────────────────────────────────────────────
 -- fn_get_standing — Unified defaulter/standing resolver
 -- Replaces the 5 ad-hoc checks:
@@ -15071,7 +14671,7 @@ END $$;
 --   fn_bye_law7_eligibility, fn_nodues_issue_check, fn_service_cutoff_check,
 --   fn_check_noc_eligibility, fn_cast_vote (via dues/overdue checks)
 -- ───────────────────────────────────────────────────────────────────────────────
-DROP FUNCTION IF EXISTS fn_get_standing(INT, INT, DATE);
+
 CREATE OR REPLACE FUNCTION fn_get_standing(
     p_society_id  INT,
     p_apartment_id INT,

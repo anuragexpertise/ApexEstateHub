@@ -6,13 +6,20 @@ EstateHub — apply database/estatehub.sql to PostgreSQL, then optionally seed.
 estatehub.sql is the single source of truth for the schema. Every column,
 constraint and index is declared inline on its CREATE TABLE, so this script has
 no DDL of its own to keep in step with the file. Two constraints cannot be
-inlined and are the only ALTER TABLE statements left, both inside idempotent
-DO blocks because they point at a table declared later in the file
-(societies -> accounts, society_policy_settings -> resolutions).
+inlined and are the only ALTER TABLE statements, both pointing at a table
+declared later in the file (societies -> accounts, society_policy_settings ->
+resolutions).
 
-Because each statement is executed on its own, the script is safe to re-run: a
-CREATE TABLE that already exists is a no-op and a failing statement is reported
-and skipped rather than aborting the rest.
+The schema carries no IF NOT EXISTS / DROP IF EXISTS guards: the database is
+not in production, so the only supported way to install it is onto an empty
+schema. `database/reset_database.py --yes --after seed` drops and recreates the
+public schema and then runs this file, which is the from-scratch path.
+
+This script still executes statement-by-statement and reports rather than
+aborts on a failing statement, so on a database that already has the schema it
+will print one "already exists" error per object. That is expected and harmless
+— it is not a signal that anything needs fixing. To actually reinstall, use
+reset_database.py.
 
 Usage:
     python3 database/migrate.py            # normal

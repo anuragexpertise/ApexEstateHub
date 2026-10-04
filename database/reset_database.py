@@ -18,8 +18,14 @@ Steps:
          1) Run Schema only
          2) Run Schema & seed
          3) None — leave blank database
-    4. (unless "None") Execute estatehub.sql (idempotent), optionally seed,
-       then verify tables/functions/views
+    4. (unless "None") Execute estatehub.sql, optionally seed, then verify
+       tables/functions/views
+
+estatehub.sql declares no IF NOT EXISTS / DROP IF EXISTS guards, so it is
+written to install onto the empty schema created in step 2 and nowhere else.
+That is what makes this script the from-scratch path:
+
+    python3 database/reset_database.py --yes --after seed
 """
 
 import os
@@ -28,6 +34,7 @@ import argparse
 from pathlib import Path
 
 import psycopg2
+import psycopg2.extras
 from dotenv import load_dotenv
 
 
@@ -137,37 +144,58 @@ def prompt_post_reset_action(args) -> str:
     return {"1": "schema", "2": "seed", "3": "none", "": "schema"}.get(choice, "schema")
 
 
+def seed_connect():
+    """Opens the seed connection against THIS script's target database.
+
+    Deliberately not seed.py's get_conn(). That resolves its target from
+    DATABASE_URL first and only then falls back to PGHOST/PGDATABASE/..., while
+    this script reads the PG* variables only — so with a DATABASE_URL in .env
+    the two disagree, and `--after seed` would drop the schema from one database
+    and seed a different one (observed: a fresh local reset followed by seed
+    steps reporting every row as "already exists" against the remote). Building
+    the DSN from the values already resolved at the top of this file keeps the
+    reset and the seed pointed at one database.
+
+    RealDictCursor is required: every function in seed.py reads rows by column
+    name (row["id"], row["linked_id"], ...).
+    """
+    params = {
+        "host": DB_HOST,
+        "port": DB_PORT,
+        "dbname": DB_NAME,
+        "user": DB_USER,
+        "password": DB_PASSWORD,
+        "sslmode": SSL_MODE,
+    }
+    if SSL_ROOT_CERT and SSL_MODE not in ("disable",):
+        params["sslrootcert"] = SSL_ROOT_CERT
+    return psycopg2.connect(
+        **params,
+        cursor_factory=psycopg2.extras.RealDictCursor,
+        connect_timeout=20,
+        options="-c lock_timeout=15000 -c statement_timeout=180000",
+    )
+
+
 def run_seed_demo_data(conn):
     """Delegates to database/seed.py's run_seed(conn), which commits and
     closes `conn` itself (same contract migrate.py's --seed flow relies
     on) — the caller must not touch `conn` again after this returns.
 
-    Deliberately does NOT reuse the `conn` passed in. Every function in
-    seed.py accesses rows by column name (row["id"], row["linked_id"],
-    ...), which only works when the connection itself was opened with
-    cursor_factory=psycopg2.extras.RealDictCursor — exactly how seed.py's
-    own get_conn() connects, but NOT how this script's connect() above
-    does (validate() below needs plain positional/tuple access instead,
-    so that one stays as-is). Passing this script's connection straight
-    into run_seed() failed immediately on the first named-column access
-    with "tuple indices must be integers or slices, not str" — so this
-    closes it and opens a fresh one the way seed.py itself would, instead
-    of trying to reconfigure or share a single connection across two
-    different row-access conventions.
-
-    Mirrors migrate.py's LockNotAvailable/QueryCanceled handling for the
-    same reasons: seeding runs many individual statements, so a lock wait
-    or a slow-statement timeout here is a lot more likely (and a lot more
-    opaque without a specific message) than during the single-shot schema
-    install above."""
+    Does not reuse the `conn` passed in: validate() below needs plain
+    positional/tuple access, whereas every function in seed.py needs
+    named-column access, which only works on a connection opened with
+    cursor_factory=RealDictCursor. So this closes the first connection and
+    opens a fresh one via seed_connect(), which targets the same database.
+    """
     conn.close()
 
     try:
-        from seed import run_seed, get_conn as seed_get_conn
+        from seed import run_seed
     except ImportError:
-        from database.seed import run_seed, get_conn as seed_get_conn
+        from database.seed import run_seed
 
-    seed_conn = seed_get_conn()
+    seed_conn = seed_connect()
 
     try:
         run_seed(seed_conn)
@@ -362,7 +390,13 @@ def main():
     except Exception as e:
 
         if conn:
-            conn.rollback()
+            # run_seed_demo_data() closes `conn` itself, so by the time a seed
+            # failure reaches here the rollback raised InterfaceError and
+            # replaced the real traceback with "connection already closed".
+            try:
+                conn.rollback()
+            except psycopg2.Error:
+                pass
 
         print("\nERROR")
         print("-" * 70)
