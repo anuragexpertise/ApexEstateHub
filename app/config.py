@@ -12,6 +12,9 @@ from dotenv import load_dotenv
 # Load .env as early as possible — before any class body executes
 load_dotenv(override=False)
 
+# Imported after load_dotenv() so .env-provided secrets are visible to it.
+from app.security.secret_policy import resolve_secret
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -87,7 +90,10 @@ def get_engine_options() -> dict:
 class Config:
     """Base configuration — values resolved at instantiation time."""
 
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-CHANGE-IN-PRODUCTION')
+    # Signs the Flask-Login session cookie — every server-side identity check
+    # trusts it. No committed default: fails closed in production, random
+    # per-process key elsewhere. See app/security/secret_policy.py.
+    SECRET_KEY = resolve_secret('SECRET_KEY')
 
     # Called here so the class attribute is set after load_dotenv() above
     SQLALCHEMY_DATABASE_URI        = get_database_url()
@@ -106,7 +112,7 @@ class Config:
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024        # 16 MB
 
     # JWT
-    JWT_SECRET_KEY            = os.getenv('JWT_SECRET_KEY', 'Iamagoodboy9453')
+    JWT_SECRET_KEY            = resolve_secret('JWT_SECRET_KEY')
     JWT_ACCESS_TOKEN_EXPIRES  = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES',  '3600'))
     JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', '2592000'))
 

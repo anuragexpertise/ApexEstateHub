@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 
 from werkzeug.security import check_password_hash, generate_password_hash
 from database.db_manager import db
+from app.security.roles import resolve_role
 
 log = logging.getLogger(__name__)
 
@@ -73,9 +74,7 @@ def _build_auth(row: dict) -> dict | None:
     """Convert a DB user row into the auth-store payload."""
     if not row:
         return None
-    role = row["role"]
-    if role == "admin" and not row.get("society_id") and row.get("is_master_admin"):
-        role = "master"
+    role = resolve_role(row["role"], row.get("society_id"), row.get("is_master_admin"))
     return {
         "user_id":           row["id"],
         "email":             row["email"],

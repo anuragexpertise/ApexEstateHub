@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from database.db_manager import db
 from app.models.user import User
+from app.security.roles import portal_home
 # SECURITY (fixed 2026-08): JWT_SECRET and token generation now come from
 # app.auth.jwt_handler — the single source of truth. This module used to
 # define its own JWT_SECRET with a different fallback default, which risked
@@ -16,17 +17,7 @@ auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
 
 def _redirect_url(role, society_id):
-    if role == 'master':
-        return '/dashboard/master-societies'
-    if role == 'admin':
-        return '/dashboard/admin-portal'
-    if role == 'apartment':
-        return '/dashboard/owner-portal'
-    if role == 'vendor':
-        return '/dashboard/vendor-portal'
-    if role == 'security':
-        return '/dashboard/pass-evaluation'
-    return '/dashboard/'
+    return portal_home(role)
 
 
 # ── Login ─────────────────────────────────────────────
