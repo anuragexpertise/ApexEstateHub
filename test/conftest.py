@@ -42,6 +42,8 @@ def patched_db(fake_db):
     import app.services.alert_service as alert_svc
     import app.dash_apps.drilldown.loaders as loaders
     import app.dash_apps.callbacks.drilldown_callbacks as dc
+    import app.security.policy as policy
+    import app.services.workflow as workflow
 
     patches = [
         patch.object(dbm, "db", fake_db),
@@ -52,6 +54,8 @@ def patched_db(fake_db):
         patch.object(alert_svc, "db", fake_db),
         patch.object(loaders, "db", fake_db),
         patch.object(dc, "db", fake_db),
+        patch.object(policy, "db", fake_db),
+        patch.object(workflow, "db", fake_db),
     ]
     for p in patches:
         p.start()

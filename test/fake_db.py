@@ -102,6 +102,20 @@ class FakeDB:
             "security_roster": [],
             "tds_section_rates": [],
             "fy_closures": [],
+            # RBAC foundation tables
+            "role_definitions": [],
+            "permissions": [],
+            "role_permissions": [],
+            "user_role_assignments": [],
+            "delegations": [],
+            "societies_memberships": [],
+            # D2 transition logs
+            "concern_transitions": [],
+            "poll_transitions": [],
+            "poll_eligibility_snapshot": [],
+            "channel_event_transitions": [],
+            "society_legal_regime": [],
+            "legal_regime_profiles": [],
         }
         self._seq = {t: 1 for t in self.tables}
 

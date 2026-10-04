@@ -2432,6 +2432,95 @@ def audit_seed_invariants(cur, society_id: int) -> bool:
 # MAIN SEED ENTRYPOINT
 # ═════════════════════════════════════════════════════════════════════════════
 
+def seed_rbac_roles(cur, conn):
+    """Phase 1 (D1=Option B) backfill — grant fine-grained role_definitions to the
+    users that already exist from the legacy seeding.
+
+    Convention (AOA bye-laws): the secretary and treasurer offices are required;
+    until a formal committee election the society admin fills both. The master
+    admin (is_master_admin, no society) becomes the platform_operator.
+
+    Idempotent: skips users who already hold an active grant for the role.
+    """
+    # role_definition ids (robust to SERIAL ordering)
+    rd = {}
+    for code in ("platform_operator", "society_secretary", "treasurer"):
+        row = _one(cur, "SELECT id FROM role_definitions WHERE code=%s AND scope=%s",
+                   (code, "platform" if code == "platform_operator" else "society"))
+        if row:
+            rd[code] = row["id"]
+    if not rd:
+        print("  ⚠  role_definitions not seeded — skipping RBAC backfill")
+        return
+
+    inserted = 0
+
+    # platform_operator -> is_master_admin users (no society)
+    po = rd.get("platform_operator")
+    if po:
+        cur.execute(
+            """INSERT INTO user_role_assignments (user_id, role_definition_id, society_id, source, status)
+                  SELECT u.id, %s, NULL, 'aoa', 'active'
+                  FROM users u
+                  WHERE u.is_master_admin = TRUE AND u.society_id IS NULL
+                    AND NOT EXISTS (
+                        SELECT 1 FROM user_role_assignments ura
+                        WHERE ura.user_id = u.id AND ura.role_definition_id = %s
+                          AND ura.society_id IS NULL AND ura.status = 'active'
+                          AND (ura.effective_to IS NULL OR ura.effective_to > NOW()))
+                  ON CONFLICT (user_id, role_definition_id, society_id, entity_link, effective_from)
+                  DO NOTHING""",
+            (po, po),
+        )
+        inserted += cur.rowcount
+
+    # society_secretary + treasurer -> society admins (admin + society_id set)
+    ss = rd.get("society_secretary")
+    tr = rd.get("treasurer")
+    if ss:
+        cur.execute(
+            """ INSERT INTO user_role_assignments
+                  (user_id, role_definition_id, society_id, source, status)
+                SELECT u.id, %s, u.society_id, 'aoa', 'active'
+                  FROM users u
+                  WHERE u.role = 'admin' AND u.society_id IS NOT NULL
+                    AND NOT EXISTS (
+                          SELECT 1 FROM user_role_assignments ura
+                           WHERE ura.user_id = u.id AND ura.role_definition_id = %s
+                             AND ura.society_id = u.society_id AND ura.status = 'active'
+                             AND (ura.effective_to IS NULL OR ura.effective_to > NOW())
+                    )
+                ON CONFLICT (user_id, role_definition_id, society_id, entity_link, effective_from)
+                DO NOTHING""",
+            (ss, ss),
+        )
+        inserted += cur.rowcount
+    if tr:
+        cur.execute(
+            """ INSERT INTO user_role_assignments
+                  (user_id, role_definition_id, society_id, source, status)
+                SELECT u.id, %s, u.society_id, 'aoa', 'active'
+                  FROM users u
+                  WHERE u.role = 'admin' AND u.society_id IS NOT NULL
+                    AND NOT EXISTS (
+                          SELECT 1 FROM user_role_assignments ura
+                           WHERE ura.user_id = u.id AND ura.role_definition_id = %s
+                             AND ura.society_id = u.society_id AND ura.status = 'active'
+                             AND (ura.effective_to IS NULL OR ura.effective_to > NOW())
+                    )
+                ON CONFLICT (user_id, role_definition_id, society_id, entity_link, effective_from)
+                DO NOTHING""",
+            (tr, tr),
+        )
+        inserted += cur.rowcount
+
+    conn.commit()
+    if inserted:
+        print(f"  ✓ RBAC role backfill: {inserted} assignment(s) granted")
+    else:
+        print("  ✓ RBAC roles already backfilled — skipped")
+
+
 def run_seed(conn):
     _validate_seed_constants()
     cur = conn.cursor()
@@ -2447,6 +2536,7 @@ def run_seed(conn):
 
     seed_master_admin(cur, conn)
     users = seed_users(cur, conn, society_id)
+    seed_rbac_roles(cur, conn)
     cur.execute("SELECT fn_backfill_undivided_interest(%s)", (society_id,))   # Act s.5(2): area share until the Declaration % is entered
     conn.commit()
 
