@@ -5458,7 +5458,7 @@ BEGIN
         RAISE EXCEPTION 'purchase_value must be > 0';
     END IF;
 
-    SELECT depreciation_percent INTO v_dep_rate FROM accounts WHERE id = p_acc_id;
+    SELECT depreciation_percent INTO v_dep_rate FROM accounts WHERE id = p_acc_id AND society_id = p_society_id;
 
     INSERT INTO assets(
         society_id, company_name, asset_name, asset_SNo, purchase_date, installation_date, purchase_value,
@@ -8276,7 +8276,7 @@ BEGIN
                SUM(t.amount) FILTER (WHERE t.entry_side = 'Cr') AS cr_sum,
                SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr') AS dr_sum
         FROM transactions t
-        WHERE t.status = 'paid' AND t.trx_date < v_fy_start
+        WHERE t.society_id = p_society_id AND t.status = 'paid' AND t.trx_date < v_fy_start
         GROUP BY t.acc_id
     ) t ON t.acc_id = a.id
     WHERE a.parent_account_id = p_account_id AND a.society_id = p_society_id;
@@ -8541,7 +8541,7 @@ BEGIN
            a.has_bf, a.tab_name, COALESCE(p.tab_name, p.name, '--') AS parent_name
        INTO v_acc
        FROM accounts a
-       LEFT JOIN accounts p ON p.id = a.parent_account_id
+       LEFT JOIN accounts p ON p.id = a.parent_account_id AND p.society_id = a.society_id
       WHERE a.id = p_account_id AND a.society_id = p_society_id;
 
     IF NOT FOUND THEN RETURN; END IF;
@@ -8696,7 +8696,7 @@ BEGIN
             SELECT id INTO v_dep_acc_id FROM accounts
             WHERE society_id = p_society_id AND tab_name = 'Dep' LIMIT 1;
 
-            v_dep_acc_tab := COALESCE((SELECT tab_name FROM accounts WHERE id = v_dep_acc_id), 'Dep');
+            v_dep_acc_tab := COALESCE((SELECT tab_name FROM accounts WHERE id = v_dep_acc_id AND society_id = p_society_id), 'Dep');
             v_running_balance := v_final_balance - v_dep_total;
             RETURN QUERY SELECT
                 v_fy_end, COALESCE(v_acc.tab_name::TEXT, v_acc.name::TEXT), ''::TEXT,
@@ -8906,7 +8906,7 @@ BEGIN
                CASE WHEN t.mode <> 'cash' THEN t.amount ELSE 0 END AS chq_amt,
                ROW_NUMBER() OVER (PARTITION BY COALESCE(t.journal_id, -t.id) ORDER BY t.id) AS rn
         FROM transactions t
-        JOIN accounts a ON a.id = t.acc_id
+        JOIN accounts a ON a.id = t.acc_id AND a.society_id = t.society_id
         LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id AND t.role = 'apartment'
         LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id AND t.role = 'vendor'
         LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id AND t.role = 'security'
@@ -8933,7 +8933,7 @@ BEGIN
                CASE WHEN t.mode <> 'cash' THEN t.amount ELSE 0 END AS chq_amt,
                ROW_NUMBER() OVER (PARTITION BY COALESCE(t.journal_id, -t.id) ORDER BY t.id) AS rn
         FROM transactions t
-        JOIN accounts a ON a.id = t.acc_id
+        JOIN accounts a ON a.id = t.acc_id AND a.society_id = t.society_id
         LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id AND t.role = 'apartment'
         LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id AND t.role = 'vendor'
         LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id AND t.role = 'security'
@@ -9112,7 +9112,7 @@ RETURNS TABLE (
     is_first_page             BOOLEAN,
     is_last_page              BOOLEAN
 )
-LANGUAGE plpgsql STABLE AS $$
+LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
     v_calendar_year   INT;
     v_month_start     DATE;
@@ -9161,6 +9161,10 @@ BEGIN
               AND t.trx_date = v_month_start
         ), 0);
 
+    -- A second call in the same transaction (a loop over months, a report
+    -- that fetches several pages) used to fail with "relation _cb_month_rows
+    -- already exists" because ON COMMIT DROP only fires at commit.
+    DROP TABLE IF EXISTS _cb_month_rows;
     CREATE TEMP TABLE _cb_month_rows ON COMMIT DROP AS
     WITH cr_rows AS (
         -- mode <> 'journal' excludes pure book entries (e.g. depreciation)
@@ -9173,7 +9177,7 @@ BEGIN
                CASE WHEN t.mode <> 'cash' THEN t.amount ELSE 0 END AS chq_amt,
                ROW_NUMBER() OVER (PARTITION BY COALESCE(t.journal_id, -t.id) ORDER BY t.id) AS rn
         FROM transactions t
-        JOIN accounts a ON a.id = t.acc_id
+        JOIN accounts a ON a.id = t.acc_id AND a.society_id = t.society_id
         LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id AND t.role = 'apartment'
         LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id AND t.role = 'vendor'
         LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id AND t.role = 'security'
@@ -9197,7 +9201,7 @@ BEGIN
                CASE WHEN t.mode <> 'cash' THEN t.amount ELSE 0 END AS chq_amt,
                ROW_NUMBER() OVER (PARTITION BY COALESCE(t.journal_id, -t.id) ORDER BY t.id) AS rn
         FROM transactions t
-        JOIN accounts a ON a.id = t.acc_id
+        JOIN accounts a ON a.id = t.acc_id AND a.society_id = t.society_id
         LEFT JOIN apartments ap ON ap.id = t.entity_id AND ap.society_id = p_society_id AND t.role = 'apartment'
         LEFT JOIN vendors v ON v.id = t.entity_id AND v.society_id = p_society_id AND t.role = 'vendor'
         LEFT JOIN security_staff s ON s.id = t.entity_id AND s.society_id = p_society_id AND t.role = 'security'
@@ -9728,7 +9732,7 @@ BEGIN
                  ORDER BY pr.sort_path
                  LIMIT 1) AS block_tab
         FROM closing c
-        LEFT JOIN accounts a ON a.id = c.account_id
+        LEFT JOIN accounts a ON a.id = c.account_id AND a.society_id = p_society_id
         WHERE c.own_closing IS NOT NULL
           AND c.own_closing != 0
           AND EXISTS (
@@ -9830,7 +9834,7 @@ BEGIN
     bs_accs AS (
         SELECT c.*, a.mutuality_nature
         FROM closing c
-        LEFT JOIN accounts a ON a.id = c.account_id
+        LEFT JOIN accounts a ON a.id = c.account_id AND a.society_id = p_society_id
         CROSS JOIN cap_ac ca
         WHERE c.own_closing IS NOT NULL
           AND (ca.sort_path IS NULL
@@ -9895,7 +9899,7 @@ BEGIN
                c.statutory_statement_section, c.statutory_display_order
         FROM closing c
         CROSS JOIN cap_ac ca
-        LEFT JOIN accounts a ON a.id = c.account_id
+        LEFT JOIN accounts a ON a.id = c.account_id AND a.society_id = p_society_id
         WHERE ca.sort_path IS NOT NULL
           AND c.sort_path = ca.sort_path
           AND c.own_closing IS NOT NULL
@@ -9950,7 +9954,7 @@ BEGIN
     SELECT COALESCE(SUM(t.amount), 0)::NUMERIC(15,2)
       INTO v_total
       FROM transactions t
-      JOIN accounts a ON a.id = t.acc_id
+      JOIN accounts a ON a.id = t.acc_id AND a.society_id = t.society_id
      WHERE t.society_id = p_society_id
        AND t.status = 'paid'
        AND t.trx_date BETWEEN v_fy_start AND v_fy_end
@@ -10125,11 +10129,15 @@ BEGIN
                                ELSE COALESCE(SUM(CASE WHEN t.entry_side='Dr' THEN t.amount
                                                        WHEN t.entry_side='Cr' THEN -t.amount
                                                        ELSE 0 END), 0)
-                          END + COALESCE(MAX(bf.bf_amount), 0))
+                          END + COALESCE(MAX(CASE WHEN bf.drcr_bf = a.drcr_account
+                                   THEN bf.bf_amount ELSE -bf.bf_amount END), 0))
                END::NUMERIC(15,2) AS current_balance,
                COUNT(t.id)::INT AS transaction_count
         FROM accounts a
-        LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+        LEFT JOIN transactions t ON t.acc_id = a.id AND t.society_id = a.society_id
+                              AND t.status = 'paid'
+                              AND t.trx_date BETWEEN MAKE_DATE(fn_current_financial_year(), 4, 1)
+                                       AND MAKE_DATE(fn_current_financial_year() + 1, 3, 31)
         LEFT JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
                                      AND bf.financial_year = fn_current_financial_year()
         WHERE a.society_id = p_society_id
@@ -10141,7 +10149,7 @@ BEGIN
     FROM accounts a
     JOIN tree ON tree.id = a.id
     JOIN balances b ON b.id = a.id
-    LEFT JOIN accounts p ON p.id = a.parent_account_id
+    LEFT JOIN accounts p ON p.id = a.parent_account_id AND p.society_id = a.society_id
     WHERE a.society_id = p_society_id
       AND (p_search IS NULL OR a.name ILIKE '%'||p_search||'%' OR a.tab_name ILIKE '%'||p_search||'%')
     ORDER BY tree.sort_path;
@@ -10181,13 +10189,17 @@ BEGIN
                       ELSE COALESCE(SUM(CASE WHEN t.entry_side='Dr' THEN t.amount
                                               WHEN t.entry_side='Cr' THEN -t.amount
                                               ELSE 0 END), 0)
-                   END + COALESCE(MAX(bf.bf_amount), 0))
+                   END + COALESCE(MAX(CASE WHEN bf.drcr_bf = a.drcr_account
+                                   THEN bf.bf_amount ELSE -bf.bf_amount END), 0))
              END)::NUMERIC(15,2),
         COUNT(t.id)::INT,
         COALESCE(p.name,'—')::VARCHAR(100)
     FROM accounts a
-    LEFT JOIN accounts p ON p.id = a.parent_account_id
-    LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+    LEFT JOIN accounts p ON p.id = a.parent_account_id AND p.society_id = a.society_id
+    LEFT JOIN transactions t ON t.acc_id = a.id AND t.society_id = a.society_id
+                              AND t.status = 'paid'
+                              AND t.trx_date BETWEEN MAKE_DATE(fn_current_financial_year(), 4, 1)
+                                       AND MAKE_DATE(fn_current_financial_year() + 1, 3, 31)
     LEFT JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
                                  AND bf.financial_year = fn_current_financial_year()
     WHERE a.society_id = p_society_id
@@ -10232,12 +10244,16 @@ LANGUAGE SQL STABLE AS $$
                       ELSE COALESCE(SUM(CASE WHEN t.entry_side='Dr' THEN t.amount
                                               WHEN t.entry_side='Cr' THEN -t.amount
                                               ELSE 0 END), 0)
-                   END + COALESCE(MAX(bf.bf_amount), 0))
+                   END + COALESCE(MAX(CASE WHEN bf.drcr_bf = a.drcr_account
+                                   THEN bf.bf_amount ELSE -bf.bf_amount END), 0))
              END)::NUMERIC(15,2),
         a.created_at::TIMESTAMP
     FROM accounts a
-    LEFT JOIN accounts p ON p.id = a.parent_account_id
-    LEFT JOIN transactions t ON t.acc_id = a.id AND t.status = 'paid'
+    LEFT JOIN accounts p ON p.id = a.parent_account_id AND p.society_id = a.society_id
+    LEFT JOIN transactions t ON t.acc_id = a.id AND t.society_id = a.society_id
+                              AND t.status = 'paid'
+                              AND t.trx_date BETWEEN MAKE_DATE(fn_current_financial_year(), 4, 1)
+                                       AND MAKE_DATE(fn_current_financial_year() + 1, 3, 31)
     LEFT JOIN brought_forward bf ON bf.acc_id = a.id AND bf.society_id = a.society_id
                                  AND bf.financial_year = fn_current_financial_year()
     WHERE a.id = p_account_id AND a.society_id = p_society_id
@@ -10488,7 +10504,7 @@ BEGIN
         ar.sale_value::NUMERIC(12,2),
         ar.created_at::TIMESTAMP
     FROM assets ar
-    LEFT JOIN accounts a ON a.id = ar.acc_id
+    LEFT JOIN accounts a ON a.id = ar.acc_id AND a.society_id = ar.society_id
     WHERE ar.society_id = p_society_id
       AND ar.disposed = COALESCE(p_disposed, FALSE)
       AND (p_search IS NULL OR ar.asset_name ILIKE '%'||p_search||'%')
@@ -10990,7 +11006,7 @@ RETURNS TABLE (journal_id INT, dr_count BIGINT, cr_count BIGINT, dr_sum NUMERIC(
            COALESCE(SUM(t.amount) FILTER (WHERE a.drcr_account = 'Cr'),0)::NUMERIC(15,2) AS cr_sum,
            'Unbalanced journal (Dr != Cr)'::TEXT
     FROM transactions t
-    JOIN accounts a ON a.id = t.acc_id
+    JOIN accounts a ON a.id = t.acc_id AND a.society_id = t.society_id
     WHERE t.society_id = p_society_id AND t.journal_id IS NOT NULL AND t.status = 'paid'
     GROUP BY t.journal_id
     HAVING COUNT(*) FILTER (WHERE a.drcr_account = 'Dr') <> 1
@@ -12858,7 +12874,7 @@ BEGIN
         a.mutuality_nature as nature,
         SUM(t.amount) as total_amount
     FROM transactions t
-    JOIN accounts a ON t.acc_id = a.id
+    JOIN accounts a ON t.acc_id = a.id AND a.society_id = t.society_id
     WHERE t.society_id = p_society_id
       AND t.trx_date BETWEEN v_fy_start AND v_fy_end
       AND t.entry_side = 'Cr'
@@ -12873,7 +12889,7 @@ BEGIN
         a.mutuality_nature as nature,
         SUM(t.amount) as total_amount
     FROM transactions t
-    JOIN accounts a ON t.acc_id = a.id
+    JOIN accounts a ON t.acc_id = a.id AND a.society_id = t.society_id
     WHERE t.society_id = p_society_id
       AND t.trx_date BETWEEN v_fy_start AND v_fy_end
       AND t.entry_side = 'Dr'
