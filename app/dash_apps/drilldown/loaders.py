@@ -3424,8 +3424,20 @@ def get_depreciation_account(society_id: int, fy: int) -> list[dict]:
             (society_id, fy), fetch_all=True,
         ) or []
         if not rows:
+            # Fallback for a society whose fixed-asset register is empty.
+            # The predicate used to read `depreciation_charge > 0 OR
+            # is_depreciable = TRUE`, but fn_fy_closing_report has no
+            # `is_depreciable` column (its 19 outputs are account_id,
+            # account_name, tab_name, parent_account_id, drcr_account, has_bf,
+            # own_bf, own_movement, depreciation_charge, own_closing,
+            # total_closing, display_side, display_amount, depth, sort_path and
+            # the four statutory_* columns), so the whole statement failed with
+            # `column "is_depreciable" does not exist` and the caller got an
+            # empty list plus a logged DB error rather than a clean zero-row
+            # result. The surviving column carries the part of the intent that
+            # this function can express.
             rows = db._execute(
-                "SELECT * FROM fn_fy_closing_report(%s,%s) WHERE depreciation_charge > 0 OR is_depreciable = TRUE",
+                "SELECT * FROM fn_fy_closing_report(%s,%s) WHERE depreciation_charge > 0",
                 (society_id, fy), fetch_all=True,
             ) or []
         return rows

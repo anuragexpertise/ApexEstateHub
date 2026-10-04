@@ -197,11 +197,73 @@ class TestQRAndAlerts(unittest.TestCase):
 
     @patch("app.services.qr_service._get_signing_secret", return_value=None)
     def test_qr_generation(self, _secret):
-        # No signing secret -> legacy unsigned payload; keeps the test
-        # independent of a live database.
+        """Unsigned (legacy) path: exact payload, and a genuinely decodable PNG.
+
+        A data-URI prefix check alone would pass on a truncated or non-image
+        blob, so the bytes are decoded and inspected.
+        """
         img_str, payload = generate_qr_code(1, "EVT", 105)
-        self.assertTrue(img_str.startswith("data:image/png;base64,"))
         self.assertEqual(payload, "1-EVT-105")
+
+        prefix = "data:image/png;base64,"
+        self.assertTrue(img_str.startswith(prefix), img_str[:40])
+        img = Image.open(BytesIO(base64.b64decode(img_str[len(prefix):])))
+        self.assertEqual(img.format, "PNG")
+        self.assertGreater(img.size[0], 0)
+        self.assertGreater(img.size[1], 0)
+
+    @patch("app.services.qr_service._current_qr_version", return_value=42)
+    @patch("app.services.qr_service._get_signing_secret", return_value="fixed-test-secret")
+    def test_qr_generation_signed_payload_and_signature(self, _secret, _version):
+        """Signed path: payload shape and an independently recomputed HMAC."""
+        _, payload = generate_qr_code(1, "EVT", 105)
+        self.assertTrue(payload.startswith("1-EVT-105-42-"), payload)
+
+        sig = payload.rsplit("-", 1)[1]
+        expected = hmac.new(b"fixed-test-secret", b"1-EVT-105-42", hashlib.sha256).hexdigest()[:10]
+        self.assertEqual(sig, expected)
+
+        # and it must round-trip through the parser as a signed payload
+        parsed = parse_qr_payload(payload)
+        self.assertNotIn("error", parsed)
+        self.assertEqual(parsed["qr_version"], 42)
+        self.assertEqual(parsed["sig"], expected)
+
+    def test_build_qr_payload_is_pure(self):
+        """The payload builder must not touch the database, so the contract can
+        be tested without one."""
+        with patch.object(qr_service.db, "_execute", side_effect=AssertionError("db touched")), \
+             patch.object(qr_service.db, "execute", side_effect=AssertionError("db touched")):
+            self.assertEqual(qr_service.build_qr_payload(2, "SEC", 5), "2-SEC-5")
+            self.assertEqual(
+                qr_service.build_qr_payload(2, "sec", 5, "s", 3),
+                qr_service.build_qr_payload(2, "SEC", 5, "s", 3),
+            )
+            # a secret without a version cannot be signed
+            self.assertEqual(qr_service.build_qr_payload(2, "SEC", 5, "s"), "2-SEC-5")
+            # a version without a secret cannot be signed either
+            self.assertEqual(qr_service.build_qr_payload(2, "SEC", 5, None, 3), "2-SEC-5")
+
+    def test_resolve_signing_secret_from_stored_ciphertext(self):
+        """Decryption is tested on its own, apart from QR image construction:
+        a stored ciphertext resolves to the plaintext it decrypts to."""
+        from test.fake_db import FakeDB
+        from app.services import secret_vault
+
+        fake = FakeDB.get_instance()
+        fake.tables["societies"].append(
+            {"id": 7, "name": "Vault Society", "signing_secret_enc": "stored-ciphertext"})
+        original = secret_vault.decrypt_secret
+        secret_vault.decrypt_secret = lambda tok: f"plaintext-for-{tok}"
+        try:
+            with patch.object(qr_service, "db", fake):
+                self.assertEqual(qr_service._get_signing_secret(7), "plaintext-for-stored-ciphertext")
+                # a society with no stored secret resolves to None (legacy path)
+                self.assertIsNone(qr_service._get_signing_secret(8))
+                # a falsy society id never consults the database
+                self.assertIsNone(qr_service._get_signing_secret(None))
+        finally:
+            secret_vault.decrypt_secret = original
 
     def test_role_codes(self):
         self.assertEqual(ROLE_CODE_MAP.get("ADM"), "admin")

@@ -68,14 +68,15 @@ def _get_signing_secret(society_id):
     Resolve a society's plaintext SIGNING_SECRET from
     societies.signing_secret_enc (Fernet-encrypted — see secret_vault.py).
 
-    Returns None if society_id is falsy, the society hasn't completed
-    setup yet (column is NULL), or SECRET_VAULT_KEY itself is misconfigured.
-    The last case is deliberately not distinguished from "not set yet" by
-    the return value (mirrors the old global QR_SIGNING_SECRET-unset
-    behavior — codes for that society silently stay unsigned rather than
-    crashing) but IS logged loudly, since a vault misconfiguration is a
-    deployment bug worth noticing, unlike a fresh society that simply
-    hasn't finished onboarding.
+    Returns None if society_id is falsy or the society hasn't completed setup
+    yet (column is NULL) — a normal state that yields a legacy unsigned code.
+
+    A configured-but-undecryptable secret (vault misconfiguration, rotated
+    SECRET_VAULT_KEY) raises QRSigningError rather than returning None: those
+    are different states, and collapsing the second into the first would mean a
+    deployment fault silently produced unsigned codes that still look valid.
+    Database failures likewise propagate, so a DB outage surfaces as a QR
+    generation failure instead of "no secret configured".
     """
     if not society_id:
         return None
@@ -90,8 +91,9 @@ def _get_signing_secret(society_id):
     try:
         return decrypt_secret(enc)
     except SecretVaultError as e:
-        print(f"⚠️  SIGNING_SECRET vault error for society_id={society_id}: {e}")
-        return None
+        raise QRSigningError(
+            f"SIGNING_SECRET vault error for society_id={society_id}: {e}"
+        ) from e
 
 _QR_VERSIONED_ROLES = {
     "APT": "apartments",
@@ -132,6 +134,39 @@ def _qr_sign(secret: str, society_id: int, role_code: str, entity_id: int, qr_ve
     it on every call."""
     msg = f"{society_id}-{role_code}-{entity_id}-{qr_version}".encode()
     return hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()[:10]
+
+
+class QRSigningError(RuntimeError):
+    """A society's signing secret exists but could not be recovered.
+
+    Distinct from "this society has not set a secret yet", which is a normal
+    state that legitimately yields a legacy unsigned payload. Treating a vault
+    misconfiguration as "no secret" would silently downgrade a society's QR
+    codes to unsigned — an infrastructure fault turning into a security
+    downgrade — so it is raised instead and surfaced as a generation failure.
+    """
+
+
+def build_qr_payload(society_id: int, role_code: str, entity_id: int,
+                     secret: str | None = None,
+                     qr_version: int | None = None) -> str:
+    """Compose the QR payload string. Pure — performs no database access.
+
+    Split out of generate_qr_code() so that the payload/signature contract is
+    testable without a database, and so the signature is always a function of
+    explicitly supplied inputs rather than of whatever the environment happens
+    to resolve to.
+
+    A signature is added only when both a secret and a version are supplied:
+      no secret          -> "<society>-<ROLE>-<entity>"      (legacy, unsigned)
+      secret + version   -> "..-<version>-<10-char HMAC>"
+    """
+    society = society_id or 0
+    role = role_code.upper().strip()
+    payload = f"{society}-{role}-{entity_id}"
+    if secret and qr_version is not None:
+        payload = f"{payload}-{qr_version}-{_qr_sign(secret, society, role, entity_id, qr_version)}"
+    return payload
 
 
 def _current_qr_version(role_code: str, entity_id: int):
@@ -376,14 +411,11 @@ def generate_qr_code(society_id: int, role_code: str, entity_id: int):
     """
     try:
         role_code_clean = role_code.upper().strip()
-        qr_payload = f"{society_id or 0}-{role_code_clean}-{entity_id}"
 
         secret = _get_signing_secret(society_id)
-        if secret:
-            qr_version = _current_qr_version(role_code_clean, entity_id)
-            if qr_version is not None:
-                sig = _qr_sign(secret, society_id or 0, role_code_clean, entity_id, qr_version)
-                qr_payload = f"{qr_payload}-{qr_version}-{sig}"
+        qr_version = _current_qr_version(role_code_clean, entity_id) if secret else None
+        qr_payload = build_qr_payload(society_id, role_code_clean, entity_id,
+                                      secret, qr_version)
 
         qr = qrcode.QRCode(
             version=1,
@@ -401,6 +433,11 @@ def generate_qr_code(society_id: int, role_code: str, entity_id: int):
 
         return f"data:image/png;base64,{img_str}", qr_payload
     except Exception as e:
+        # Fails closed: an infrastructure fault (no DB pool, unreachable
+        # database, unreadable secret) returns (None, error) so the caller
+        # shows a generation failure. It must never fall through to the legacy
+        # unsigned payload — a QR that looks valid but carries no signature is
+        # exactly what an outage must not produce.
         print(f"QR generation error: {e}")
         return None, str(e)
 
