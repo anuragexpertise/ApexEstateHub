@@ -562,7 +562,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/channel_callbacks.py",
     "function": "approve_channel_alert",
-    "line": 111,
+    "line": 113,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -582,7 +582,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/channel_callbacks.py",
     "function": "close_subscribers_modal",
-    "line": 97,
+    "line": 99,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -601,7 +601,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/channel_callbacks.py",
     "function": "open_subscribers_from_alert",
-    "line": 213,
+    "line": 236,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -621,7 +621,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/channel_callbacks.py",
     "function": "open_subscribers_modal",
-    "line": 65,
+    "line": 67,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -641,7 +641,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/channel_callbacks.py",
     "function": "toggle_apartment_field",
-    "line": 51,
+    "line": 53,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -658,7 +658,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/channel_callbacks.py",
     "function": "toggle_channel_subscription",
-    "line": 174,
+    "line": 176,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -669,7 +669,9 @@
     "guards": [
       "require_session"
     ],
-    "actions": [],
+    "actions": [
+      "channel.subscribe"
+    ],
     "public": false
   },
   {
@@ -1060,7 +1062,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "close_fy_with_reserve",
-    "line": 6178,
+    "line": 6230,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1081,7 +1083,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "download_fy_export",
-    "line": 2528,
+    "line": 2580,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1098,7 +1100,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "download_xls",
-    "line": 2676,
+    "line": 2728,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1115,7 +1117,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "download_xlsx",
-    "line": 2356,
+    "line": 2408,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1132,7 +1134,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "expense_tds_autofill",
-    "line": 2412,
+    "line": 2464,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1149,7 +1151,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "expense_tds_pan_banner",
-    "line": 2485,
+    "line": 2537,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1183,7 +1185,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "handle_form_submit",
-    "line": 1877,
+    "line": 1900,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1196,7 +1198,10 @@
     "guards": [
       "require_session"
     ],
-    "actions": [],
+    "actions": [
+      "concern.create",
+      "event.ticket.purchase"
+    ],
     "public": false
   },
   {
@@ -1221,7 +1226,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "handle_poll_vote",
-    "line": 2773,
+    "line": 2825,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1244,7 +1249,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "mark_rcm_gstr_filed",
-    "line": 2703,
+    "line": 2755,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1261,7 +1266,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "open_receipts_from_toast",
-    "line": 1819,
+    "line": 1842,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1295,7 +1300,9 @@
     "guards": [
       "require_session"
     ],
-    "actions": [],
+    "actions": [
+      "channel.subscribe"
+    ],
     "public": false
   },
   {
@@ -1303,7 +1310,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "select_pass_type",
-    "line": 2731,
+    "line": 2783,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1320,7 +1327,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "update_member_ledger_state",
-    "line": 6134,
+    "line": 6186,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1339,7 +1346,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drillin_callbacks.py",
     "function": "close_pay_dues_bill_modal",
-    "line": 534,
+    "line": 580,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1358,7 +1365,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drillin_callbacks.py",
     "function": "drillin_clear",
-    "line": 453,
+    "line": 496,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1377,7 +1384,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drillin_callbacks.py",
     "function": "drillin_close",
-    "line": 496,
+    "line": 539,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1396,7 +1403,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drillin_callbacks.py",
     "function": "drillin_navigate",
-    "line": 191,
+    "line": 234,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1417,7 +1424,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drillin_callbacks.py",
     "function": "drillin_select_item",
-    "line": 335,
+    "line": 378,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1436,7 +1443,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drillin_callbacks.py",
     "function": "open_pay_dues_bill_modal",
-    "line": 516,
+    "line": 559,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1448,7 +1455,9 @@
     "guards": [
       "require_session"
     ],
-    "actions": [],
+    "actions": [
+      "finance.self.view"
+    ],
     "public": false
   },
   {
@@ -1456,7 +1465,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drillin_callbacks.py",
     "function": "populate_pay_dues_bill_list",
-    "line": 572,
+    "line": 618,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1467,7 +1476,9 @@
     "guards": [
       "require_session"
     ],
-    "actions": [],
+    "actions": [
+      "finance.self.view"
+    ],
     "public": false
   },
   {
@@ -1475,7 +1486,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drillin_callbacks.py",
     "function": "select_pay_dues_bill",
-    "line": 639,
+    "line": 687,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1486,7 +1497,9 @@
     "guards": [
       "require_session"
     ],
-    "actions": [],
+    "actions": [
+      "finance.self.view"
+    ],
     "public": false
   },
   {
@@ -1494,7 +1507,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drillin_callbacks.py",
     "function": "validate_pay_dues_bill_group",
-    "line": 549,
+    "line": 595,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"

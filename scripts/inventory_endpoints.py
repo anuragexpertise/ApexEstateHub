@@ -85,7 +85,7 @@ def _cap_arg(call: ast.Call, caps: dict[str, str]) -> str | None:
     return None
 
 
-def _authz_actions(fn: ast.AST, caps: dict[str, str]) -> set[str]:
+def _direct_actions(fn: ast.AST, caps: dict[str, str]) -> set[str]:
     out: set[str] = set()
     for node in ast.walk(fn):
         if isinstance(node, ast.Call):
@@ -94,6 +94,35 @@ def _authz_actions(fn: ast.AST, caps: dict[str, str]) -> set[str]:
                 a = _cap_arg(node, caps)
                 if a:
                     out.add(a)
+    return out
+
+
+def _helper_actions(tree: ast.Module, caps: dict[str, str]) -> dict[str, set[str]]:
+    """Module-level helpers that perform an authorization check themselves
+    (e.g. drillin_callbacks.resolve_dues_scope). A callback that calls such a
+    helper by name is credited with the helper's actions - ONE level only, so
+    the manifest cannot be satisfied by a long indirect chain nobody reviews.
+    Callbacks themselves are never treated as helpers."""
+    out: dict[str, set[str]] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if any(isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                   and d.func.attr == "callback" for d in node.decorator_list):
+                continue
+            acts = _direct_actions(node, caps)
+            if acts:
+                out[node.name] = acts
+    return out
+
+
+def _authz_actions(fn: ast.AST, caps: dict[str, str],
+                   helpers: dict[str, set[str]] | None = None) -> set[str]:
+    out = _direct_actions(fn, caps)
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Call) and helpers:
+            name = _dec_name(node)
+            if name in helpers:
+                out |= helpers[name]
     return out
 
 
@@ -161,6 +190,7 @@ def collect() -> list[dict]:
 
     for path in sorted(CALLBACKS_DIR.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        helpers = _helper_actions(tree, caps)
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -178,7 +208,7 @@ def collect() -> list[dict]:
                 "file": f"app/dash_apps/callbacks/{path.name}", "function": fn.name,
                 "line": fn.lineno, "route": "/dashboard/_dash-update-component",
                 "methods": ["POST"], "outputs": outputs[:3], "guards": guards,
-                "actions": sorted(_authz_actions(fn, caps)),
+                "actions": sorted(_authz_actions(fn, caps, helpers)),
                 "public": fn.name in public.get(path.name, set()),
             })
     rows.sort(key=lambda r: r["id"])
