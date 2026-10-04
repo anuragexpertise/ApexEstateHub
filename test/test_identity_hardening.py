@@ -160,15 +160,115 @@ def test_poll_create_ignores_browser_auth_store(monkeypatch):
     assert (uid, sid, err) == (4, 2, None)                                     # society 2, never forged 99
 
 
-def test_stamp_callbacks_are_tenant_scoped():
-    """Every UPDATE of last_printed_at / last_emailed_at must filter by society."""
-    seen = 0
+def test_stamp_callbacks_all_use_owner_scoped_helper():
+    """No callback may UPDATE last_printed_at/last_emailed_at itself; all ten
+    go through stamp_document(), which adds tenant AND owner scoping."""
+    calls = 0
     for f in CALLBACKS.glob("*.py"):
         src = f.read_text()
-        for m in re.finditer(r'UPDATE\s+\w+\s+SET\s+last_(?:printed|emailed)_at\s*=\s*NOW\(\)[^"\']*', src):
-            seen += 1
-            assert "society_id" in m.group(0), f"{f.name}: unscoped stamp -> {m.group(0)!r}"
-    assert seen == 10
+        assert not re.search(r"UPDATE\s+\w+\s+SET\s+last_(?:printed|emailed)_at", src), \
+            f"{f.name}: raw stamp UPDATE bypasses stamp_document()"
+        calls += len(re.findall(r"stamp_document\(", src))
+    assert calls == 10
+
+
+class _RecDB:
+    def __init__(self, hit=True):
+        self.hit, self.calls = hit, []
+
+    def _execute(self, sql, params=None, fetch_one=False, fetch_all=False):
+        self.calls.append((" ".join(sql.split()), tuple(params)))
+        return {"id": 1} if self.hit else None
+
+
+def _as(monkeypatch, role, uid=7, sid=2, linked=11):
+    import app.security.stamp_scope as ss
+    monkeypatch.setattr(ss, "get_current_user_role", lambda: role)
+    monkeypatch.setattr(ss, "get_current_user_id", lambda: uid)
+    monkeypatch.setattr(ss, "get_current_society_id", lambda: sid)
+    monkeypatch.setattr(ss, "get_current_linked_id", lambda: linked)
+    return ss
+
+
+def test_stamp_admin_is_society_scoped_only(monkeypatch):
+    ss = _as(monkeypatch, "admin", linked=None)
+    db = _RecDB()
+    assert ss.stamp_document("receipts", 5, "last_printed_at", db=db)
+    sql, params = db.calls[0]
+    assert "AND society_id = %s" in sql and "entity_id" not in sql
+    assert params == (5, 2)
+
+
+def test_stamp_resident_limited_to_own_receipt(monkeypatch):
+    ss = _as(monkeypatch, "apartment", uid=7, linked=11)
+    db = _RecDB()
+    ss.stamp_document("receipts", 5, "last_emailed_at", db=db)
+    sql, params = db.calls[0]
+    assert "role = %s AND entity_id = %s" in sql and "user_id = %s" in sql
+    assert params == (5, 2, "apartment", 11, 7)
+
+
+def test_stamp_noc_resident_own_apartment_only(monkeypatch):
+    ss = _as(monkeypatch, "apartment", linked=11)
+    db = _RecDB()
+    ss.stamp_document("nocs", 3, "last_printed_at", db=db)
+    assert "apartment_id = %s" in db.calls[0][0] and db.calls[0][1][-1] == 11
+
+
+def test_stamp_ticket_limited_to_buyer(monkeypatch):
+    ss = _as(monkeypatch, "vendor", uid=7)
+    db = _RecDB()
+    ss.stamp_document("event_ticket_items", 9, "last_printed_at", db=db)
+    assert "event_tickets" in db.calls[0][0] and "user_id = %s" in db.calls[0][0]
+
+
+@pytest.mark.parametrize("role,table", [
+    ("apartment", "society_agreements"),   # agreements: admin only
+    ("vendor", "nocs"),                    # NOC stamp: owning apartment only
+    ("master", "receipts"),                # master has no society to stamp in
+])
+def test_stamp_denied_without_touching_db(monkeypatch, role, table):
+    ss = _as(monkeypatch, role, sid=None if role == "master" else 2)
+    db = _RecDB()
+    assert ss.stamp_document(table, 1, "last_printed_at", db=db) is False
+    assert db.calls == []
+
+
+def test_stamp_rejects_unlisted_table_or_column(monkeypatch):
+    ss = _as(monkeypatch, "admin")
+    with pytest.raises(ValueError):
+        ss.stamp_document("users", 1, "last_printed_at", db=_RecDB())
+    with pytest.raises(ValueError):
+        ss.stamp_document("receipts", 1, "amount", db=_RecDB())
+
+
+def test_get_server_auth_ignores_forged_identity(monkeypatch):
+    import app.security.audit_context as ac
+    monkeypatch.setattr(ac, "get_current_user_id", lambda: 4)
+    monkeypatch.setattr(ac, "get_current_user_role", lambda: "apartment")
+    monkeypatch.setattr(ac, "get_current_society_id", lambda: 2)
+    monkeypatch.setattr(ac, "get_current_linked_id", lambda: 11)
+    monkeypatch.setattr(ac, "_server_user_type", lambda uid: "owner")
+    forged = {"role": "admin", "society_id": 99, "user_id": 1, "apartment_id": 5,
+              "user_type": "owner", "name": "Asha"}
+    out = ac.get_server_auth(forged)
+    assert (out["role"], out["society_id"], out["user_id"], out["apartment_id"]) == ("apartment", 2, 4, 11)
+    assert out["name"] == "Asha"                       # cosmetic key preserved
+
+
+def test_get_server_auth_without_session_is_empty(monkeypatch):
+    import app.security.audit_context as ac
+    monkeypatch.setattr(ac, "get_current_user_id", lambda: None)
+    assert ac.get_server_auth({"role": "admin", "society_id": 1}) == {}
+
+
+def test_drilldown_entry_points_use_server_identity():
+    dc = (CALLBACKS / "drilldown_callbacks.py").read_text()
+    body = dc[dc.index("def _render_current("):][:400]
+    assert "get_server_auth(auth)" in body
+    assert not re.search(r'\(auth or \{\}\)\.get\(\s*["\'](?:role|society_id|user_id)', dc)
+    kpi = (CALLBACKS / "card_catalogue_callbacks.py").read_text()
+    assert "auth_data = get_server_auth(auth_data)" in kpi
 
 
 def test_autofill_account_lookup_is_tenant_scoped():

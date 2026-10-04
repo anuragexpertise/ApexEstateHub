@@ -15,6 +15,7 @@ from app.security.audit_context import (
     get_current_user_id,
     get_current_user_role,
     get_current_society_id,
+    get_server_auth,
 )
 
 logger = logging.getLogger(__name__)
@@ -321,6 +322,10 @@ def register_card_catalogue_callbacks(app):
         if not auth_data or not auth_data.get("authenticated"):
             return ["—"] * len(kpi_ids), {"toast": no_update, "icon_class": icon_class, "ts": time.time()}
 
+        # Scope every KPI query from the server session, not the browser's
+        # auth-store: a forged society_id/role there would otherwise read
+        # another tenant's (or the master's) numbers.
+        auth_data = get_server_auth(auth_data)
         sid       = auth_data.get("society_id")
         role      = auth_data.get("role", "admin")
         apt_id    = auth_data.get("apartment_id")   # set for 'apartment' portal

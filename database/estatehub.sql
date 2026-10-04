@@ -2037,15 +2037,43 @@ CREATE TABLE IF NOT EXISTS polls (
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT
 );
 
-CREATE TABLE IF NOT EXISTS poll_votes (
-    id SERIAL PRIMARY KEY,
+-- SECRET BALLOT. "Who voted" and "what was chosen" are kept in two tables
+-- that cannot be joined:
+--   poll_participation  one row per (poll, apartment): enforces the
+--                       one-vote-per-apartment rule and drives turnout /
+--                       quorum / has_voted. It carries NO choice, NO user_id
+--                       and only a DATE (no time-of-day), so it cannot be
+--                       lined up against the ballot rows.
+--   poll_ballots        the choices only: NO user, NO apartment, NO id and NO
+--                       timestamp. Admins get counts through the fn_* poll
+--                       functions only; no function returns individual rows.
+-- Both rows are written inside fn_cast_vote's single transaction.
+CREATE TABLE IF NOT EXISTS poll_participation (
     poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
-    user_id INT NOT NULL REFERENCES users (id),
     apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
-    choice SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5),
-    cast_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (poll_id, apartment_id)
+    cast_on DATE NOT NULL DEFAULT CURRENT_DATE,
+    PRIMARY KEY (poll_id, apartment_id)
 );
+
+CREATE TABLE IF NOT EXISTS poll_ballots (
+    poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
+    choice SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5)
+);
+
+-- One-time inline migration from the old linked poll_votes table (kept
+-- minimal: clean-schema pilots skip it because poll_votes never exists).
+-- Ballots are copied in random order so the old id order cannot re-link them.
+DO $$
+BEGIN
+    IF to_regclass('public.poll_votes') IS NOT NULL THEN
+        INSERT INTO poll_participation (poll_id, apartment_id, cast_on)
+        SELECT poll_id, apartment_id, cast_at::DATE FROM poll_votes
+        ON CONFLICT DO NOTHING;
+        INSERT INTO poll_ballots (poll_id, choice)
+        SELECT poll_id, choice FROM poll_votes ORDER BY RANDOM();
+        DROP TABLE poll_votes;
+    END IF;
+END $$;
 
 -- SECTION 15: INDIAN CHS/RWA COMPLIANCE — TDS (Phase 4)
 -- ════════════════════════════════════════════════════════════════
@@ -2291,13 +2319,9 @@ CREATE INDEX IF NOT EXISTS idx_polls_society ON polls (society_id);
 
 CREATE INDEX IF NOT EXISTS idx_polls_status ON polls (status);
 
-CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes (poll_id);
+CREATE INDEX IF NOT EXISTS idx_poll_participation_apartment ON poll_participation (apartment_id);
 
-CREATE INDEX IF NOT EXISTS idx_poll_votes_user ON poll_votes (user_id);
-
-CREATE INDEX IF NOT EXISTS idx_poll_votes_apartment ON poll_votes (apartment_id);
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_poll_vote_apartment ON poll_votes (poll_id, apartment_id);
+CREATE INDEX IF NOT EXISTS idx_poll_ballots_poll ON poll_ballots (poll_id, choice);
 
 CREATE INDEX IF NOT EXISTS idx_tds_section_rates_lookup ON tds_section_rates (
     society_id,
@@ -11433,7 +11457,7 @@ BEGIN
         FALSE AS has_voted,
         p.ends_at
     FROM polls p
-    LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_votes GROUP BY poll_id) v
+    LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_participation GROUP BY poll_id) v
         ON v.poll_id = p.id
     WHERE p.society_id = p_society_id
       AND p.status = 'active'
@@ -11491,18 +11515,21 @@ BEGIN
         COALESCE(v.total_votes, 0)::BIGINT,
         w.winning_choice
     FROM polls p
-    LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_votes GROUP BY poll_id) v
+    LEFT JOIN (SELECT poll_id, COUNT(*) AS total_votes FROM poll_participation GROUP BY poll_id) v
         ON v.poll_id = p.id
     LEFT JOIN LATERAL (
         -- Only one choice qualifies as "winning" if its vote count is a
         -- strict, unique max — a tie (or zero votes) yields NULL so the
         -- list never highlights an arbitrary choice.
-        SELECT CASE WHEN COUNT(*) FILTER (WHERE x.cnt = x.maxcnt) = 1
+        -- Only revealed once the admin has declared results; before that the
+        -- interim leader is not shown to anyone.
+        SELECT CASE WHEN p.status = 'results_declared'
+                     AND COUNT(*) FILTER (WHERE x.cnt = x.maxcnt) = 1
                     THEN (ARRAY_AGG(x.choice) FILTER (WHERE x.cnt = x.maxcnt))[1]
                     ELSE NULL END AS winning_choice
         FROM (
             SELECT choice, COUNT(*) AS cnt, MAX(COUNT(*)) OVER () AS maxcnt
-            FROM poll_votes
+            FROM poll_ballots
             WHERE poll_id = p.id
             GROUP BY choice
         ) x
@@ -11556,9 +11583,9 @@ BEGIN
         p.choice_5,
         p.results_announced_at,
         p.created_at,
-        COALESCE((SELECT COUNT(*) FROM poll_votes WHERE poll_id = p.id), 0)::BIGINT,
-        EXISTS (SELECT 1 FROM poll_votes WHERE poll_id = p.id AND apartment_id = (SELECT linked_id FROM users WHERE users.id = p_user_id)),
-        (SELECT choice FROM poll_votes WHERE poll_id = p.id AND apartment_id = (SELECT linked_id FROM users WHERE users.id = p_user_id)),
+        COALESCE((SELECT COUNT(*) FROM poll_participation WHERE poll_id = p.id), 0)::BIGINT,
+        EXISTS (SELECT 1 FROM poll_participation WHERE poll_id = p.id AND apartment_id = (SELECT linked_id FROM users WHERE users.id = p_user_id)),
+        NULL::SMALLINT,   -- secret ballot: a voter's own choice is not retrievable
         p.ends_at
     FROM polls p
     WHERE p.id = p_poll_id
@@ -11571,18 +11598,22 @@ BEGIN
         RETURN;
     END IF;
 
-    vote_counts := (
-        SELECT jsonb_object_agg(
-            'choice_' || v.choice,
-            v.cnt
-        )
-        FROM (
-            SELECT choice, COUNT(*) AS cnt
-            FROM poll_votes
-            WHERE poll_id = p_poll_id
-            GROUP BY choice
-        ) v
-    );
+    -- Per-choice tallies exist only after the admin declares results; while
+    -- voting is open (or merely closed) only the total turnout is visible.
+    IF status = 'results_declared' THEN
+        vote_counts := (
+            SELECT jsonb_object_agg(
+                'choice_' || v.choice,
+                v.cnt
+            )
+            FROM (
+                SELECT choice, COUNT(*) AS cnt
+                FROM poll_ballots
+                WHERE poll_id = p_poll_id
+                GROUP BY choice
+            ) v
+        );
+    END IF;
 
     RETURN NEXT;
 END;
@@ -11652,16 +11683,19 @@ BEGIN
         RETURN;
     END IF;
 
-    SELECT id INTO v_existing FROM poll_votes WHERE poll_id = p_poll_id AND apartment_id = v_apt_id;
+    SELECT apartment_id INTO v_existing FROM poll_participation WHERE poll_id = p_poll_id AND apartment_id = v_apt_id;
     IF v_existing IS NOT NULL THEN
         RETURN QUERY SELECT FALSE, 'A vote has already been cast for this apartment'::TEXT, 0::BIGINT;
         RETURN;
     END IF;
 
-    INSERT INTO poll_votes (poll_id, user_id, apartment_id, choice)
-    VALUES (p_poll_id, p_user_id, v_apt_id, p_choice);
+    -- Same transaction: the participation row enforces one vote per apartment
+    -- (its PK raises unique_violation on a race); the ballot row carries only
+    -- the choice, so nothing links this apartment/user to what was chosen.
+    INSERT INTO poll_participation (poll_id, apartment_id) VALUES (p_poll_id, v_apt_id);
+    INSERT INTO poll_ballots (poll_id, choice) VALUES (p_poll_id, p_choice);
 
-    SELECT COUNT(*) INTO v_total FROM poll_votes WHERE poll_id = p_poll_id;
+    SELECT COUNT(*) INTO v_total FROM poll_participation WHERE poll_id = p_poll_id;
 
     RETURN QUERY SELECT TRUE, 'Vote cast successfully'::TEXT, v_total;
 EXCEPTION
@@ -11711,7 +11745,7 @@ BEGIN
         RETURN FALSE;
     END IF;
 
-    SELECT COUNT(*) INTO v_vote_count FROM poll_votes WHERE poll_id = p_poll_id;
+    SELECT COUNT(*) INTO v_vote_count FROM poll_participation WHERE poll_id = p_poll_id;
     IF v_vote_count > 0 THEN
         RETURN FALSE;
     END IF;
@@ -11763,7 +11797,7 @@ BEGIN
     END IF;
 
     -- Count total votes
-    SELECT COUNT(*) INTO v_total_votes FROM poll_votes WHERE poll_id = p_poll_id;
+    SELECT COUNT(*) INTO v_total_votes FROM poll_ballots WHERE poll_id = p_poll_id;
 
     -- Count eligible voters (apartments that can vote based on open_to)
     IF v_poll.open_to = 'no_dues' THEN
@@ -11782,7 +11816,7 @@ BEGIN
 
     -- Determine winning choice
     SELECT choice, COUNT(*) INTO v_winning_choice, v_winning_votes
-    FROM poll_votes
+    FROM poll_ballots
     WHERE poll_id = p_poll_id
     GROUP BY choice
     ORDER BY COUNT(*) DESC, choice ASC
@@ -11811,7 +11845,7 @@ BEGIN
             SELECT jsonb_object_agg('choice_' || choice, cnt)
             FROM (
                 SELECT choice, COUNT(*) AS cnt
-                FROM poll_votes
+                FROM poll_ballots
                 WHERE poll_id = p_poll_id
                 GROUP BY choice
             ) sub
@@ -11910,7 +11944,7 @@ $$;
 -- fn_poll_vote_count_kpi: Returns total votes cast across all active polls in a society
 CREATE OR REPLACE FUNCTION fn_poll_vote_count_kpi(p_society_id INT)
 RETURNS BIGINT LANGUAGE SQL STABLE AS $$
-    SELECT COUNT(*)::BIGINT FROM poll_votes pv
+    SELECT COUNT(*)::BIGINT FROM poll_participation pv
     JOIN polls p ON p.id = pv.poll_id
     WHERE p.society_id = p_society_id;
 $$;

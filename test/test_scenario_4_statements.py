@@ -7,10 +7,15 @@ import openpyxl
 from test.fake_db import FakeDB
 from app.dash_apps.drilldown import loaders, renderers
 from database import financial_statements_export
+from test.test_scenario_g_fy_close import _seed_financial_world
 
 
-def test_4_statements_loading_rendering_and_export():
-    db = FakeDB()
+def test_4_statements_loading_rendering_and_export(patched_db):
+    # patched_db points loaders at the in-memory FakeDB; without it the
+    # loaders hit a missing Postgres, return no rows and the card renders
+    # only its "No data" alert, so no section titles exist to assert on.
+    db = patched_db
+    _seed_financial_world(db)
     society_id = 1
     fy = 2026
 
