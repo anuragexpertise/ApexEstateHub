@@ -1,0 +1,759 @@
+{
+  "version": 1,
+  "unclassified_baseline": 139,
+  "endpoints": {
+    "callback:account_callbacks.py::handle_change_password": {
+      "classification": "unclassified"
+    },
+    "callback:account_callbacks.py::toggle_account_settings_modal": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:agreement_callbacks.py::_stamp_agreement_emailed": {
+      "classification": "unclassified"
+    },
+    "callback:agreement_callbacks.py::_stamp_agreement_printed": {
+      "classification": "unclassified"
+    },
+    "callback:assign_to_callbacks.py::clear_selections": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:assign_to_callbacks.py::close_assign_modal": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:assign_to_callbacks.py::load_assign_list": {
+      "classification": "unclassified"
+    },
+    "callback:assign_to_callbacks.py::open_assign_modal": {
+      "classification": "unclassified"
+    },
+    "callback:assign_to_callbacks.py::submit_assignments": {
+      "classification": "action",
+      "actions": [
+        "concern.assign"
+      ]
+    },
+    "callback:assign_to_callbacks.py::toggle_assign_view": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:assign_to_callbacks.py::toggle_selection": {
+      "classification": "unclassified"
+    },
+    "callback:bank_reconcile_callbacks.py::close_bank_reconcile_modal": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:bank_reconcile_callbacks.py::close_reconcile_picker": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:bank_reconcile_callbacks.py::confirm_reconcile": {
+      "classification": "unclassified"
+    },
+    "callback:bank_reconcile_callbacks.py::delete_unreconciled": {
+      "classification": "unclassified"
+    },
+    "callback:bank_reconcile_callbacks.py::download_bank_template": {
+      "classification": "unclassified"
+    },
+    "callback:bank_reconcile_callbacks.py::open_bank_reconcile_modal": {
+      "classification": "unclassified"
+    },
+    "callback:bank_reconcile_callbacks.py::open_reconcile_picker": {
+      "classification": "unclassified"
+    },
+    "callback:bank_reconcile_callbacks.py::populate_reconcile_picker": {
+      "classification": "unclassified"
+    },
+    "callback:bank_reconcile_callbacks.py::post_unmatched": {
+      "classification": "unclassified"
+    },
+    "callback:bank_reconcile_callbacks.py::process_bank_statement_upload": {
+      "classification": "unclassified"
+    },
+    "callback:bulk_enroll_callbacks.py::close_bulk_enroll_modal": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:bulk_enroll_callbacks.py::download_bulk_enroll_template": {
+      "classification": "unclassified"
+    },
+    "callback:bulk_enroll_callbacks.py::open_bulk_enroll_modal": {
+      "classification": "exempt",
+      "reason": "Returns static registry/option metadata only (no tenant data, no DB access); reviewed RWA3 PR5."
+    },
+    "callback:bulk_enroll_callbacks.py::process_bulk_enroll_upload": {
+      "classification": "action",
+      "actions": [
+        "enrollment.commit"
+      ]
+    },
+    "callback:bulk_enroll_callbacks.py::validate_bulk_enroll_file": {
+      "classification": "exempt",
+      "reason": "Client-side-style field validation of the submitted values only; no DB access, no side effects; reviewed RWA3 PR5."
+    },
+    "callback:card_catalogue_callbacks.py::handle_kpi_side_effects": {
+      "classification": "exempt",
+      "reason": "Forwards a value already in the caller's own browser store to another UI component; no server data; reviewed RWA3 PR5."
+    },
+    "callback:card_catalogue_callbacks.py::refresh_kpi_values": {
+      "classification": "unclassified"
+    },
+    "callback:channel_callbacks.py::approve_channel_alert": {
+      "classification": "unclassified"
+    },
+    "callback:channel_callbacks.py::close_subscribers_modal": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:channel_callbacks.py::open_subscribers_from_alert": {
+      "classification": "unclassified"
+    },
+    "callback:channel_callbacks.py::open_subscribers_modal": {
+      "classification": "unclassified"
+    },
+    "callback:channel_callbacks.py::toggle_apartment_field": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:channel_callbacks.py::toggle_channel_subscription": {
+      "classification": "unclassified"
+    },
+    "callback:concern_bid_callbacks.py::close_bid_modal": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:concern_bid_callbacks.py::open_bid_modal": {
+      "classification": "unclassified"
+    },
+    "callback:concern_bid_callbacks.py::submit_bid": {
+      "classification": "unclassified"
+    },
+    "callback:customize_callbacks.py::capture_order": {
+      "classification": "exempt",
+      "reason": "Forwards a value already in the caller's own browser store to another UI component; no server data; reviewed RWA3 PR5."
+    },
+    "callback:customize_callbacks.py::filter_palette": {
+      "classification": "unclassified"
+    },
+    "callback:customize_callbacks.py::integrate_kpi_sql": {
+      "classification": "action",
+      "actions": [
+        "platform.sql.inspect"
+      ]
+    },
+    "callback:customize_callbacks.py::layout_tab_options": {
+      "classification": "exempt",
+      "reason": "Returns static registry/option metadata only (no tenant data, no DB access); reviewed RWA3 PR5."
+    },
+    "callback:customize_callbacks.py::layout_tab_reset": {
+      "classification": "exempt",
+      "reason": "Returns static registry/option metadata only (no tenant data, no DB access); reviewed RWA3 PR5."
+    },
+    "callback:customize_callbacks.py::load_layout": {
+      "classification": "unclassified"
+    },
+    "callback:customize_callbacks.py::reset_group_filter": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:customize_callbacks.py::reset_layout": {
+      "classification": "unclassified"
+    },
+    "callback:customize_callbacks.py::save_layout": {
+      "classification": "unclassified"
+    },
+    "callback:customize_kpi_callbacks.py::export_kpi_sql": {
+      "classification": "exempt",
+      "reason": "Echoes the caller's own submitted text back as a file download; reads no server data; reviewed RWA3 PR5."
+    },
+    "callback:customize_kpi_callbacks.py::load_entity_reference": {
+      "classification": "unclassified"
+    },
+    "callback:customize_kpi_callbacks.py::test_kpi_sql": {
+      "classification": "action",
+      "actions": [
+        "platform.sql.inspect"
+      ]
+    },
+    "callback:customize_kpi_callbacks.py::update_kpi_details": {
+      "classification": "unclassified"
+    },
+    "callback:customize_kpi_callbacks.py::update_kpi_options": {
+      "classification": "unclassified"
+    },
+    "callback:customize_kpi_callbacks.py::update_tab_options": {
+      "classification": "exempt",
+      "reason": "Returns static registry/option metadata only (no tenant data, no DB access); reviewed RWA3 PR5."
+    },
+    "callback:debug_callbacks.py::run_kpi_audit": {
+      "classification": "action",
+      "actions": [
+        "platform.sql.inspect"
+      ]
+    },
+    "callback:drilldown_callbacks.py::close_fy_with_reserve": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::download_fy_export": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::download_xls": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::download_xlsx": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::expense_tds_autofill": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::expense_tds_pan_banner": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::handle_camera_capture": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::handle_form_submit": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::handle_image_upload": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::handle_poll_vote": {
+      "classification": "action",
+      "actions": [
+        "poll.vote"
+      ]
+    },
+    "callback:drilldown_callbacks.py::mark_rcm_gstr_filed": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::open_receipts_from_toast": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::route_drilldown": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::select_pass_type": {
+      "classification": "unclassified"
+    },
+    "callback:drilldown_callbacks.py::update_member_ledger_state": {
+      "classification": "unclassified"
+    },
+    "callback:drillin_callbacks.py::close_pay_dues_bill_modal": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:drillin_callbacks.py::drillin_clear": {
+      "classification": "unclassified"
+    },
+    "callback:drillin_callbacks.py::drillin_close": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:drillin_callbacks.py::drillin_navigate": {
+      "classification": "unclassified"
+    },
+    "callback:drillin_callbacks.py::drillin_select_item": {
+      "classification": "unclassified"
+    },
+    "callback:drillin_callbacks.py::open_pay_dues_bill_modal": {
+      "classification": "unclassified"
+    },
+    "callback:drillin_callbacks.py::populate_pay_dues_bill_list": {
+      "classification": "unclassified"
+    },
+    "callback:drillin_callbacks.py::select_pay_dues_bill": {
+      "classification": "unclassified"
+    },
+    "callback:drillin_callbacks.py::validate_pay_dues_bill_group": {
+      "classification": "exempt",
+      "reason": "Client-side-style field validation of the submitted values only; no DB access, no side effects; reviewed RWA3 PR5."
+    },
+    "callback:event_ticket_callbacks.py::_stamp_ticket_emailed": {
+      "classification": "unclassified"
+    },
+    "callback:event_ticket_callbacks.py::_stamp_ticket_printed": {
+      "classification": "unclassified"
+    },
+    "callback:expense_callbacks.py::_stamp_emailed": {
+      "classification": "unclassified"
+    },
+    "callback:expense_callbacks.py::_stamp_printed": {
+      "classification": "unclassified"
+    },
+    "callback:form_autofill_callbacks.py::suggest_particulars": {
+      "classification": "unclassified"
+    },
+    "callback:form_inspector_callbacks.py::populate_form_options": {
+      "classification": "unclassified"
+    },
+    "callback:form_inspector_callbacks.py::render_form_inspector": {
+      "classification": "unclassified"
+    },
+    "callback:form_inspector_callbacks.py::run_form_audit": {
+      "classification": "action",
+      "actions": [
+        "platform.sql.inspect"
+      ]
+    },
+    "callback:fund_management_callbacks.py::confirm_or_cancel_appropriation": {
+      "classification": "unclassified"
+    },
+    "callback:fund_management_callbacks.py::refresh_appropriation_sections": {
+      "classification": "unclassified"
+    },
+    "callback:fund_management_callbacks.py::refresh_fund_management_data": {
+      "classification": "unclassified"
+    },
+    "callback:fund_management_callbacks.py::save_fund_bank_mappings": {
+      "classification": "unclassified"
+    },
+    "callback:fund_management_callbacks.py::submit_appropriation": {
+      "classification": "unclassified"
+    },
+    "callback:fund_management_callbacks.py::submit_fund_utilization": {
+      "classification": "unclassified"
+    },
+    "callback:invite_to_callbacks.py::clear_invite_selections": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:invite_to_callbacks.py::close_invite_modal": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:invite_to_callbacks.py::load_invite_list": {
+      "classification": "unclassified"
+    },
+    "callback:invite_to_callbacks.py::open_invite_modal": {
+      "classification": "unclassified"
+    },
+    "callback:invite_to_callbacks.py::submit_invitations": {
+      "classification": "unclassified"
+    },
+    "callback:invite_to_callbacks.py::toggle_invite_selection": {
+      "classification": "unclassified"
+    },
+    "callback:list_inspector_callbacks.py::export_list_sql": {
+      "classification": "exempt",
+      "reason": "Echoes the caller's own submitted text back as a file download; reads no server data; reviewed RWA3 PR5."
+    },
+    "callback:list_inspector_callbacks.py::load_list_sql": {
+      "classification": "action",
+      "actions": [
+        "platform.sql.inspect"
+      ]
+    },
+    "callback:list_inspector_callbacks.py::populate_kpi_options": {
+      "classification": "exempt",
+      "reason": "Returns static registry/option metadata only (no tenant data, no DB access); reviewed RWA3 PR5."
+    },
+    "callback:list_inspector_callbacks.py::populate_list_options": {
+      "classification": "exempt",
+      "reason": "Returns static registry/option metadata only (no tenant data, no DB access); reviewed RWA3 PR5."
+    },
+    "callback:list_inspector_callbacks.py::render_list_details": {
+      "classification": "unclassified"
+    },
+    "callback:list_inspector_callbacks.py::run_list_audit": {
+      "classification": "action",
+      "actions": [
+        "platform.sql.inspect"
+      ]
+    },
+    "callback:list_inspector_callbacks.py::run_list_sql": {
+      "classification": "action",
+      "actions": [
+        "platform.sql.inspect"
+      ]
+    },
+    "callback:login_callbacks.py::close_forgot_modal": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:login_callbacks.py::close_reset_modal": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:login_callbacks.py::handle_master_login": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:login_callbacks.py::handle_password_login": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:login_callbacks.py::handle_pattern_login": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:login_callbacks.py::handle_pin_login": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:login_callbacks.py::handle_reset_flow": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:login_callbacks.py::toggle_forgot_modal": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:master_rules_callbacks.py::execute_enactment": {
+      "classification": "action",
+      "actions": [
+        "platform.rules.manage"
+      ]
+    },
+    "callback:master_rules_callbacks.py::link_bye_law": {
+      "classification": "action",
+      "actions": [
+        "platform.rules.manage"
+      ]
+    },
+    "callback:master_rules_callbacks.py::prefill_catalog": {
+      "classification": "action",
+      "actions": [
+        "platform.rules.manage"
+      ]
+    },
+    "callback:master_rules_callbacks.py::prefill_resolution_majority": {
+      "classification": "action",
+      "actions": [
+        "platform.rules.manage"
+      ]
+    },
+    "callback:master_rules_callbacks.py::save_bye_law": {
+      "classification": "action",
+      "actions": [
+        "platform.rules.manage"
+      ]
+    },
+    "callback:master_rules_callbacks.py::save_cash_mode": {
+      "classification": "action",
+      "actions": [
+        "platform.rules.manage"
+      ]
+    },
+    "callback:master_rules_callbacks.py::save_catalog": {
+      "classification": "action",
+      "actions": [
+        "platform.rules.manage"
+      ]
+    },
+    "callback:master_rules_callbacks.py::save_meeting": {
+      "classification": "action",
+      "actions": [
+        "platform.rules.manage"
+      ]
+    },
+    "callback:master_rules_callbacks.py::save_resolution": {
+      "classification": "action",
+      "actions": [
+        "platform.rules.manage"
+      ]
+    },
+    "callback:master_rules_callbacks.py::save_rule": {
+      "classification": "action",
+      "actions": [
+        "platform.rules.manage"
+      ]
+    },
+    "callback:master_rules_callbacks.py::show_hint": {
+      "classification": "action",
+      "actions": [
+        "platform.rules.manage"
+      ]
+    },
+    "callback:noc_callbacks.py::_stamp_noc_emailed": {
+      "classification": "unclassified"
+    },
+    "callback:noc_callbacks.py::_stamp_noc_printed": {
+      "classification": "unclassified"
+    },
+    "callback:poll_callbacks.py::save_poll": {
+      "classification": "action",
+      "actions": [
+        "poll.manage"
+      ]
+    },
+    "callback:poll_callbacks.py::toggle_extra_choices": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:qr_callbacks.py::refresh_atd_qr": {
+      "classification": "unclassified"
+    },
+    "callback:qr_callbacks.py::render_scans": {
+      "classification": "unclassified"
+    },
+    "callback:qr_callbacks.py::save_qr_png": {
+      "classification": "unclassified"
+    },
+    "callback:qr_callbacks.py::show_admin_contact": {
+      "classification": "unclassified"
+    },
+    "callback:qr_callbacks.py::toggle_qr_modal": {
+      "classification": "unclassified"
+    },
+    "callback:qr_callbacks.py::trigger_emergency": {
+      "classification": "unclassified"
+    },
+    "callback:qr_callbacks.py::validate_manual_qr_scoped": {
+      "classification": "unclassified"
+    },
+    "callback:qr_callbacks.py::validate_qr_scanned": {
+      "classification": "unclassified"
+    },
+    "callback:qr_reissue_callbacks.py::confirm_reissue": {
+      "classification": "unclassified"
+    },
+    "callback:qr_reissue_callbacks.py::lookup_reissue_entity": {
+      "classification": "unclassified"
+    },
+    "callback:qr_reissue_callbacks.py::parse_reissue_qr": {
+      "classification": "unclassified"
+    },
+    "callback:receipt_callbacks.py::_stamp_emailed": {
+      "classification": "unclassified"
+    },
+    "callback:receipt_callbacks.py::_stamp_printed": {
+      "classification": "unclassified"
+    },
+    "callback:security_callbacks.py::call_presumed_visitor": {
+      "classification": "unclassified"
+    },
+    "callback:security_callbacks.py::create_walk_in_visitor_handler": {
+      "classification": "unclassified"
+    },
+    "callback:security_callbacks.py::escalate_to_call": {
+      "classification": "unclassified"
+    },
+    "callback:security_callbacks.py::manage_attendance": {
+      "classification": "unclassified"
+    },
+    "callback:security_callbacks.py::notify_presumed_visitor": {
+      "classification": "unclassified"
+    },
+    "callback:security_callbacks.py::owner_respond_to_alert": {
+      "classification": "unclassified"
+    },
+    "callback:security_callbacks.py::trigger_gate_alert": {
+      "classification": "unclassified"
+    },
+    "callback:security_callbacks.py::validate_qr": {
+      "classification": "unclassified"
+    },
+    "callback:setup_wizard_callbacks.py::handle_wizard_navigation": {
+      "classification": "unclassified"
+    },
+    "callback:setup_wizard_callbacks.py::refresh_up_aoa_step_content": {
+      "classification": "unclassified"
+    },
+    "callback:setup_wizard_callbacks.py::save_wizard_bye_law_choice": {
+      "classification": "unclassified"
+    },
+    "callback:setup_wizard_callbacks.py::save_wizard_policy_choice": {
+      "classification": "unclassified"
+    },
+    "callback:setup_wizard_callbacks.py::submit_setup_wizard": {
+      "classification": "unclassified"
+    },
+    "callback:setup_wizard_callbacks.py::trigger_setup_wizard": {
+      "classification": "unclassified"
+    },
+    "callback:setup_wizard_callbacks.py::validate_setup_fields": {
+      "classification": "unclassified"
+    },
+    "callback:shell_callbacks.py::_drill_back": {
+      "classification": "unclassified"
+    },
+    "callback:shell_callbacks.py::_forward_profile_toast": {
+      "classification": "exempt",
+      "reason": "Forwards a value already in the caller's own browser store to another UI component; no server data; reviewed RWA3 PR5."
+    },
+    "callback:shell_callbacks.py::_load_notifications": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:shell_callbacks.py::_mark_all_read": {
+      "classification": "unclassified"
+    },
+    "callback:shell_callbacks.py::_mark_notification_read": {
+      "classification": "unclassified"
+    },
+    "callback:shell_callbacks.py::_toggle_drill_back": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:shell_callbacks.py::_toggle_notifications_dropdown": {
+      "classification": "unclassified"
+    },
+    "callback:shell_callbacks.py::_update_badge": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:shell_callbacks.py::back_to_stage1": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:shell_callbacks.py::guard_modal": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:shell_callbacks.py::inject_stage2": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:shell_callbacks.py::load_societies": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:shell_callbacks.py::logout": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:shell_callbacks.py::navigate_global_card_search": {
+      "classification": "unclassified"
+    },
+    "callback:shell_callbacks.py::open_global_card_search": {
+      "classification": "exempt",
+      "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:shell_callbacks.py::restore_from_cookie": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:shell_callbacks.py::route_page": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:shell_callbacks.py::show_toast": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:shell_callbacks.py::toggle_master": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:shell_callbacks.py::toggle_sidebar": {
+      "classification": "unclassified"
+    },
+    "callback:shell_callbacks.py::transition_to_stage2": {
+      "classification": "exempt",
+      "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
+    },
+    "callback:shell_callbacks.py::update_global_card_search": {
+      "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::export_annexures": {
+      "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::fill_ui": {
+      "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::record_s22": {
+      "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::run_bye_law7": {
+      "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::save_basis": {
+      "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::save_filing": {
+      "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::save_loan": {
+      "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::save_loan_due": {
+      "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::save_nodues": {
+      "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::save_repayment": {
+      "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::save_transfer": {
+      "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::start_s22": {
+      "classification": "unclassified"
+    },
+    "route:api.py::get_kpis": {
+      "classification": "unclassified"
+    },
+    "route:api.py::get_societies": {
+      "classification": "unclassified"
+    },
+    "route:api.py::get_society": {
+      "classification": "unclassified"
+    },
+    "route:auth.py::check_auth": {
+      "classification": "unclassified"
+    },
+    "route:auth.py::get_societies_list": {
+      "classification": "unclassified"
+    },
+    "route:auth.py::login": {
+      "classification": "unclassified"
+    },
+    "route:auth.py::logout": {
+      "classification": "unclassified"
+    },
+    "route:auth.py::refresh_token": {
+      "classification": "unclassified"
+    },
+    "route:auth.py::subscribe_push": {
+      "classification": "unclassified"
+    },
+    "route:auth.py::unsubscribe_push": {
+      "classification": "unclassified"
+    },
+    "route:presumed_visitor.py::create_presumed_visitor": {
+      "classification": "unclassified"
+    },
+    "route:presumed_visitor.py::list_presumed_visitors": {
+      "classification": "unclassified"
+    },
+    "route:push_routes.py::delete_fcm_token": {
+      "classification": "unclassified"
+    },
+    "route:push_routes.py::delete_subscription": {
+      "classification": "unclassified"
+    },
+    "route:push_routes.py::push_test_page": {
+      "classification": "unclassified"
+    },
+    "route:push_routes.py::save_fcm_token": {
+      "classification": "unclassified"
+    },
+    "route:push_routes.py::send_test": {
+      "classification": "unclassified"
+    },
+    "route:push_routes.py::subscribe": {
+      "classification": "unclassified"
+    },
+    "route:push_routes.py::vapid_public_key": {
+      "classification": "unclassified"
+    },
+    "route:scan.py::scan_qr": {
+      "classification": "unclassified"
+    },
+    "route:sse.py::events": {
+      "classification": "unclassified"
+    },
+    "route:web.py::health": {
+      "classification": "unclassified"
+    },
+    "route:web.py::index": {
+      "classification": "unclassified"
+    }
+  }
+}

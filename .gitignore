@@ -24,6 +24,12 @@ migrations/
 # Wizard silently renders with no guidance banners at all.
 !conversation.xlsx
 *.json
+# RWA3 WP1: the reviewed authorization manifest and generated endpoint inventory are
+# source-controlled evidence. Without these exceptions the blanket *.json rule above
+# kept docs/authz_manifest.json out of the repo, so `inventory_endpoints.py --check`
+# (a CI step) could never pass on a fresh checkout.
+!docs/authz_manifest.json
+!docs/endpoint_inventory.json
 generate_button_manifest.py
 run.log
 run_button_audit.py
