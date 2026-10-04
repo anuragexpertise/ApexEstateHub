@@ -1793,6 +1793,7 @@ CREATE TABLE audit_events (
     -- accounting entries it produced, across all three logs.
     correlation_id    UUID,
     permission_used   VARCHAR(60),
+    policy_version    VARCHAR(20),   -- authorization policy version that decided (RWA3 §3.3 inv. 5)
     document_hash     VARCHAR(128),
     approval_ref      VARCHAR(100),
     ip_address        VARCHAR(45),

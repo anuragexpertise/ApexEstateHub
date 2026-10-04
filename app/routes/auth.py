@@ -151,8 +151,10 @@ def get_societies_list():
             fetch_all=True,
         )
         return jsonify({'societies': societies or []})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("societies list failed")
+        return jsonify({'error': 'Unable to load societies'}), 500
 
 
 # ── Push notification subscription ─────────────────────────────

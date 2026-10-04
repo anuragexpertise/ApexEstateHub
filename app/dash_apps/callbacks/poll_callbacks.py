@@ -7,6 +7,8 @@ from app.utils.ux_toasts import error_toast
 import logging
 from app.security.guards import require_session
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
+from app.security.authorization import Cap
+from app.security.service_guard import audit_event, authorize_resource, blocks, check
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,13 @@ def _require_auth(auth_data=None, required_role=None):
     return user_id, society_id, None
 
 
+def _denied_alert():
+    return html.Div([
+        html.I(className="fas fa-lock me-2", style={"color": "#e74c3c"}),
+        "You do not have permission to perform this action.",
+    ], className="alert alert-danger mt-2")
+
+
 def register_poll_callbacks(app):
 
     @app.callback(
@@ -107,6 +116,21 @@ def register_poll_callbacks(app):
         choices = [c1 or '', c2 or '', c3 or '', c4 or '', c5 or '']
         is_edit = bool(poll_id)
 
+        # Action-level authorization (RWA3 WP4). `_require_auth` above is the
+        # legacy portal gate; this is the capability check, and for an edit the
+        # poll is first resolved INSIDE the caller's own society so a forged
+        # poll-edit-id can never address another tenant's poll.
+        if is_edit:
+            try:
+                _pid = int(poll_id)
+            except (TypeError, ValueError):
+                return _denied_alert()
+            _decision, _row = authorize_resource(Cap.POLL_MANAGE, "poll", "polls", _pid)
+        else:
+            _decision = check(Cap.POLL_MANAGE, "poll", target_society_id=society_id)
+        if blocks(_decision):
+            return _denied_alert()
+
         import datetime as _dt
         if ends_at:
             try:
@@ -151,6 +175,9 @@ def register_poll_callbacks(app):
                         html.I(className="fas fa-exclamation-triangle me-2", style={"color": "#e59620"}),
                         "Poll couldn't be updated — it may already have votes, or be closed.",
                     ], className="alert alert-warning mt-2")
+                audit_event("poll.edit", "poll", poll_id,
+                            after={"title": title, "choice_count": choice_count, "ends_at": ends_at},
+                            permission_used=Cap.POLL_MANAGE)
                 _publish_schedule_update()
                 invalidate_kpi_cache()
                 return html.Div([
@@ -168,6 +195,10 @@ def register_poll_callbacks(app):
                 fetch_one=True
             )
             new_poll_id = result["poll_id"] if result else None
+            audit_event("poll.create", "poll", new_poll_id,
+                        after={"title": title, "choice_count": choice_count,
+                               "open_to": open_to or "no_dues", "ends_at": ends_at},
+                        permission_used=Cap.POLL_MANAGE)
             try:
                 PushService.notify_poll_created(society_id, title)
             except Exception as e:
