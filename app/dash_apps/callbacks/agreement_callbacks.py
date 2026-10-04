@@ -30,6 +30,7 @@ plus the agreement-modal itself (see _agreement_modal() in app_shell.py).
 from dash import Output, Input, State, clientside_callback, no_update
 from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
 from app.security.guards import require_session
+from app.security.stamp_scope import stamp_document
 from app.security.audit_context import get_current_society_id
 
 
@@ -198,7 +199,7 @@ def register_agreement_callbacks(app):
             return no_update
         try:
             from database.db_manager import db
-            db._execute("UPDATE society_agreements SET last_printed_at = NOW() WHERE id = %s AND society_id = %s", (int(agreement_id), sid))
+            stamp_document("society_agreements", agreement_id, "last_printed_at")
         except Exception as e:
             print(f"agreement last_printed_at stamp error: {e}")
         return no_update
@@ -217,7 +218,7 @@ def register_agreement_callbacks(app):
             return no_update
         try:
             from database.db_manager import db
-            db._execute("UPDATE society_agreements SET last_emailed_at = NOW() WHERE id = %s AND society_id = %s", (int(agreement_id), sid))
+            stamp_document("society_agreements", agreement_id, "last_emailed_at")
         except Exception as e:
             print(f"agreement last_emailed_at stamp error: {e}")
         return no_update

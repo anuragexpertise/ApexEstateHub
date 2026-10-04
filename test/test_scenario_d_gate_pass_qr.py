@@ -49,12 +49,12 @@ class TestScenarioD_GatePassQR:
 
     # -- QR generation -------------------------------------------------------
 
-    def test_generate_qr_returns_base64_image(self):
+    def test_generate_qr_returns_base64_image(self, patched_db):
         img, payload = qr_service.generate_qr_code(1, "APT", 101)
         assert img.startswith("data:image/png;base64,")
         assert payload == "1-APT-101"
 
-    def test_generate_qr_payload_format(self):
+    def test_generate_qr_payload_format(self, patched_db):
         _, payload = qr_service.generate_qr_code(2, "SEC", 5)
         if qr_service._get_signing_secret(2):
             assert payload.startswith("2-SEC-5-")

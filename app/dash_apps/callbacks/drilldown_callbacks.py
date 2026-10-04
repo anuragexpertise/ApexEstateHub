@@ -81,6 +81,7 @@ from app.security.audit_context import (
     get_current_user_role,
     get_current_society_id,
     get_current_linked_id,
+    get_server_auth,
 )
 from app.utils.ux_toasts import error_toast
 from app.utils.field_config import DEFAULT_CONCERN_TYPE
@@ -189,10 +190,9 @@ def _is_admin(auth: dict | None) -> bool:
     
     SECURITY: Never trust client-side auth-store for role checks. Resolve
     from Flask-Login session first."""
-    server_role = get_current_user_role()
-    if server_role is not None:
-        return server_role == "admin"
-    return (auth or {}).get("role", "") == "admin"
+    # Fail closed: with no server session nobody is an admin, whatever the
+    # browser's auth-store claims.
+    return get_current_user_role() == "admin"
 
 def _require_admin(auth: dict | None) -> bool:
     """Server-side guard: returns True if caller is a society admin.
@@ -265,7 +265,7 @@ def _handle_list_confirm(entity, pk, sid, store, auth):
         # the server, not the client-editable auth-store — resolve from the
         # Flask-Login session, falling back to auth-store only if no server
         # session exists yet (see app/security/audit_context.py).
-        user_id = get_current_user_id() or (auth or {}).get("user_id")
+        user_id = get_current_user_id()
         ok, msg = loaders.verify_receipt(int(pk), confirmed_by=user_id)
     except Exception as e:
         ok, msg = False, error_toast(e, "Unable to confirm this record.")["message"]
@@ -308,7 +308,7 @@ def _handle_list_confirm_bill_group(entity, bg_id, sid, store, auth):
         return _empty_state("Missing bill group ID"), [], [], {"display": "none"}, \
             {"_toast": {"type": "error", "message": "Invalid bill group ID"}}
     try:
-        user_id = get_current_user_id() or (auth or {}).get("user_id")
+        user_id = get_current_user_id()
         ok, msg, receipt_id = loaders.verify_receivable_bill_group(str(bg_id), confirmed_by=user_id)
     except Exception as e:
         ok, msg, receipt_id = False, error_toast(e, "Unable to confirm this bill group.")["message"], None
@@ -354,7 +354,7 @@ def _handle_list_reject_bill_group(entity, bg_id, sid, store, auth):
         return _empty_state("Missing bill group ID"), [], [], {"display": "none"}, \
             {"_toast": {"type": "error", "message": "Invalid bill group ID"}}
     try:
-        user_id = get_current_user_id() or (auth or {}).get("user_id")
+        user_id = get_current_user_id()
         ok, msg = loaders.reject_receivable_bill_group(str(bg_id), confirmed_by=user_id)
     except Exception as e:
         ok, msg = False, error_toast(e, "Unable to reject this bill group.")["message"]
@@ -481,7 +481,7 @@ def register_drilldown_callbacks(app):
         if not contents:
             return no_update, no_update
         try:
-            society_id = (auth or {}).get("society_id")
+            society_id = get_current_society_id()
             entity = field_id.get("entity") if isinstance(field_id, dict) else None
             field_name = field_id.get("field", "image")
 
@@ -520,7 +520,7 @@ def register_drilldown_callbacks(app):
             # this same callback) — nothing to do.
             raise PreventUpdate
         try:
-            society_id = (auth or {}).get("society_id")
+            society_id = get_current_society_id()
             entity = field_id.get("entity") if isinstance(field_id, dict) else None
             field_name = field_id.get("field", "image")
 
@@ -1822,8 +1822,8 @@ def register_drilldown_callbacks(app):
         if not ids:
             raise PreventUpdate
 
-        role = (auth or {}).get("role")
-        sid = (auth or {}).get("society_id")
+        role = get_current_user_role()
+        sid = get_current_society_id()
         store = store or nav_state.initial_state(role, sid)
 
         if len(ids) == 1:
@@ -2102,7 +2102,7 @@ def register_drilldown_callbacks(app):
                     "validity": validity_date if validity_date else None,
                     "admin_email": admin_email,
                     "admin_password": admin_password,
-                    "created_by": auth.get("user_id") if auth else None,
+                    "created_by": get_current_user_id(),
                 })
                 if not nsid:
                     return (store, no_update, no_update, 
@@ -2822,6 +2822,9 @@ def register_drilldown_callbacks(app):
 
 
 def _render_current(store: dict, auth: dict) -> tuple:
+    # Renderers decide permissions and ownership from this dict, so it must
+    # come from the server session, not the browser's editable auth-store.
+    auth = get_server_auth(auth)
     active = store.get("active_card", "")
     filters = dict(nav_state.get_filters(store))
     prefill = nav_state.get_prefill(store)

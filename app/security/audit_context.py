@@ -92,3 +92,70 @@ def get_current_linked_id() -> int | None:
     except Exception:
         pass
     return None
+
+
+def get_server_auth(client_auth: dict | None = None) -> dict:
+    """
+    Build the `auth` dict that renderers and permission helpers consume from
+    the SERVER session, never from the browser's `auth-store`.
+
+    Identity keys (user_id, role, society_id, linked_id, apartment_id,
+    vendor_id, security_id, user_type, authenticated) are always overwritten
+    with server-resolved values, so a forged auth-store cannot raise the
+    role, switch tenant, or claim another unit's record. Purely cosmetic
+    client keys (e.g. display name) are carried through untouched.
+
+    With no valid session this returns an empty dict (role missing -> the
+    renderers fall back to their least-privileged "guest" path).
+    """
+    uid = get_current_user_id()
+    if uid is None:
+        return {}
+    role = get_current_user_role()
+    linked = get_current_linked_id()
+    out = {k: v for k, v in (client_auth or {}).items()
+           if k not in _IDENTITY_KEYS}
+    out.update({
+        "authenticated": True,
+        "user_id": uid,
+        "role": role,
+        "society_id": get_current_society_id(),
+        "linked_id": linked,
+        "apartment_id": linked if role == "apartment" else None,
+        "vendor_id": linked if role == "vendor" else None,
+        "security_id": linked if role == "security" else None,
+        "user_type": _server_user_type(uid),
+    })
+    return out
+
+
+_IDENTITY_KEYS = frozenset({
+    "authenticated", "user_id", "role", "society_id", "linked_id",
+    "apartment_id", "vendor_id", "security_id", "user_type", "token",
+})
+
+
+def _server_user_type(uid: int) -> str | None:
+    """users.user_type for the session user (owner/family/tenant/visitor),
+    cached on flask.g for the request so repeated renders don't re-query."""
+    try:
+        from flask import g, has_request_context
+        if has_request_context() and getattr(g, "_server_user_type", None) is not None:
+            cached_uid, cached = g._server_user_type
+            if cached_uid == uid:
+                return cached
+    except Exception:
+        has_request_context = None
+    try:
+        from database.db_manager import db
+        row = db._execute("SELECT user_type FROM users WHERE id=%s", (uid,), fetch_one=True)
+        value = (row or {}).get("user_type")
+    except Exception:
+        value = None
+    try:
+        from flask import g, has_request_context
+        if has_request_context():
+            g._server_user_type = (uid, value)
+    except Exception:
+        pass
+    return value

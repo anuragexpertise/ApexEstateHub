@@ -195,7 +195,10 @@ class TestQRAndAlerts(unittest.TestCase):
         self.assertEqual(parsed["role"], "visitor")
         self.assertEqual(parsed["entity_id"], 50)
 
-    def test_qr_generation(self):
+    @patch("app.services.qr_service._get_signing_secret", return_value=None)
+    def test_qr_generation(self, _secret):
+        # No signing secret -> legacy unsigned payload; keeps the test
+        # independent of a live database.
         img_str, payload = generate_qr_code(1, "EVT", 105)
         self.assertTrue(img_str.startswith("data:image/png;base64,"))
         self.assertEqual(payload, "1-EVT-105")
