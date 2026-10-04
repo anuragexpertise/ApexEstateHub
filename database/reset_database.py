@@ -35,7 +35,10 @@ from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from db_config import connection_params, describe_target  # noqa: E402
 
 
 # ------------------------------------------------------------------
@@ -46,14 +49,29 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / ".env")
 
-DB_HOST = os.getenv("PGHOST")
-DB_PORT = int(os.getenv("PGPORT", "5432"))
-DB_NAME = os.getenv("PGDATABASE")
-DB_USER = os.getenv("PGUSER")
-DB_PASSWORD = os.getenv("PGPASSWORD")
+# Resolved once, here, and reused everywhere below (schema install, seed
+# handoff, validation) so all three provably hit the same database. The
+# precedence rules live in db_config.
+_P = connection_params()
+DB_HOST = _P.get("host")
+DB_PORT = _P.get("port")
+DB_NAME = _P.get("dbname")
+DB_USER = _P.get("user")
+DB_PASSWORD = _P.get("password")
+SSL_MODE = _P.get("sslmode")
+SSL_ROOT_CERT = _P.get("sslrootcert")
 
-SSL_MODE = os.getenv("PGSSLMODE", "require")
-SSL_ROOT_CERT = os.getenv("PGSSLROOTCERT")
+if DB_HOST is None:
+    # DATABASE_URL-only configuration: fall back to the individual values for
+    # the psql subprocess, which cannot take a URL in place of these flags.
+    _u = dotenv_values(BASE_DIR / ".env")
+    DB_HOST = _u.get("PGHOST")
+    DB_PORT = int(_u.get("PGPORT") or 5432)
+    DB_NAME = _u.get("PGDATABASE")
+    DB_USER = _u.get("PGUSER")
+    DB_PASSWORD = _u.get("PGPASSWORD")
+    SSL_MODE = _u.get("PGSSLMODE") or "require"
+    SSL_ROOT_CERT = _u.get("PGSSLROOTCERT")
 
 
 # ------------------------------------------------------------------
@@ -61,19 +79,13 @@ SSL_ROOT_CERT = os.getenv("PGSSLROOTCERT")
 # ------------------------------------------------------------------
 
 def connect():
-    params = {
-        "host": DB_HOST,
-        "port": DB_PORT,
-        "dbname": DB_NAME,
-        "user": DB_USER,
-        "password": DB_PASSWORD,
-        "sslmode": SSL_MODE,
-    }
-
-    if SSL_ROOT_CERT:
-        params["sslrootcert"] = SSL_ROOT_CERT
-
-    return psycopg2.connect(**params)
+    """Plain cursor connection — validate() below uses positional access."""
+    return psycopg2.connect(
+        host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER,
+        password=DB_PASSWORD, sslmode=SSL_MODE,
+        **({"sslrootcert": SSL_ROOT_CERT}
+           if SSL_ROOT_CERT and SSL_MODE != "disable" else {}),
+    )
 
 
 # ------------------------------------------------------------------
@@ -147,30 +159,18 @@ def prompt_post_reset_action(args) -> str:
 def seed_connect():
     """Opens the seed connection against THIS script's target database.
 
-    Deliberately not seed.py's get_conn(). That resolves its target from
-    DATABASE_URL first and only then falls back to PGHOST/PGDATABASE/..., while
-    this script reads the PG* variables only — so with a DATABASE_URL in .env
-    the two disagree, and `--after seed` would drop the schema from one database
-    and seed a different one (observed: a fresh local reset followed by seed
-    steps reporting every row as "already exists" against the remote). Building
-    the DSN from the values already resolved at the top of this file keeps the
-    reset and the seed pointed at one database.
+    Deliberately not seed.py's get_conn(): the two resolved their targets
+    independently, so with a DATABASE_URL in .env this script dropped the
+    schema from the PG* database while the seed wrote to the DATABASE_URL one
+    (observed as a fresh local reset followed by every seed step reporting
+    "already exists" against the remote). Both now go through db_config, so the
+    reset and the seed provably hit one database.
 
     RealDictCursor is required: every function in seed.py reads rows by column
     name (row["id"], row["linked_id"], ...).
     """
-    params = {
-        "host": DB_HOST,
-        "port": DB_PORT,
-        "dbname": DB_NAME,
-        "user": DB_USER,
-        "password": DB_PASSWORD,
-        "sslmode": SSL_MODE,
-    }
-    if SSL_ROOT_CERT and SSL_MODE not in ("disable",):
-        params["sslrootcert"] = SSL_ROOT_CERT
     return psycopg2.connect(
-        **params,
+        **connection_params(),
         cursor_factory=psycopg2.extras.RealDictCursor,
         connect_timeout=20,
         options="-c lock_timeout=15000 -c statement_timeout=180000",

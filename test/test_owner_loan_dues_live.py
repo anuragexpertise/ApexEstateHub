@@ -11,8 +11,10 @@ from datetime import date, timedelta
 
 import pytest
 
+from test.live_db_gate import LIVE_DB_REASON, live_db_enabled
+
 psycopg2 = pytest.importorskip("psycopg2")
-pytestmark = pytest.mark.skipif(not os.getenv("PGHOST"), reason="needs a seeded Postgres (set PGHOST/...)")
+pytestmark = pytest.mark.skipif(not live_db_enabled(), reason=LIVE_DB_REASON)
 
 SOC = 1
 ELECTION = date(2026, 10, 1)          # financial-year basis -> cut-off 31 Mar 2026; 60-day rule -> due on/before 30 Jan 2026
@@ -184,20 +186,30 @@ def _proceeding(cur, apt):
                       VALUES (%s,%s,'water',%s) RETURNING id""", (SOC, apt, date(2025, 1, 1)))["id"]
 
 
-def _no_dues_blocker(cur, pid, asof=date(2026, 9, 1)):
+def _s22_dues_blocker(cur, pid, asof=date(2026, 9, 1)):
+    """True when service cut-off is blocked because nothing is owed.
+
+    fn_service_cutoff_check() reports this as "outstanding dues or overdue
+    loans remain ... (s.22 blocked)". The wording is confusing at first glance:
+    s.22 lets a society cut a service only when charges have been unpaid for
+    over the statutory period, so a flat with nothing outstanding — or with an
+    overdue loan the society has chosen not to count — is *blocked*, not
+    cleared. The rule under test (owner_loan_counts_s22) decides which of those
+    two the loan produces.
+    """
     blockers = q1(cur, "SELECT blockers FROM fn_service_cutoff_check(%s,%s)", (pid, asof))["blockers"]
-    return any("no outstanding dues remain" in b for b in blockers)
+    return any("(s.22 blocked)" in b for b in blockers)
 
 
 def test_s22_ignores_loans_by_default_and_counts_them_when_switched_on(cur):
     apt = apartment(cur, clean=True)
     pid = _proceeding(cur, apt)
     make_loan(cur, apt, 50000, due=OLD_DUE)
-    assert _no_dues_blocker(cur, pid) is True              # default OFF: a loan alone is not a ground for cutting a service
+    assert _s22_dues_blocker(cur, pid) is True         # default OFF: a loan alone is not a ground for cutting a service
     set_rule(cur, "owner_loan_counts_s22", 1)
-    assert _no_dues_blocker(cur, pid) is False             # ON: the overdue loan counts as dues remaining
+    assert _s22_dues_blocker(cur, pid) is False        # ON: the overdue loan counts as dues remaining
     cur.execute("UPDATE owner_loans SET due_date=NULL WHERE apartment_id=%s", (apt,))
-    assert _no_dues_blocker(cur, pid) is True              # no repayment date -> not overdue, even when ON
+    assert _s22_dues_blocker(cur, pid) is True         # no repayment date -> not overdue, even when ON
 
 
 # ── actions layer ────────────────────────────────────────────────────────────

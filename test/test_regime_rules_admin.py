@@ -11,6 +11,8 @@ from datetime import date, timedelta
 
 import pytest
 
+from test.live_db_gate import LIVE_DB_REASON, live_db_enabled
+
 from app.services import regime_rules_admin as rra
 
 UP = "UP_AOA_2010"
@@ -73,7 +75,7 @@ def test_non_master_is_refused_everywhere():
 
 
 # ── Part 2: live Postgres ────────────────────────────────────────────────────
-live = pytest.mark.skipif(not os.getenv("PGHOST"), reason="needs a seeded Postgres (set PGHOST/...)")
+live = pytest.mark.skipif(not live_db_enabled(), reason=LIVE_DB_REASON)
 SOC = 1
 
 
