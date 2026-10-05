@@ -416,7 +416,10 @@ def catalog_edit_form() -> html.Div:
         ], className="mb-2"),
         _label("Applicability"), dbc.Textarea(id="mrl-cat-app", rows=2, size="sm", className="mb-2"),
         _label("Key provisions"), dbc.Textarea(id="mrl-cat-prov", rows=4, size="sm", className="mb-2"),
-        _label("Source reference"), dbc.Textarea(id="mrl-cat-src", rows=2, size="sm", className="mb-2"),
+        _label("Source reference"), dbc.Textarea(id="mrl-cat-src", rows=2, size="sm", className="mb-1"),
+        html.Div("Include the full https:// link to the instrument. For the Bye-laws entry, the first link here is the "
+                 "'Read the notified Model Bye-Laws' link every society sees when adopting a clause as-is.",
+                 style={"fontSize": "11px", "color": "#666"}, className="mb-2"),
         _label("Reason for the change"), dbc.Input(id="mrl-cat-reason", type="text", size="sm", className="mb-2"),
         dbc.Button("Save catalog entry", id="mrl-cat-save", color="warning", size="sm"),
     )

@@ -215,11 +215,23 @@ def test_variation_shows_the_text_box(stub):
     assert show_var is True
 
 
-def test_model_bye_laws_link_defaults_to_the_official_copy_and_can_be_overridden(monkeypatch):
-    monkeypatch.delenv("MODEL_BYE_LAWS_URL", raising=False)
+def test_model_bye_laws_link_comes_from_the_catalog_source_reference(monkeypatch):
+    monkeypatch.setattr(rra, "_row", lambda *a, **k: {
+        "source_reference": "Notification 3977, 16 Nov 2011. Text: https://up.gov.test/model-bye-laws.pdf."})
+    assert rra.model_bye_laws_source()["url"] == "https://up.gov.test/model-bye-laws.pdf"
+
+
+@pytest.mark.parametrize("row", [None, {"source_reference": None}, {"source_reference": "Notification 3977, 16 Nov 2011"},
+                                 {"source_reference": "javascript:alert(1)"}])
+def test_model_bye_laws_link_falls_back_to_the_official_copy(monkeypatch, row):
+    monkeypatch.setattr(rra, "_row", lambda *a, **k: row)
     assert rra.model_bye_laws_source()["url"] == "https://up-rera.in/pdf/Model-By-Laws.pdf"
-    monkeypatch.setenv("MODEL_BYE_LAWS_URL", "https://example.test/mine.pdf")
-    assert rra.model_bye_laws_source()["url"] == "https://example.test/mine.pdf"
+
+
+def test_model_bye_laws_link_is_not_a_server_setting(monkeypatch):
+    monkeypatch.setenv("MODEL_BYE_LAWS_URL", "https://example.test/env.pdf")
+    monkeypatch.setattr(rra, "_row", lambda *a, **k: None)
+    assert rra.model_bye_laws_source()["url"] == "https://up-rera.in/pdf/Model-By-Laws.pdf"
 
 
 # ── layout ───────────────────────────────────────────────────────────────────
