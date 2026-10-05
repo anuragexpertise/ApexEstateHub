@@ -1,6 +1,7 @@
 import os
 
 from dash import html, dcc, Input, Output, State, ALL, callback, no_update
+from app.utils.fiscal import fy_start_date, fy_start_year
 import dash_bootstrap_components as dbc
 from database.db_manager import db
 
@@ -535,7 +536,7 @@ def render_category_content(category, society_id=None, state=None):
             _label("TDS Effective Date"),
             html.Div(dcc.DatePickerSingle(
                 id="sw-tds-effective-date",
-                date="2024-04-01",
+                date=str(fy_start_date()),
                 display_format="YYYY-MM-DD"
             ), className="mb-4"),
             html.Hr(),
@@ -906,14 +907,14 @@ def render_category_content(category, society_id=None, state=None):
             dbc.Row([dbc.Col([_label("Vendor Pass (1 Day) ₹"), dbc.Input(id="sw-ven-1day", type="number", value=s_v1, step=1, className="mb-3")]), dbc.Col([_label("Vendor Pass (7 Days) ₹"), dbc.Input(id="sw-ven-7day", type="number", value=s_v7, step=1, className="mb-3")]), dbc.Col([_label("Vendor Pass (1 Month) ₹"), dbc.Input(id="sw-ven-1mth", type="number", value=s_v30, step=1, className="mb-3")])])
         ]
     elif category == "Accounts":
-        s_calc = "2024-04-01"
+        s_calc = str(fy_start_date())
         if society_id:
             row = db._execute("SELECT calc_start_date FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row and row.get("calc_start_date"): s_calc = str(row["calc_start_date"])
         from database.seed import ACCOUNTS
         inputs = [
             _render_banner("Accounts Settings", "Configure accounting start date and Payment QR Code."),
-            html.P([html.B("Note: "), "The primary_bank_account is not set by default. The Society's payment QR code must correspond to this bank. You can set this later in the Admin portal under the 'Settings' tab, 'Account' KPI."], className="sw-note-red mb-3"),
+            html.P([html.B("Note: "), "The primary bank account is NOT set by default. Bank receipts and payments cannot be recorded until you add your real bank account and mark it primary (Admin portal, 'Settings' tab, 'Account' KPI). The Society's payment QR code must belong to that bank."], className="sw-note-red mb-3"),
             _label("Payment QR Code Image"),
             _render_image_capture_control("society", "pay_qr", _imgs.get("pay_qr"), society_id),
             _label("Accounting/Calculation Start Date"),
@@ -947,10 +948,10 @@ def render_category_content(category, society_id=None, state=None):
         inputs.append(html.Div([header] + rows, className="sw-hscroll"))
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Brought Forward":
-        s_fy = 2024
+        s_fy = fy_start_year()
         if society_id:
             row = db._execute("SELECT financial_year FROM brought_forward WHERE society_id = :id LIMIT 1", {"id": society_id}, fetch_one=True)
-            if row: s_fy = row.get("financial_year", 2024)
+            if row: s_fy = row.get("financial_year") or s_fy
         from database.seed import ACCOUNTS
 
         # Same shape as the Balance Sheet: Assets (Dr) on the left,
@@ -1039,7 +1040,9 @@ def render_category_content(category, society_id=None, state=None):
         ]
     elif category == "Instructions":
         here = os.path.dirname(os.path.abspath(__file__))
-        readme_path = os.path.abspath(os.path.join(here, "../../../README.md"))
+        # A12: show the short admin-facing quick start, not the 170 KB
+        # developer README.
+        readme_path = os.path.abspath(os.path.join(here, "../../../docs/ADMIN_QUICKSTART.md"))
         
         readme_txt = ""
         if os.path.exists(readme_path):

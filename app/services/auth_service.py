@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from werkzeug.security import check_password_hash, generate_password_hash
 from database.db_manager import db
 from app.security.roles import resolve_role
+from app.security.password_policy import validate_password
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ log = logging.getLogger(__name__)
 # brute-force protection. _record_failed_attempt / _reset_failed_attempts
 # make that check mean something.
 MAX_FAILED_ATTEMPTS = 5
+RESET_TOKEN_HOURS = 1
 LOCKOUT_MINUTES = 15
 
 
@@ -181,7 +183,8 @@ def authenticate_pattern(email: str, pattern: str,
 def request_password_reset(email: str,
                                  society_id: int | None = None) -> tuple[bool, str, str | None]:
     """
-    Generate a reset token. Returns (ok, message, plain_token).
+    Generate a reset token. Returns (ok, message, plain_token). The token is also emailed (or logged when
+    SMTP is unavailable); UI callers must never display or return it to the browser.
 
     SECURITY (fixed 2026-08): this previously generated a 6-digit numeric
     code (1,000,000 possible values, no request rate limit) and hashed it
@@ -206,18 +209,35 @@ def request_password_reset(email: str,
         user = db._execute(q, p, fetch_one=True)
         if not user:
             # Don't reveal whether the email exists.
-            return True, f"If that email exists, a reset link has been sent.", None
+            return True, "If that email exists, a reset token has been sent.", None
 
         plain  = secrets.token_urlsafe(32)
         hashed = hashlib.sha256(plain.encode()).hexdigest()
-        expiry = datetime.now() + timedelta(hours=1)
+        expiry = datetime.now() + timedelta(hours=RESET_TOKEN_HOURS)
 
         db._execute(
             """UPDATE users SET reset_token = :tok, reset_token_expires = :exp
                WHERE id = :uid""",
             {"tok": hashed, "exp": expiry, "uid": user["id"]},
         )
-        return True, f"Reset token sent to {email}.", plain
+        # A1: the token used to be returned to a caller that discarded it, so
+        # it reached nobody. Deliver it by email; if SMTP is not configured or
+        # the send fails, log it (so an operator can relay it) and say so
+        # honestly instead of claiming it was sent.
+        from app.services.mailer import send_email
+        body = (
+            "A password reset was requested for your EstateHub account.\n\n"
+            f"Reset token: {plain}\n\n"
+            f"It is valid for {RESET_TOKEN_HOURS} hour(s). If you did not request "
+            "this, ignore this email."
+        )
+        if send_email(email, "EstateHub password reset", body):
+            return True, "If that email exists, a reset token has been sent.", plain
+        log.warning("Password reset token for user_id=%s could not be emailed "
+                    "(SMTP not configured or send failed); token: %s",
+                    user["id"], plain)
+        return True, ("If that email exists, a reset token was generated, but email "
+                      "is not configured on this server. Ask Master to relay it."), plain
     except Exception:
         log.exception("request_password_reset error")
         return False, "Error generating reset token.", None
@@ -228,8 +248,9 @@ def reset_password(plain_token: str, new_password: str) -> tuple[bool, str]:
     import hashlib
     if not plain_token or not new_password:
         return False, "Please fill in all fields."
-    if len(new_password) < 8:
-        return False, "New password must be at least 8 characters."
+    _pw_err = validate_password(new_password)
+    if _pw_err:
+        return False, _pw_err
     try:
         token_hash = hashlib.sha256(plain_token.encode()).hexdigest()
         row = db._execute(
@@ -244,7 +265,8 @@ def reset_password(plain_token: str, new_password: str) -> tuple[bool, str]:
         db._execute(
             """UPDATE users
                SET password_hash = :ph, reset_token = NULL, reset_token_expires = NULL,
-                   failed_login_attempts = 0, locked_until = NULL
+                   failed_login_attempts = 0, locked_until = NULL,
+                   must_change_password = FALSE
                WHERE id = :uid""",
             {"ph": generate_password_hash(new_password), "uid": row["id"]},
         )
@@ -264,8 +286,9 @@ def reset_password(plain_token: str, new_password: str) -> tuple[bool, str]:
 def change_password(user_id: int, current_password: str, new_password: str) -> tuple[bool, str]:
     if not current_password or not new_password:
         return False, "Please fill in all fields."
-    if len(new_password) < 8:
-        return False, "New password must be at least 8 characters."
+    _pw_err = validate_password(new_password)
+    if _pw_err:
+        return False, _pw_err
     if new_password == current_password:
         return False, "New password must be different from your current password."
     try:
@@ -281,7 +304,8 @@ def change_password(user_id: int, current_password: str, new_password: str) -> t
 
         db._execute(
             """UPDATE users
-               SET password_hash = :ph, failed_login_attempts = 0, locked_until = NULL
+               SET password_hash = :ph, failed_login_attempts = 0, locked_until = NULL,
+                   must_change_password = FALSE
                WHERE id = :uid""",
             {"ph": generate_password_hash(new_password), "uid": user_id},
         )
@@ -289,3 +313,45 @@ def change_password(user_id: int, current_password: str, new_password: str) -> t
     except Exception:
         log.exception("change_password error for user_id=%s", user_id)
         return False, "Error changing password."
+
+
+def must_change_password(user_id: int) -> bool:
+    """True while the account still has the password someone else chose (A4)."""
+    try:
+        row = db._execute(
+            "SELECT must_change_password FROM users WHERE id = :uid",
+            {"uid": user_id}, fetch_one=True,
+        )
+        return bool((row or {}).get("must_change_password"))
+    except Exception:
+        log.exception("must_change_password lookup failed for user_id=%s", user_id)
+        return False
+
+
+
+def verify_password_with_lockout(user_id: int, password: str) -> tuple[bool, str]:
+    """Check a logged-in user's password against the SAME lockout counter as login (A11).
+
+    Used by sensitive confirmations (e.g. the Setup Wizard's final submit) so
+    guessing the admin password there is throttled exactly like at the login
+    screen. Returns (ok, error_message).
+    """
+    try:
+        row = db._execute(
+            "SELECT password_hash, locked_until FROM users WHERE id = :uid",
+            {"uid": user_id}, fetch_one=True,
+        )
+    except Exception:
+        log.exception("verify_password_with_lockout lookup failed for user_id=%s", user_id)
+        return False, "Unable to verify the password. Please try again."
+    if not row:
+        return False, "Invalid Admin Password."
+    locked_until = row.get("locked_until")
+    if locked_until and locked_until > datetime.utcnow():
+        return False, f"Account temporarily locked after too many wrong attempts. Try again in {LOCKOUT_MINUTES} minutes."
+    stored = row.get("password_hash") or ""
+    if not stored or not check_password_hash(stored, password or ""):
+        _record_failed_attempt(user_id)
+        return False, "Invalid Admin Password."
+    _reset_failed_attempts(user_id)
+    return True, ""

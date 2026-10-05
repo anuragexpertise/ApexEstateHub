@@ -1431,12 +1431,15 @@ def seed_account_statutory_mappings(cur, conn, society_id: int):
         print(f"  ✓ Account statutory mappings seeded ({inserted} new rows)")
 
 
-def seed_accounts(cur, conn, society_id: int):
+def seed_accounts(cur, conn, society_id: int, commit: bool = True):
     """
     Insert this society's chart of accounts using the literal seed-constant
     `aid` values as the real `accounts.id` (accounts.id is scoped per-society).
     Two-pass insert (parent first N/A, then backfill) to avoid FK ordering
     issues — same convention as before, ids now on the block scheme.
+
+    commit=False leaves the surrounding transaction open so the caller can make
+    seeding and a following write atomic (the Setup Wizard does this, A14).
     """
     created = 0
     inserted_ids = set()
@@ -1487,14 +1490,16 @@ def seed_accounts(cur, conn, society_id: int):
             (lock_pct, aid, society_id),
         )
 
-    conn.commit()
+    if commit:
+        conn.commit()
 
     if society_id == 1:
         cur.execute(
             "SELECT setval(pg_get_serial_sequence('accounts','id'), "
             "(SELECT COALESCE(MAX(id),1) FROM accounts))"
         )
-        conn.commit()
+        if commit:
+            conn.commit()
     return created
 
 

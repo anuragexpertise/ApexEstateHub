@@ -20,9 +20,16 @@ from app.security.audit_context import (
 
 
 def _login_response(user: dict):
-    _establish_server_session(user)
     role       = user.get("role", "admin")
     society_id = user.get("society_id")
+
+    # A13: refuse the login of an expired society BEFORE any session is created.
+    if role != "master":
+        from app.security.plan_guard import society_plan_expired, PLAN_EXPIRED_MESSAGE
+        if society_plan_expired(society_id):
+            return _login_error(PLAN_EXPIRED_MESSAGE)
+
+    _establish_server_session(user)
     name       = user.get("email", "").split("@")[0]
 
     try:
@@ -305,7 +312,8 @@ def register_login_callbacks(app):
             society_id = (auth or {}).get("society_id")
             from app.services.auth_service import request_password_reset
             ok, msg, _ = request_password_reset(email.strip(), society_id)
-            return (not ok), no_update, {"type": "success" if ok else "error", "message": msg}
+            # On success close the "forgot" modal and open the "enter token" modal.
+            return (not ok), bool(ok), {"type": "success" if ok else "error", "message": msg}
 
         if trigger == "confirm-reset-btn":
             if not token or not new_pass:

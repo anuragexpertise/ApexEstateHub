@@ -38,6 +38,7 @@ reported without rolling back rows already committed earlier in the file.
 """
 from __future__ import annotations
 
+from app.security.password_policy import validate_password
 import base64
 import io
 import pandas as pd
@@ -275,18 +276,28 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
     success  = 0
     failed: list[tuple[int, str]] = []
 
+    # A3: enforce the same plan apartment cap as single-add. Rows beyond the
+    # remaining slots are reported as failed rather than silently inserted.
+    from app.services.plan_limits import remaining_apartment_slots
+    slots_left, _plan, _limit = remaining_apartment_slots(sid)
+
     for i, row in enumerate(rows, start=2):   # row 1 = header
         err = _check_required(row, required)
         if err:
             failed.append((i, err))
             continue
 
+        if slots_left <= 0:
+            failed.append((i, f"Society plan '{_plan}' limit reached ({_limit} apartments)"))
+            continue
+
         flat     = row["flat_number"].strip()
         email    = row["email"].strip().lower()
         password = row["password"].strip()
 
-        if len(password) < 6:
-            failed.append((i, "Password must be at least 6 characters long"))
+        _pw_err = validate_password(password)
+        if _pw_err:
+            failed.append((i, _pw_err))
             continue
 
         try:
@@ -331,6 +342,7 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
             continue
 
         success += 1
+        slots_left -= 1
 
     return {"success": success, "failed": failed}
 
@@ -360,8 +372,9 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
         name     = row["name"].strip()
         biz_name = (row.get("business_name") or name or email).strip()
 
-        if len(password) < 6:
-            failed.append((i, "Password must be at least 6 characters long"))
+        _pw_err = validate_password(password)
+        if _pw_err:
+            failed.append((i, _pw_err))
             continue
 
         try:
@@ -428,8 +441,9 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
         password = row["password"].strip()
         name     = row["name"].strip()
 
-        if len(password) < 6:
-            failed.append((i, "Password must be at least 6 characters long"))
+        _pw_err = validate_password(password)
+        if _pw_err:
+            failed.append((i, _pw_err))
             continue
 
         try:
@@ -488,8 +502,9 @@ def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None
         if user_type not in ("owner", "family", "tenant", "visitor"):
             user_type = "family"
 
-        if len(password) < 6:
-            failed.append((i, "Password must be at least 6 characters long"))
+        _pw_err = validate_password(password)
+        if _pw_err:
+            failed.append((i, _pw_err))
             continue
 
         try:

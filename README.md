@@ -79,7 +79,7 @@ Each society gets its own fully isolated data silo scoped by `society_id`. A **M
 | **Bank Reconciliation** | Per-bank-account Excel statement upload, exact + fuzzy matching against receipts/expenses, per-row manual reconcile |
 | **Fund Management** | Statutory fund balances with lock/drawable split · Utilize Fund (honours `statutory_lock_pct`) · **Appropriate Income → Fund** (Dr income / Cr fund) with pending→confirm workflow · **Fund Deposit Routing** (per-fund destination bank account) |
 | **Fund Deposit Routing** | A fund's contributions can be banked into a separately-held account/FD instead of the society's primary account; enforced at posting time by `fn_resolve_bank_leg`, and statement uploads are matched per account |
-| **Society Onboarding** | First-time Setup Wizard (charges, GST/TDS defaults, brought-forward, plus a read-only **UP AOA Compliance** step tabulating the governing Act / Rules / Bye-laws from `legal_instrument_catalog`, and a **Bye-Laws Adoption** step where the admin records which Model Bye-Laws clauses the Association is adopting — provisional until a General Body resolution is linked) + Agreement e-sign flow with Print / Save as PDF / Email (shared letterhead: logo · watermark · secretary signature · verification QR) |
+| **Society Onboarding** | First-time Setup Wizard (charges, GST/TDS defaults, brought-forward, plus a read-only **UP AOA Compliance** step tabulating the governing Act / Rules / Bye-laws from `legal_instrument_catalog`, and a **Bye-Laws Adoption** step where the admin records which Model Bye-Laws clauses the Association is adopting — provisional until a General Body resolution is recorded) + Agreement flow with Print / Save as PDF and an Email button that opens your mail app (`mailto:`; nothing is sent server-side) (shared letterhead: logo · watermark · secretary signature · verification QR) |
 | **Bulk Enrollment** | Excel upload for apartments/vendors/security with template download |
 
 ---
@@ -487,8 +487,10 @@ Login modal:
 
 ### Forgot Password Flow
 
-1. User enters email → `request_password_reset()` → SHA-256 token stored in DB with 2h expiry
-2. Token printed to server log (email delivery hookable in `auth_service.py`)
+**Plan expiry (A13).** A paid society whose `plan_validity` has passed can no longer log in, and open sessions are cut off at the router with a "Plan Expired" page. The `Free` plan never expires and Master (no society) is exempt. `PLAN_GRACE_DAYS` (env, default 7) keeps an expired society usable for a few days after the validity date; set it to `0` for a hard cut-off. The rule lives in `app/security/plan_guard.py`; Master renews by editing the society's validity date.
+
+1. User enters email → `request_password_reset()` → SHA-256 token stored in DB with a 1h expiry (`RESET_TOKEN_HOURS`)
+2. Token is emailed via `app/services/mailer.py` (uses the `SMTP_*` settings). If SMTP is not configured or the send fails, the token is written to the server log and the user is told email is not configured
 3. User enters token + new password → `reset_password()` → hash updated, token cleared
 
 ---
@@ -620,7 +622,7 @@ How a society's own decisions — not just the statute — reach the engine. Tab
 | 2 | Society policy — may only tighten a Layer-1 clause | General Body, 2/3 (`SET_SOCIETY_POLICY`) | `layer = 2` |
 | 3 | Board decision — operational limits | Managing Committee (`SET_BOARD_PARAM`) | `layer = 3` |
 
-**Provisional → active.** A choice saved without a resolution is stored `status = 'provisional'` and remembers the intended outcome in `proposed_status`; the engine ignores it. It becomes active only when Master links a **passed** resolution (`link_provisional_to_resolution`). `_check_resolution` refuses a resolution that is not this society's, not passed, for a different clause, of the wrong decision type for the layer, taken at a meeting with no recorded quorum, or (for GBM-bodied types) not taken at a GBM/EGM. `create_resolution` will not record a resolution as passed on a smaller majority than its decision type requires. The four statute-backed clauses (`STATUTE_BACKED_CLAUSES`: BL_07 arrears bar, BL_39 No Dues / transfer fee, BL_49 cash limits and statement filings, BL_55 Act prevails) cannot be "not adopted" unless the society's `droppable_BL_xx` policy (Setup Wizard → Bye-Laws Adoption → Society resolution settings, active once Master links a passed resolution) says otherwise. Clause numbers and titles follow the Model Bye-Laws notified 16 Nov 2011 (No. 3977/8-1-11-115D.A./02T.C.-I); which clauses are non-droppable is a legal call, so confirm with an advocate. BL_55 can never take a variation. Other Setup Wizard policies: `nodues_blocks_on` (loans only | dues and loans), `vote_ineligibility_basis` (any overdue bill | arrears over 60 days) and `vote_loan_basis` (loan over 60 days past due | any loan past due) for "no dues" polls. Bye-law 7 itself governs Board elections only; poll eligibility is engine policy. Arrears of exactly 60 days are still eligible.
+**Provisional → active.** A choice saved without a resolution is stored `status = 'provisional'` and remembers the intended outcome in `proposed_status`; the engine ignores it. It becomes active when the society admin records a **passed** resolution (`gov_save_resolution` activates the matching provisional choice automatically; `link_provisional_to_resolution` remains as a service-level manual path). `_check_resolution` refuses a resolution that is not this society's, not passed, for a different clause, of the wrong decision type for the layer, taken at a meeting with no recorded quorum, or (for GBM-bodied types) not taken at a GBM/EGM. `create_resolution` will not record a resolution as passed on a smaller majority than its decision type requires. The four statute-backed clauses (`STATUTE_BACKED_CLAUSES`: BL_07 arrears bar, BL_39 No Dues / transfer fee, BL_49 cash limits and statement filings, BL_55 Act prevails) cannot be "not adopted" unless the society's `droppable_BL_xx` policy (Setup Wizard → Bye-Laws Adoption → Society resolution settings, active once a passed resolution is recorded) says otherwise. Clause numbers and titles follow the Model Bye-Laws notified 16 Nov 2011 (No. 3977/8-1-11-115D.A./02T.C.-I); which clauses are non-droppable is a legal call, so confirm with an advocate. BL_55 can never take a variation. Other Setup Wizard policies: `nodues_blocks_on` (loans only | dues and loans), `vote_ineligibility_basis` (any overdue bill | arrears over 60 days) and `vote_loan_basis` (loan over 60 days past due | any loan past due) for "no dues" polls. Bye-law 7 itself governs Board elections only; poll eligibility is engine policy. Arrears of exactly 60 days are still eligible.
 
 **Where each choice is made**
 
@@ -628,7 +630,7 @@ How a society's own decisions — not just the statute — reach the engine. Tab
 |---|---|---|
 | Setup Wizard → **Bye-Laws Adoption** | Society admin (own society only) | Radio per clause → provisional Layer-1 row, saved on click (`record_wizard_adoption`). Clauses left alone follow the Model Bye-Laws / Act as written |
 | Master → AOA Rule Editor → Society Bye-Laws | Master | Radio form for any layer, with an optional passed-resolution id; register shows layer, state (Provisional / Active) and the intended outcome |
-| Master → AOA Rule Editor → Meetings & Resolutions | Master | Record GBM / EGM / MC meetings (quorum flag, minutes path) and resolutions; link a provisional choice to a passed resolution |
+| Master → AOA Rule Editor → Meetings & Resolutions | Master | Record GBM / EGM / MC meetings (quorum flag, minutes path) and resolutions; link a provisional choice to a passed resolution (service-level; the admin's governance screen activates it automatically) |
 
 Every write also inserts into `regime_rule_audit`.
 
@@ -667,7 +669,7 @@ Every write also inserts into `regime_rule_audit`.
 
 **Known gaps (not yet built)**
 - `fn_get_standing` reads `regime_rule_parameters`, **not** `fn_resolve_rule` — an adopted variation (e.g. a 45-day arrears margin) is recorded and shown but does not yet change the engine. Wiring it needs a parameter grammar for `variation_text` (whitelisted keys, tighten-only comparison).
-- `resolution_effects` has no writer, so Master's "pending enactments" list is always empty; provisional → active via `link_provisional_to_resolution` is the working path.
+- `resolution_effects` has no writer, so Master's "pending enactments" list is always empty; provisional → active happens automatically when the admin records a passed resolution (`link_provisional_to_resolution` is the manual service-level path).
 - "Tighten only" for Layers 2/3 is a rule in this section, not a check — free-text variations cannot be compared.
 - Meetings and resolutions are recorded by Master; there is no admin/secretary entry screen and no read-only mirror on the Admin UP AOA Compliance card.
 - A poll that carries does not create a resolution; ratification at a GBM is manual.

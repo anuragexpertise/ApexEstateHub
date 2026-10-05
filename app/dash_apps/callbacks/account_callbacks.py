@@ -85,4 +85,25 @@ def register_account_callbacks(app):
 
         return (not ok), {"type": "success" if ok else "error", "message": msg}
 
+    # ── 3. First-login prompt (A4) ──────────────────────────────────
+    # Opens the same Change Password modal right after login while the account
+    # still has a password chosen by someone else. It is a prompt, not a hard
+    # block: the user can close it, and it reappears on the next login until
+    # the password is changed. Identity comes from the server session.
+    @app.callback(
+        Output("account-settings-modal", "is_open", allow_duplicate=True),
+        Output("toast-store", "data", allow_duplicate=True),
+        Input("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def prompt_first_login_password_change(auth):
+        user_id = get_current_user_id()
+        if not user_id:
+            raise PreventUpdate
+        from app.services.auth_service import must_change_password
+        if not must_change_password(user_id):
+            raise PreventUpdate
+        return True, {"type": "info", "message": "Please change the temporary password you were given."}
+
     print("  ✓ Account callbacks registered")
