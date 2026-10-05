@@ -473,3 +473,69 @@ def test_rules_table_labels_kind_as_statute_or_policy(monkeypatch):
     monkeypatch.setattr(rra, "societies_on_regime", lambda r: 1)
     text = str(mrp.render_rules_sections())
     assert "Statute" in text and "Policy" in text
+
+
+# ── information tables: The layers / Who edits what ──────────────────────────
+def _real_compliance_page(monkeypatch, role, embedded, rows=()):
+    from database import db_manager
+    from app.dash_apps.pages import portal_pages
+    monkeypatch.setattr(db_manager.db, "_execute", lambda *a, **k: list(rows))
+    monkeypatch.setattr(rra, "list_instruments", lambda r: [])
+    return portal_pages._rwa_compliance_up_page("#1859b8", role=role, embedded=embedded)
+
+
+@pytest.mark.parametrize("role,embedded", [("master", False), ("admin", True), ("apartment", True)])
+def test_layers_and_who_edits_what_show_on_master_admin_and_owner(monkeypatch, role, embedded):
+    text = str(_real_compliance_page(monkeypatch, role, embedded))
+    assert "The layers" in text and "Who edits what" in text
+    for name in ("Act & Rules", "Model Bye-Law adoption", "Society policy", "Board decision"):
+        assert name in text
+    for col in ("Master", "Admin", "Owner"):
+        assert col in text
+
+
+def test_guide_still_shows_for_admin_when_the_catalog_table_is_missing(monkeypatch):
+    from database import db_manager
+    from app.dash_apps.pages import portal_pages
+
+    def boom(*a, **k):
+        raise RuntimeError("relation does not exist")
+    monkeypatch.setattr(db_manager.db, "_execute", boom)
+    text = str(portal_pages._rwa_compliance_up_page("#1859b8", role="admin", embedded=True))
+    assert "has not been set up yet" in text and "Who edits what" in text
+
+
+def test_guide_layers_match_the_engine_layers():
+    from app.dash_apps.pages import governance_guide as gg
+    assert [l[0] for l in gg.LAYERS] == ["0", "1", "2", "3"]
+    assert set(rra.BYE_LAW_LAYERS) == {1, 2, 3}
+
+
+def test_owner_is_never_told_they_can_edit():
+    from app.dash_apps.pages import governance_guide as gg
+    assert all(row[4] != gg.EDIT for row in gg.WHO_EDITS)
+
+
+def test_guide_edit_claims_match_forms_that_really_exist(stub):
+    """Every 'Edit' in the guide is backed by a real control, and nothing is offered that the guide denies."""
+    from app.dash_apps.pages import governance_guide as gg
+    from app.dash_apps.pages import master_rules_page as mrp
+    admin_ids = _ids(stub.render_governance_tabs("admin", 5))
+    owner_ids = _ids(stub.render_governance_tabs("apartment", 5))
+    admin_controls = {"cash": ["gov-cash-save"], "bye": ["gov-bye-save"], "policy": ["gov-pol-save"],
+                      "meetings": ["gov-mtg-save", "gov-res-save"]}
+    master_controls = {"catalog": ["mrl-cat-save"], "rules": ["mrl-save"]}
+    cat_ids = _ids(mrp.catalog_edit_form())
+    from unittest import mock
+    with mock.patch.multiple(rra, list_instruments=lambda r: [], effective_rules=lambda r, on=None: [],
+                             scheduled_rules=lambda r: [], recent_audit=lambda n=25, society_id=None: [],
+                             societies_on_regime=lambda r: 0):
+        master_ids = _ids(mrp.render_master_rules_page()) | cat_ids
+    for key, _what, master, admin, owner, _note in gg.WHO_EDITS:
+        for ctl in admin_controls.get(key, []):
+            assert (ctl in admin_ids) == (admin == gg.EDIT), (key, ctl)
+            assert ctl not in owner_ids                      # owners never get the control
+            assert ctl not in master_ids                     # nor does master
+        for ctl in master_controls.get(key, []):
+            assert (ctl in master_ids) == (master == gg.EDIT), (key, ctl)
+            assert ctl not in admin_ids
