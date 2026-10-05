@@ -308,6 +308,7 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
     """
     from database.db_manager import db
     from app.dash_apps.pages.master_rules_page import catalog_edit_form
+    from app.dash_apps.pages.governance_guide import render_governance_guide
 
     try:
         rows = db._execute(
@@ -328,7 +329,8 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
 
     if rows is None and role != "master":
         return html.Div([_title(), dbc.Alert("The legal instrument catalog has not been set up yet. "
-                                             "Please contact the platform administrator.", color="warning")],
+                                             "Please contact the platform administrator.", color="warning"),
+                         render_governance_guide()],
                         className="portal-page")
 
     if rows is None:
@@ -419,6 +421,7 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
                  f"last verified {last_verified}" if last_verified else "verification date not recorded",
                  "fa-scroll"),
         html.Div(sections),
+        render_governance_guide(),
         html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
         *footer,
     ], className="portal-page")
