@@ -4,7 +4,7 @@ Callbacks for Settings -> governance tabs (Admin portal). Admin only; the societ
 server-side Flask-Login session, never from a browser value, and the service layer re-checks that the actor's
 society matches (rra._require_writer). Owners have no write callbacks at all.
 
-Wired here (admin, own society only): cash-limit mode, provisional bye-law choice (guided form), record meeting,
+Wired here (admin, own society only): cash-limit mode, provisional bye-law choice (guided form), provisional policy choice, record meeting,
 record resolution (which auto-activates a matching provisional choice) and executing society enactments.
 Rule values and catalog entries stay in master_rules_callbacks.py (master only).
 """
@@ -103,6 +103,25 @@ def register_governance_callbacks(app):
             return no_update, no_update
         info, show_var = gs.bye_choice_panel(clause, layer, status)
         return info, {"display": "block" if show_var else "none"}
+
+    @app.callback(Output("gov-pol-value", "options"), Output("gov-pol-value", "value"), Output("gov-pol-info", "children"),
+                  Input("gov-pol-key", "value"), prevent_initial_call=True)
+    @require_session
+    def gov_policy_choices(key):
+        ctx_, err = _ctx()
+        if err:
+            return no_update, no_update, no_update
+        return gs.policy_choice_ui(ctx_[0], key)
+
+    @app.callback(_TOAST, Output("gov-bye-body", "children", allow_duplicate=True), Input("gov-pol-save", "n_clicks"),
+                  State("gov-pol-key", "value"), State("gov-pol-value", "value"), prevent_initial_call=True)
+    @require_session
+    def gov_save_policy(n, key, value):
+        if not n or not key or not value:
+            return no_update, no_update
+        return _run(lambda uid, role, sid: rra.record_wizard_policy(
+                        uid, role, sid, sid, key, value, source="Settings (Society governance)"),
+                    lambda sid: (gs.bye_body(sid),), 1)
 
     @app.callback(_TOAST, Output("gov-mtg-body", "children", allow_duplicate=True),
                   Output("gov-res-mtg", "options", allow_duplicate=True), Input("gov-mtg-save", "n_clicks"),

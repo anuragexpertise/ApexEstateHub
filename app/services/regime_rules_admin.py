@@ -702,10 +702,7 @@ def record_wizard_adoption(actor_id, actor_role, actor_society_id, society_id: i
     Always provisional, always Layer 1, effective immediately but inert in the engine until a passed GBM
     resolution is recorded (Settings -> Society governance -> Meetings & Resolutions). An admin can only write their own society, and can only re-choose a clause
     that has no active (resolution-backed) row."""
-    if actor_role not in ("admin", "master"):
-        raise PermissionError("Admin role required.")
-    if actor_role == "admin" and int(actor_society_id or 0) != int(society_id):
-        raise PermissionError("You can only record bye-law choices for your own society.")
+    _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
     err = _validate_bye_law_save(society_id, clause_id, 1, choice, (variation_text or "").strip() or None)
     if err:
         return False, err
@@ -714,7 +711,8 @@ def record_wizard_adoption(actor_id, actor_role, actor_society_id, society_id: i
                       AND status <> 'provisional' AND resolution_id IS NOT NULL
                       AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)""", (society_id, clause_id))
     if active:
-        return False, f"{clause_id} is already backed by a resolution; change it from Master → AOA Rule Editor."
+        return False, (f"{clause_id} is already backed by a resolution; to change it, use Settings → Society governance → "
+                       f"Society By-laws (save a new choice, then record the resolution).")
     why = "Recorded in the Setup Wizard; awaiting GBM resolution"
     row = _row(
         """WITH upd AS (
@@ -757,13 +755,11 @@ def list_society_policies(society_id: int) -> dict[str, dict]:
 
 
 def record_wizard_policy(actor_id, actor_role, actor_society_id, society_id: int,
-                         policy_key: str, value: str) -> tuple[bool, str]:
-    """Setup Wizard drop-down: record a society-resolution policy choice. Always provisional - inert in the engine
-    until a passed resolution is recorded for the clause (activated automatically). Admin: own society only."""
-    if actor_role not in ("admin", "master"):
-        raise PermissionError("Admin role required.")
-    if actor_role == "admin" and int(actor_society_id or 0) != int(society_id):
-        raise PermissionError("You can only record policy choices for your own society.")
+                         policy_key: str, value: str, source: str = "Setup Wizard") -> tuple[bool, str]:
+    """Record a society-resolution policy choice (Setup Wizard, or Settings -> Society governance -> Society
+    By-laws). Always provisional - inert in the engine until a passed resolution is recorded for the clause
+    (activated automatically). Admin of that society only."""
+    _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
     spec = POLICY_SPECS.get(policy_key)
     if not spec:
         return False, f"Unknown policy {policy_key}."
@@ -783,9 +779,10 @@ def record_wizard_policy(actor_id, actor_role, actor_society_id, society_id: int
                                           reason, changed_by, changed_by_role)
            SELECT 'society_policy_settings', %(s)s, %(k)s, 'set', NULL,
                   jsonb_build_object('proposed', CAST(%(v)s AS text)),
-                  'Recorded in the Setup Wizard; awaiting resolution', %(uid)s, %(role)s
+                  %(why)s, %(uid)s, %(role)s
            RETURNING id""",
-        {"s": int(society_id), "k": policy_key, "v": value, "uid": actor_id, "role": actor_role})
+        {"s": int(society_id), "k": policy_key, "v": value, "uid": actor_id, "role": actor_role,
+         "why": f"Recorded in the {source}; awaiting resolution"})
     return (True, "Noted as provisional until you record the passed resolution.") if row else (False, "Nothing was saved.")
 
 

@@ -1845,7 +1845,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_execute_enactment",
-    "line": 146,
+    "line": 165,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1861,11 +1861,32 @@
     "public": false
   },
   {
+    "id": "callback:governance_callbacks.py::gov_policy_choices",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/governance_callbacks.py",
+    "function": "gov_policy_choices",
+    "line": 110,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "gov-pol-value",
+      "gov-pol-value",
+      "gov-pol-info"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:governance_callbacks.py::gov_prefill_majority",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_prefill_majority",
-    "line": 121,
+    "line": 140,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1922,7 +1943,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_save_meeting",
-    "line": 112,
+    "line": 131,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1938,11 +1959,30 @@
     "public": false
   },
   {
+    "id": "callback:governance_callbacks.py::gov_save_policy",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/governance_callbacks.py",
+    "function": "gov_save_policy",
+    "line": 119,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "gov-bye-body"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:governance_callbacks.py::gov_save_resolution",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_save_resolution",
-    "line": 133,
+    "line": 152,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"

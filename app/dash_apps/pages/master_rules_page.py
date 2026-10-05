@@ -177,6 +177,27 @@ def render_policy_section(society_id: int | None) -> list:
                      _table(["Setting", "In force now", "Status", "Pending choice"], rows, "No policy settings."))]
 
 
+def render_policy_form(society_id: int | None, p: str = "gov") -> html.Div:
+    """Record Policy Choice: pick a society policy setting, see what it controls, choose a value. Saved as
+    PROVISIONAL; the passed resolution on the setting's clause (decision type 'Set Society Policy') activates it."""
+    if not society_id:
+        return html.Div()
+    opts = [{"label": f"{label}  ({clause})", "value": key} for key, (label, clause, _c) in rra.POLICY_SPECS.items()]
+    return _section(
+        "Record Policy Choice",
+        "Society policy settings that the engine used to hard-code. Saved as provisional; it becomes active when you "
+        "record the passed resolution on the setting's clause (decision type: Set Society Policy). "
+        "Order matters: save the choice first, then record the resolution.",
+        _label("Setting"),
+        dcc.Dropdown(id=f"{p}-pol-key", options=opts, clearable=False, style={"fontSize": "12px"}, className="mb-2"),
+        html.Div(id=f"{p}-pol-info", className="mb-2"),
+        _label("Your choice"),
+        dbc.RadioItems(id=f"{p}-pol-value", options=[{"label": "Select a setting first", "value": "", "disabled": True}],
+                       className="small mb-2"),
+        dbc.Button("Save provisional policy choice", id=f"{p}-pol-save", color="warning", size="sm"),
+    )
+
+
 def render_bye_laws_form(society_id: int | None, p: str = "gov") -> html.Div:
     """Guided form: pick clause -> pick who decides (layer) -> only the choices that are allowed are offered, the
     clause title and notification link are shown for 'as-is', and a text box appears only for 'with variation'."""

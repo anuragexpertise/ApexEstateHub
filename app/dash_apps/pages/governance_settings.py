@@ -61,6 +61,33 @@ def mtg_body(society_id, can_execute: bool = False) -> list:
             + mrp.render_enactment_section(society_id, P, can_execute=can_execute))
 
 
+def policy_choice_ui(society_id, policy_key):
+    """(options, value, info) for the Record Policy Choice form: choices of that setting, the current/pending
+    one pre-selected, and a note on which clause's resolution activates it."""
+    spec = rra.POLICY_SPECS.get(policy_key)
+    if not spec:
+        return [{"label": "Select a setting first", "value": "", "disabled": True}], None, None
+    label, clause, choices = spec
+    try:
+        st = rra.list_society_policies(society_id).get(policy_key, {})
+    except Exception:
+        st = {}
+    names = dict(choices)
+    now = names.get(st.get("value"), st.get("value"))
+    pend = names.get(st.get("proposed")) if st.get("proposed") else None
+    lines = [html.Div([html.Strong(label, style={"fontSize": "12px"})]),
+             html.Div(f"Controlled by bye-law {clause} — {rra.clause_title(clause)}. It becomes active when you record a "
+                      f"passed 'Set Society Policy' resolution naming {clause}.", style={"fontSize": "12px"}),
+             html.Div(f"In force now: {now or 'default'}" + (f"  ·  pending: {pend}" if pend else ""),
+                      style={"fontSize": "12px", "color": "#666"})]
+    if policy_key.startswith("droppable_"):
+        lines.append(html.Div("Which clauses can legally be dropped is a legal call - confirm with an advocate.",
+                              style={"fontSize": "11px", "color": "#b26a00"}))
+    info = html.Div(lines, style={"padding": "10px 12px", "background": "#f6f8fb", "border": "1px solid #e1e7ef",
+                                  "borderRadius": "8px"})
+    return [{"label": text, "value": val} for val, text in choices], (st.get("proposed") or st.get("value")), info
+
+
 def bye_choice_ui(society_id, clause_id, layer):
     """(options, value) for the guided bye-law form. Only choices the rules allow are enabled."""
     if not clause_id:
@@ -176,6 +203,7 @@ def render_governance_tabs(role: str, sid, color: str = "#1859b8"):
     if is_admin:
         bye.append(_order_note())
         bye.append(mrp.render_bye_laws_form(society_id, P))
+        bye.append(mrp.render_policy_form(society_id, P))
 
     # ── Meetings & Resolutions ──────────────────────────────────────────────
     mtg = [html.Div(mtg_body(society_id, can_execute=is_admin), id=f"{P}-mtg-body")]

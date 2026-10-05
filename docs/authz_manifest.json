@@ -346,6 +346,9 @@
     "callback:governance_callbacks.py::gov_execute_enactment": {
       "classification": "legacy-gated"
     },
+    "callback:governance_callbacks.py::gov_policy_choices": {
+      "classification": "legacy-gated"
+    },
     "callback:governance_callbacks.py::gov_prefill_majority": {
       "classification": "legacy-gated"
     },
@@ -356,6 +359,9 @@
       "classification": "legacy-gated"
     },
     "callback:governance_callbacks.py::gov_save_meeting": {
+      "classification": "legacy-gated"
+    },
+    "callback:governance_callbacks.py::gov_save_policy": {
       "classification": "legacy-gated"
     },
     "callback:governance_callbacks.py::gov_save_resolution": {
