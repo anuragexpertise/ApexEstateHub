@@ -2155,9 +2155,9 @@ def register_drilldown_callbacks(app):
                         {"type": "error", "message": "Password must be at least 8 characters."}, 
                         no_update)
             
-            from app.services.society_service import create_society
+            from app.services.society_service import create_society_checked, SocietyCreateError
             try:
-                nsid = create_society({
+                nsid = create_society_checked({
                     "name": name,
                     "address": address,
                     "pan": pan,
@@ -2185,6 +2185,10 @@ def register_drilldown_callbacks(app):
                     {"type": "success", "message": f"Society '{name}' created successfully!"},
                     kpi_style,
                 )
+            except SocietyCreateError as e:
+                return (store, no_update, no_update,
+                        {"type": "error", "message": str(e)},
+                        no_update)
             except Exception as e:
                 return (store, no_update, no_update,
                         error_toast(e, "Unable to create the society. Please try again."),
@@ -4912,7 +4916,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     # while still sharing the "create/update a paired users login" logic.
     if role == "apartment":
         if is_edit:
-            email = (d.get("email") or "").strip()
+            email = (d.get("email") or "").strip().lower()
             pw = (d.get("password") or "").strip()
             # Only touch `users` if a value was actually given — apartments
             # created before this merge (or via a path that predates it)
@@ -4959,7 +4963,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         flat = (d.get("flat_number") or "").strip()
         if not flat:
             return False, "Flat number is required", None
-        email = (d.get("email") or "").strip()
+        email = (d.get("email") or "").strip().lower()
         if not email:
             return False, "Email is required", None
         pw = d.get("password", "")
@@ -5008,7 +5012,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     domain_table = "security_staff" if role == "security" else "vendors"
 
     if is_edit:
-        email = (d.get("email") or "").strip()
+        email = (d.get("email") or "").strip().lower()
         pw = (d.get("password") or "").strip()
         if email or pw:
             set_parts, params = [], []
@@ -5064,7 +5068,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             )
         return True, f"{role.title()} updated", pk
 
-    email = (d.get("email") or "").strip()
+    email = (d.get("email") or "").strip().lower()
     if not email:
         return False, "Email is required", None
     pw = d.get("password", "")
@@ -5125,7 +5129,7 @@ def _save_apartment_user(db, d, sid, is_edit, pk):
     from werkzeug.security import generate_password_hash
     from app.dash_apps.auth_layer import get_current_user_id, get_current_linked_id
     
-    email = (d.get("email") or "").strip()
+    email = (d.get("email") or "").strip().lower()
     if not email:
         return False, "Email is required", None
         

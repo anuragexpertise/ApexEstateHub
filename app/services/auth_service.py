@@ -99,18 +99,18 @@ def _fetch_user(email: str, society_id: int | None) -> dict | None:
                 """SELECT id, email, role, society_id, linked_id, is_master_admin, user_type,
                           password_hash, pin_hash, pattern_hash, locked_until
                     FROM users
-                   WHERE email = :email
+                   WHERE lower(email) = lower(:email)
                      AND (society_id IS NULL OR is_master_admin = TRUE)""",
-                {"email": email},
+                {"email": (email or "").strip()},
                 fetch_one=True,
             )
         return db._execute(
             """SELECT id, email, role, society_id, linked_id, is_master_admin, user_type,
                       password_hash, pin_hash, pattern_hash, locked_until
                 FROM users
-               WHERE email = :email
+               WHERE lower(email) = lower(:email)
                  AND society_id = :sid""",
-            {"email": email, "sid": society_id},
+            {"email": (email or "").strip(), "sid": society_id},
             fetch_one=True,
         )
     except Exception as exc:
@@ -200,8 +200,8 @@ def request_password_reset(email: str,
     """
     import hashlib
     try:
-        q = "SELECT id FROM users WHERE email = :email"
-        p: dict = {"email": email}
+        q = "SELECT id FROM users WHERE lower(email) = lower(:email)"
+        p: dict = {"email": (email or "").strip()}
         if society_id:
             q += " AND society_id = :sid"
             p["sid"] = society_id
