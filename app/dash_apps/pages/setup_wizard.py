@@ -667,8 +667,9 @@ def render_category_content(category, society_id=None, state=None):
     elif category == "Bye-Laws Adoption":
         # The society's bye-law register: for each Model Bye-Law 2011 clause the admin notes the intended outcome
         # (adopt as-is / adopt with variation / not adopted). Every choice is PROVISIONAL: it is stored with
-        # proposed_status and changes nothing in the engine until Master links a passed GBM resolution to it
-        # (Master → AOA Rule Editor → Society Bye-Laws). A clause nobody touches is governed by the Model
+        # proposed_status and changes nothing in the engine until the passed GBM resolution is recorded
+        # (Admin → Settings → Society governance → Meetings & Resolutions), which activates it automatically.
+        # A clause nobody touches is governed by the Model
         # Bye-Laws / Act as-is. Persistence is immediate, by callback (sw-bl-*), not on wizard submit.
         from app.services import regime_rules_admin as rra
         existing = {}
@@ -719,7 +720,8 @@ def render_category_content(category, society_id=None, state=None):
             ]))
         policy_panel = html.Div([
             html.H6("Society resolution settings", className="mt-3 mb-1"),
-            html.Small("Choices the engine used to hard-code. Provisional until Master links a passed resolution. "
+            html.Small("Choices the engine used to hard-code. Provisional until you record the passed resolution "
+                       "(Settings → Society governance → Meetings & Resolutions). "
                        "Clauses 7, 39, 49 and 55 are 'enforced by the engine' unless you allow them to be dropped; "
                        "which clauses are truly non-droppable is a legal call - confirm with an advocate.", className="text-muted d-block mb-2"),
             dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in ("Setting", "Choice", "Status")])),
@@ -729,7 +731,7 @@ def render_category_content(category, society_id=None, state=None):
             dbc.Alert([html.I(className="fas fa-scale-balanced me-2"),
                        "Record which Model Bye-Laws 2011 clauses your Association is adopting. These are ",
                        html.Strong("provisional"), " — nothing changes in how EstateHub treats dues, voting, NOC or filings "
-                       "until a General Body resolution is recorded and linked by Master. Clauses you leave alone follow the "
+                       "until you record the General Body meeting and its passed resolution. Clauses you leave alone follow the "
                        "Model Bye-Laws and the Act as written."], color="info", className="mb-3", style={"fontSize": "13px"}),
             html.Div([
                 html.Div([html.Strong("Who can change what"), html.Br(),
@@ -742,6 +744,13 @@ def render_category_content(category, society_id=None, state=None):
                                 html.Tbody(rows)], bordered=True, size="sm", hover=True),
                      style={"maxHeight": "420px", "overflowY": "auto"}),
             policy_panel,
+            dbc.Alert([html.I(className="fas fa-arrow-right me-2"), html.Strong("Next: "),
+                       "after the General Body meets, record the meeting and then the passed resolution under ",
+                       html.Strong("Settings → Society governance → Meetings & Resolutions"),
+                       ". That activates the choices above automatically. ",
+                       html.Strong("Order matters: save the choice first, then record the resolution. "
+                                   "An older resolution can't activate a newer choice.")],
+                      color="warning", className="mt-3", style={"fontSize": "13px"}),
         ]
     elif category == "UP AOA Compliance":
         # Read-only reference step: the tabulated Acts, Rules, Bye-laws and

@@ -424,6 +424,11 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
     ], className="portal-page")
 
 
+def _governance_summary(role: str, sid):
+    from app.dash_apps.pages.governance_settings import render_governance_summary
+    return render_governance_summary(role, sid)
+
+
 def _governance_tabs(role: str, sid):
     """Settings → RWA Compliance (UP) | Rules | Society By-laws | Meetings & Resolutions (admin / owner)."""
     from app.dash_apps.pages.governance_settings import render_governance_tabs
@@ -851,7 +856,8 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
     # ── Settings ──────────────────────────────────────────────────────────────
     if active_tab == "settings":
         return html.Div([
-            _page_title("fa-cog", c, "Settings", "accounts · charge rates"),
+            _page_title("fa-cog", c, "Settings", "accounts · charge rates · society governance"),
+            _governance_summary("admin", sid),
             _kpi_row_dynamic(
                 "admin", "settings", sid,
                 cols=KPI_GRID_COLS,
@@ -1003,6 +1009,7 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
     if active_tab in ("settings", "owner_settings"):
         return html.Div([
             _page_title("fa-cog", c, "My Profile & Settings"),
+            _governance_summary("apartment", sid),
             _kpi_row_dynamic(
                 "owner", "settings", sid,
                 cols=KPI_GRID_COLS,
