@@ -337,6 +337,30 @@
     "callback:fund_management_callbacks.py::submit_fund_utilization": {
       "classification": "unclassified"
     },
+    "callback:governance_callbacks.py::gov_bye_choices": {
+      "classification": "legacy-gated"
+    },
+    "callback:governance_callbacks.py::gov_bye_panel": {
+      "classification": "legacy-gated"
+    },
+    "callback:governance_callbacks.py::gov_execute_enactment": {
+      "classification": "legacy-gated"
+    },
+    "callback:governance_callbacks.py::gov_prefill_majority": {
+      "classification": "legacy-gated"
+    },
+    "callback:governance_callbacks.py::gov_save_bye_law": {
+      "classification": "legacy-gated"
+    },
+    "callback:governance_callbacks.py::gov_save_cash_mode": {
+      "classification": "legacy-gated"
+    },
+    "callback:governance_callbacks.py::gov_save_meeting": {
+      "classification": "legacy-gated"
+    },
+    "callback:governance_callbacks.py::gov_save_resolution": {
+      "classification": "legacy-gated"
+    },
     "callback:invite_to_callbacks.py::clear_invite_selections": {
       "classification": "exempt",
       "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
@@ -422,31 +446,7 @@
       "classification": "exempt",
       "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
     },
-    "callback:master_rules_callbacks.py::execute_enactment": {
-      "classification": "action",
-      "actions": [
-        "platform.rules.manage"
-      ]
-    },
-    "callback:master_rules_callbacks.py::link_bye_law": {
-      "classification": "action",
-      "actions": [
-        "platform.rules.manage"
-      ]
-    },
     "callback:master_rules_callbacks.py::prefill_catalog": {
-      "classification": "action",
-      "actions": [
-        "platform.rules.manage"
-      ]
-    },
-    "callback:master_rules_callbacks.py::prefill_resolution_majority": {
-      "classification": "action",
-      "actions": [
-        "platform.rules.manage"
-      ]
-    },
-    "callback:master_rules_callbacks.py::save_bye_law": {
       "classification": "action",
       "actions": [
         "platform.rules.manage"
@@ -459,18 +459,6 @@
       ]
     },
     "callback:master_rules_callbacks.py::save_catalog": {
-      "classification": "action",
-      "actions": [
-        "platform.rules.manage"
-      ]
-    },
-    "callback:master_rules_callbacks.py::save_meeting": {
-      "classification": "action",
-      "actions": [
-        "platform.rules.manage"
-      ]
-    },
-    "callback:master_rules_callbacks.py::save_resolution": {
       "classification": "action",
       "actions": [
         "platform.rules.manage"

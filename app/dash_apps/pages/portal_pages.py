@@ -288,7 +288,7 @@ _TYPE_BADGE_COLOR = {
 }
 
 
-def _rwa_compliance_up_page(c: str) -> html.Div:
+def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False) -> html.Div:
     """
     Master Portal → 'RWA Compliance (UP)' tab.
 
@@ -297,12 +297,17 @@ def _rwa_compliance_up_page(c: str) -> html.Div:
     research into legal_instrument_catalog (regime UP_AOA_2010) — a child
     table of the existing legal_regime_profiles jurisdiction system.
 
+    role / embedded: the same informational view is shown on the master, admin and owner portals
+    (embedded=True drops the page title when it is a tab inside Settings). Only role == 'master' gets
+    'Edit a catalog entry'; its callbacks are master-only on the server regardless of what is rendered.
+
     This table is new: on a database that hasn't had it integrated yet, the
     query below raises (relation does not exist), and rather than a raw
     500 we show the exact steps + SQL to push it live from Master Settings
     → KPI Inspector → "Integrate to DB", without needing a deploy.
     """
     from database.db_manager import db
+    from app.dash_apps.pages.master_rules_page import catalog_edit_form
 
     try:
         rows = db._execute(
@@ -316,10 +321,19 @@ def _rwa_compliance_up_page(c: str) -> html.Div:
     except Exception:
         rows = None  # table not integrated yet — show setup instructions instead
 
+    def _title():
+        return None if embedded else _page_title(
+            "fa-gavel", c, "RWA Compliance (UP)",
+            "Acts, Rules & Bye-laws governing RWAs / Apartment Owners' Associations in Uttar Pradesh")
+
+    if rows is None and role != "master":
+        return html.Div([_title(), dbc.Alert("The legal instrument catalog has not been set up yet. "
+                                             "Please contact the platform administrator.", color="warning")],
+                        className="portal-page")
+
     if rows is None:
         return html.Div([
-            _page_title("fa-gavel", c, "RWA Compliance (UP)",
-                        "Acts, Rules & Bye-laws governing RWAs / Apartment Owners' Associations in Uttar Pradesh"),
+            _title(),
             dbc.Alert([
                 html.H6([html.I(className="fas fa-database me-2"), "Not integrated yet"],
                         className="alert-heading", style={"fontWeight": "700"}),
@@ -384,21 +398,36 @@ def _rwa_compliance_up_page(c: str) -> html.Div:
 
     last_verified = max((r.get("last_verified_on") for r in rows if r.get("last_verified_on")), default=None)
 
+    if role == "master":
+        footer = [
+            html.Small(
+                "To add a new instrument, add it to LEGAL_INSTRUMENTS_UP_AOA in database/seed.py and re-run the seed. "
+                "Raw INSERT/UPDATE on this table through Integrate to DB is blocked.", className="text-muted"),
+            # 'Edit a catalog entry' — master only. Its save callback also writes mrl-toast / mrl-body, so both
+            # must exist on this page (mrl-body is a hidden sink; the rules tables live on the AOA Rule Editor).
+            html.Div(id="mrl-toast", className="mt-3"),
+            html.Div(id="mrl-body", style={"display": "none"}),
+            catalog_edit_form(),
+        ]
+    else:
+        footer = [html.Small("Informational. Changes to this catalog are made by the platform administrator.",
+                             className="text-muted")]
+
     return html.Div([
-        _page_title("fa-gavel", c, "RWA Compliance (UP)",
-                    "Acts, Rules & Bye-laws governing RWAs / Apartment Owners' Associations in Uttar Pradesh"),
+        _title(),
         _sec_hdr(f"{len(rows)} statutory instruments — UP_AOA_2010 regime",
                  f"last verified {last_verified}" if last_verified else "verification date not recorded",
                  "fa-scroll"),
         html.Div(sections),
         html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
-        html.Small(
-            "To change an entry's status, provisions, source or verified date, use Master → AOA Rule Editor "
-            "(validated and audited). To add a new instrument, add it to LEGAL_INSTRUMENTS_UP_AOA in "
-            "database/seed.py and re-run the seed. Raw INSERT/UPDATE on this table through Integrate to DB is blocked.",
-            className="text-muted",
-        ),
+        *footer,
     ], className="portal-page")
+
+
+def _governance_tabs(role: str, sid):
+    """Settings → RWA Compliance (UP) | Rules | Society By-laws | Meetings & Resolutions (admin / owner)."""
+    from app.dash_apps.pages.governance_settings import render_governance_tabs
+    return render_governance_tabs(role, sid, _C["admin" if role == "admin" else "apartment"])
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -828,6 +857,8 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
                 cols=KPI_GRID_COLS,
             ),
             _divider(), _drill_panel(),
+            _divider(),
+            _governance_tabs("admin", sid),
         ], className="portal-page")
 
     if active_tab == "evaluate_pass":
@@ -978,6 +1009,8 @@ def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> h
                 entity_id=apt_id,
             ),
             _divider(), _drill_panel(),
+            _divider(),
+            _governance_tabs("apartment", sid),
         ], className="portal-page")
 
     return html.Div([

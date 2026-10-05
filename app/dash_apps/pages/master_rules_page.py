@@ -57,6 +57,20 @@ def _fmt_audit_change(a):
     return f"status {old.get('status')} -> {new.get('status')}"
 
 
+def _kind_badge(statutory: bool):
+    return (dbc.Badge("Statute", color="danger", className="me-1", style={"fontSize": "10px"}) if statutory else
+            dbc.Badge("Policy", color="secondary", className="me-1", style={"fontSize": "10px"}))
+
+
+KIND_LEGEND = html.Div([
+    html.Div([_kind_badge(True), html.Span("A figure laid down by the Act, Rules or Bye-laws. Mandatory for every society; "
+                                           "it changes only when the law is amended.", style={"fontSize": "11px"})],
+             style={"marginBottom": "4px"}),
+    html.Div([_kind_badge(False), html.Span("A setting chosen by the platform (not a statute figure). Applies to every society "
+                                            "on the regime unless noted.", style={"fontSize": "11px"})]),
+], style={"padding": "10px 12px", "background": "#f6f8fb", "border": "1px solid #e1e7ef", "borderRadius": "8px"})
+
+
 def _status_badge(status: str) -> html.Span:
     colors = {
         "adopted_as_is": "success",
@@ -64,7 +78,9 @@ def _status_badge(status: str) -> html.Span:
         "not_adopted": "secondary",
         "provisional": "info",
     }
-    return dbc.Badge(status.replace("_", " ").title(), color=colors.get(status, "secondary"), className="me-1", style={"fontSize": "10px"})
+    label = {"adopted_as_is": "Adopted as-is", "adopted_with_variation": "Adopted with variation",
+             "not_adopted": "Not adopted", "provisional": "Provisional"}.get(status, status.replace("_", " ").title())
+    return dbc.Badge(label, color=colors.get(status, "secondary"), className="me-1", style={"fontSize": "10px"})
 
 
 def _layer_badge(layer: int) -> html.Span:
@@ -114,66 +130,59 @@ def render_bye_laws_sections(society_id: int | None = None) -> list:
     
     return [
         _section("Society Bye-Laws Register", "Layer 1 = Model Bye-Laws adoption (GBM). Layer 2 = Society Policy (GBM, tighten only). Layer 3 = Board Decision (MC). "
-                          "Provisional choices require a passed resolution to become active.",
+                          "A provisional choice becomes active automatically when you record a matching passed resolution (Meetings & Resolutions tab).",
                   _table(["Clause", "Layer", "Status", "Variation", "Effective", "State", "Resolution"], clause_rows,
                          "No bye-laws configured for this society.")),
     ]
 
 
-def render_bye_laws_form(society_id: int | None) -> html.Div:
-    """Form to save a provisional bye-law choice."""
+LAYER_HELP = {
+    1: ("Model Bye-Law adoption", "Decided by the General Body (GBM). Adopt a clause of the 2011 Model Bye-Laws as-is, "
+                                  "adopt it with a variation, or - for non-statutory clauses only - not adopt it."),
+    2: ("Society policy", "Decided by the General Body (GBM). Tightens an adopted clause for your society; "
+                          "it can never loosen the Model Bye-Law."),
+    3: ("Board decision", "Decided by the Managing Committee (MC). An operating setting within the limits of the "
+                          "adopted clause and society policy."),
+}
+CHOICE_LABELS = {"adopted_as_is": "Adopt as-is", "adopted_with_variation": "Adopt with variation",
+                 "not_adopted": "Not adopted"}
+
+
+def render_bye_laws_form(society_id: int | None, p: str = "gov") -> html.Div:
+    """Guided form: pick clause -> pick who decides (layer) -> only the choices that are allowed are offered, the
+    clause title and notification link are shown for 'as-is', and a text box appears only for 'with variation'."""
     if not society_id:
         return html.Div()
-    
+
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
     clause_opts = [{"label": f"{c[0]} — {c[1]}", "value": c[0]} for c in rra.MODEL_BYE_LAW_CLAUSES]
-    layer_opts = [{"label": f"Layer {l} — {'Model Bye-Law Adoption' if l==1 else 'Society Policy (GBM)' if l==2 else 'Board Decision (MC)'}", "value": l} for l in (1, 2, 3)]
-    status_opts = [{"label": {"adopted_as_is": "Adopt as-is", "adopted_with_variation": "Adopt with variation",
-                              "not_adopted": "Not adopted (non-statutory clauses only)"}[s], "value": s}
-                   for s in rra.ADOPTION_CHOICES]
-    
-    return _section(
-        "Save Provisional Bye-Law Choice", "Creates a provisional entry; becomes active only when linked to a passed resolution. "
-        "Layer 1: adopt/reject Model Bye-Law clause. Layer 2: tighten adopted clause (GBM). Layer 3: operational param (MC).",
-        dbc.Row([
-            dbc.Col([_label("Society"), dbc.Input(id="mrl-bye-soc", type="text", value=str(society_id), readonly=True, size="sm")], md=3),
-            dbc.Col([_label("Clause"), dcc.Dropdown(id="mrl-bye-clause", options=clause_opts, clearable=False, style={"fontSize": "12px"})], md=5),
-            dbc.Col([_label("Layer"), dcc.Dropdown(id="mrl-bye-layer", options=layer_opts, clearable=False, style={"fontSize": "12px"})], md=4),
-        ], className="mb-2"),
-        dbc.Row([
-            dbc.Col([_label("Choice"), dbc.RadioItems(id="mrl-bye-status", options=status_opts, value="adopted_as_is", className="small")], md=4),
-            dbc.Col([_label("Takes effect on"), dbc.Input(id="mrl-bye-eff", type="date", size="sm", value=tomorrow, min=tomorrow)], md=4),
-            dbc.Col([_label("Passed resolution ID (blank = save as provisional)"), dbc.Input(id="mrl-bye-res", type="number", size="sm")], md=4),
-        ], className="mb-2"),
-        _label("Variation text (only for 'Adopt with variation')"),
-        dbc.Textarea(id="mrl-bye-variation", rows=3, size="sm", className="mb-2", placeholder="Enter variation text..."),
-        _label("Reason for the change"),
-        dbc.Input(id="mrl-bye-reason", type="text", size="sm", className="mb-2", placeholder="Minimum 10 characters"),
-        dbc.Button("Save provisional choice", id="mrl-bye-save", color="warning", size="sm"),
-    )
+    layer_opts = [{"label": f"Layer {l} — {LAYER_HELP[l][0]}", "value": l} for l in (1, 2, 3)]
 
-
-def render_link_form(society_id: int | None) -> html.Div:
-    """Form to link provisional choice to a passed resolution."""
-    if not society_id:
-        return html.Div()
-    
-    clause_opts = [{"label": f"{c[0]} — {c[1]}", "value": c[0]} for c in rra.MODEL_BYE_LAW_CLAUSES]
-    layer_opts = [{"label": f"Layer {l}", "value": l} for l in (1, 2, 3)]
-    
     return _section(
-        "Link Provisional Choice to Passed Resolution", "When a GBM/MC passes a resolution on a bye-law, "
-        "link the provisional choice here to make it active. The resolution must match the clause and layer.",
+        "Save Provisional Bye-Law Choice",
+        "Step 1 of 2. Record what the society intends. It stays provisional until you record the matching passed "
+        "resolution under Meetings & Resolutions (step 2), which activates it automatically.",
         dbc.Row([
-            dbc.Col([_label("Society"), dbc.Input(id="mrl-link-soc", type="text", value=str(society_id), readonly=True, size="sm")], md=3),
-            dbc.Col([_label("Clause"), dcc.Dropdown(id="mrl-link-clause", options=clause_opts, clearable=False, style={"fontSize": "12px"})], md=5),
-            dbc.Col([_label("Layer"), dcc.Dropdown(id="mrl-link-layer", options=layer_opts, clearable=False, style={"fontSize": "12px"})], md=4),
+            dbc.Col([_label("Clause"), dcc.Dropdown(id=f"{p}-bye-clause", options=clause_opts, clearable=False,
+                                                    style={"fontSize": "12px"})], md=7),
+            dbc.Col([_label("Who decides (layer)"), dcc.Dropdown(id=f"{p}-bye-layer", options=layer_opts, value=1,
+                                                                 clearable=False, style={"fontSize": "12px"})], md=5),
         ], className="mb-2"),
+        html.Div(id=f"{p}-bye-layer-help", children=LAYER_HELP[1][1],
+                 style={"fontSize": "11px", "color": "#666", "marginBottom": "8px"}),
+        _label("Your choice"),
+        dbc.RadioItems(id=f"{p}-bye-status", options=[{"label": "Select a clause first", "value": "", "disabled": True}],
+                       className="small mb-2"),
+        html.Div(id=f"{p}-bye-info", className="mb-2"),
+        html.Div([
+            _label("Your variation — the exact wording the society adopts"),
+            dbc.Textarea(id=f"{p}-bye-variation", rows=3, size="sm", placeholder="Enter variation text..."),
+        ], id=f"{p}-bye-var-wrap", style={"display": "none"}, className="mb-2"),
         dbc.Row([
-            dbc.Col([_label("Resolution ID"), dbc.Input(id="mrl-link-res", type="number", size="sm")], md=4),
-            dbc.Col([_label("Reason"), dbc.Input(id="mrl-link-reason", type="text", size="sm")], md=8),
+            dbc.Col([_label("Takes effect on"), dbc.Input(id=f"{p}-bye-eff", type="date", size="sm", value=tomorrow, min=tomorrow)], md=4),
+            dbc.Col([_label("Reason for the change (min. 10 characters)"), dbc.Input(id=f"{p}-bye-reason", type="text", size="sm")], md=8),
         ], className="mb-2"),
-        dbc.Button("Link to Resolution", id="mrl-link-save", color="success", size="sm"),
+        dbc.Button("Save provisional choice", id=f"{p}-bye-save", color="warning", size="sm"),
     )
 
 
@@ -227,7 +236,7 @@ def render_meetings_sections(society_id: int | None = None) -> list:
     ]
 
 
-def render_meeting_form(society_id: int | None) -> html.Div:
+def render_meeting_form(society_id: int | None, p: str = "mrl") -> html.Div:
     """Form to create a meeting."""
     if not society_id:
         return html.Div()
@@ -238,21 +247,21 @@ def render_meeting_form(society_id: int | None) -> html.Div:
     return _section(
         "Record Meeting", "Create a new GBM, EGM, or MC meeting record. Quorum can be marked after the meeting.",
         dbc.Row([
-            dbc.Col([_label("Society"), dbc.Input(id="mrl-mtg-soc", type="text", value=str(society_id), readonly=True, size="sm")], md=3),
-            dbc.Col([_label("Type"), dcc.Dropdown(id="mrl-mtg-type", options=type_opts, clearable=False, style={"fontSize": "12px"})], md=4),
-            dbc.Col([_label("Held on"), dbc.Input(id="mrl-mtg-date", type="date", size="sm", value=tomorrow, max=date.today().isoformat())], md=3),
-            dbc.Col([_label("Quorum met"), dbc.Checkbox(id="mrl-mtg-quorum", label="Yes", value=False)], md=2),
+            dbc.Col([_label("Society"), dbc.Input(id=f"{p}-mtg-soc", type="text", value=str(society_id), readonly=True, size="sm")], md=3),
+            dbc.Col([_label("Type"), dcc.Dropdown(id=f"{p}-mtg-type", options=type_opts, clearable=False, style={"fontSize": "12px"})], md=4),
+            dbc.Col([_label("Held on"), dbc.Input(id=f"{p}-mtg-date", type="date", size="sm", value=tomorrow, max=date.today().isoformat())], md=3),
+            dbc.Col([_label("Quorum met"), dbc.Checkbox(id=f"{p}-mtg-quorum", label="Yes", value=False)], md=2),
         ], className="mb-2"),
         dbc.Row([
-            dbc.Col([_label("Minutes PDF path"), dbc.Input(id="mrl-mtg-minutes", type="text", size="sm", placeholder="/path/to/minutes.pdf")], md=8),
+            dbc.Col([_label("Minutes PDF path"), dbc.Input(id=f"{p}-mtg-minutes", type="text", size="sm", placeholder="/path/to/minutes.pdf")], md=8),
         ], className="mb-2"),
         _label("Reason / Notes"),
-        dbc.Textarea(id="mrl-mtg-reason", rows=2, size="sm", className="mb-2"),
-        dbc.Button("Save Meeting", id="mrl-mtg-save", color="warning", size="sm"),
+        dbc.Textarea(id=f"{p}-mtg-reason", rows=2, size="sm", className="mb-2"),
+        dbc.Button("Save Meeting", id=f"{p}-mtg-save", color="warning", size="sm"),
     )
 
 
-def render_resolution_form(society_id: int | None) -> html.Div:
+def render_resolution_form(society_id: int | None, p: str = "mrl") -> html.Div:
     """Form to create a resolution."""
     if not society_id:
         return html.Div()
@@ -280,27 +289,27 @@ def render_resolution_form(society_id: int | None) -> html.Div:
         "Record Resolution", "Create a resolution from a meeting. Decision type determines required body and majority. "
         "Link to a bye-law clause for Layer 1/2/3 enactments.",
         dbc.Row([
-            dbc.Col([_label("Society"), dbc.Input(id="mrl-res-soc", type="text", value=str(society_id), readonly=True, size="sm")], md=3),
-            dbc.Col([_label("Meeting"), dcc.Dropdown(id="mrl-res-mtg", options=meeting_opts, clearable=False, style={"fontSize": "12px"})], md=5),
-            dbc.Col([_label("Decision Type"), dcc.Dropdown(id="mrl-res-dt", options=dt_opts, clearable=False, style={"fontSize": "12px"})], md=4),
+            dbc.Col([_label("Society"), dbc.Input(id=f"{p}-res-soc", type="text", value=str(society_id), readonly=True, size="sm")], md=3),
+            dbc.Col([_label("Meeting"), dcc.Dropdown(id=f"{p}-res-mtg", options=meeting_opts, clearable=False, style={"fontSize": "12px"})], md=5),
+            dbc.Col([_label("Decision Type"), dcc.Dropdown(id=f"{p}-res-dt", options=dt_opts, clearable=False, style={"fontSize": "12px"})], md=4),
         ], className="mb-2"),
         dbc.Row([
-            dbc.Col([_label("Clause (optional)"), dcc.Dropdown(id="mrl-res-clause", options=clause_opts, style={"fontSize": "12px"})], md=6),
-            dbc.Col([_label("Majority % (from decision type)"), dbc.Input(id="mrl-res-majority", type="number", step="0.01", size="sm", readonly=True)], md=3),
+            dbc.Col([_label("Clause (optional)"), dcc.Dropdown(id=f"{p}-res-clause", options=clause_opts, style={"fontSize": "12px"})], md=6),
+            dbc.Col([_label("Majority % (from decision type)"), dbc.Input(id=f"{p}-res-majority", type="number", step="0.01", size="sm", readonly=True)], md=3),
         ], className="mb-2"),
         _label("Resolution Body"),
-        dbc.Textarea(id="mrl-res-body", rows=4, size="sm", className="mb-2", placeholder="Full text of the resolution..."),
+        dbc.Textarea(id=f"{p}-res-body", rows=4, size="sm", className="mb-2", placeholder="Full text of the resolution..."),
         dbc.Row([
-            dbc.Col([_label("Passed"), dbc.Checkbox(id="mrl-res-passed", label="Mark as passed", value=False)], md=4),
-            dbc.Col([_label("Passed on"), dbc.Input(id="mrl-res-passed-on", type="date", size="sm", value=date.today().isoformat())], md=4),
+            dbc.Col([_label("Passed"), dbc.Checkbox(id=f"{p}-res-passed", label="Mark as passed", value=False)], md=4),
+            dbc.Col([_label("Passed on"), dbc.Input(id=f"{p}-res-passed-on", type="date", size="sm", value=date.today().isoformat())], md=4),
         ], className="mb-2"),
         _label("Reason / Notes"),
-        dbc.Textarea(id="mrl-res-reason", rows=2, size="sm", className="mb-2"),
-        dbc.Button("Save Resolution", id="mrl-res-save", color="warning", size="sm"),
+        dbc.Textarea(id=f"{p}-res-reason", rows=2, size="sm", className="mb-2"),
+        dbc.Button("Save Resolution", id=f"{p}-res-save", color="warning", size="sm"),
     )
 
 
-def render_enactment_section(society_id: int | None) -> list:
+def render_enactment_section(society_id: int | None, p: str = "mrl", can_execute: bool = True) -> list:
     """Section to enact pending resolutions."""
     if not society_id:
         return []
@@ -322,8 +331,8 @@ def render_enactment_section(society_id: int | None) -> list:
             e.get('payload_json') or "—",
             e.get('status', 'pending'),
             html.Div([
-                dbc.Button("Execute", id={"type": "mrl-enact", "index": e['id']}, color="success", size="sm", outline=True),
-            ], style={"display": "flex", "gap": "4px"}),
+                dbc.Button("Execute", id={"type": f"{p}-enact", "index": e['id']}, color="success", size="sm", outline=True),
+            ], style={"display": "flex", "gap": "4px"}) if can_execute else html.Small("Master executes", className="text-muted"),
         ])
     
     return [
@@ -333,9 +342,12 @@ def render_enactment_section(society_id: int | None) -> list:
     ]
 
 
-def render_rules_sections() -> list:
-    """The three live tables: rules in force, scheduled changes, recent audit."""
-    rules = {r["rule_key"]: r for r in rra.effective_rules(REGIME)}
+def render_rules_sections(society_id: int | None = None) -> list:
+    """The three live tables: rules in force, scheduled changes, recent audit.
+    With society_id, the regime is the society's own and the audit log is that society's (plus regime-wide
+    rule changes that apply to it)."""
+    regime = (rra.society_regime(society_id) if society_id else None) or REGIME
+    rules = {r["rule_key"]: r for r in rra.effective_rules(regime)}
     rule_rows = []
     for key, spec in rra.RULE_SPECS.items():
         r = rules.get(key)
@@ -345,16 +357,18 @@ def render_rules_sections() -> list:
                                     html.Small(spec.label, className="text-muted")]),
                           _val(r), r.get("unit") or "", f"{r['effective_from']:%d %b %Y}",
                           html.Small(r.get("source_reference") or "", className="text-muted"),
-                          "statute" if spec.statutory else "policy"])
+                          _kind_badge(spec.statutory)])
     sched = [[s["rule_key"], _val(s), f"{s['effective_from']:%d %b %Y}", html.Small(s["source_reference"], className="text-muted")]
-             for s in rra.scheduled_rules(REGIME)]
+             for s in rra.scheduled_rules(regime)]
     audit = [[f"{a['changed_at']:%d %b %Y %H:%M}", a["target_table"].replace("regime_rule_parameters", "rule")
               .replace("legal_instrument_catalog", "catalog").replace("societies.cash_limit_mode", "society"),
               a.get("rule_key") or "", _fmt_audit_change(a), a["reason"], f"user {a.get('changed_by')}"]
-             for a in rra.recent_audit(25)]
-    n = rra.societies_on_regime(REGIME)
+             for a in rra.recent_audit(25, society_id)]
+    n = rra.societies_on_regime(regime)
+    blurb = (f"Your society is on {regime}. These are the rules in force for it today." if society_id else
+             f"{n} society(ies) are on {regime}. A change here applies to all of them from its effective date.")
     return [
-        _section("Rules in force today", f"{n} society(ies) are on {REGIME}. A change here applies to all of them from its effective date.",
+        _section("Rules in force today", blurb, KIND_LEGEND,
                  _table(["Rule", "Value", "Unit", "In force since", "Source", "Kind"], rule_rows,
                         "No rules found. Is estatehub.sql's UP AOA compliance layer loaded?")),
         _section("Scheduled changes", "Already queued; they take over automatically on their date.",
@@ -362,6 +376,49 @@ def render_rules_sections() -> list:
         _section("Audit log (last 25)", "Append-only: the database refuses edits and deletes of these rows.",
                  _table(["When", "Area", "Item", "Change", "Reason", "By"], audit, "No changes recorded yet.")),
     ]
+
+
+def cash_limit_form(p: str, soc_options=None, society_id=None, current_mode=None) -> html.Div:
+    """Cash-limit enforcement. Master picks a society; an admin's society is fixed (and re-checked server-side)."""
+    mode_opts = [{"label": "regime default", "value": ""}, {"label": "warn", "value": "warn"}, {"label": "block", "value": "block"}]
+    soc_col = (dbc.Col([_label("Society"), dcc.Dropdown(id=f"{p}-cash-soc", options=soc_options, style={"fontSize": "12px"})], md=5)
+               if soc_options is not None else
+               dbc.Col([_label("Current mode"), html.Div(current_mode or "regime default", style={"fontSize": "13px", "fontWeight": "600"})], md=5))
+    return _section(
+        "Cash-limit enforcement" + ("" if soc_options is not None else " (your society)"),
+        "warn = record a compliance flag; block = refuse the posting; blank = follow the regime default.",
+        dbc.Row([
+            soc_col,
+            dbc.Col([_label("Mode"), dcc.Dropdown(id=f"{p}-cash-mode", style={"fontSize": "12px"}, value=current_mode or "", options=mode_opts)], md=3),
+            dbc.Col([_label("Reason"), dbc.Input(id=f"{p}-cash-reason", type="text", size="sm")], md=4),
+        ], className="mb-2"),
+        dbc.Button("Save mode", id=f"{p}-cash-save", color="warning", size="sm"),
+    )
+
+
+def catalog_edit_form() -> html.Div:
+    """Master-only: edit a legal_instrument_catalog entry. Ids stay mrl-cat-* (master callbacks)."""
+    try:
+        instruments = rra.list_instruments(REGIME)
+    except Exception:
+        instruments = []
+    inst_opts = [{"label": f"[{i['instrument_type']}] {i['title']} ({i['enactment_year'] or 'n/a'})", "value": i["id"]}
+                 for i in instruments]
+    return _section(
+        "Edit a catalog entry", "Status, provisions, applicability, source and last-verified date. Entries are retired "
+        "(status = superseded), never deleted.",
+        _label("Instrument"), dcc.Dropdown(id="mrl-cat-id", options=inst_opts, style={"fontSize": "12px"}, className="mb-2"),
+        dbc.Row([
+            dbc.Col([_label("Status"), dcc.Dropdown(id="mrl-cat-status", clearable=False, style={"fontSize": "12px"},
+                                                    options=[{"label": x, "value": x} for x in rra.CATALOG_STATUSES])], md=4),
+            dbc.Col([_label("Last verified"), dbc.Input(id="mrl-cat-ver", type="date", size="sm", max=date.today().isoformat())], md=4),
+        ], className="mb-2"),
+        _label("Applicability"), dbc.Textarea(id="mrl-cat-app", rows=2, size="sm", className="mb-2"),
+        _label("Key provisions"), dbc.Textarea(id="mrl-cat-prov", rows=4, size="sm", className="mb-2"),
+        _label("Source reference"), dbc.Textarea(id="mrl-cat-src", rows=2, size="sm", className="mb-2"),
+        _label("Reason for the change"), dbc.Input(id="mrl-cat-reason", type="text", size="sm", className="mb-2"),
+        dbc.Button("Save catalog entry", id="mrl-cat-save", color="warning", size="sm"),
+    )
 
 
 def render_master_rules_page() -> html.Div:
@@ -372,12 +429,8 @@ def render_master_rules_page() -> html.Div:
         societies = rra.list_societies_cash_mode(REGIME)
     except Exception:   # tables not integrated yet
         instruments, societies = [], []
-    inst_opts = [{"label": f"[{i['instrument_type']}] {i['title']} ({i['enactment_year'] or 'n/a'})", "value": i["id"]}
-                 for i in instruments]
     soc_opts = [{"label": f"{s['name']} — {s['cash_limit_mode'] or 'regime default'}", "value": s["id"]} for s in societies]
     
-    default_society = societies[0]["id"] if societies else None
-
     rule_form = _section(
         "Change a rule", "Creates a NEW dated version; the current value is closed the day before. Back-dating is refused. "
         "Statutory figures need the amending instrument cited and an explicit confirmation.",
@@ -395,54 +448,17 @@ def render_master_rules_page() -> html.Div:
                      className="mb-2", style={"fontSize": "12px"}),
         dbc.Button("Save new version", id="mrl-save", color="warning", size="sm"),
     )
-    cat_form = _section(
-        "Edit a catalog entry", "Status, provisions, applicability, source and last-verified date. Entries are retired "
-        "(status = superseded), never deleted.",
-        _label("Instrument"), dcc.Dropdown(id="mrl-cat-id", options=inst_opts, style={"fontSize": "12px"}, className="mb-2"),
-        dbc.Row([
-            dbc.Col([_label("Status"), dcc.Dropdown(id="mrl-cat-status", clearable=False, style={"fontSize": "12px"},
-                                                        options=[{"label": s, "value": s} for s in rra.CATALOG_STATUSES])], md=4),
-            dbc.Col([_label("Last verified"), dbc.Input(id="mrl-cat-ver", type="date", size="sm", max=date.today().isoformat())], md=4),
-        ], className="mb-2"),
-        _label("Applicability"), dbc.Textarea(id="mrl-cat-app", rows=2, size="sm", className="mb-2"),
-        _label("Key provisions"), dbc.Textarea(id="mrl-cat-prov", rows=4, size="sm", className="mb-2"),
-        _label("Source reference"), dbc.Textarea(id="mrl-cat-src", rows=2, size="sm", className="mb-2"),
-        _label("Reason for the change"), dbc.Input(id="mrl-cat-reason", type="text", size="sm", className="mb-2"),
-        dbc.Button("Save catalog entry", id="mrl-cat-save", color="warning", size="sm"),
-    )
-    cash_form = _section(
-        "Cash-limit enforcement per society", "warn = record a compliance flag; block = refuse the posting; "
-        "blank = follow the regime default (cash_limit_default_mode above).",
-        dbc.Row([
-            dbc.Col([_label("Society"), dcc.Dropdown(id="mrl-cash-soc", options=soc_opts, style={"fontSize": "12px"})], md=5),
-            dbc.Col([_label("Mode"), dcc.Dropdown(id="mrl-cash-mode", style={"fontSize": "12px"}, value="",
-                                                  options=[{"label": "regime default", "value": ""},
-                                                           {"label": "warn", "value": "warn"}, {"label": "block", "value": "block"}])], md=3),
-            dbc.Col([_label("Reason"), dbc.Input(id="mrl-cash-reason", type="text", size="sm")], md=4),
-        ], className="mb-2"),
-        dbc.Button("Save mode", id="mrl-cash-save", color="warning", size="sm"),
-    )
-    
-    bye_laws_sections = render_bye_laws_sections(default_society)
-    bye_laws_form = render_bye_laws_form(default_society)
-    link_form = render_link_form(default_society)
-    
-    meetings_sections = render_meetings_sections(default_society)
-    meeting_form = render_meeting_form(default_society)
-    resolution_form = render_resolution_form(default_society)
-    enactment_section = render_enactment_section(default_society)
-    
+    # Master manages the law (rule values, catalog entries) and the per-society cash-limit mode.
+    # Bye-law adoption, meetings and resolutions are each society's own governance and are edited by that
+    # society's admin (Admin -> Settings), so they are not offered here. 'Edit a catalog entry' lives on
+    # RWA Compliance (UP).
     return html.Div([
         html.H4([html.I(className="fas fa-sliders-h me-2", style={"color": COLOR}), "AOA Rule Editor"], style={"fontWeight": "700"}),
-        html.P("Master-only. Every change is validated, dated and written to the audit log. Confirm any statutory change "
-               "with an advocate before relying on it.", style={"fontSize": "12px", "color": "#666"}),
+        html.P("Master-only. Statute figures change only when the law is amended; every change is validated, dated and "
+               "written to the audit log. Confirm any statutory change with an advocate before relying on it.",
+               style={"fontSize": "12px", "color": "#666"}),
         html.Div(id="mrl-toast"),
-        dcc.Tabs(id="mrl-tabs", value="tab-rules", children=[
-            dcc.Tab(label="Rules", value="tab-rules", children=html.Div(render_rules_sections(), id="mrl-body")),
-            dcc.Tab(label="Society Bye-Laws", value="tab-bye-laws", children=html.Div(bye_laws_sections, id="mrl-bye-body")),
-            dcc.Tab(label="Meetings & Resolutions", value="tab-mtg", children=html.Div(meetings_sections + enactment_section, id="mrl-mtg-body")),
-        ]),
-        rule_form, cat_form, cash_form,
-        bye_laws_form, link_form,
-        meeting_form, resolution_form,
+        html.Div(render_rules_sections(), id="mrl-body"),
+        rule_form,
+        cash_limit_form("mrl", soc_options=soc_opts),
     ], className="portal-page")
