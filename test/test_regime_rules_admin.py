@@ -149,7 +149,7 @@ def test_policy_key_needs_no_confirmation_and_cash_mode(pg):
     tomorrow = date.today() + timedelta(days=1)
     assert rra.save_rule_version(7, "master", UP, "cash_limit_default_mode", "block", tomorrow,
                                  "Board policy minute of 2026-10-03", "Tighten cash control", False)[0]
-    assert rra.set_cash_limit_mode(7, "master", SOC, "block", "Society asked for hard stop")[0]
+    assert rra.set_cash_limit_mode(7, "admin", SOC, "block", "Society asked for hard stop", actor_society_id=SOC)[0]
     pg.execute("SELECT cash_limit_mode FROM societies WHERE id=%s", (SOC,))
     assert pg.fetchone()["cash_limit_mode"] == "block"
     assert rra.set_cash_limit_mode(7, "master", SOC, "", "Back to regime default")[0]

@@ -452,12 +452,6 @@
         "platform.rules.manage"
       ]
     },
-    "callback:master_rules_callbacks.py::save_cash_mode": {
-      "classification": "action",
-      "actions": [
-        "platform.rules.manage"
-      ]
-    },
     "callback:master_rules_callbacks.py::save_catalog": {
       "classification": "action",
       "actions": [

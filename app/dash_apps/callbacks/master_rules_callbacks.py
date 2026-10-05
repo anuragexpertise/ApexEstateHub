@@ -1,7 +1,7 @@
 # app/dash_apps/callbacks/master_rules_callbacks.py
 """
 Callbacks for Master Portal -> "AOA Rule Editor" and the catalog form on "RWA Compliance (UP)". Master only:
-rule values, catalog entries and per-society cash-limit mode. Bye-law adoption, meetings and resolutions are
+rule values and catalog entries (cash-limit mode is society-specific: the admin's). Bye-law adoption, meetings and resolutions are
 the society admin's (callbacks/governance_callbacks.py). Thin wrappers: the role comes from the
 server-side Flask-Login session (never the browser's auth-store), the work is done by
 app.services.regime_rules_admin, and the body is re-rendered only after a successful save.
@@ -94,14 +94,3 @@ def register_master_rules_callbacks(app):
             return no_update, no_update
         role = get_current_user_role()
         return _run(lambda uid: rra.update_instrument(uid, role, iid, status, app_txt, prov, src, ver, reason))
-
-    @app.callback(_TOAST, _BODY, Input("mrl-cash-save", "n_clicks"),
-                  State("mrl-cash-soc", "value"), State("mrl-cash-mode", "value"), State("mrl-cash-reason", "value"),
-                  prevent_initial_call=True)
-    @require_session
-    @require_action(Cap.PLATFORM_RULES_MANAGE, "platform_rule", on_deny=_denied)
-    def save_cash_mode(n, soc, mode, reason):
-        if not n:
-            return no_update, no_update
-        role = get_current_user_role()
-        return _run(lambda uid: rra.set_cash_limit_mode(uid, role, soc, mode, reason))

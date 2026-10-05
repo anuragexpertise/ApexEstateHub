@@ -33,6 +33,16 @@ def _note(text: str):
                                  "background": "#f6f8fb", "border": "1px solid #e1e7ef", "borderRadius": "8px"})
 
 
+ORDER_NOTE = ("Order matters: save the choice first, then record the resolution. "
+              "An older resolution can't activate a newer choice.")
+
+
+def _order_note():
+    return html.Div([html.I(className="fas fa-info-circle me-2"), html.Strong(ORDER_NOTE)],
+                    style={"fontSize": "12px", "padding": "10px 12px", "marginTop": "16px", "background": "#fff8e1",
+                           "border": "1px solid #ffe08a", "borderRadius": "8px"})
+
+
 def _no_society():
     return html.Div("No society is linked to your account.", className="text-muted p-3")
 
@@ -131,6 +141,7 @@ def render_governance_tabs(role: str, sid, color: str = "#1859b8"):
     # ── Society By-laws ─────────────────────────────────────────────────────
     bye = [html.Div(bye_body(society_id), id=f"{P}-bye-body")]
     if is_admin:
+        bye.append(_order_note())
         bye.append(mrp.render_bye_laws_form(society_id, P))
 
     # ── Meetings & Resolutions ──────────────────────────────────────────────
@@ -138,9 +149,10 @@ def render_governance_tabs(role: str, sid, color: str = "#1859b8"):
     if is_admin:
         mtg.append(mrp.render_meeting_form(society_id, P))
         mtg.append(mrp.render_resolution_form(society_id, P))
-        mtg.append(_note("Step 2 of the bye-law process: when you record a PASSED resolution naming a clause, the "
-                         "matching provisional choice is activated automatically (right decision type, quorum and "
-                         "meeting body are checked). Record the meeting first, then the resolution."))
+        mtg.append(_order_note())
+        mtg.append(_note("When you record a PASSED resolution naming a clause, the matching provisional bye-law choice is "
+                         "activated automatically (decision type, quorum and meeting body are checked). Record the "
+                         "meeting first, then the resolution."))
 
     return _wrap(role, compliance, rules, bye, mtg)
 

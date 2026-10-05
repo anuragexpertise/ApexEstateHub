@@ -161,7 +161,8 @@ def render_bye_laws_form(society_id: int | None, p: str = "gov") -> html.Div:
     return _section(
         "Save Provisional Bye-Law Choice",
         "Step 1 of 2. Record what the society intends. It stays provisional until you record the matching passed "
-        "resolution under Meetings & Resolutions (step 2), which activates it automatically.",
+        "resolution under Meetings & Resolutions (step 2), which activates it automatically. "
+        "Order matters: save the choice first, then record the resolution.",
         dbc.Row([
             dbc.Col([_label("Clause"), dcc.Dropdown(id=f"{p}-bye-clause", options=clause_opts, clearable=False,
                                                     style={"fontSize": "12px"})], md=7),
@@ -332,7 +333,9 @@ def render_enactment_section(society_id: int | None, p: str = "mrl", can_execute
             e.get('status', 'pending'),
             html.Div([
                 dbc.Button("Execute", id={"type": f"{p}-enact", "index": e['id']}, color="success", size="sm", outline=True),
-            ], style={"display": "flex", "gap": "4px"}) if can_execute else html.Small("Master executes", className="text-muted"),
+            ], style={"display": "flex", "gap": "4px"}) if (can_execute and e.get("handler_name") != "set_regime_param") else html.Small(
+                "Regime-wide: Master changes it via Change a rule" if e.get("handler_name") == "set_regime_param"
+                else "Admin executes", className="text-muted"),
         ])
     
     return [
@@ -378,19 +381,17 @@ def render_rules_sections(society_id: int | None = None) -> list:
     ]
 
 
-def cash_limit_form(p: str, soc_options=None, society_id=None, current_mode=None) -> html.Div:
-    """Cash-limit enforcement. Master picks a society; an admin's society is fixed (and re-checked server-side)."""
+def cash_limit_form(p: str, current_mode=None) -> html.Div:
+    """Cash-limit enforcement for ONE society (the signed-in admin's; re-checked server-side). It is a
+    society-specific setting, so master has no form for it."""
     mode_opts = [{"label": "regime default", "value": ""}, {"label": "warn", "value": "warn"}, {"label": "block", "value": "block"}]
-    soc_col = (dbc.Col([_label("Society"), dcc.Dropdown(id=f"{p}-cash-soc", options=soc_options, style={"fontSize": "12px"})], md=5)
-               if soc_options is not None else
-               dbc.Col([_label("Current mode"), html.Div(current_mode or "regime default", style={"fontSize": "13px", "fontWeight": "600"})], md=5))
     return _section(
-        "Cash-limit enforcement" + ("" if soc_options is not None else " (your society)"),
+        "Cash-limit enforcement (your society)",
         "warn = record a compliance flag; block = refuse the posting; blank = follow the regime default.",
         dbc.Row([
-            soc_col,
-            dbc.Col([_label("Mode"), dcc.Dropdown(id=f"{p}-cash-mode", style={"fontSize": "12px"}, value=current_mode or "", options=mode_opts)], md=3),
-            dbc.Col([_label("Reason"), dbc.Input(id=f"{p}-cash-reason", type="text", size="sm")], md=4),
+            dbc.Col([_label("Mode"), dcc.Dropdown(id=f"{p}-cash-mode", style={"fontSize": "12px"}, value=current_mode or "",
+                                                  options=mode_opts, clearable=False)], md=4),
+            dbc.Col([_label("Reason (min. 10 characters)"), dbc.Input(id=f"{p}-cash-reason", type="text", size="sm")], md=8),
         ], className="mb-2"),
         dbc.Button("Save mode", id=f"{p}-cash-save", color="warning", size="sm"),
     )
@@ -424,13 +425,6 @@ def catalog_edit_form() -> html.Div:
 def render_master_rules_page() -> html.Div:
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
     rule_opts = [{"label": f"{k} — {s.label}", "value": k} for k, s in rra.RULE_SPECS.items()]
-    try:
-        instruments = rra.list_instruments(REGIME)
-        societies = rra.list_societies_cash_mode(REGIME)
-    except Exception:   # tables not integrated yet
-        instruments, societies = [], []
-    soc_opts = [{"label": f"{s['name']} — {s['cash_limit_mode'] or 'regime default'}", "value": s["id"]} for s in societies]
-    
     rule_form = _section(
         "Change a rule", "Creates a NEW dated version; the current value is closed the day before. Back-dating is refused. "
         "Statutory figures need the amending instrument cited and an explicit confirmation.",
@@ -448,10 +442,10 @@ def render_master_rules_page() -> html.Div:
                      className="mb-2", style={"fontSize": "12px"}),
         dbc.Button("Save new version", id="mrl-save", color="warning", size="sm"),
     )
-    # Master manages the law (rule values, catalog entries) and the per-society cash-limit mode.
+    # Master manages the law: Statute / Policy rule values (and catalog entries, on RWA Compliance (UP)).
     # Bye-law adoption, meetings and resolutions are each society's own governance and are edited by that
-    # society's admin (Admin -> Settings), so they are not offered here. 'Edit a catalog entry' lives on
-    # RWA Compliance (UP).
+    # society's admin (Admin -> Settings), as is the society-specific cash-limit mode, so none are offered here.
+    # 'Edit a catalog entry' lives on RWA Compliance (UP).
     return html.Div([
         html.H4([html.I(className="fas fa-sliders-h me-2", style={"color": COLOR}), "AOA Rule Editor"], style={"fontWeight": "700"}),
         html.P("Master-only. Statute figures change only when the law is amended; every change is validated, dated and "
@@ -460,5 +454,4 @@ def render_master_rules_page() -> html.Div:
         html.Div(id="mrl-toast"),
         html.Div(render_rules_sections(), id="mrl-body"),
         rule_form,
-        cash_limit_form("mrl", soc_options=soc_opts),
     ], className="portal-page")

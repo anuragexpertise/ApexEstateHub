@@ -2395,26 +2395,6 @@
     "public": false
   },
   {
-    "id": "callback:master_rules_callbacks.py::save_cash_mode",
-    "kind": "dash-callback",
-    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
-    "function": "save_cash_mode",
-    "line": 103,
-    "route": "/dashboard/_dash-update-component",
-    "methods": [
-      "POST"
-    ],
-    "outputs": [],
-    "guards": [
-      "require_action",
-      "require_session"
-    ],
-    "actions": [
-      "platform.rules.manage"
-    ],
-    "public": false
-  },
-  {
     "id": "callback:master_rules_callbacks.py::save_catalog",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",

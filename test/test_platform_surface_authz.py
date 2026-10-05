@@ -298,7 +298,6 @@ class Spy:
 MUTATORS = [
     ("save_rule", lambda: (1, "k", "v", "2026-04-01", "src", "reason", True), "save_rule_version"),
     ("save_catalog", lambda: (1, 3, "active", "app", "prov", "src", "2026-01-01", "reason"), "update_instrument"),
-    ("save_cash_mode", lambda: (1, 5, "strict", "reason"), "set_cash_limit_mode"),
 ]
 
 
