@@ -537,16 +537,28 @@ def clause_rules(society_id, clause_id: str) -> dict:
 
 
 MODEL_BYE_LAWS_REFERENCE = "UP Model Bye-Laws, notified 16 Nov 2011 (No. 3977/8-1-11-115D.A./02T.C.-I) under s.14(6) of the Act"
-# Official copy of the notification, hosted by UP-RERA. Override with the MODEL_BYE_LAWS_URL environment
-# variable (e.g. in .env / the host's config) if a different copy should be linked.
+# Official copy of the notification, hosted by UP-RERA. It is only the fallback: Master sets the link that
+# every society sees by putting an https:// URL in the Model Bye-Laws entry's 'Source reference'
+# (RWA Compliance (UP) -> Edit a catalog entry).
 MODEL_BYE_LAWS_DEFAULT_URL = "https://up-rera.in/pdf/Model-By-Laws.pdf"
+_URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 
 
 def model_bye_laws_source(regime_code: str = DEFAULT_REGIME) -> dict:
-    """{'reference', 'url'} for the notified Model Bye-Laws: MODEL_BYE_LAWS_URL if set, else the official copy."""
-    import os
-    url = (os.environ.get("MODEL_BYE_LAWS_URL") or "").strip() or MODEL_BYE_LAWS_DEFAULT_URL
-    return {"reference": MODEL_BYE_LAWS_REFERENCE, "url": url}
+    """{'reference', 'url'} for the notified Model Bye-Laws. The link is the first http(s) URL in the catalog's
+    Bye-laws entry 'Source reference' (editable by Master); if there is none, the official UP-RERA copy."""
+    url = None
+    try:
+        row = _row("""SELECT source_reference FROM legal_instrument_catalog
+                      WHERE regime_code = %(r)s AND instrument_type = 'Bye-laws' ORDER BY display_order, id LIMIT 1""",
+                   {"r": regime_code})
+    except Exception:
+        row = None
+    if row:
+        m = _URL_RE.search(row.get("source_reference") or "")
+        if m:
+            url = m.group(0).rstrip(".,;)")
+    return {"reference": MODEL_BYE_LAWS_REFERENCE, "url": url or MODEL_BYE_LAWS_DEFAULT_URL}
 
 
 def _validate_bye_law_save(society_id: int, clause_id: str, layer: int, choice: str, variation_text: str | None) -> str | None:
