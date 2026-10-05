@@ -45,6 +45,10 @@ CALLS = {
         1, role, 5, "BL_10", 1, 2, GOOD, actor_society_id=own),
     "link_policy_resolution": lambda role, own: rra.link_policy_resolution(
         1, role, 5, "nodues_blocks_on", 2, actor_society_id=own),
+    "record_wizard_policy": lambda role, own: rra.record_wizard_policy(
+        1, role, own, 5, "nodues_blocks_on", "loans_only"),
+    "record_wizard_adoption": lambda role, own: rra.record_wizard_adoption(
+        1, role, own, 5, "BL_10", "adopted_as_is", None),
 }
 
 
@@ -188,6 +192,63 @@ def test_pending_policies_are_matched_to_their_clause(monkeypatch):
                                                        {"policy_key": "nodues_blocks_on"}])
     assert rra._pending_policies(5, "BL_08") == ["vote_ineligibility_basis", "vote_loan_basis"]
     assert rra._pending_policies(5, "BL_39") == ["nodues_blocks_on"]
+
+
+# ── Record Policy Choice form ────────────────────────────────────────────────
+def test_own_admin_can_record_a_policy_choice(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(rra, "_row", lambda sql, params=None: (seen.update(params or {}), {"id": 1})[1])
+    ok, msg = rra.record_wizard_policy(1, "admin", 5, 5, "nodues_blocks_on", "dues_and_loans", source="Settings")
+    assert ok and "provisional" in msg and seen["k"] == "nodues_blocks_on" and seen["role"] == "admin"
+    assert seen["why"] == "Recorded in the Settings; awaiting resolution"
+
+
+def test_policy_choice_must_be_one_of_the_allowed_values():
+    assert rra.record_wizard_policy(1, "admin", 5, 5, "nodues_blocks_on", "bogus")[0] is False
+    assert rra.record_wizard_policy(1, "admin", 5, 5, "no_such_policy", "x")[0] is False
+
+
+def test_policy_form_lists_every_setting_and_saves_provisionally(stub):
+    tree = stub.render_governance_tabs("admin", 5)
+    ids = _ids(tree)
+    assert {"gov-pol-key", "gov-pol-value", "gov-pol-save", "gov-pol-info"} <= ids
+    text = str(tree)
+    assert "Record Policy Choice" in text and "Order matters: save the choice first" in text
+    for key, (label, _clause, _c) in rra.POLICY_SPECS.items():
+        assert label in text
+
+
+def test_owner_has_no_policy_form(stub):
+    assert not [i for i in _ids(stub.render_governance_tabs("apartment", 5)) if i.startswith("gov-pol-")]
+
+
+def test_policy_choice_ui_preselects_pending_then_current_and_names_the_clause(stub, monkeypatch):
+    monkeypatch.setattr(rra, "list_society_policies", lambda s: {
+        "vote_loan_basis": {"value": "margin_60_days", "active": False, "proposed": "any_overdue"}})
+    opts, value, info = stub.policy_choice_ui(5, "vote_loan_basis")
+    assert value == "any_overdue" and {o["value"] for o in opts} == {"margin_60_days", "any_overdue"}
+    assert "BL_08" in str(info) and "Set Society Policy" in str(info)
+    monkeypatch.setattr(rra, "list_society_policies", lambda s: {
+        "vote_loan_basis": {"value": "margin_60_days", "active": True, "proposed": None}})
+    assert stub.policy_choice_ui(5, "vote_loan_basis")[1] == "margin_60_days"
+
+
+def test_policy_choice_ui_without_a_setting_offers_nothing(stub):
+    opts, value, info = stub.policy_choice_ui(5, None)
+    assert value is None and info is None and opts[0]["disabled"]
+
+
+def test_droppable_policy_carries_the_legal_advice_note(stub, monkeypatch):
+    monkeypatch.setattr(rra, "list_society_policies", lambda s: {})
+    key = next(k for k in rra.POLICY_SPECS if k.startswith("droppable_"))
+    assert "advocate" in str(stub.policy_choice_ui(5, key)[2])
+
+
+def test_wizard_message_no_longer_points_at_the_removed_master_screen(monkeypatch):
+    monkeypatch.setattr(rra, "_validate_bye_law_save", lambda *a: None)
+    monkeypatch.setattr(rra, "_row", lambda *a, **k: {"x": 1})            # clause already backed
+    ok, msg = rra.record_wizard_adoption(1, "admin", 5, 5, "BL_10", "adopted_as_is", None)
+    assert ok is False and "Society governance" in msg and "Master" not in msg
 
 
 # ── Settings summary strip + policy register ─────────────────────────────────
