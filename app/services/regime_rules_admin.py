@@ -372,8 +372,8 @@ def update_instrument(actor_id, actor_role, instrument_id, status, applicability
 
 
 def set_cash_limit_mode(actor_id, actor_role, society_id, mode, reason, actor_society_id=None) -> tuple[bool, str]:
-    """mode: 'warn' | 'block' | '' (clear -> regime default)."""
-    _require_writer(actor_role, actor_society_id, society_id)
+    """mode: 'warn' | 'block' | '' (clear -> regime default). Society-specific, so only that society's admin."""
+    _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
     mode = (mode or "").strip().lower() or None
     if mode is not None and mode not in CASH_MODES:
         return False, "Mode must be warn, block, or blank for the regime default."
@@ -537,27 +537,16 @@ def clause_rules(society_id, clause_id: str) -> dict:
 
 
 MODEL_BYE_LAWS_REFERENCE = "UP Model Bye-Laws, notified 16 Nov 2011 (No. 3977/8-1-11-115D.A./02T.C.-I) under s.14(6) of the Act"
+# Official copy of the notification, hosted by UP-RERA. Override with the MODEL_BYE_LAWS_URL environment
+# variable (e.g. in .env / the host's config) if a different copy should be linked.
+MODEL_BYE_LAWS_DEFAULT_URL = "https://up-rera.in/pdf/Model-By-Laws.pdf"
 
 
 def model_bye_laws_source(regime_code: str = DEFAULT_REGIME) -> dict:
-    """{'reference', 'url'} for the notified Model Bye-Laws, taken from the catalog's own source reference
-    (or the MODEL_BYE_LAWS_URL environment variable). url is None when none is recorded: no URL is invented."""
+    """{'reference', 'url'} for the notified Model Bye-Laws: MODEL_BYE_LAWS_URL if set, else the official copy."""
     import os
-    url = (os.environ.get("MODEL_BYE_LAWS_URL") or "").strip() or None
-    ref = MODEL_BYE_LAWS_REFERENCE
-    try:
-        row = _row("""SELECT title, source_reference FROM legal_instrument_catalog
-                      WHERE regime_code = %(r)s AND instrument_type = 'Bye-laws' ORDER BY display_order, id LIMIT 1""",
-                   {"r": regime_code})
-    except Exception:
-        row = None
-    if row:
-        src = row.get("source_reference") or ""
-        m = re.search(r"https?://\S+", src)
-        if m and not url:
-            url = m.group(0).rstrip(".,;)")
-        ref = row.get("title") or ref
-    return {"reference": ref, "url": url}
+    url = (os.environ.get("MODEL_BYE_LAWS_URL") or "").strip() or MODEL_BYE_LAWS_DEFAULT_URL
+    return {"reference": MODEL_BYE_LAWS_REFERENCE, "url": url}
 
 
 def _validate_bye_law_save(society_id: int, clause_id: str, layer: int, choice: str, variation_text: str | None) -> str | None:

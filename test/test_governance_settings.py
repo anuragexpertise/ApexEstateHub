@@ -8,13 +8,21 @@ GOOD = "a long enough reason"
 
 
 # ── who may write ────────────────────────────────────────────────────────────
-def test_cash_mode_guard_allows_master_and_own_admin_only():
-    rra._require_writer("master", None, 5)
-    rra._require_writer("admin", 5, 5)
+def test_writer_guard_allows_only_the_societys_own_admin():
+    rra._require_writer("admin", 5, 5, master_ok=False)
     with pytest.raises(PermissionError):
-        rra._require_writer("admin", 5, 6)
+        rra._require_writer("master", None, 5, master_ok=False)
     with pytest.raises(PermissionError):
-        rra._require_writer("apartment", 5, 5)
+        rra._require_writer("admin", 5, 6, master_ok=False)
+    with pytest.raises(PermissionError):
+        rra._require_writer("apartment", 5, 5, master_ok=False)
+
+
+def test_cash_limit_mode_is_society_specific_so_master_cannot_set_it():
+    with pytest.raises(PermissionError, match="Admin role required"):
+        rra.set_cash_limit_mode(1, "master", 5, "block", GOOD)
+    with pytest.raises(PermissionError, match="own society"):
+        rra.set_cash_limit_mode(1, "admin", 5, "block", GOOD, actor_society_id=6)
 
 
 def test_own_admin_really_gets_past_the_guard():
@@ -207,12 +215,11 @@ def test_variation_shows_the_text_box(stub):
     assert show_var is True
 
 
-def test_no_invented_link_when_none_is_recorded(monkeypatch):
+def test_model_bye_laws_link_defaults_to_the_official_copy_and_can_be_overridden(monkeypatch):
     monkeypatch.delenv("MODEL_BYE_LAWS_URL", raising=False)
-    monkeypatch.setattr(rra, "_row", lambda *a, **k: {"title": "Model Bye-Laws", "source_reference": "Notification 3977, 16 Nov 2011"})
-    assert rra.model_bye_laws_source()["url"] is None
-    monkeypatch.setattr(rra, "_row", lambda *a, **k: {"title": "Model Bye-Laws", "source_reference": "see https://up.gov.test/x.pdf."})
-    assert rra.model_bye_laws_source()["url"] == "https://up.gov.test/x.pdf"
+    assert rra.model_bye_laws_source()["url"] == "https://up-rera.in/pdf/Model-By-Laws.pdf"
+    monkeypatch.setenv("MODEL_BYE_LAWS_URL", "https://example.test/mine.pdf")
+    assert rra.model_bye_laws_source()["url"] == "https://example.test/mine.pdf"
 
 
 # ── layout ───────────────────────────────────────────────────────────────────
@@ -257,7 +264,21 @@ def test_admin_has_the_four_tabs_and_the_governance_forms(stub):
     assert {"gov-cash-save", "gov-bye-save", "gov-bye-clause", "gov-bye-status", "gov-bye-var-wrap",
             "gov-mtg-save", "gov-res-save"} <= ids
     assert not {i for i in ids if "link" in i}                     # no manual link step any more
+    assert "Order matters: save the choice first, then record the resolution." in str(tree)
+    assert "An older resolution can't activate a newer choice." in str(tree)
     assert not ({"mrl-key", "mrl-save", "mrl-cat-save"} & ids)      # rule / catalog stay master-only
+
+
+def test_regime_wide_enactment_is_labelled_not_given_an_execute_button(monkeypatch):
+    from app.dash_apps.pages import master_rules_page as mrp
+    monkeypatch.setattr(rra, "list_pending_enactments", lambda s: [
+        {"id": 1, "resolution_id": 7, "decision_type_code": "X", "clause_id": None, "handler_name": "set_regime_param",
+         "payload_json": "{}", "status": "pending"},
+        {"id": 2, "resolution_id": 8, "decision_type_code": "SET_BOARD_PARAM", "clause_id": "BL_10",
+         "handler_name": "set_board_param", "payload_json": "{}", "status": "pending"}])
+    text = str(mrp.render_enactment_section(5, "gov", can_execute=True))
+    assert "Regime-wide: Master changes it via Change a rule" in text
+    assert text.count("'type': 'gov-enact'") == 1                  # only the society-level effect is executable
 
 
 def test_owner_is_read_only(stub):
@@ -280,8 +301,8 @@ def test_master_editor_is_rules_only(monkeypatch):
         page = mrp.render_master_rules_page()
     ids = _ids(page)
     assert _labels(page) == []                                       # no sub-tabs
-    assert {"mrl-save", "mrl-cash-save"} <= ids
-    assert not [i for i in ids if i.startswith(("mrl-bye", "mrl-mtg", "mrl-res", "mrl-link", "mrl-cat"))]
+    assert "mrl-save" in ids
+    assert not [i for i in ids if i.startswith(("mrl-bye", "mrl-mtg", "mrl-res", "mrl-link", "mrl-cat", "mrl-cash"))]
 
 
 def test_rules_table_labels_kind_as_statute_or_policy(monkeypatch):
