@@ -1800,6 +1800,164 @@
     "public": false
   },
   {
+    "id": "callback:governance_callbacks.py::gov_bye_choices",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/governance_callbacks.py",
+    "function": "gov_bye_choices",
+    "line": 89,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "gov-bye-status",
+      "gov-bye-status",
+      "gov-bye-layer-help"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:governance_callbacks.py::gov_bye_panel",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/governance_callbacks.py",
+    "function": "gov_bye_panel",
+    "line": 101,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "gov-bye-info",
+      "gov-bye-var-wrap"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:governance_callbacks.py::gov_execute_enactment",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/governance_callbacks.py",
+    "function": "gov_execute_enactment",
+    "line": 146,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "gov-mtg-body",
+      "gov-bye-body"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:governance_callbacks.py::gov_prefill_majority",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/governance_callbacks.py",
+    "function": "gov_prefill_majority",
+    "line": 121,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "gov-res-majority"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:governance_callbacks.py::gov_save_bye_law",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/governance_callbacks.py",
+    "function": "gov_save_bye_law",
+    "line": 75,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "gov-bye-body"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:governance_callbacks.py::gov_save_cash_mode",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/governance_callbacks.py",
+    "function": "gov_save_cash_mode",
+    "line": 64,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "gov-body"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:governance_callbacks.py::gov_save_meeting",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/governance_callbacks.py",
+    "function": "gov_save_meeting",
+    "line": 112,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "gov-mtg-body",
+      "gov-res-mtg"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:governance_callbacks.py::gov_save_resolution",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/governance_callbacks.py",
+    "function": "gov_save_resolution",
+    "line": 133,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "gov-mtg-body",
+      "gov-bye-body"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:invite_to_callbacks.py::clear_invite_selections",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/invite_to_callbacks.py",
@@ -2213,51 +2371,11 @@
     "public": true
   },
   {
-    "id": "callback:master_rules_callbacks.py::execute_enactment",
-    "kind": "dash-callback",
-    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
-    "function": "execute_enactment",
-    "line": 209,
-    "route": "/dashboard/_dash-update-component",
-    "methods": [
-      "POST"
-    ],
-    "outputs": [],
-    "guards": [
-      "require_action",
-      "require_session"
-    ],
-    "actions": [
-      "platform.rules.manage"
-    ],
-    "public": false
-  },
-  {
-    "id": "callback:master_rules_callbacks.py::link_bye_law",
-    "kind": "dash-callback",
-    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
-    "function": "link_bye_law",
-    "line": 157,
-    "route": "/dashboard/_dash-update-component",
-    "methods": [
-      "POST"
-    ],
-    "outputs": [],
-    "guards": [
-      "require_action",
-      "require_session"
-    ],
-    "actions": [
-      "platform.rules.manage"
-    ],
-    "public": false
-  },
-  {
     "id": "callback:master_rules_callbacks.py::prefill_catalog",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "prefill_catalog",
-    "line": 104,
+    "line": 78,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2277,53 +2395,11 @@
     "public": false
   },
   {
-    "id": "callback:master_rules_callbacks.py::prefill_resolution_majority",
-    "kind": "dash-callback",
-    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
-    "function": "prefill_resolution_majority",
-    "line": 181,
-    "route": "/dashboard/_dash-update-component",
-    "methods": [
-      "POST"
-    ],
-    "outputs": [
-      "mrl-res-majority"
-    ],
-    "guards": [
-      "require_action",
-      "require_session"
-    ],
-    "actions": [
-      "platform.rules.manage"
-    ],
-    "public": false
-  },
-  {
-    "id": "callback:master_rules_callbacks.py::save_bye_law",
-    "kind": "dash-callback",
-    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
-    "function": "save_bye_law",
-    "line": 143,
-    "route": "/dashboard/_dash-update-component",
-    "methods": [
-      "POST"
-    ],
-    "outputs": [],
-    "guards": [
-      "require_action",
-      "require_session"
-    ],
-    "actions": [
-      "platform.rules.manage"
-    ],
-    "public": false
-  },
-  {
     "id": "callback:master_rules_callbacks.py::save_cash_mode",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "save_cash_mode",
-    "line": 129,
+    "line": 103,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2343,47 +2419,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "save_catalog",
-    "line": 118,
-    "route": "/dashboard/_dash-update-component",
-    "methods": [
-      "POST"
-    ],
-    "outputs": [],
-    "guards": [
-      "require_action",
-      "require_session"
-    ],
-    "actions": [
-      "platform.rules.manage"
-    ],
-    "public": false
-  },
-  {
-    "id": "callback:master_rules_callbacks.py::save_meeting",
-    "kind": "dash-callback",
-    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
-    "function": "save_meeting",
-    "line": 171,
-    "route": "/dashboard/_dash-update-component",
-    "methods": [
-      "POST"
-    ],
-    "outputs": [],
-    "guards": [
-      "require_action",
-      "require_session"
-    ],
-    "actions": [
-      "platform.rules.manage"
-    ],
-    "public": false
-  },
-  {
-    "id": "callback:master_rules_callbacks.py::save_resolution",
-    "kind": "dash-callback",
-    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
-    "function": "save_resolution",
-    "line": 194,
+    "line": 92,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2403,7 +2439,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "save_rule",
-    "line": 93,
+    "line": 67,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2423,7 +2459,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "show_hint",
-    "line": 76,
+    "line": 50,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"

@@ -299,11 +299,6 @@ MUTATORS = [
     ("save_rule", lambda: (1, "k", "v", "2026-04-01", "src", "reason", True), "save_rule_version"),
     ("save_catalog", lambda: (1, 3, "active", "app", "prov", "src", "2026-01-01", "reason"), "update_instrument"),
     ("save_cash_mode", lambda: (1, 5, "strict", "reason"), "set_cash_limit_mode"),
-    ("save_bye_law", lambda: (1, 5, "7", 1, "adopted", "var", "2026-04-01", "reason", None), "save_bye_law_version"),
-    ("link_bye_law", lambda: (1, 5, "7", 1, 2, "reason"), "link_provisional_to_resolution"),
-    ("save_meeting", lambda: (1, 5, "agm", "2026-04-01", True, "min", "reason"), "create_meeting"),
-    ("save_resolution", lambda: (1, 5, 2, 3, "7", "body", 75, True, "2026-04-01", "reason"), "create_resolution"),
-    ("execute_enactment", lambda: ([1], [{"type": "mrl-enact", "index": 42}]), "execute_enactment"),
 ]
 
 
@@ -323,8 +318,7 @@ def test_non_platform_users_cannot_edit_aoa_rules(db, monkeypatch, mods, apps, w
 def test_master_can_edit_aoa_rules(db, monkeypatch, mods, apps, name, args, svc):
     spy = Spy()
     monkeypatch.setattr(mods["mr"].rra, svc, spy)
-    for r in ("render_rules_sections", "render_bye_laws_sections", "render_meetings_sections"):
-        monkeypatch.setattr(mods["mr"], r, lambda: "body")
+    monkeypatch.setattr(mods["mr"], "render_rules_sections", lambda: "body")
     login(monkeypatch, MASTER, mods.values())
     _call(apps["mr"][name], args())
     assert len(spy.calls) == 1
@@ -332,8 +326,7 @@ def test_master_can_edit_aoa_rules(db, monkeypatch, mods, apps, name, args, svc)
 
 
 @pytest.mark.parametrize("name,args", [("show_hint", lambda: ("k",)),
-                                       ("prefill_catalog", lambda: (3,)),
-                                       ("prefill_resolution_majority", lambda: (3,))])
+                                       ("prefill_catalog", lambda: (3,))])
 def test_rule_editor_read_helpers_are_platform_only(db, monkeypatch, mods, apps, name, args):
     login(monkeypatch, ADMIN, mods.values())
     assert _call(apps["mr"][name], args()) == "PREVENT_UPDATE"

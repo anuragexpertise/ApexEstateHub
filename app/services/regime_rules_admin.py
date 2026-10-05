@@ -97,6 +97,25 @@ def _require_master(role):
         raise PermissionError("Master role required.")
 
 
+def _require_writer(actor_role, actor_society_id, society_id, *, master_ok: bool = True):
+    """Who may write a society-level record.
+
+    A society admin may write ONLY their own society. Master may write any society only where master_ok is
+    True (cash-limit mode). Bye-law adoption, meetings, resolutions and enactment are the society's own
+    governance, so they pass master_ok=False: admin of that society only."""
+    if actor_role == "master" and master_ok:
+        return
+    if actor_role == "admin":
+        try:
+            same = int(actor_society_id) == int(society_id)
+        except (TypeError, ValueError):
+            same = False
+        if same:
+            return
+        raise PermissionError("You can only change records of your own society.")
+    raise PermissionError("Admin role required." if not master_ok else "Master role required.")
+
+
 def _d(value) -> date | None:
     if isinstance(value, datetime):
         return value.date()
@@ -218,11 +237,28 @@ def list_societies_cash_mode(regime_code: str) -> list[dict]:
            WHERE slr.regime_code = %(r)s ORDER BY s.name""", {"r": regime_code})
 
 
-def recent_audit(limit: int = 25) -> list[dict]:
+def recent_audit(limit: int = 25, society_id: int | None = None) -> list[dict]:
+    """Newest audit rows. With society_id: that society's own rows plus regime-wide rule changes
+    (which apply to it); never another society's rows."""
+    where, params = "", {"n": int(limit)}
+    if society_id is not None:
+        where = "WHERE a.society_id = %(s)s OR (a.society_id IS NULL AND a.target_table = 'regime_rule_parameters')"
+        params["s"] = int(society_id)
     return _rows(
-        """SELECT a.changed_at, a.target_table, a.regime_code, a.society_id, a.rule_key, a.action,
-                  a.old_value, a.new_value, a.reason, a.changed_by, a.changed_by_role
-           FROM regime_rule_audit a ORDER BY a.id DESC LIMIT %(n)s""", {"n": int(limit)})
+        f"""SELECT a.changed_at, a.target_table, a.regime_code, a.society_id, a.rule_key, a.action,
+                   a.old_value, a.new_value, a.reason, a.changed_by, a.changed_by_role
+            FROM regime_rule_audit a {where} ORDER BY a.id DESC LIMIT %(n)s""", params)
+
+
+def society_regime(society_id) -> str | None:
+    """The legal regime a society is on (None if not on one)."""
+    row = _row("SELECT regime_code FROM society_legal_regime WHERE society_id = %(s)s LIMIT 1", {"s": society_id})
+    return (row or {}).get("regime_code")
+
+
+def society_cash_mode(society_id) -> str | None:
+    row = _row("SELECT cash_limit_mode FROM societies WHERE id = %(s)s", {"s": society_id})
+    return (row or {}).get("cash_limit_mode")
 
 
 # ── writes ────────────────────────────────────────────────────────────────────
@@ -335,9 +371,9 @@ def update_instrument(actor_id, actor_role, instrument_id, status, applicability
     return (True, "Catalog entry updated.") if row else (False, "That instrument no longer exists.")
 
 
-def set_cash_limit_mode(actor_id, actor_role, society_id, mode, reason) -> tuple[bool, str]:
+def set_cash_limit_mode(actor_id, actor_role, society_id, mode, reason, actor_society_id=None) -> tuple[bool, str]:
     """mode: 'warn' | 'block' | '' (clear -> regime default)."""
-    _require_master(actor_role)
+    _require_writer(actor_role, actor_society_id, society_id)
     mode = (mode or "").strip().lower() or None
     if mode is not None and mode not in CASH_MODES:
         return False, "Mode must be warn, block, or blank for the regime default."
@@ -355,9 +391,9 @@ def set_cash_limit_mode(actor_id, actor_role, society_id, mode, reason) -> tuple
            INSERT INTO regime_rule_audit
                   (target_table, society_id, rule_key, action, old_value, new_value, reason, changed_by, changed_by_role)
            SELECT 'societies.cash_limit_mode', upd.id, 'cash_limit_mode', 'set',
-                  to_jsonb(b), to_jsonb(upd), %(why)s, %(uid)s, 'master'
+                  to_jsonb(b), to_jsonb(upd), %(why)s, %(uid)s, %(role)s
            FROM upd JOIN before_row b ON b.id = upd.id RETURNING id""",
-        {"sid": sid, "m": mode, "why": why, "uid": actor_id})
+        {"sid": sid, "m": mode, "why": why, "uid": actor_id, "role": actor_role})
     if not row:
         return False, "Society not found."
     return True, f"Cash-limit mode set to {mode or 'regime default'}."
@@ -487,6 +523,43 @@ MODEL_BYE_LAW_CLAUSES = [
 ]
 
 
+def clause_title(clause_id: str) -> str:
+    return dict(MODEL_BYE_LAW_CLAUSES).get(clause_id, clause_id)
+
+
+def clause_rules(society_id, clause_id: str) -> dict:
+    """What an admin may choose for a clause: locked (cannot be 'not adopted') / fixed (cannot be varied)."""
+    try:
+        locked = clause_is_locked(society_id, clause_id)
+    except Exception:
+        locked = clause_id in STATUTE_BACKED_CLAUSES
+    return {"title": clause_title(clause_id), "locked": locked, "fixed": clause_id == "BL_55"}
+
+
+MODEL_BYE_LAWS_REFERENCE = "UP Model Bye-Laws, notified 16 Nov 2011 (No. 3977/8-1-11-115D.A./02T.C.-I) under s.14(6) of the Act"
+
+
+def model_bye_laws_source(regime_code: str = DEFAULT_REGIME) -> dict:
+    """{'reference', 'url'} for the notified Model Bye-Laws, taken from the catalog's own source reference
+    (or the MODEL_BYE_LAWS_URL environment variable). url is None when none is recorded: no URL is invented."""
+    import os
+    url = (os.environ.get("MODEL_BYE_LAWS_URL") or "").strip() or None
+    ref = MODEL_BYE_LAWS_REFERENCE
+    try:
+        row = _row("""SELECT title, source_reference FROM legal_instrument_catalog
+                      WHERE regime_code = %(r)s AND instrument_type = 'Bye-laws' ORDER BY display_order, id LIMIT 1""",
+                   {"r": regime_code})
+    except Exception:
+        row = None
+    if row:
+        src = row.get("source_reference") or ""
+        m = re.search(r"https?://\S+", src)
+        if m and not url:
+            url = m.group(0).rstrip(".,;)")
+        ref = row.get("title") or ref
+    return {"reference": ref, "url": url}
+
+
 def _validate_bye_law_save(society_id: int, clause_id: str, layer: int, choice: str, variation_text: str | None) -> str | None:
     """Validate a society_bye_laws choice. Returns an error message or None."""
     if layer not in BYE_LAW_LAYERS:
@@ -538,12 +611,15 @@ def _check_resolution(society_id: int, clause_id: str, layer: int, resolution_id
 
 
 def save_bye_law_version(actor_id, actor_role, society_id: int, clause_id: str, layer: int, choice: str,
-                        variation_text: str | None, effective_from, reason: str, resolution_id: int | None = None) -> tuple[bool, str]:
+                        variation_text: str | None, effective_from, reason: str, resolution_id: int | None = None,
+                        actor_society_id=None) -> tuple[bool, str]:
     """Record a society's choice for a bye-law clause. Returns (ok, message).
 
     With no resolution the row is stored as 'provisional' (remembering the intended outcome in proposed_status)
-    and changes nothing in the engine; with a valid passed resolution it is stored active."""
-    _require_master(actor_role)
+    and changes nothing in the engine; with a valid passed resolution it is stored active. Admin of that society
+    only. Normally the admin saves it as provisional and it is activated automatically when a matching passed
+    resolution is recorded (see create_resolution / _auto_activate)."""
+    _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
     err = _validate_bye_law_save(society_id, clause_id, layer, choice, variation_text)
     if err:
         return False, err
@@ -588,10 +664,10 @@ def save_bye_law_version(actor_id, actor_role, society_id: int, clause_id: str, 
            INSERT INTO regime_rule_audit
                   (target_table, society_id, rule_key, action, old_value, new_value, reason, changed_by, changed_by_role)
            SELECT 'society_bye_laws', ins.society_id, ins.clause_id, 'new_version',
-                  (SELECT to_jsonb(closed) FROM closed), to_jsonb(ins), %(why)s, %(uid)s, 'master'
+                  (SELECT to_jsonb(closed) FROM closed), to_jsonb(ins), %(why)s, %(uid)s, %(role)s
            FROM ins RETURNING id""",
         {"s": society_id, "c": clause_id, "l": layer, "st": status, "pr": proposed, "vt": variation_text,
-         "res": resolution_id, "start": start, "why": why, "uid": actor_id})
+         "res": resolution_id, "start": start, "why": why, "uid": actor_id, "role": actor_role})
     if not row:
         return False, "Nothing was saved."
     state = "provisional until a passed resolution is linked" if status == "provisional" else "active"
@@ -753,22 +829,10 @@ def list_society_bye_laws_all_versions(society_id: int, clause_id: str | None = 
         params)
 
 
-def link_provisional_to_resolution(actor_id, actor_role, society_id: int, clause_id: str, layer: int,
-                                   resolution_id: int, reason: str) -> tuple[bool, str]:
-    """Link a provisional bye-law choice to a passed resolution, making it active."""
-    _require_master(actor_role)
-    why = _text(reason, MIN_TEXT)
-    if not why:
-        return False, f"Say why the choice is being confirmed (at least {MIN_TEXT} characters)."
-    _, rerr = _check_resolution(society_id, clause_id, layer, resolution_id)
-    if rerr:
-        return False, rerr
-    prov = _row("""SELECT * FROM society_bye_laws
-                   WHERE society_id = %(s)s AND clause_id = %(c)s AND layer = %(l)s AND status = 'provisional'
-                   ORDER BY effective_from DESC LIMIT 1""",
-                {"s": society_id, "c": clause_id, "l": layer})
-    if not prov:
-        return False, "No provisional choice found for this clause/layer."
+def _activate_provisional(actor_id, actor_role, society_id: int, prov: dict, clause_id: str, layer: int,
+                          resolution_id: int, why: str) -> tuple[bool, str]:
+    """Turn one provisional society_bye_laws row into an active one, backed by `resolution_id`."""
+    import json
     new_status = prov.get("proposed_status") or ("adopted_with_variation" if prov.get("variation_text") else "adopted_as_is")
     row = _row(
         """UPDATE society_bye_laws
@@ -777,15 +841,77 @@ def link_provisional_to_resolution(actor_id, actor_role, society_id: int, clause
         {"st": new_status, "res": resolution_id, "id": prov["id"]})
     if not row:
         return False, "Failed to update provisional choice."
-    import json
+
     def _json_safe(d):
-        return {k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in d.items()}
+        return {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in d.items()}
     db._execute(
         """INSERT INTO regime_rule_audit
                (target_table, society_id, rule_key, action, old_value, new_value, reason, changed_by, changed_by_role)
-           VALUES ('society_bye_laws', %s, %s, 'confirm_provisional', %s::jsonb, %s::jsonb, %s, %s, 'master')""",
-        (society_id, clause_id, json.dumps(_json_safe(prov)), json.dumps(_json_safe(dict(row))), why, actor_id))
+           VALUES ('society_bye_laws', %s, %s, 'confirm_provisional', %s::jsonb, %s::jsonb, %s, %s, %s)""",
+        (society_id, clause_id, json.dumps(_json_safe(prov)), json.dumps(_json_safe(dict(row))), why, actor_id, actor_role))
     return True, f"{clause_id} (layer {layer}) is now active as {new_status.replace('_', ' ')} via resolution #{resolution_id}."
+
+
+def _latest_provisional(society_id: int, clause_id: str, layer: int) -> dict | None:
+    return _row("""SELECT * FROM society_bye_laws
+                   WHERE society_id = %(s)s AND clause_id = %(c)s AND layer = %(l)s AND status = 'provisional'
+                   ORDER BY effective_from DESC LIMIT 1""", {"s": society_id, "c": clause_id, "l": layer})
+
+
+# Which stored choices each Layer-1 decision type can confirm.
+_LAYER1_DECISION_CHOICES = {
+    "ADOPT_BYE_LAW": ("adopted_as_is", "adopted_with_variation"),
+    "VARY_BYE_LAW": ("adopted_with_variation",),
+    "REJECT_BYE_LAW": ("not_adopted",),
+}
+
+
+def _auto_activate(actor_id, actor_role, society_id: int, resolution_id: int) -> list[str]:
+    """After a PASSED resolution naming a clause is recorded: activate the society's provisional choice for that
+    clause when the resolution is valid for it (_check_resolution: passed, same clause, right decision type for
+    the layer, quorum, right body) AND its decision type fits the choice (adopt/vary/reject). A resolution backs
+    at most one choice, so an old resolution can never confirm a newer choice. Returns user-facing notes."""
+    res = _row("""SELECT r.clause_id, dt.code AS dt_code FROM resolutions r
+                  JOIN decision_types dt ON dt.id = r.decision_type_id WHERE r.id = %s""", (resolution_id,))
+    if not res or not res["clause_id"]:
+        return []
+    if _row("SELECT 1 AS x FROM society_bye_laws WHERE resolution_id = %s", (resolution_id,)):
+        return []
+    clause = res["clause_id"]
+    notes: list[str] = []
+    for layer in BYE_LAW_LAYERS:
+        prov = _latest_provisional(society_id, clause, layer)
+        if not prov:
+            continue
+        _, err = _check_resolution(society_id, clause, layer, resolution_id)
+        if err:
+            continue      # this resolution is not the right kind for this layer
+        want = prov.get("proposed_status") or ("adopted_with_variation" if prov.get("variation_text") else "adopted_as_is")
+        if layer == 1 and want not in _LAYER1_DECISION_CHOICES.get(res["dt_code"], ()):
+            notes.append(f"{clause} stays provisional: a {res['dt_code']} resolution cannot confirm "
+                         f"'{want.replace('_', ' ')}'.")
+            continue
+        ok, msg = _activate_provisional(actor_id, actor_role, society_id, prov, clause, layer, resolution_id,
+                                        f"Activated automatically by passed resolution #{resolution_id}")
+        notes.append(msg if ok else f"{clause}: {msg}")
+    return notes
+
+
+def link_provisional_to_resolution(actor_id, actor_role, society_id: int, clause_id: str, layer: int,
+                                   resolution_id: int, reason: str, actor_society_id=None) -> tuple[bool, str]:
+    """Manually link a provisional choice to a passed resolution (service-level; the UI no longer offers this
+    because recording the resolution activates the choice automatically)."""
+    _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
+    why = _text(reason, MIN_TEXT)
+    if not why:
+        return False, f"Say why the choice is being confirmed (at least {MIN_TEXT} characters)."
+    _, rerr = _check_resolution(society_id, clause_id, layer, resolution_id)
+    if rerr:
+        return False, rerr
+    prov = _latest_provisional(society_id, clause_id, layer)
+    if not prov:
+        return False, "No provisional choice found for this clause/layer."
+    return _activate_provisional(actor_id, actor_role, society_id, prov, clause_id, layer, resolution_id, why)
 
 
 # ═════════════════════════════════════════════════════════════════════════════════
@@ -803,9 +929,9 @@ def list_meetings(society_id: int) -> list[dict]:
 
 
 def create_meeting(actor_id, actor_role, society_id: int, type: str, held_on, quorum_met: bool,
-                  minutes_pdf: str | None, reason: str) -> tuple[bool, str]:
-    """Create a new meeting record."""
-    _require_master(actor_role)
+                  minutes_pdf: str | None, reason: str, actor_society_id=None) -> tuple[bool, str]:
+    """Create a new meeting record (admin of that society only)."""
+    _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
     why = _text(reason, MIN_TEXT)
     if not why:
         return False, f"Say why the meeting is being recorded (at least {MIN_TEXT} characters)."
@@ -826,9 +952,9 @@ def create_meeting(actor_id, actor_role, society_id: int, type: str, held_on, qu
            INSERT INTO regime_rule_audit
                   (target_table, society_id, rule_key, action, old_value, new_value, reason, changed_by, changed_by_role)
            SELECT 'meetings', %s, 'meeting#' || ins.id, 'new_version',
-                  '{}'::jsonb, to_jsonb(ins), %s, %s, 'master'
+                  '{}'::jsonb, to_jsonb(ins), %s, %s, %s
            FROM ins RETURNING rule_key""",
-        (society_id, type, held, quorum_met, minutes_pdf, actor_id, society_id, why, actor_id))
+        (society_id, type, held, quorum_met, minutes_pdf, actor_id, society_id, why, actor_id, actor_role))
     if not row:
         return False, "Failed to create meeting."
     return True, f"Meeting #{row['rule_key'].split('#')[1]} ({type}) recorded for {held:%d %b %Y}."
@@ -855,9 +981,10 @@ def list_decision_types() -> list[dict]:
 
 def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, decision_type_id: int,
                       clause_id: str | None, body: str, majority_required: float,
-                      passed: bool, passed_on, reason: str) -> tuple[bool, str]:
-    """Create a new resolution record."""
-    _require_master(actor_role)
+                      passed: bool, passed_on, reason: str, actor_society_id=None) -> tuple[bool, str]:
+    """Create a new resolution record (admin of that society only). If it is passed and names a clause, any
+    matching provisional bye-law choice of the society is activated automatically."""
+    _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
     why = _text(reason, MIN_TEXT)
     if not why:
         return False, f"Say why the resolution is being recorded (at least {MIN_TEXT} characters)."
@@ -900,12 +1027,21 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
            INSERT INTO regime_rule_audit
                   (target_table, society_id, rule_key, action, old_value, new_value, reason, changed_by, changed_by_role)
            SELECT 'resolutions', %s, 'resolution#' || ins.id, 'new_version',
-                  '{}'::jsonb, to_jsonb(ins), %s, %s, 'master'
+                  '{}'::jsonb, to_jsonb(ins), %s, %s, %s
            FROM ins RETURNING rule_key""",
-        (meeting_id, clause_id, decision_type_id, body, maj, passed, passed_date, actor_id, society_id, why, actor_id))
+        (meeting_id, clause_id, decision_type_id, body, maj, passed, passed_date, actor_id, society_id, why, actor_id, actor_role))
     if not row:
         return False, "Failed to create resolution."
-    return True, f"Resolution #{row['rule_key'].split('#')[1]} created."
+    new_id = int(row["rule_key"].split("#")[1])
+    msg = f"Resolution #{new_id} created."
+    if passed and clause_id:
+        try:
+            notes = _auto_activate(actor_id, actor_role, society_id, new_id)
+        except Exception as exc:   # the resolution is saved; activation can be retried by recording again
+            notes = [f"Resolution saved, but automatic activation failed: {exc}"]
+        if notes:
+            msg += " " + " ".join(notes)
+    return True, msg
 
 
 def list_pending_enactments(society_id: int) -> list[dict]:
@@ -920,10 +1056,15 @@ def list_pending_enactments(society_id: int) -> list[dict]:
                  {"s": society_id})
 
 
-def execute_enactment(actor_id, actor_role, effect_id: int) -> tuple[bool, str]:
-    """Execute a pending resolution effect."""
-    _require_master(actor_role)
-    
+def execute_enactment(actor_id, actor_role, effect_id: int, actor_society_id=None) -> tuple[bool, str]:
+    """Execute a pending resolution effect.
+
+    Admin: only effects of their own society, and only society-scoped handlers (set_society_policy,
+    set_board_param). set_regime_param changes the rule for every society on the regime, so only Master may
+    apply it; an admin attempt is refused WITHOUT marking the effect failed."""
+    if actor_role not in ("admin", "master"):
+        raise PermissionError("Admin role required.")
+
     effect = _row("""SELECT re.*, r.meeting_id, r.clause_id, m.society_id, dt.code as decision_type_code
                      FROM resolution_effects re
                      JOIN resolutions r ON r.id = re.resolution_id
@@ -933,8 +1074,14 @@ def execute_enactment(actor_id, actor_role, effect_id: int) -> tuple[bool, str]:
                   (effect_id,))
     if not effect:
         return False, "Pending enactment not found."
-    
+
     society_id = effect["society_id"]
+    if actor_role == "admin":
+        _require_writer("admin", actor_society_id, society_id, master_ok=False)
+        if effect["handler_name"] == "set_regime_param":
+            return False, "A regime-wide rule change can only be applied by Master."
+    elif effect["handler_name"] != "set_regime_param":
+        raise PermissionError("Society enactments are executed by that society's admin.")
     
     # Execute based on handler
     try:
@@ -964,7 +1111,8 @@ def execute_enactment(actor_id, actor_role, effect_id: int) -> tuple[bool, str]:
             resolution_id = payload.get("resolution_id", effect["resolution_id"])
             if not clause_id or not effective_from:
                 raise ValueError("Missing required payload fields for set_society_policy")
-            ok, msg = save_bye_law_version(actor_id, actor_role, society_id, clause_id, layer, status, variation_text, effective_from, f"Enacted via resolution #{effect['resolution_id']}", resolution_id)
+            ok, msg = save_bye_law_version(actor_id, actor_role, society_id, clause_id, layer, status, variation_text, effective_from, f"Enacted via resolution #{effect['resolution_id']}", resolution_id,
+                                      actor_society_id=actor_society_id)
             if not ok:
                 raise ValueError(msg)
             
@@ -980,7 +1128,8 @@ def execute_enactment(actor_id, actor_role, effect_id: int) -> tuple[bool, str]:
             resolution_id = payload.get("resolution_id", effect["resolution_id"])
             if not clause_id or not effective_from:
                 raise ValueError("Missing required payload fields for set_board_param")
-            ok, msg = save_bye_law_version(actor_id, actor_role, society_id, clause_id, layer, status, variation_text, effective_from, f"Enacted via resolution #{effect['resolution_id']}", resolution_id)
+            ok, msg = save_bye_law_version(actor_id, actor_role, society_id, clause_id, layer, status, variation_text, effective_from, f"Enacted via resolution #{effect['resolution_id']}", resolution_id,
+                                      actor_society_id=actor_society_id)
             if not ok:
                 raise ValueError(msg)
         
