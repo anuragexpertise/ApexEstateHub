@@ -52,7 +52,7 @@ def rules_body(society_id) -> list:
 
 
 def bye_body(society_id) -> list:
-    return mrp.render_bye_laws_sections(society_id)
+    return mrp.render_bye_laws_sections(society_id) + mrp.render_policy_section(society_id)
 
 
 def mtg_body(society_id, can_execute: bool = False) -> list:
@@ -107,6 +107,39 @@ def bye_choice_panel(clause_id, layer, status):
     return box, status == "adopted_with_variation"
 
 
+def render_governance_summary(role: str, sid):
+    """Strip shown at the TOP of Settings so the governance section (further down) is easy to find."""
+    society_id = get_current_society_id() or sid
+    try:
+        society_id = int(society_id) if society_id else None
+    except (TypeError, ValueError):
+        society_id = None
+    if not society_id:
+        return None
+    snap = rra.governance_snapshot(society_id)
+    last = snap["last_meeting"]
+    last_txt = last.strftime("%d %b %Y") if hasattr(last, "strftime") else (str(last) if last else "none recorded")
+    pend = snap["pending_choices"]
+
+    def _stat(label, value, warn=False):
+        return html.Div([html.Div(label, style={"fontSize": "11px", "color": "#666"}),
+                         html.Div(value, style={"fontSize": "15px", "fontWeight": "700",
+                                                "color": "#b26a00" if warn else "inherit"})],
+                        style={"marginRight": "28px"})
+
+    verb = "record meetings and resolutions, and adopt bye-laws" if role == "admin" else "view your society's bye-laws, meetings and resolutions"
+    return html.Div([
+        html.Div([html.I(className="fas fa-gavel me-2"), html.Strong("Society governance")], style={"marginBottom": "6px"}),
+        html.Div([_stat("Last meeting", last_txt),
+                  _stat("Choices awaiting a resolution", str(pend), warn=pend > 0),
+                  _stat("Pending enactments", str(snap["pending_enactments"]), warn=snap["pending_enactments"] > 0)],
+                 style={"display": "flex", "flexWrap": "wrap", "marginBottom": "6px"}),
+        html.Small(f"Scroll down past the cards below to the Society governance tabs, where you can {verb}.",
+                   className="text-muted"),
+    ], style={"padding": "12px 14px", "margin": "8px 0 14px", "background": "#f6f8fb",
+              "border": "1px solid #e1e7ef", "borderRadius": "8px"})
+
+
 def render_governance_tabs(role: str, sid, color: str = "#1859b8"):
     """role: 'admin' (own-society forms) or 'apartment' (read-only). sid is only a fallback: the society
     comes from the server session."""
@@ -158,7 +191,7 @@ def render_governance_tabs(role: str, sid, color: str = "#1859b8"):
 
 
 def _wrap(role, compliance, rules, bye, mtg):
-    head = [html.H5("Society governance", style={"fontWeight": "700", "marginTop": "8px"})]
+    head = [html.H5("Society governance", id="society-governance", style={"fontWeight": "700", "marginTop": "8px"})]
     if role != "admin":
         head.append(html.Small("Read-only view for your society.", className="text-muted"))
     return html.Div([

@@ -415,7 +415,8 @@ ADOPTION_CHOICES = ("adopted_as_is", "adopted_with_variation", "not_adopted")
 STATUTE_BACKED_CLAUSES = ("BL_07", "BL_39", "BL_49", "BL_55")
 
 # Society-resolution policies chosen from drop-downs in the Setup Wizard. Stored in society_policy_settings as
-# PROVISIONAL rows; the engine (fn_society_policy) only reads a row once Master links a passed resolution.
+# PROVISIONAL rows; the engine (fn_society_policy) only reads a row once a passed resolution backs it (recording
+# that resolution activates it automatically - see _auto_activate).
 # key -> (label, clause the resolution must be about, ((value, label), ...)); the FIRST choice is the default.
 POLICY_SPECS: dict[str, tuple] = {
     "nodues_blocks_on": ("What blocks issuing a No Dues Certificate", "BL_39",
@@ -521,6 +522,25 @@ MODEL_BYE_LAW_CLAUSES = [
     ("BL_57", "Power of competent authority to inspect the building"),
     ("BL_58", "Amendment of Bye-Laws"),
 ]
+
+
+def governance_snapshot(society_id) -> dict:
+    """Numbers for the Settings summary strip: choices still awaiting a resolution, last meeting, open enactments."""
+    out = {"pending_choices": 0, "last_meeting": None, "pending_enactments": 0}
+    try:
+        r = _row("""SELECT (SELECT COUNT(*) FROM society_bye_laws WHERE society_id = %(s)s AND status = 'provisional') AS bl,
+                           (SELECT COUNT(*) FROM society_policy_settings WHERE society_id = %(s)s AND resolution_id IS NULL) AS pol,
+                           (SELECT MAX(held_on) FROM meetings WHERE society_id = %(s)s) AS last_meeting""",
+                 {"s": int(society_id)}) or {}
+        out["pending_choices"] = int(r.get("bl") or 0) + int(r.get("pol") or 0)
+        out["last_meeting"] = r.get("last_meeting")
+    except Exception:
+        pass
+    try:
+        out["pending_enactments"] = len(list_pending_enactments(society_id))
+    except Exception:
+        pass
+    return out
 
 
 def clause_title(clause_id: str) -> str:
@@ -671,7 +691,7 @@ def save_bye_law_version(actor_id, actor_role, society_id: int, clause_id: str, 
          "res": resolution_id, "start": start, "why": why, "uid": actor_id, "role": actor_role})
     if not row:
         return False, "Nothing was saved."
-    state = "provisional until a passed resolution is linked" if status == "provisional" else "active"
+    state = "provisional until you record the passed resolution" if status == "provisional" else "active"
     return True, f"Bye-law {clause_id} (layer {layer}) saved from {start:%d %b %Y} — {state}."
 
 
@@ -680,7 +700,7 @@ def record_wizard_adoption(actor_id, actor_role, actor_society_id, society_id: i
     """Setup Wizard: a society admin records which Model Bye-Law clauses the society intends to adopt.
 
     Always provisional, always Layer 1, effective immediately but inert in the engine until a passed GBM
-    resolution is linked by Master. An admin can only write their own society, and can only re-choose a clause
+    resolution is recorded (Settings -> Society governance -> Meetings & Resolutions). An admin can only write their own society, and can only re-choose a clause
     that has no active (resolution-backed) row."""
     if actor_role not in ("admin", "master"):
         raise PermissionError("Admin role required.")
@@ -739,7 +759,7 @@ def list_society_policies(society_id: int) -> dict[str, dict]:
 def record_wizard_policy(actor_id, actor_role, actor_society_id, society_id: int,
                          policy_key: str, value: str) -> tuple[bool, str]:
     """Setup Wizard drop-down: record a society-resolution policy choice. Always provisional - inert in the engine
-    until Master links a passed resolution (link_policy_resolution). Admin: own society only."""
+    until a passed resolution is recorded for the clause (activated automatically). Admin: own society only."""
     if actor_role not in ("admin", "master"):
         raise PermissionError("Admin role required.")
     if actor_role == "admin" and int(actor_society_id or 0) != int(society_id):
@@ -766,18 +786,19 @@ def record_wizard_policy(actor_id, actor_role, actor_society_id, society_id: int
                   'Recorded in the Setup Wizard; awaiting resolution', %(uid)s, %(role)s
            RETURNING id""",
         {"s": int(society_id), "k": policy_key, "v": value, "uid": actor_id, "role": actor_role})
-    return (True, "Noted as provisional until a resolution is linked.") if row else (False, "Nothing was saved.")
+    return (True, "Noted as provisional until you record the passed resolution.") if row else (False, "Nothing was saved.")
 
 
-def link_policy_resolution(actor_id, actor_role, society_id: int, policy_key: str, resolution_id: int) -> tuple[bool, str]:
-    """Master: make the society's provisional policy choice active by linking a passed Layer-2 resolution."""
-    _require_master(actor_role)
-    spec = POLICY_SPECS.get(policy_key)
-    if not spec:
-        return False, f"Unknown policy {policy_key}."
-    _, rerr = _check_resolution(int(society_id), spec[1], 2, int(resolution_id))
-    if rerr:
-        return False, rerr
+def _pending_policies(society_id: int, clause_id: str) -> list[str]:
+    """Policy keys of this society that belong to `clause_id` and still have a provisional (unresolved) choice."""
+    rows = _rows("SELECT policy_key FROM society_policy_settings WHERE society_id = %s AND resolution_id IS NULL",
+                 (int(society_id),))
+    return [r["policy_key"] for r in rows if POLICY_SPECS.get(r["policy_key"], (None, None))[1] == clause_id]
+
+
+def _activate_policy(actor_id, actor_role, society_id: int, policy_key: str, resolution_id: int,
+                     why: str) -> tuple[bool, str]:
+    """Make the society's provisional policy choice active, backed by a passed Layer-2 resolution."""
     row = _row(
         """WITH upd AS (
                UPDATE society_policy_settings SET resolution_id = %(r)s, effective_from = GREATEST(effective_from, CURRENT_DATE),
@@ -789,10 +810,26 @@ def link_policy_resolution(actor_id, actor_role, society_id: int, policy_key: st
                                           reason, changed_by, changed_by_role)
            SELECT 'society_policy_settings', %(s)s, %(k)s, 'confirm_provisional', NULL,
                   jsonb_build_object('value', upd.value_text, 'resolution_id', %(r)s),
-                  'Linked to passed resolution', %(uid)s, 'master'
+                  %(why)s, %(uid)s, %(role)s
              FROM upd RETURNING id""",
-        {"s": int(society_id), "k": policy_key, "r": int(resolution_id), "uid": actor_id})
-    return (True, "Policy is now active.") if row else (False, "No provisional choice to activate.")
+        {"s": int(society_id), "k": policy_key, "r": int(resolution_id), "uid": actor_id, "role": actor_role, "why": why})
+    label = POLICY_SPECS[policy_key][0]
+    return ((True, f"Policy '{label}' is now active via resolution #{resolution_id}.") if row
+            else (False, "No provisional choice to activate."))
+
+
+def link_policy_resolution(actor_id, actor_role, society_id: int, policy_key: str, resolution_id: int,
+                           actor_society_id=None) -> tuple[bool, str]:
+    """Manually link a provisional policy choice to a passed Layer-2 resolution (service-level; the UI relies on
+    automatic activation when the resolution is recorded). Admin of that society only."""
+    _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
+    spec = POLICY_SPECS.get(policy_key)
+    if not spec:
+        return False, f"Unknown policy {policy_key}."
+    _, rerr = _check_resolution(int(society_id), spec[1], 2, int(resolution_id))
+    if rerr:
+        return False, rerr
+    return _activate_policy(actor_id, actor_role, society_id, policy_key, resolution_id, "Linked to passed resolution")
 
 
 def list_society_bye_laws(society_id: int, on: date | None = None) -> list[dict]:
@@ -876,7 +913,9 @@ def _auto_activate(actor_id, actor_role, society_id: int, resolution_id: int) ->
                   JOIN decision_types dt ON dt.id = r.decision_type_id WHERE r.id = %s""", (resolution_id,))
     if not res or not res["clause_id"]:
         return []
-    if _row("SELECT 1 AS x FROM society_bye_laws WHERE resolution_id = %s", (resolution_id,)):
+    if _row("""SELECT 1 AS x FROM society_bye_laws WHERE resolution_id = %s
+               UNION ALL SELECT 1 FROM society_policy_settings WHERE resolution_id = %s LIMIT 1""",
+            (resolution_id, resolution_id)):
         return []
     clause = res["clause_id"]
     notes: list[str] = []
@@ -895,6 +934,17 @@ def _auto_activate(actor_id, actor_role, society_id: int, resolution_id: int) ->
         ok, msg = _activate_provisional(actor_id, actor_role, society_id, prov, clause, layer, resolution_id,
                                         f"Activated automatically by passed resolution #{resolution_id}")
         notes.append(msg if ok else f"{clause}: {msg}")
+
+    # Society policy choices (Setup Wizard) on this clause are Layer-2 decisions. One valid resolution on the
+    # clause confirms every pending policy choice of that clause (e.g. both BL_08 voting settings).
+    pending = _pending_policies(society_id, clause)
+    if pending:
+        _, err = _check_resolution(society_id, clause, 2, resolution_id)
+        if not err:
+            for key in pending:
+                ok, msg = _activate_policy(actor_id, actor_role, society_id, key, resolution_id,
+                                           f"Activated automatically by passed resolution #{resolution_id}")
+                notes.append(msg if ok else f"{key}: {msg}")
     return notes
 
 

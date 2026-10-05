@@ -148,6 +148,35 @@ CHOICE_LABELS = {"adopted_as_is": "Adopt as-is", "adopted_with_variation": "Adop
                  "not_adopted": "Not adopted"}
 
 
+def render_policy_section(society_id: int | None) -> list:
+    """The society's policy settings (chosen in the Setup Wizard): what the engine uses now and any pending choice."""
+    if not society_id:
+        return []
+    try:
+        pol = rra.list_society_policies(society_id)
+    except Exception:
+        pol = {}
+    if not pol:
+        return []
+    labels = {k: dict(v[2]) for k, v in rra.POLICY_SPECS.items()}
+    rows = []
+    for key, (label, clause, _choices) in rra.POLICY_SPECS.items():
+        st = pol.get(key) or {}
+        now = labels[key].get(st.get("value"), st.get("value") or "-")
+        pend = labels[key].get(st.get("proposed"), st.get("proposed")) if st.get("proposed") else None
+        rows.append([html.Div([html.Strong(label, style={"fontSize": "11px"}), html.Br(),
+                               html.Small(clause, className="text-muted")]),
+                     now,
+                     (_status_badge("provisional") if pend else
+                      dbc.Badge("Active (resolution on file)", color="success", style={"fontSize": "10px"}) if st.get("active")
+                      else dbc.Badge("Default", color="secondary", style={"fontSize": "10px"})),
+                     pend or "-"])
+    return [_section("Society policy settings",
+                     "Choices recorded in the Setup Wizard. A provisional choice is activated by the passed resolution on "
+                     "its clause (Meetings & Resolutions tab).",
+                     _table(["Setting", "In force now", "Status", "Pending choice"], rows, "No policy settings."))]
+
+
 def render_bye_laws_form(society_id: int | None, p: str = "gov") -> html.Div:
     """Guided form: pick clause -> pick who decides (layer) -> only the choices that are allowed are offered, the
     clause title and notification link are shown for 'as-is', and a text box appears only for 'with variation'."""

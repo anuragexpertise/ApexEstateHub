@@ -43,6 +43,8 @@ CALLS = {
                                                                  None, GOOD, actor_society_id=own),
     "link_provisional_to_resolution": lambda role, own: rra.link_provisional_to_resolution(
         1, role, 5, "BL_10", 1, 2, GOOD, actor_society_id=own),
+    "link_policy_resolution": lambda role, own: rra.link_policy_resolution(
+        1, role, 5, "nodues_blocks_on", 2, actor_society_id=own),
 }
 
 
@@ -122,6 +124,9 @@ def activation(monkeypatch):
         return None
 
     monkeypatch.setattr(rra, "_row", fake_row)
+    monkeypatch.setattr(rra, "_pending_policies", lambda s_, c: state.get("policies", []))
+    monkeypatch.setattr(rra, "_activate_policy",
+                        lambda *a: (state.setdefault("policy_done", []).append(a[3]), (True, f"Policy {a[3]} active."))[1])
     monkeypatch.setattr(rra, "_latest_provisional", lambda s, c, layer: state["prov"].get(layer))
     monkeypatch.setattr(rra, "_check_resolution", lambda s, c, layer, r: (None, state["check_err"]) if state["check_err"] else ({}, None))
     monkeypatch.setattr(rra, "_activate_provisional",
@@ -153,6 +158,83 @@ def test_a_resolution_backs_only_one_choice(activation):
 def test_no_provisional_choice_means_nothing_to_activate(activation):
     activation["prov"] = {}
     assert rra._auto_activate(1, "admin", 5, 7) == []
+
+
+# ── policy choices (Setup Wizard) are activated by the same resolution ──────────
+def test_passed_resolution_activates_every_pending_policy_of_that_clause(activation):
+    activation["prov"] = {}
+    activation["policies"] = ["vote_ineligibility_basis", "vote_loan_basis"]
+    notes = rra._auto_activate(1, "admin", 5, 7)
+    assert activation["policy_done"] == ["vote_ineligibility_basis", "vote_loan_basis"] and len(notes) == 2
+
+
+def test_invalid_resolution_activates_no_policy(activation):
+    activation["prov"] = {}
+    activation["policies"] = ["vote_loan_basis"]
+    activation["check_err"] = "The meeting that passed this resolution did not record a quorum."
+    assert rra._auto_activate(1, "admin", 5, 7) == [] and "policy_done" not in activation
+
+
+def test_a_resolution_already_backing_something_activates_no_policy(activation):
+    activation["prov"] = {}
+    activation["policies"] = ["vote_loan_basis"]
+    activation["linked"] = True
+    assert rra._auto_activate(1, "admin", 5, 7) == [] and "policy_done" not in activation
+
+
+def test_pending_policies_are_matched_to_their_clause(monkeypatch):
+    monkeypatch.setattr(rra, "_rows", lambda *a, **k: [{"policy_key": "vote_ineligibility_basis"},
+                                                       {"policy_key": "vote_loan_basis"},
+                                                       {"policy_key": "nodues_blocks_on"}])
+    assert rra._pending_policies(5, "BL_08") == ["vote_ineligibility_basis", "vote_loan_basis"]
+    assert rra._pending_policies(5, "BL_39") == ["nodues_blocks_on"]
+
+
+# ── Settings summary strip + policy register ─────────────────────────────────
+def test_snapshot_counts_pending_choices_and_last_meeting(monkeypatch):
+    import datetime
+    monkeypatch.setattr(rra, "_row", lambda *a, **k: {"bl": 2, "pol": 1, "last_meeting": datetime.date(2026, 8, 12)})
+    monkeypatch.setattr(rra, "list_pending_enactments", lambda s: [1])
+    snap = rra.governance_snapshot(5)
+    assert snap == {"pending_choices": 3, "last_meeting": datetime.date(2026, 8, 12), "pending_enactments": 1}
+
+
+def test_snapshot_never_raises_when_tables_are_missing(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("no table")
+    monkeypatch.setattr(rra, "_row", boom)
+    monkeypatch.setattr(rra, "list_pending_enactments", boom)
+    assert rra.governance_snapshot(5) == {"pending_choices": 0, "last_meeting": None, "pending_enactments": 0}
+
+
+def test_settings_summary_points_to_the_governance_section(stub, monkeypatch):
+    import datetime
+    monkeypatch.setattr(rra, "governance_snapshot",
+                        lambda s: {"pending_choices": 3, "last_meeting": datetime.date(2026, 8, 12), "pending_enactments": 0})
+    text = str(stub.render_governance_summary("admin", 5))
+    assert "12 Aug 2026" in text and "Choices awaiting a resolution" in text and "'3'" in text
+    assert "Society governance tabs" in text and "record meetings and resolutions" in text
+    assert "view your society" in str(stub.render_governance_summary("apartment", 5))
+
+
+def test_summary_is_empty_without_a_society(stub, monkeypatch):
+    monkeypatch.setattr(stub, "get_current_society_id", lambda: None)
+    assert stub.render_governance_summary("admin", None) is None
+
+
+def test_bye_law_tab_shows_the_policy_register(stub, monkeypatch):
+    monkeypatch.setattr(rra, "list_society_policies", lambda s: {
+        k: {"value": rra.policy_default(k), "active": False, "proposed": None} for k in rra.POLICY_SPECS})
+    text = str(stub.render_governance_tabs("admin", 5))
+    assert "Society policy settings" in text and "Pending choice" in text
+
+
+def test_setup_wizard_no_longer_says_master_links_resolutions():
+    src = open("app/dash_apps/pages/setup_wizard.py", encoding="utf-8").read()
+    for stale in ("linked by Master", "Master links", "Master → AOA Rule Editor → Society Bye-Laws"):
+        assert stale not in src, stale
+    assert "Settings → Society governance → Meetings & Resolutions" in src
+    assert "Order matters: save the choice first, then record the resolution." in src
 
 
 # ── guided bye-law form ──────────────────────────────────────────────────────
