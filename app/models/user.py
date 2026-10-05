@@ -52,7 +52,7 @@ class User(UserMixin):
     @staticmethod
     def find_by_email(email, society_id=None):
         try:
-            query  = "SELECT id, email, role, society_id, linked_id, is_master_admin FROM users WHERE email = %s"
+            query  = "SELECT id, email, role, society_id, linked_id, is_master_admin FROM users WHERE lower(email) = lower(%s)"
             params = [email]
             if society_id:
                 query  += " AND society_id = %s"
@@ -79,7 +79,7 @@ class User(UserMixin):
                 """INSERT INTO users (email, password_hash, role, society_id, name, login_method, created_by)
                    VALUES (%s, %s, %s, %s, %s, 'password', %s)
                    RETURNING id""",
-                (email, password_hash, role, society_id, name, created_by), fetch_one=True
+                ((email or "").strip().lower(), password_hash, role, society_id, name, created_by), fetch_one=True
             )
             if result:
                 return User.get(result['id'])

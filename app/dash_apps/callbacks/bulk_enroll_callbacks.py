@@ -162,33 +162,70 @@ def _instructions_for(entity: str) -> html.Div:
     ])
 
 
+def _friendly_error(e: Exception) -> str:
+    """Readable reason for a failed row; never leaks SQL/driver text to the screen."""
+    import logging
+    logging.getLogger(__name__).warning("bulk enroll row failed: %s", e)
+    msg = str(e)
+    for marker in ("\nCONTEXT:", "\nDETAIL:", "\nHINT:", "\nLINE "):
+        msg = msg.split(marker)[0]
+    msg = msg.strip()
+    low = msg.lower()
+    if "duplicate key" in low or "unique constraint" in low:
+        return "A record with the same unique value (email or flat number) already exists."
+    if "violates" in low or "constraint" in low or "does not exist" in low or "syntax" in low:
+        return "This row could not be saved - please check its values."
+    return msg or "This row could not be saved."
+
+
+def _existing_email_status(email: str, sid: int, role: str) -> str | None:
+    """'same' = already enrolled in this society with this role (leave untouched);
+    'other' = email belongs to a different society/role; None = free."""
+    row = db._execute(
+        "SELECT society_id, role FROM users WHERE lower(email) = %s", (email,), fetch_one=True)
+    if not row:
+        return None
+    return "same" if (row.get("society_id") == sid and row.get("role") == role) else "other"
+
+
 def _render_results(results: dict, filename: str) -> html.Div:
     success = results["success"]
     failed  = results["failed"]
+    skipped = results.get("skipped", [])
     children = []
     if success:
         children.append(html.Div([
             html.I(className="fas fa-check-circle me-2",
                    style={"color": "#17976e"}),
-            f"{success} row(s) enrolled successfully from «{filename}».",
+            f"{success} row(s) enrolled successfully from \u00ab{filename}\u00bb.",
         ], style={"color": "#17976e", "fontWeight": "600",
                   "marginBottom": "6px"}))
+    if skipped:
+        children.append(html.Div(
+            f"{len(skipped)} row(s) already enrolled - left unchanged "
+            "(nothing was overwritten).",
+            style={"color": "#7d8ea3", "fontWeight": "600", "marginTop": "6px"},
+        ))
     if failed:
         children.append(html.Div(
-            f"{len(failed)} row(s) skipped:",
-            style={"color": "#de5c52", "fontWeight": "600",
-                   "marginTop": "8px"},
+            f"{len(failed)} row(s) need correction. Fix them in your file and upload it again; "
+            "rows that were already enrolled will not be changed.",
+            style={"color": "#de5c52", "fontWeight": "600", "marginTop": "8px"},
         ))
-        children.append(html.Ul([
-            html.Li(f"Row {row_i}: {reason}",
-                    style={"fontSize": "12px", "color": "#de5c52"})
-            for row_i, reason in failed[:25]
-        ]))
-        if len(failed) > 25:
-            children.append(html.Small(
-                f"...and {len(failed) - 25} more errors not shown.",
-                style={"color": "#de5c52"},
-            ))
+        body = []
+        for item in failed:
+            row_i, reason = item[0], item[1]
+            label = item[2] if len(item) > 2 else ""
+            body.append(html.Tr([html.Td(str(row_i)), html.Td(label), html.Td(reason)]))
+        children.append(html.Div(
+            dbc.Table(
+                [html.Thead(html.Tr([html.Th("Row"), html.Th("Flat / Email"), html.Th("What to fix")])),
+                 html.Tbody(body)],
+                bordered=True, size="sm", striped=True,
+                style={"fontSize": "12px"},
+            ),
+            style={"maxHeight": "320px", "overflowY": "auto"},
+        ))
     if not children:
         children.append(html.Div("No rows processed.",
                                   style={"color": "#7d8ea3"}))
@@ -274,7 +311,8 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
     """
     required = _BULK_TEMPLATES["apartments"]["required"]
     success  = 0
-    failed: list[tuple[int, str]] = []
+    failed: list[tuple] = []
+    skipped: list[tuple] = []
 
     # A3: enforce the same plan apartment cap as single-add. Rows beyond the
     # remaining slots are reported as failed rather than silently inserted.
@@ -284,7 +322,16 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
     for i, row in enumerate(rows, start=2):   # row 1 = header
         err = _check_required(row, required)
         if err:
-            failed.append((i, err))
+            failed.append((i, err, str(row.get("email") or "")))
+            continue
+
+        _em = str(row.get("email") or "").strip().lower()
+        _st = _existing_email_status(_em, sid, "apartment")
+        if _st == "same":
+            skipped.append((i, "Already enrolled - left unchanged", _em))
+            continue
+        if _st == "other":
+            failed.append((i, "This email is already used by another account", _em))
             continue
 
         if slots_left <= 0:
@@ -297,7 +344,7 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
 
         _pw_err = validate_password(password)
         if _pw_err:
-            failed.append((i, _pw_err))
+            failed.append((i, _pw_err, _em))
             continue
 
         try:
@@ -338,13 +385,13 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
                     (sid, email, generate_password_hash(password), apt_id, user_id),
                 )
         except Exception as e:
-            failed.append((i, f"Insert failed (rolled back): {e}"))
+            failed.append((i, _friendly_error(e), _em))
             continue
 
         success += 1
         slots_left -= 1
 
-    return {"success": success, "failed": failed}
+    return {"success": success, "failed": failed, "skipped": skipped}
 
 
 def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dict:
@@ -359,12 +406,22 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
     """
     required = _BULK_TEMPLATES["vendors"]["required"]
     success  = 0
-    failed: list[tuple[int, str]] = []
+    failed: list[tuple] = []
+    skipped: list[tuple] = []
 
     for i, row in enumerate(rows, start=2):
         err = _check_required(row, required)
         if err:
-            failed.append((i, err))
+            failed.append((i, err, str(row.get("email") or "")))
+            continue
+
+        _em = str(row.get("email") or "").strip().lower()
+        _st = _existing_email_status(_em, sid, "vendor")
+        if _st == "same":
+            skipped.append((i, "Already enrolled - left unchanged", _em))
+            continue
+        if _st == "other":
+            failed.append((i, "This email is already used by another account", _em))
             continue
 
         email    = row["email"].strip().lower()
@@ -374,7 +431,7 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
 
         _pw_err = validate_password(password)
         if _pw_err:
-            failed.append((i, _pw_err))
+            failed.append((i, _pw_err, _em))
             continue
 
         try:
@@ -411,12 +468,12 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
                     (sid, email, generate_password_hash(password), ven_id, user_id),
                 )
         except Exception as e:
-            failed.append((i, f"Insert failed (rolled back): {e}"))
+            failed.append((i, _friendly_error(e), _em))
             continue
 
         success += 1
 
-    return {"success": success, "failed": failed}
+    return {"success": success, "failed": failed, "skipped": skipped}
 
 
 def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> dict:
@@ -429,12 +486,22 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
     """
     required = _BULK_TEMPLATES["security"]["required"]
     success  = 0
-    failed: list[tuple[int, str]] = []
+    failed: list[tuple] = []
+    skipped: list[tuple] = []
 
     for i, row in enumerate(rows, start=2):
         err = _check_required(row, required)
         if err:
-            failed.append((i, err))
+            failed.append((i, err, str(row.get("email") or "")))
+            continue
+
+        _em = str(row.get("email") or "").strip().lower()
+        _st = _existing_email_status(_em, sid, "security")
+        if _st == "same":
+            skipped.append((i, "Already enrolled - left unchanged", _em))
+            continue
+        if _st == "other":
+            failed.append((i, "This email is already used by another account", _em))
             continue
 
         email    = row["email"].strip().lower()
@@ -443,7 +510,7 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
 
         _pw_err = validate_password(password)
         if _pw_err:
-            failed.append((i, _pw_err))
+            failed.append((i, _pw_err, _em))
             continue
 
         try:
@@ -475,23 +542,33 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
                     (sid, email, generate_password_hash(password), sec_id, user_id),
                 )
         except Exception as e:
-            failed.append((i, f"Insert failed (rolled back): {e}"))
+            failed.append((i, _friendly_error(e), _em))
             continue
 
         success += 1
 
-    return {"success": success, "failed": failed}
+    return {"success": success, "failed": failed, "skipped": skipped}
 
 
 def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None) -> dict:
     required = _BULK_TEMPLATES["apartment_users"]["required"]
     success  = 0
-    failed: list[tuple[int, str]] = []
+    failed: list[tuple] = []
+    skipped: list[tuple] = []
 
     for i, row in enumerate(rows, start=2):
         err = _check_required(row, required)
         if err:
-            failed.append((i, err))
+            failed.append((i, err, str(row.get("email") or "")))
+            continue
+
+        _em = str(row.get("email") or "").strip().lower()
+        _st = _existing_email_status(_em, sid, "apartment")
+        if _st == "same":
+            skipped.append((i, "Already enrolled - left unchanged", _em))
+            continue
+        if _st == "other":
+            failed.append((i, "This email is already used by another account", _em))
             continue
 
         flat     = row["flat_number"].strip()
@@ -504,7 +581,7 @@ def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None
 
         _pw_err = validate_password(password)
         if _pw_err:
-            failed.append((i, _pw_err))
+            failed.append((i, _pw_err, _em))
             continue
 
         try:
@@ -526,9 +603,9 @@ def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None
                 )
             success += 1
         except Exception as e:
-            failed.append((i, f"Insert failed: {e}"))
+            failed.append((i, _friendly_error(e), _em))
 
-    return {"success": success, "failed": failed}
+    return {"success": success, "failed": failed, "skipped": skipped}
 
 def _bulk_insert_assets(rows: list[dict], sid: int, user_id: int = None) -> dict:
     required = _BULK_TEMPLATES["assets"]["required"]
@@ -749,6 +826,7 @@ def register_bulk_enroll_callbacks(app):
 
         n_ok   = results["success"]
         n_fail = len(results["failed"])
+        n_same = len(results.get("skipped", []))
         toast_type = (
             "success" if n_ok and not n_fail else
             "warning" if n_ok else
@@ -756,6 +834,7 @@ def register_bulk_enroll_callbacks(app):
         )
         toast = {"_toast": {
             "type":    toast_type,
-            "message": f"Bulk enroll: {n_ok} added, {n_fail} skipped.",
+            "message": (f"Bulk enroll: {n_ok} added, {n_same} already enrolled (unchanged), "
+                        f"{n_fail} need correction."),
         }}
         return result_ui, store, content, breadcrumb, toast
