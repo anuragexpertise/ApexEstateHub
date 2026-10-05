@@ -180,7 +180,7 @@ def create_app(config_name: str | None = None) -> Flask:
         import markdown
         base_dir = Path(__file__).parent.parent
         if doc_type == "readme":
-            file_path = base_dir / "README.md"
+            file_path = base_dir / "docs" / "ADMIN_QUICKSTART.md"
             title = "EstateHub Instructions"
         elif doc_type == "agreement":
             file_path = base_dir / "database" / "AGREEMENT.md"

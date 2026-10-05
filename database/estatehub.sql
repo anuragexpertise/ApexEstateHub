@@ -24,7 +24,7 @@ CREATE TABLE societies (
     TAN_number VARCHAR(10),
     logo VARCHAR(100),
     address TEXT,
-    email VARCHAR(30),
+    email VARCHAR(100),
     phone VARCHAR(20),
     secretary_name VARCHAR(100),
     secretary_phone VARCHAR(20),
@@ -79,7 +79,7 @@ CREATE TABLE societies (
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
     society_id INT REFERENCES societies (id) ON DELETE CASCADE,
-    email VARCHAR(30) NOT NULL UNIQUE,
+    email VARCHAR(100) NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     pin_hash TEXT,
     pattern_hash TEXT,
@@ -110,6 +110,13 @@ CREATE TABLE users (
     locked_until TIMESTAMP,
     reset_token VARCHAR(64),
     reset_token_expires TIMESTAMP,
+    -- A4: TRUE until the user sets a password of their own. Every account is
+    -- created with a password someone else chose (Master for the admin, the
+    -- admin for residents/vendors/guards), so this defaults to TRUE and is
+    -- cleared by change_password() / reset_password().
+    must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
+    -- A11: shared (cross-worker) 5-second throttle for Setup Wizard submits.
+    setup_submit_at TIMESTAMP,
     push_token TEXT,
     push_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     last_login TIMESTAMP,
@@ -10510,7 +10517,7 @@ CREATE OR REPLACE FUNCTION fn_societies_list(
 )
 RETURNS TABLE (
     id INT, name VARCHAR(100), PAN_number VARCHAR(10), TAN_number VARCHAR(10), logo VARCHAR(100),
-    address TEXT, email VARCHAR(30), phone VARCHAR(20), secretary_name VARCHAR(100),
+    address TEXT, email VARCHAR(100), phone VARCHAR(20), secretary_name VARCHAR(100),
     secretary_phone VARCHAR(20), secretary_email VARCHAR(100), secretary_sign VARCHAR(100),
     payment_qr VARCHAR(255), plan VARCHAR(20), plan_validity DATE, calc_start_date DATE,
     login_background VARCHAR(100), created_at TIMESTAMP, gstin VARCHAR(15),
@@ -10522,7 +10529,7 @@ BEGIN
     RETURN QUERY
     SELECT
         s.id::INT, s.name::VARCHAR(100), s.PAN_number::VARCHAR(10), s.TAN_number::VARCHAR(10), s.logo::VARCHAR(100),
-        s.address::TEXT, s.email::VARCHAR(30), s.phone::VARCHAR(20), s.secretary_name::VARCHAR(100),
+        s.address::TEXT, s.email::VARCHAR(100), s.phone::VARCHAR(20), s.secretary_name::VARCHAR(100),
         s.secretary_phone::VARCHAR(20), s.secretary_email::VARCHAR(100), s.secretary_sign::VARCHAR(100),
         s.payment_qr::VARCHAR(255), s.plan::VARCHAR(20), s.plan_validity::DATE, s.calc_start_date::DATE,
         s.login_background::VARCHAR(100), s.created_at::TIMESTAMP, s.gstin::VARCHAR(15),
@@ -10549,7 +10556,7 @@ $$;
 CREATE OR REPLACE FUNCTION fn_society_profile(p_society_id INT)
 RETURNS TABLE (
     id INT, name VARCHAR(100), logo VARCHAR(100), login_background VARCHAR(100),
-    email VARCHAR(30), phone VARCHAR(20), address TEXT, plan VARCHAR(20),
+    email VARCHAR(100), phone VARCHAR(20), address TEXT, plan VARCHAR(20),
     plan_status VARCHAR(10), plan_validity DATE, calc_start_date DATE,
     secretary_name VARCHAR(100), secretary_phone VARCHAR(20), secretary_sign VARCHAR(100),
     PAN_number VARCHAR(10), gstin VARCHAR(15), payment_qr VARCHAR(255),
@@ -13279,7 +13286,7 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_bf_fy             INT,
     p_bf_json           JSONB,
     p_created_by        INT,  -- kept for signature compat; no longer stored (apt/ven charge basis and brought_forward are admin-only, so created_by/updated_by were removed from those tables)
-    p_email             VARCHAR(30) DEFAULT NULL,
+    p_email             VARCHAR(100) DEFAULT NULL,
     p_reg_num           VARCHAR(100) DEFAULT NULL,
     p_apt_interest      NUMERIC DEFAULT 0,
     p_sinking_fund_basis VARCHAR(20) DEFAULT 'per_sq_ft',
@@ -13292,13 +13299,17 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_export_fmt        VARCHAR(20) DEFAULT 'structured',
     p_gate_logic        VARCHAR(10) DEFAULT 'both',
     p_duty_hrs           VARCHAR(2) DEFAULT '8',
-    p_tds_effective_date DATE DEFAULT '2024-04-01'
+    p_tds_effective_date DATE DEFAULT NULL,
+    p_state              VARCHAR(50) DEFAULT NULL
 ) RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
     v_item   JSONB;
     v_apt_id INT;
     v_ven_id INT;
     v_gst_id INT;
+    v_tds_eff DATE;
+    v_dr NUMERIC;
+    v_cr NUMERIC;
 BEGIN
     IF p_society_id IS NULL THEN
         RETURN 'Error: society not identified';
@@ -13311,30 +13322,63 @@ BEGIN
         END IF;
     END IF;
 
+    -- A8: no stale hard-coded date. When the caller sends none, default to the
+    -- start of the CURRENT Indian financial year (1 April).
+    v_tds_eff := COALESCE(
+        p_tds_effective_date,
+        make_date(
+            CASE WHEN EXTRACT(MONTH FROM CURRENT_DATE) >= 4
+                 THEN EXTRACT(YEAR FROM CURRENT_DATE)::INT
+                 ELSE EXTRACT(YEAR FROM CURRENT_DATE)::INT - 1 END,
+            4, 1)
+    );
+
+    -- A9: opening balances must balance (Dr = Cr). Checked BEFORE any write so
+    -- a rejected submission leaves the society untouched.
+    IF p_bf_json IS NOT NULL AND jsonb_array_length(p_bf_json) > 0 THEN
+        SELECT COALESCE(SUM(CASE WHEN COALESCE(a.drcr_account, 'Dr') = 'Dr'
+                                 THEN (j->>'bf_amount')::NUMERIC END), 0),
+               COALESCE(SUM(CASE WHEN a.drcr_account = 'Cr'
+                                 THEN (j->>'bf_amount')::NUMERIC END), 0)
+          INTO v_dr, v_cr
+          FROM jsonb_array_elements(p_bf_json) j
+          JOIN accounts a ON a.id = (j->>'acc_id')::INT AND a.society_id = p_society_id
+         WHERE (j->>'bf_amount')::NUMERIC > 0;
+        IF ABS(v_dr - v_cr) > 0.005 THEN
+            RETURN 'Error: Brought Forward does not balance - total Debits '
+                   || TO_CHAR(v_dr, 'FM999999999990.00') || ' vs total Credits '
+                   || TO_CHAR(v_cr, 'FM999999999990.00') || ' (difference '
+                   || TO_CHAR(ABS(v_dr - v_cr), 'FM999999999990.00') || ').';
+        END IF;
+    END IF;
+
     -- 1) Setup-completion flag and society details
     UPDATE societies SET 
         signing_secret_enc = p_signing_secret_enc,
         logo = COALESCE(p_logo, logo),
-        address = COALESCE(p_address, address),
-        phone = COALESCE(p_phone, phone),
-        email = COALESCE(p_email, email),
-        registration_number = COALESCE(p_reg_num, registration_number),
+        address = COALESCE(NULLIF(BTRIM(p_address), ''), address),
+        phone = COALESCE(NULLIF(BTRIM(p_phone), ''), phone),
+        email = COALESCE(NULLIF(BTRIM(p_email), ''), email),
+        registration_number = COALESCE(NULLIF(BTRIM(p_reg_num), ''), registration_number),
         login_background = COALESCE(p_login_bg, login_background),
-        tan_number = COALESCE(p_tan, tan_number),
-        gstin = COALESCE(p_gstin, gstin),
+        tan_number = COALESCE(NULLIF(BTRIM(p_tan), ''), tan_number),
+        gstin = COALESCE(NULLIF(BTRIM(p_gstin), ''), gstin),
         payment_qr = COALESCE(p_payment_qr, payment_qr),
         calc_start_date = COALESCE(p_calc_start, calc_start_date),
-        secretary_name = COALESCE(p_sec_name, secretary_name),
-        secretary_phone = COALESCE(p_sec_phone, secretary_phone),
-        secretary_email = COALESCE(p_sec_email, secretary_email),
+        secretary_name = COALESCE(NULLIF(BTRIM(p_sec_name), ''), secretary_name),
+        secretary_phone = COALESCE(NULLIF(BTRIM(p_sec_phone), ''), secretary_phone),
+        secretary_email = COALESCE(NULLIF(BTRIM(p_sec_email), ''), secretary_email),
         secretary_sign = COALESCE(p_sec_sign, secretary_sign),
         gate_logic = COALESCE(p_gate_logic, gate_logic),
         duty_hrs = COALESCE(p_duty_hrs, duty_hrs),
-        primary_bank_account_id = COALESCE(primary_bank_account_id,
-            (SELECT id FROM accounts
-              WHERE society_id = p_society_id AND tab_name = 'SBI'
-              LIMIT 1)
-        )
+        -- A10: State is written in the SAME statement (so the state->legal-regime
+        -- trigger fires inside this call and a failure is not swallowed).
+        state = COALESCE(NULLIF(BTRIM(p_state), ''), state)
+        -- A7: primary_bank_account_id is deliberately NOT defaulted here any more.
+        -- It used to be pointed at the seeded 'SBI' account for every society,
+        -- whatever its real bank. Non-cash postings now fail loudly (see
+        -- fn_resolve_bank_leg) until the admin picks the real bank in
+        -- Settings > Accounts.
     WHERE id = p_society_id;
 
     -- 2) TDS section rates (per-society; keyed by section+discriminator — see note above)
@@ -13376,7 +13420,7 @@ BEGIN
             WHERE society_id = p_society_id
               AND section = v_item->>'section'
               AND discriminator IS NOT DISTINCT FROM (v_item->>'discriminator')
-              AND effective_from = p_tds_effective_date;
+              AND effective_from = v_tds_eff;
 
             IF NOT FOUND THEN
                 INSERT INTO tds_section_rates (
@@ -13392,7 +13436,7 @@ BEGIN
                     (v_item->>'rate_no_pan')::NUMERIC,
                     (v_item->>'single_bill_threshold')::NUMERIC,
                     (v_item->>'annual_aggregate_threshold')::NUMERIC,
-                    p_tds_effective_date
+                    v_tds_eff
                 );
             END IF;
         END LOOP;

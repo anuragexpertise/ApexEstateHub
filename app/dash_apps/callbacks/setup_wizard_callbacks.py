@@ -10,6 +10,8 @@ from app.dash_apps.pages.setup_wizard import (
 )
 from app.utils.ux_toasts import error_toast
 from app.security.guards import require_session
+from app.security.password_policy import validate_signing_secret
+from app.utils.fiscal import fy_start_date
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
 
 # Index of the statutes step in CATEGORIES — the only step whose body depends
@@ -26,14 +28,31 @@ def _setup_validation_result(value, label, base_class="mb-3", kind="text"):
         return f"is-invalid {base_class}".strip(), "Enter a valid email address."
     if kind == "phone" and not re.fullmatch(r"[0-9+()\-\s]{7,20}", value):
         return f"is-invalid {base_class}".strip(), "Enter a valid phone number."
-    if kind == "secret" and (
-        len(value) < 8
-        or not re.search(r"[A-Z]", value)
-        or not re.search(r"[a-z]", value)
-        or not re.search(r"[^a-zA-Z0-9]", value)
-    ):
-        return f"is-invalid {base_class}".strip(), "Use at least 8 characters with upper, lower, and special characters."
+    if kind == "secret":
+        _err = validate_signing_secret(value)
+        if _err:
+            return f"is-invalid {base_class}".strip(), _err
     return base_class, ""
+
+
+def _society_details_error(address, email, phone, registration):
+    """A6: server-side required checks for the Society Details step.
+
+    Returns an error message, or None. Previously these fields only got red
+    styling; Next and Submit never checked them, and a blank address was sent
+    on as "" which COALESCE() treats as a real value, wiping the address the
+    Master had entered.
+    """
+    for value, label, kind in (
+        (address, "Address", "text"),
+        (email, "Email", "email"),
+        (phone, "Phone number", "phone"),
+        (registration, "Registration number", "text"),
+    ):
+        cls, msg = _setup_validation_result(value, label, "", kind)
+        if msg:
+            return msg if label in msg else f"{label}: {msg}"
+    return None
 
 
 def register_setup_wizard_callbacks(app):
@@ -143,22 +162,19 @@ def register_setup_wizard_callbacks(app):
         State("sw-deducts-tds", "value"),
         State("sw-qr-secret", "value"),
         State("sw-qr-secret-confirm", "value"),
+        State("sw-society-address", "value"),
+        State("sw-society-email", "value"),
+        State("sw-society-phone", "value"),
+        State("sw-society-reg", "value"),
         prevent_initial_call=True
     )
     @require_session
-    def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id, gst_reg, deducts_tds, qr_secret, qr_confirm):
+    def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id, gst_reg, deducts_tds, qr_secret, qr_confirm,
+                                 s_address, s_email_v, s_phone_v, s_reg_v):
         triggered_id = ctx.triggered_id
         
         error_msg = ""
         new_step = current_step
-        
-        import re
-        def is_strong_password(pwd):
-            if not pwd or len(pwd) < 8: return False
-            if not re.search(r"[A-Z]", pwd): return False
-            if not re.search(r"\d", pwd): return False
-            if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", pwd): return False
-            return True
         
         def get_next_valid_step(step, direction):
             while 0 <= step < len(CATEGORIES):
@@ -171,13 +187,15 @@ def register_setup_wizard_callbacks(app):
             return max(0, min(step, len(CATEGORIES) - 1))
             
         if triggered_id == "sw-btn-next" and n_next:
-            if CATEGORIES[current_step] == "Administrator":
+            if CATEGORIES[current_step] == "Society Details" and _society_details_error(s_address, s_email_v, s_phone_v, s_reg_v):
+                error_msg = _society_details_error(s_address, s_email_v, s_phone_v, s_reg_v)
+            elif CATEGORIES[current_step] == "Administrator":
                 if not qr_secret or not qr_confirm:
                     error_msg = "Please enter and confirm your SIGNING_SECRET."
                 elif qr_secret != qr_confirm:
                     error_msg = "SIGNING_SECRET fields do not match."
-                elif not is_strong_password(qr_secret):
-                    error_msg = "SIGNING_SECRET must be at least 8 characters long, with 1 uppercase, 1 number, and 1 special character."
+                elif validate_signing_secret(qr_secret):
+                    error_msg = validate_signing_secret(qr_secret)
                 else:
                     new_step = get_next_valid_step(current_step + 1, 1)
             elif current_step < len(CATEGORIES) - 1:
@@ -192,8 +210,8 @@ def register_setup_wizard_callbacks(app):
                     error_msg = "Please enter and confirm your SIGNING_SECRET."
                 elif qr_secret != qr_confirm:
                     error_msg = "SIGNING_SECRET fields do not match."
-                elif not is_strong_password(qr_secret):
-                    error_msg = "SIGNING_SECRET must be at least 8 characters long, with 1 uppercase, 1 number, and 1 special character."
+                elif validate_signing_secret(qr_secret):
+                    error_msg = validate_signing_secret(qr_secret)
                 else:
                     new_step = get_next_valid_step(clicked_step, 1)
             else:
@@ -422,14 +440,23 @@ def register_setup_wizard_callbacks(app):
             if get_current_user_role() != "admin":
                 return True, no_update, no_update, no_update, no_update, "Only the society admin can complete setup.", no_update, no_update
 
-            import time
-            if not hasattr(app, "_setup_rate_limits"):
-                app._setup_rate_limits = {}
+            # A11: the 5-second throttle used to be an in-memory dict, so with 2
+            # gunicorn workers it was per-worker and reset on restart. One atomic
+            # UPDATE on the database makes it shared: only the request that moves
+            # setup_submit_at forward gets a row back.
             uid = _sw_uid
-            now = time.time()
-            if uid in app._setup_rate_limits and now - app._setup_rate_limits[uid] < 5:
+            _slot = db._execute(
+                "UPDATE users SET setup_submit_at = NOW() "
+                "WHERE id = :uid AND (setup_submit_at IS NULL "
+                "OR setup_submit_at < NOW() - INTERVAL '5 seconds') RETURNING id",
+                {"uid": uid}, fetch_one=True,
+            )
+            if not _slot:
                 return True, no_update, no_update, no_update, no_update, "Please wait before submitting again.", no_update, no_update
-            app._setup_rate_limits[uid] = now
+
+            _details_err = _society_details_error(address, s_email, phone, reg_num)
+            if _details_err:
+                return True, no_update, no_update, no_update, no_update, _details_err, no_update, no_update
 
             if i_agree != 'I AGREE':
                 return True, no_update, no_update, no_update, no_update, "You must type 'I AGREE' to proceed.", no_update, no_update
@@ -437,20 +464,23 @@ def register_setup_wizard_callbacks(app):
             if not admin_pass:
                 return True, no_update, no_update, no_update, no_update, "Admin Password is required.", no_update, no_update
 
-            from werkzeug.security import check_password_hash
-            user_row = db._execute("SELECT password_hash FROM users WHERE id = :uid", {"uid": _sw_uid}, fetch_one=True)
-            if not user_row or not check_password_hash(user_row["password_hash"], admin_pass):
-                return True, no_update, no_update, no_update, no_update, "Invalid Admin Password.", no_update, no_update
-
+            # Validate the secret fields first so a typo there never counts
+            # as a wrong-password attempt.
             if not qr_secret:
                 return True, no_update, no_update, no_update, no_update, "SIGNING_SECRET is required.", no_update, no_update
 
             if qr_secret != qr_confirm or qr_secret != qr_confirm_final:
                 return True, no_update, no_update, no_update, no_update, "SIGNING_SECRETs do not match.", no_update, no_update
 
-            import re
-            if len(qr_secret) < 8 or not re.search(r'[A-Z]', qr_secret) or not re.search(r'[a-z]', qr_secret) or not re.search(r'[^a-zA-Z0-9]', qr_secret):
-                return True, no_update, no_update, no_update, no_update, "SIGNING_SECRET must be >= 8 chars, 1 uppercase, 1 lowercase, 1 special char.", no_update, no_update
+            _secret_err = validate_signing_secret(qr_secret)
+            if _secret_err:
+                return True, no_update, no_update, no_update, no_update, _secret_err, no_update, no_update
+
+            # A11: wrong admin passwords here now feed the shared login lockout.
+            from app.services.auth_service import verify_password_with_lockout
+            _pw_ok, _pw_msg = verify_password_with_lockout(_sw_uid, admin_pass)
+            if not _pw_ok:
+                return True, no_update, no_update, no_update, no_update, _pw_msg, no_update, no_update
 
             # society_id was resolved from the server session above.
 
@@ -519,26 +549,26 @@ def register_setup_wizard_callbacks(app):
             sec_name = str(sec_name)[:100] if sec_name else None
             sec_email = str(sec_email)[:100] if sec_email else None
             
-            try:
-                from database.seed import seed_accounts
-                with db._conn() as conn:
-                    with conn.cursor() as cur:
-                        seed_accounts(cur, conn, society_id)
-            except Exception as e:
-                return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to seed the default accounts. Please try again.")["message"], no_update, no_update
+            # A14: chart-of-accounts seeding and the setup write now share ONE
+            # transaction. If the setup function rejects the input (e.g. an
+            # unbalanced Brought Forward) or errors, the seeding is rolled back
+            # too, so a failed submit no longer leaves a half-initialised society.
+            from database.seed import seed_accounts
+            from database.db_manager import _to_pyformat
 
-            try:
-                result = db._execute(
-                    """SELECT fn_complete_society_setup(
+            class _SetupRejected(Exception):
+                pass
+
+            _setup_sql = """SELECT fn_complete_society_setup(
                         :sid, :secret_enc, :logo, :addr, :phone, :bg, :tan, :gstin, :pay_qr, :calc_start, :sec_name, :sec_phone, :sec_email, :sec_sign,
                         CAST(:tds_json AS jsonb), :cgst, :sgst,
                         :apt_amt, :apt_rate, :apt_due, :apt_sink, :apt_repair,
                         :ven_1, :ven_7, :ven_30,
                         :bf_fy, CAST(:bf_json AS jsonb), :created_by,
                         :s_email, :reg_num, :apt_interest,
-                        :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt, :gate_logic, :duty_hrs, :tds_effective_date
-                    ) AS result""",
-                    {
+                        :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt, :gate_logic, :duty_hrs, :tds_effective_date, :s_state
+                    ) AS result"""
+            _setup_params = {
                         "sid": society_id,
                         "secret_enc": secret_enc,
                         "logo": logo_path,
@@ -548,7 +578,7 @@ def register_setup_wizard_callbacks(app):
                         "tan": tan,
                         "gstin": gstin,
                         "pay_qr": qr_path,
-                        "calc_start": calc_start,
+                        "calc_start": calc_start or str(fy_start_date()),
                         "sec_name": sec_name,
                         "gate_logic": gate_logic,
                         "duty_hrs": duty_hrs,
@@ -573,10 +603,22 @@ def register_setup_wizard_callbacks(app):
                         "c_gst_reg": c_gst_reg,
                         "c_tds_act": c_tds_act,
                         "c_exp_fmt": c_exp_fmt,
-                        "tds_effective_date": tds_effective_date or '2024-04-01'
-                    },
-                    fetch_one=True,
-                )
+                        "tds_effective_date": tds_effective_date or str(fy_start_date()),
+                        "s_state": (s_state or "").strip()[:50] or None,
+                    }
+            _sql, _prm = _to_pyformat(_setup_sql, _setup_params)
+            try:
+                with db._conn() as conn:
+                    cur = conn.cursor()
+                    seed_accounts(cur, conn, society_id, commit=False)
+                    cur.execute(_sql, _prm)
+                    _row = cur.fetchone()
+                    result = dict(_row) if _row else None
+                    _res = (result or {}).get("result") or ""
+                    if _res != "OK":
+                        raise _SetupRejected(_res or "Setup could not be saved — please try again.")
+            except _SetupRejected as rej:
+                return True, no_update, no_update, no_update, no_update, str(rej), no_update, no_update
             except Exception as e:
                 return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to save the society setup. Please try again.")["message"], no_update, no_update
 
@@ -584,17 +626,9 @@ def register_setup_wizard_callbacks(app):
             if outcome != "OK":
                 return True, no_update, no_update, no_update, no_update, outcome or "Setup could not be saved — please try again.", no_update, no_update
 
-            # societies.state has no other write path anywhere in the app
-            # (see setup_wizard.py's "Society Details" State dropdown note)
-            # and fn_complete_society_setup's signature predates it, so it
-            # is written separately here rather than growing that
-            # already-large function's parameter list. A failure here must
-            # not undo the setup that already succeeded above.
-            try:
-                s_state_clean = (s_state or "").strip()[:50] or None
-                db._execute("UPDATE societies SET state = :state WHERE id = :id", {"state": s_state_clean, "id": society_id})
-            except Exception:
-                pass
+            # State is now written inside fn_complete_society_setup (same
+            # statement, same transaction), so a failure here can no longer be
+            # swallowed and leave the society without a legal regime (A10).
 
             # Auto-show the society's Agreement right after onboarding
             # completes, and persist it (society_agreements) so it can be

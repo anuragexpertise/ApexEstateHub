@@ -5,6 +5,10 @@
     "callback:account_callbacks.py::handle_change_password": {
       "classification": "unclassified"
     },
+    "callback:account_callbacks.py::prompt_first_login_password_change": {
+      "classification": "exempt",
+      "reason": "Session-guarded (@require_session). Reads only the caller's own must_change_password flag (identity from the server session, not auth-store) and writes nothing; it only opens the self-service Change Password modal (A4)."
+    },
     "callback:account_callbacks.py::toggle_account_settings_modal": {
       "classification": "exempt",
       "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."

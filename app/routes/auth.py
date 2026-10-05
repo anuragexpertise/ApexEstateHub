@@ -61,6 +61,12 @@ def login():
     if not user_dict:
         return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
 
+    # A13: expired society plans cannot log in (master has no society and is exempt).
+    if user_dict.get('role') != 'master':
+        from app.security.plan_guard import society_plan_expired, PLAN_EXPIRED_MESSAGE
+        if society_plan_expired(user_dict.get('society_id')):
+            return jsonify({'success': False, 'message': PLAN_EXPIRED_MESSAGE}), 403
+
     user_obj = User(
         user_id=user_dict['user_id'],
         email=user_dict['email'],

@@ -45,6 +45,7 @@ Store schema (id="drilldown-store"):
 from __future__ import annotations
 from datetime import date as dt_date, datetime
 from decimal import Decimal
+from app.security.password_policy import validate_password
 import json
 import io
 import re
@@ -2149,7 +2150,7 @@ def register_drilldown_callbacks(app):
                         {"type": "error", "message": "All essential fields (Name, Address, PAN, Registration, Validity Date, Admin Email, Password) are required."}, 
                         no_update)
             
-            if len(admin_password) < 8:
+            if validate_password(admin_password):
                 return (store, no_update, no_update, 
                         {"type": "error", "message": "Password must be at least 8 characters."}, 
                         no_update)
@@ -2256,28 +2257,16 @@ def register_drilldown_callbacks(app):
         # Ensure that the number of apartments does not exceed the society's plan limit.
         if entity_singular == "apartment" and "edit" not in card_id and sid:
             try:
-                soc_plan_row = db._execute(
-                    "SELECT plan FROM societies WHERE id=%s",
-                    (sid,), fetch_one=True
-                )
-                if soc_plan_row:
-                    soc_plan = soc_plan_row.get("plan", "Free")
-                    apt_count_row = db._execute(
-                        "SELECT COUNT(*) as c FROM apartments WHERE society_id=%s",
-                        (sid,), fetch_one=True
+                from app.services.plan_limits import remaining_apartment_slots
+                slots_left, soc_plan, limit = remaining_apartment_slots(sid)
+                if slots_left <= 0:
+                    return (
+                        store,
+                        no_update,
+                        no_update,
+                        {"type": "error", "message": f"Society plan '{soc_plan}' limit reached ({limit} apartments). Cannot add more."},
+                        no_update,
                     )
-                    apt_count = apt_count_row.get("c", 0) if apt_count_row else 0
-                    
-                    plan_limits = {"Free": 9, "9Apts": 9, "99Apts": 99, "999Apts": 999, "unlimited": 9999}
-                    limit = plan_limits.get(soc_plan, 9)
-                    if apt_count >= limit:
-                        return (
-                            store,
-                            no_update,
-                            no_update,
-                            {"type": "error", "message": f"Society plan '{soc_plan}' limit reached ({limit} apartments). Cannot add more."},
-                            no_update,
-                        )
             except Exception as e:
                 print(f"⚠️  Error checking apartment limit: {e}")
 
@@ -4976,8 +4965,8 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         pw = d.get("password", "")
         if not pw:
             return False, "Password is required", None
-        if len(pw) < 6:
-            return False, "Password must be at least 6 characters long", None
+        if validate_password(pw):
+            return False, validate_password(pw), None
 
         # apartments row FIRST, then users — the reverse of vendor/security
         # below. flat_number is the natural key here (not email), and if
@@ -5081,8 +5070,8 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     pw = d.get("password", "")
     if not pw:
         return False, "Password is required", None
-    if len(pw) < 6:
-        return False, "Password must be at least 6 characters long", None
+    if validate_password(pw):
+        return False, validate_password(pw), None
     if role == "vendor" and not (d.get("business_name") or "").strip():
         return False, "Business Name is required", None
 

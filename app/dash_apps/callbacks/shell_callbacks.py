@@ -415,6 +415,28 @@ def _breadcrumb(pathname):
     return items
 
 
+def _plan_expired_content(role):
+    """Rendered by route_page instead of the dashboard for an expired society plan (A13)."""
+    if role == "admin":
+        message = ("Your society's EstateHub plan has expired. Please contact "
+                   "EstateHub support to renew it; the dashboard will unlock "
+                   "as soon as the new validity date is recorded.")
+    else:
+        message = ("Your society's EstateHub plan has expired. Please ask your "
+                   "society administrator to renew it.")
+    return html.Div(
+        [
+            html.I(className="fas fa-calendar-times",
+                   style={"fontSize": "44px", "color": "#95a5a6", "marginBottom": "16px"}),
+            html.H4("Plan Expired", style={"fontWeight": "700"}),
+            html.P(message, className="text-muted",
+                   style={"maxWidth": "420px", "margin": "0 auto"}),
+        ],
+        className="text-center",
+        style={"paddingTop": "120px"},
+    )
+
+
 def _setup_pending_content(role):
     """
     Rendered by route_page in place of the real dashboard whenever the
@@ -904,6 +926,23 @@ def register_shell_callbacks(app):
         if role != "master" and society_setup_incomplete(society_id):
             return (
                 _setup_pending_content(role),
+                {"rendered": True, "ts": time.time()},
+                [],
+                _breadcrumb(pathname),
+                "", {},
+                email.split("@")[0].title() if email else "User",
+                role_label, "?",
+                "EstateHub", "?",
+                "EstateHub", "/static/assets/EH_logo.png",
+                {},
+            )
+
+        # A13: plan-validity gate, same chokepoint as the setup gate above, so a
+        # society whose plan expired is cut off even for sessions already open.
+        from app.security.plan_guard import society_plan_expired
+        if role != "master" and society_plan_expired(society_id):
+            return (
+                _plan_expired_content(role),
                 {"rendered": True, "ts": time.time()},
                 [],
                 _breadcrumb(pathname),
