@@ -244,7 +244,7 @@ def load_conversation_data():
 
 CONVERSATION_DATA = load_conversation_data()
 WIZARD_GROUPS = {
-    "Organization Details": ["Society Details", "Administrator", "Instructions"],
+    "Organization Details": ["Instructions", "Society Details", "Administrator"],
     "Tax & Compliance": ["Society Compliance", "UP AOA Compliance", "Bye-Laws Adoption", "TAN & TDS Rates", "GSTIN & GST Rate"],
     "Billing & Accounts": ["Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward"],
     "Finalization": ["Agreement"]

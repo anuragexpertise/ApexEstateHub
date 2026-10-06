@@ -115,10 +115,11 @@ def register_setup_wizard_callbacks(app):
 
     @app.callback(
         Output("setup-wizard-container", "children"),
-        Input("auth-store", "data")
+        Input("auth-store", "data"),
+        Input("pwd-gate-store", "data"),
     )
     @require_session
-    def trigger_setup_wizard(auth):
+    def trigger_setup_wizard(auth, pwd_gate):
         # `auth` (the browser's auth-store) only re-triggers this callback on
         # login; role and society come from the server session. Reading them
         # from the client-editable store let a forged society_id open another
@@ -127,6 +128,13 @@ def register_setup_wizard_callbacks(app):
             return no_update
         society_id = get_current_society_id()
         if not society_id:
+            return no_update
+
+        # The compulsory first-login password change comes first: while the
+        # account still has a temporary password, don't open the wizard.
+        # pwd-gate-store fires this callback again once the change succeeds.
+        from app.services.auth_service import must_change_password
+        if must_change_password(get_current_user_id()):
             return no_update
 
         # Setup-completion check now lives in one place — see

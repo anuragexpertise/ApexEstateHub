@@ -882,7 +882,9 @@ def _account_settings_modal() -> dbc.Modal:
         [
             dbc.ModalHeader(
                 dbc.ModalTitle("Account Settings"),
-                close_button=True,
+                # No header "X": Cancel is the only dismiss control, so the
+                # compulsory first-login password change can hide it.
+                close_button=False,
             ),
             dbc.ModalBody(
                 html.Div([
@@ -912,6 +914,7 @@ def _account_settings_modal() -> dbc.Modal:
         ],
         id="account-settings-modal",
         size="sm", is_open=False, centered=True,
+        backdrop=True, keyboard=True,
         style={"zIndex": "20050"},
     )
 
@@ -1039,6 +1042,9 @@ def shell_layout() -> html.Div:
             dcc.Store(id="cookie-store",            storage_type="local", data={}),
             # ephemeral stores — memory (JS variable, reset on mount)
             dcc.Store(id="toast-store",             storage_type="memory", data=None),
+            # Bumped when a compulsory first-login password change succeeds;
+            # trigger_setup_wizard waits on it (see account_callbacks.py).
+            dcc.Store(id="pwd-gate-store",          storage_type="memory", data=0),
             dcc.Store(id="kpi-refresh-side-effects-store", storage_type="memory", data=None),
             dcc.Store(id="sidebar-open-store",      storage_type="memory", data={"collapsed": False}),
             dcc.Store(id="profile-action-trigger",  storage_type="memory", data={"action": None, "params": {}}),
