@@ -37,7 +37,7 @@ from app.security.audit_context import (
     get_current_society_id, get_current_linked_id,
 )
 from app.security.guards import require_session
-from app.utils.ux_toasts import error_toast
+from app.utils.ux_toasts import error_toast, normalize_toast, toast_duration_ms, TOAST_TITLES
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -1083,10 +1083,11 @@ def register_shell_callbacks(app):
         prevent_initial_call=True,
     )
     def show_toast(data):
+        data = normalize_toast(data)
         if not data:
             return []
-        t   = data.get("type", "info")
-        msg = data.get("message", "")
+        t   = data["type"]
+        msg = data["message"]
         action = data.get("action") or {}
         icons  = {"success": "fa-check-circle", "error": "fa-exclamation-circle",
                   "warning": "fa-exclamation-triangle", "info": "fa-info-circle"}
@@ -1094,7 +1095,7 @@ def register_shell_callbacks(app):
                   "warning": "#f59e0b", "info": "#3b82f6"}
 
         body = [msg]
-        duration = 4000
+        duration = toast_duration_ms(msg, t)
         if action.get("kind") == "view_receipts" and action.get("receipt_ids"):
             ids = [str(i) for i in action["receipt_ids"] if i]
             if ids:
@@ -1115,7 +1116,7 @@ def register_shell_callbacks(app):
             id="toast",
             header=html.Div([
                 html.I(className=f"fas {icons.get(t,'fa-info-circle')} me-2"),
-                t.title(),
+                TOAST_TITLES.get(t, "Heads up"),
             ]),
             icon=t, duration=duration, is_open=True,
             style={"borderLeft": f"4px solid {colors.get(t,'#3b82f6')}"},
