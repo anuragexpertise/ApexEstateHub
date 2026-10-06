@@ -22,6 +22,8 @@ Requires in app_shell.py:
 """
 from __future__ import annotations
 
+import time
+
 from dash import Input, Output, State, no_update
 from dash.exceptions import PreventUpdate
 
@@ -42,6 +44,9 @@ def register_account_callbacks(app):
         Output("current-password-input", "value"),
         Output("new-password-input-acct", "value"),
         Output("confirm-password-input-acct", "value"),
+        Output("account-settings-modal", "backdrop"),
+        Output("account-settings-modal", "keyboard"),
+        Output("close-account-settings-modal", "style"),
         Input("account-settings-btn", "n_clicks"),
         Input("close-account-settings-modal", "n_clicks"),
         State("account-settings-modal", "is_open"),
@@ -53,12 +58,15 @@ def register_account_callbacks(app):
             raise PreventUpdate
         # Always clear the fields on open or close — never leave a
         # previously-typed password sitting in the DOM.
-        return (not is_open), "", "", ""
+        # Normal (voluntary) open/close: always dismissible. The forced
+        # first-login mode is set only by prompt_first_login_password_change.
+        return (not is_open), "", "", "", True, True, {}
 
     # ── 2. Submit the change ────────────────────────────────────────
     @app.callback(
         Output("account-settings-modal", "is_open", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
+        Output("pwd-gate-store", "data", allow_duplicate=True),
         Input("change-password-btn", "n_clicks"),
         State("current-password-input", "value"),
         State("new-password-input-acct", "value"),
@@ -75,24 +83,33 @@ def register_account_callbacks(app):
         # and must never decide *whose* password gets changed.
         user_id = get_current_user_id()
         if not user_id:
-            return no_update, {"type": "error", "message": "Your session has expired — please log in again."}
+            return no_update, {"type": "error", "message": "Your session has expired — please log in again."}, no_update
 
         if not new_pw or new_pw != confirm_pw:
-            return no_update, {"type": "error", "message": "New password and confirmation don't match."}
+            return no_update, {"type": "error", "message": "New password and confirmation don't match."}, no_update
 
-        from app.services.auth_service import change_password
+        from app.services.auth_service import change_password, must_change_password
+        was_forced = must_change_password(user_id)
         ok, msg = change_password(user_id, current_pw or "", new_pw)
 
-        return (not ok), {"type": "success" if ok else "error", "message": msg}
+        # Releases the Setup Wizard gate — only when this change was the
+        # compulsory one, so a voluntary change mid-wizard never rebuilds it.
+        gate = time.time() if (ok and was_forced) else no_update
+        return (not ok), {"type": "success" if ok else "error", "message": msg}, gate
 
-    # ── 3. First-login prompt (A4) ──────────────────────────────────
-    # Opens the same Change Password modal right after login while the account
-    # still has a password chosen by someone else. It is a prompt, not a hard
-    # block: the user can close it, and it reappears on the next login until
-    # the password is changed. Identity comes from the server session.
+    # ── 3. First-login prompt (A4) — compulsory ─────────────────────
+    # Opens the Change Password modal right after login while the account
+    # still has a password chosen by someone else, and makes it a hard
+    # block: static backdrop, Esc disabled, Cancel hidden. The only way out
+    # is a successful change (or logging out / refreshing, which re-prompts).
+    # The Setup Wizard waits for this (trigger_setup_wizard listens on
+    # pwd-gate-store). Identity comes from the server session.
     @app.callback(
         Output("account-settings-modal", "is_open", allow_duplicate=True),
         Output("toast-store", "data", allow_duplicate=True),
+        Output("account-settings-modal", "backdrop", allow_duplicate=True),
+        Output("account-settings-modal", "keyboard", allow_duplicate=True),
+        Output("close-account-settings-modal", "style", allow_duplicate=True),
         Input("auth-store", "data"),
         prevent_initial_call=True,
     )
@@ -104,6 +121,10 @@ def register_account_callbacks(app):
         from app.services.auth_service import must_change_password
         if not must_change_password(user_id):
             raise PreventUpdate
-        return True, {"type": "info", "message": "Please change the temporary password you were given."}
+        return (
+            True,
+            {"type": "info", "message": "Please change the temporary password you were given before continuing."},
+            "static", False, {"display": "none"},
+        )
 
     print("  ✓ Account callbacks registered")
