@@ -13373,12 +13373,17 @@ BEGIN
         duty_hrs = COALESCE(p_duty_hrs, duty_hrs),
         -- A10: State is written in the SAME statement (so the state->legal-regime
         -- trigger fires inside this call and a failure is not swallowed).
-        state = COALESCE(NULLIF(BTRIM(p_state), ''), state)
-        -- A7: primary_bank_account_id is deliberately NOT defaulted here any more.
-        -- It used to be pointed at the seeded 'SBI' account for every society,
-        -- whatever its real bank. Non-cash postings now fail loudly (see
-        -- fn_resolve_bank_leg) until the admin picks the real bank in
-        -- Settings > Accounts.
+        state = COALESCE(NULLIF(BTRIM(p_state), ''), state),
+        -- A7/R1: the seeded 'SBI' account (child of the Bank Accounts header) is
+        -- the society's primary bank account from day one, so non-cash receipts
+        -- and payments work immediately (fn_resolve_bank_leg raises if this is
+        -- NULL). An already-chosen primary is never overwritten. The wizard
+        -- text says so; an admin who banks elsewhere changes it afterwards.
+        primary_bank_account_id = COALESCE(primary_bank_account_id,
+            (SELECT id FROM accounts
+              WHERE society_id = p_society_id AND tab_name = 'SBI'
+              LIMIT 1)
+        )
     WHERE id = p_society_id;
 
     -- 2) TDS section rates (per-society; keyed by section+discriminator — see note above)

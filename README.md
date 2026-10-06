@@ -490,7 +490,7 @@ Login modal:
 **Plan expiry (A13).** A paid society whose `plan_validity` has passed can no longer log in, and open sessions are cut off at the router with a "Plan Expired" page. The `Free` plan never expires and Master (no society) is exempt. `PLAN_GRACE_DAYS` (env, default 7) keeps an expired society usable for a few days after the validity date; set it to `0` for a hard cut-off. The rule lives in `app/security/plan_guard.py`; Master renews by editing the society's validity date.
 
 1. User enters email → `request_password_reset()` → SHA-256 token stored in DB with a 1h expiry (`RESET_TOKEN_HOURS`)
-2. Token is emailed via `app/services/mailer.py` (uses the `SMTP_*` settings). If SMTP is not configured or the send fails, the token is written to the server log and the user is told email is not configured
+2. Token is emailed via `app/services/mailer.py` (uses the `SMTP_*` settings). If SMTP is not configured or the send fails, the token is written to the server log so an operator can relay it. The user always sees the same message, "Reset mail sent if account available in database.", whether or not the account exists or the mail went out. The mail server should offer **STARTTLS**; if it does not, the mail is still sent but a warning is logged and the message travels unencrypted
 3. User enters token + new password → `reset_password()` → hash updated, token cleared
 
 ---

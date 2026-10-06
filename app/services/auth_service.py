@@ -29,6 +29,10 @@ log = logging.getLogger(__name__)
 # make that check mean something.
 MAX_FAILED_ATTEMPTS = 5
 RESET_TOKEN_HOURS = 1
+
+# One message for every outcome (account found / not found / mail not delivered),
+# so the forgot-password form cannot be used to discover which emails exist.
+RESET_REQUEST_MESSAGE = "Reset mail sent if account available in database."
 LOCKOUT_MINUTES = 15
 
 
@@ -185,6 +189,7 @@ def request_password_reset(email: str,
     """
     Generate a reset token. Returns (ok, message, plain_token). The token is also emailed (or logged when
     SMTP is unavailable); UI callers must never display or return it to the browser.
+    `message` is always RESET_REQUEST_MESSAGE, whatever happened.
 
     SECURITY (fixed 2026-08): this previously generated a 6-digit numeric
     code (1,000,000 possible values, no request rate limit) and hashed it
@@ -209,7 +214,7 @@ def request_password_reset(email: str,
         user = db._execute(q, p, fetch_one=True)
         if not user:
             # Don't reveal whether the email exists.
-            return True, "If that email exists, a reset token has been sent.", None
+            return True, RESET_REQUEST_MESSAGE, None
 
         plain  = secrets.token_urlsafe(32)
         hashed = hashlib.sha256(plain.encode()).hexdigest()
@@ -232,12 +237,12 @@ def request_password_reset(email: str,
             "this, ignore this email."
         )
         if send_email(email, "EstateHub password reset", body):
-            return True, "If that email exists, a reset token has been sent.", plain
+            return True, RESET_REQUEST_MESSAGE, plain
         log.warning("Password reset token for user_id=%s could not be emailed "
                     "(SMTP not configured or send failed); token: %s",
                     user["id"], plain)
-        return True, ("If that email exists, a reset token was generated, but email "
-                      "is not configured on this server. Ask Master to relay it."), plain
+        # Same message as every other outcome: do not reveal that the account exists.
+        return True, RESET_REQUEST_MESSAGE, plain
     except Exception:
         log.exception("request_password_reset error")
         return False, "Error generating reset token.", None
