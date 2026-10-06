@@ -1324,7 +1324,7 @@ def shell_layout() -> html.Div:
                         };
                         var el = document.createElement('div');
                         el.style.cssText = 'padding:10px 14px;margin-bottom:8px;border-radius:8px;font-size:13px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:' + (colors[type] || colors.info) + ';border:1px solid #c3e6cb;box-shadow:0 4px 12px rgba(0,0,0,.08);animation:toastIn .3s ease';
-                        el.textContent = message;
+                        el.textContent = (message && String(message).trim()) ? message : 'You have a new notification.';
                         toastContainer.appendChild(el);
                         setTimeout(function() {
                             el.style.opacity = '0';
@@ -1372,12 +1372,13 @@ def shell_layout() -> html.Div:
                                     var data = payload.data || {};
                                     var title = data.name || data.visitor_name || data.channel_type || 'Alert';
                                     var body = '';
-                                    if (payload.type === 'channel_alert') body = 'Channel alert: ' + title + ' — ' + (data.state || '');
+                                    var st = data.state ? String(data.state) : '';
+                                    if (payload.type === 'channel_alert') body = 'Channel alert: ' + title + (st ? ' \u2014 ' + st : '');
                                     else if (payload.type === 'visitor_alert') body = 'Visitor arrived: ' + title;
-                                    else if (payload.type === 'alert_response') body = 'Alert updated: ' + (data.state || '');
-                                    else if (payload.type === 'visitor_response') body = 'Visitor status: ' + (data.state || '');
+                                    else if (payload.type === 'alert_response') body = st ? 'Alert updated: ' + st : 'An alert was updated.';
+                                    else if (payload.type === 'visitor_response') body = st ? 'Visitor status: ' + st : 'A visitor status was updated.';
                                     else if (payload.type === 'presumed_visitor_created') body = 'New presumed visitor: ' + title;
-                                    else body = JSON.stringify(data);
+                                    else body = 'You have a new notification.';
                                     showToast(body, 'info');
                                     playTone();
                                 } catch (err) {

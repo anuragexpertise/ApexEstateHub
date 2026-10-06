@@ -76,6 +76,100 @@ def error_toast(exc: Exception, fallback: str = "Something went wrong. Please tr
     return toast(friendly, "error", reference_id)
 
 
+_TOAST_TYPES = ("success", "error", "warning", "info")
+
+# Shown when a producer sends a toast with no usable message, so the user
+# never sees an empty box.
+_DEFAULT_MESSAGES = {
+    "success": "Done.",
+    "error": "Something went wrong. Please try again.",
+    "warning": "Please review and try again.",
+    "info": "Update available.",
+}
+
+# Header text per type (friendlier than "Success"/"Error").
+TOAST_TITLES = {
+    "success": "Done",
+    "error": "Couldn't complete that",
+    "warning": "Please note",
+    "info": "Heads up",
+}
+
+# Leftovers that mean "no message" (a bare None/False/{} that got str()-ed).
+_EMPTY_LITERALS = {"", "none", "null", "false", "true", "nan", "{}", "[]", "undefined"}
+
+_MAX_TOAST_CHARS = 240
+
+
+def _friendly_text(raw: str, type_: str) -> str:
+    """Turn a raw message into something a user can read."""
+    msg = raw
+    for marker in ("\nCONTEXT:", "\nDETAIL:", "\nHINT:", "\nLINE ", "Traceback (most recent call last)"):
+        msg = msg.split(marker)[0]
+    msg = " ".join(msg.split())
+    low = msg.lower()
+    if low in _EMPTY_LITERALS:
+        return ""
+    # Raw technical text must never reach the screen.
+    if "duplicate key" in low or "unique constraint" in low:
+        return "This record already exists."
+    if "foreign key" in low:
+        return "Cannot complete \u2014 a related record is missing or in use."
+    if "psycopg2" in low or "sqlalchemy" in low or "violates" in low or "syntax error" in low \
+            or ("relation" in low and "does not exist" in low) or ("column" in low and "does not exist" in low):
+        return _DEFAULT_MESSAGES["error"] if type_ == "error" else "This could not be completed. Please try again."
+    if len(msg) > _MAX_TOAST_CHARS:
+        cut = msg[:_MAX_TOAST_CHARS].rsplit(" ", 1)[0].rstrip(",;:-")
+        msg = cut + "\u2026"
+    return msg
+
+
+def normalize_toast(data) -> dict | None:
+    """Make any toast payload safe and readable; None means "show nothing".
+
+    The one chokepoint every toast passes through (show_toast in
+    shell_callbacks). Many producers pass an action's ``msg`` straight through,
+    and that is sometimes "" or None, which used to render an empty toast.
+    Also accepts a bare string, a ``{"_toast": {...}}`` wrapper, or
+    ``{"msg"/"text"/"detail": ...}`` instead of ``message``.
+    """
+    if not data:
+        return None
+    if isinstance(data, str):
+        data = {"message": data}
+    if not isinstance(data, dict):
+        data = {"message": str(data)}
+    if isinstance(data.get("_toast"), dict):
+        data = data["_toast"]
+
+    type_ = str(data.get("type") or "info").lower()
+    if type_ in ("danger", "failure", "fail"):
+        type_ = "error"
+    if type_ not in _TOAST_TYPES:
+        type_ = "info"
+
+    raw = None
+    for key in ("message", "msg", "text", "detail", "error"):
+        v = data.get(key)
+        if v is not None and str(v).strip():
+            raw = v
+            break
+    if isinstance(raw, (list, tuple)):
+        raw = " ".join(str(x) for x in raw if x)
+    text = _friendly_text(str(raw), type_) if raw is not None else ""
+
+    out = dict(data)
+    out["type"] = type_
+    out["message"] = text or _DEFAULT_MESSAGES[type_]
+    return out
+
+
+def toast_duration_ms(message: str, type_: str) -> int:
+    """Long messages and errors stay on screen longer so they can be read."""
+    base = 6000 if type_ in ("error", "warning") else 4000
+    return min(base + 40 * max(len(message) - 60, 0), 10000)
+
+
 def success_toast(message: str, reference_id: str | None = None) -> dict:
     return toast(message, "success", reference_id)
 
