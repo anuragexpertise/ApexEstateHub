@@ -65,7 +65,7 @@ FIELD_TIPS = {
     "Vendor Pass (7 Days) ₹": f"Default fee for a seven-day vendor pass. Default ₹{DEFAULT_VENDOR_7DAY}.",
     "Vendor Pass (1 Month) ₹": f"Default fee for a one-month vendor pass. Default ₹{DEFAULT_VENDOR_1MTH}.",
     # Accounts / BF
-    "Payment QR Code Image": "Your society's payment QR (UPI). It must belong to the bank account you later set as primary.",
+    "Payment QR Code Image": "Your society's payment QR (UPI). It must belong to the primary bank account (the seeded 'SBI A/c - Society' unless you change it).",
     "Accounting/Calculation Start Date": "Date from which EstateHub calculates bills, interest and books. Usually the start of a financial year.",
     "Financial Year (Start Year)": "Year in which the financial year of these opening balances starts (e.g. 2024 for FY 2024-25).",
     # Agreement
@@ -914,7 +914,7 @@ def render_category_content(category, society_id=None, state=None):
         from database.seed import ACCOUNTS
         inputs = [
             _render_banner("Accounts Settings", "Configure accounting start date and Payment QR Code."),
-            html.P([html.B("Note: "), "The primary bank account is NOT set by default. Bank receipts and payments cannot be recorded until you add your real bank account and mark it primary (Admin portal, 'Settings' tab, 'Account' KPI). The Society's payment QR code must belong to that bank."], className="sw-note-red mb-3"),
+            html.P([html.B("Note: "), "The seeded account 'SBI A/c - Society' is set as your society's primary bank account. Every non-cash receipt and payment is booked to it, so the Society's payment QR code must belong to this bank. If your society banks elsewhere, change the primary bank account after setup (Admin portal, 'Settings' tab, 'Account' KPI)."], className="sw-note-red mb-3"),
             _label("Payment QR Code Image"),
             _render_image_capture_control("society", "pay_qr", _imgs.get("pay_qr"), society_id),
             _label("Accounting/Calculation Start Date"),

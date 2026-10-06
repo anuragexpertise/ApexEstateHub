@@ -4,8 +4,11 @@ Minimal SMTP sender.
 
 Uses the SMTP_* settings already defined in app/config.py. When SMTP_HOST is
 not configured, send_email() returns False and the caller decides what to do
-(the password-reset flow logs the token so an operator can relay it, and tells
-the user truthfully that no email was sent).
+(the password-reset flow logs the token so an operator can relay it).
+
+STARTTLS: the connection is upgraded with STARTTLS when the server offers it.
+If it does not, the email is still sent but a WARNING is logged asking the
+operator to make STARTTLS available.
 """
 import logging
 import smtplib
@@ -36,7 +39,14 @@ def send_email(to_addr: str, subject: str, body: str) -> bool:
                 smtp.starttls()
                 smtp.ehlo()
             except smtplib.SMTPNotSupportedError:
-                pass
+                # The message is still sent (some internal relays have no TLS),
+                # but an operator must know it travelled in clear text.
+                log.warning(
+                    "SMTP server %s:%s does not offer STARTTLS, so this email "
+                    "(including password-reset tokens and any SMTP login) is sent "
+                    "UNENCRYPTED. Please make STARTTLS available on the mail "
+                    "server, or point SMTP_HOST at one that supports it.",
+                    Config.SMTP_HOST, Config.SMTP_PORT)
             if Config.SMTP_USER:
                 smtp.login(Config.SMTP_USER, Config.SMTP_PASS)
             smtp.send_message(msg)
