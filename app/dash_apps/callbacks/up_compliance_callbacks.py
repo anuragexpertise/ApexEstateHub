@@ -85,12 +85,13 @@ def register_up_compliance_callbacks(app):
 
     @app.callback(_TOAST, _BODY, Input("upc-tr-save", "n_clicks"),
                   State("upc-tr-flat", "value"), State("upc-tr-date", "date"), State("upc-tr-value", "value"),
-                  State("upc-tr-from", "value"), State("upc-tr-to", "value"), prevent_initial_call=True)
+                  State("upc-tr-from", "value"), State("upc-tr-to", "value"), State("upc-tr-type", "value"),
+                  prevent_initial_call=True)
     @require_session
-    def save_transfer(n, flat, d, value, seller, buyer):
+    def save_transfer(n, flat, d, value, seller, buyer, ttype):
         if not n:
             raise PreventUpdate
-        return _run(lambda sid, uid: act.record_transfer(sid, uid, flat, d, value, seller, buyer))
+        return _run(lambda sid, uid: act.record_transfer(sid, uid, flat, d, value, seller, buyer, ttype))
 
     @app.callback(_TOAST, _BODY, Input("upc-nd-save", "n_clicks"),
                   State("upc-nd-transfer", "value"), State("upc-nd-action", "value"), State("upc-nd-date", "date"),

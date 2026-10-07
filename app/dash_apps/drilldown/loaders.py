@@ -762,19 +762,21 @@ def get_fy_closing_report(society_id: int, fy: int) -> tuple[list[dict], str | N
 
 
 # ── FY CLOSE / statutory reserve appropriation ─────────────────────────────
-# UP AOA Model Bye-Laws Ch.VII Para 46(c) & 3(d) require a fixed share of net
-# surplus (the Model Bye-Laws indicate 25%) to be transferred to the Reserve
-# Fund each year. fn_fy_close_preview is the read-only half (surplus, proposed
+# The UP Apartment Act 2010 and the 2011 Model Bye-Laws say common profits form the
+# nucleus of the reserve funds but fix NO percentage. The share of net surplus moved to
+# the Reserve Fund at FY close is therefore society policy: the regime parameter
+# `reserve_appropriation_pct` (seeded 25, set by General Body resolution). Passing
+# reserve_pct=None (the default) uses that parameter. fn_fy_close_preview is the read-only half (surplus, proposed
 # amount, and every reason the close would be refused) so the card can explain
 # itself before the admin commits; fn_fy_close_reserve_appropriation is the
 # write half. Both are idempotent per (society, FY) — see the fy_closures
 # table comment in estatehub.sql.
 
-DEFAULT_RESERVE_APPROPRIATION_PCT = 25.0
+DEFAULT_RESERVE_APPROPRIATION_PCT = None   # None -> the society's `reserve_appropriation_pct` rule
 
 
 def get_fy_close_preview(society_id: int, fy: int,
-                         reserve_pct: float = DEFAULT_RESERVE_APPROPRIATION_PCT) -> tuple[dict | None, str | None]:
+                         reserve_pct: float | None = DEFAULT_RESERVE_APPROPRIATION_PCT) -> tuple[dict | None, str | None]:
     """
     Read-only close preview for the FY Closing card: net surplus for the FY,
     the amount a `reserve_pct` appropriation would move, which account would
@@ -794,7 +796,7 @@ def get_fy_close_preview(society_id: int, fy: int,
 
 
 def close_fy_with_reserve_appropriation(society_id: int, fy: int,
-                                        reserve_pct: float = DEFAULT_RESERVE_APPROPRIATION_PCT,
+                                        reserve_pct: float | None = DEFAULT_RESERVE_APPROPRIATION_PCT,
                                         created_by: int | None = None) -> tuple[dict | None, str | None]:
     """
     Close the FY and post the statutory reserve appropriation:

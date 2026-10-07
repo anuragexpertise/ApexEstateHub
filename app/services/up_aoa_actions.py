@@ -18,6 +18,7 @@ S22_STEPS = {
     "gb_resolution_on": "General-body resolution passed",
     "copy_sent_to_authority_on": "Certified copy sent to competent authority",
     "copy_sent_to_owner_on": "Certified copy sent to owner",
+    "copy_received_by_owner_on": "Owner received the certified copy (appeal runs from receipt)",
     "display_notice_on": "Notice displayed",
     "appeal_filed_on": "Appeal filed by owner",
     "cut_off_on": "Service cut off",
@@ -113,17 +114,29 @@ def set_billing_basis(society_id: int, basis, budget):
 
 
 # ── bye-law 39: transfers ─────────────────────────────────────────────────────
-def record_transfer(society_id: int, user_id, apartment_id, transfer_date, value, transferor, transferee):
+TRANSFER_TYPES = {"sale": "Sale (\u00bd% fee, payable by the seller)", "gift": "Gift (no fee)", "succession": "Inheritance / succession (no fee)"}
+
+
+def record_transfer(society_id: int, user_id, apartment_id, transfer_date, value, transferor, transferee,
+                    transfer_type="sale"):
     v, d = _num(value), _d(transfer_date)
+    transfer_type = (transfer_type or "sale").strip().lower()
+    if transfer_type not in TRANSFER_TYPES:
+        return False, "Choose a transfer type."
     if not _owns("apartments", apartment_id, society_id):
         return False, "Choose a flat."
-    if not d or v is None or v <= 0:
-        return False, "Enter the transfer date and a positive transfer value."
-    row = db._execute("SELECT * FROM fn_record_apartment_transfer(%s,%s,%s,%s,%s,%s,%s)",
-                      (society_id, int(apartment_id), d, v, (transferor or "").strip() or None,
-                       (transferee or "").strip() or None, user_id), fetch_one=True) or {}
+    if not d:
+        return False, "Enter the transfer date."
+    if transfer_type == "sale" and (v is None or v <= 0):
+        return False, "Enter a positive transfer value for a sale."
+    row = db._execute("SELECT * FROM fn_record_apartment_transfer(%s,%s,%s,%s,%s,%s,%s,%s)",
+                      (society_id, int(apartment_id), d, v if v is not None else 0,
+                       (transferor or "").strip() or None, (transferee or "").strip() or None,
+                       user_id, transfer_type), fetch_one=True) or {}
     if str(row.get("msg", "")).startswith("Error") or not row.get("transfer_id"):
         return False, row.get("msg") or "Could not record the transfer."
+    if transfer_type != "sale":
+        return True, f"{transfer_type.capitalize()} recorded. No transfer fee is levied."
     return True, f"Transfer recorded. Major Repair Fund fee of \u20b9{float(row['fee_amount']):,.2f} added to the flat's dues."
 
 

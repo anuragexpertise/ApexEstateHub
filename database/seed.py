@@ -1046,19 +1046,16 @@ def seed_state_compliance_thresholds(cur, conn):
         print(f"  ✓ State compliance thresholds seeded ({inserted} new rows)")
 
 
+# UP_AOA_2010 and GENERIC come from the scheme packs (schemes/*.toml); only schemes without a pack yet are listed here.
+# (code, state_code, name, primary_law, rules_version, model_bye_laws_version, effective_from, effective_to,
+#  status, source_reference, constitution)
 LEGAL_REGIME_PROFILES = [
-    ("UP_AOA_2010", "UP", "Uttar Pradesh Apartment Owners Association (AOA)",
-     "Uttar Pradesh Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010",
-     "Uttar Pradesh Apartment Rules, 2011",
-     "Model Bye-Laws under Section 14(6), notified 16 November 2011",
-     "2011-11-16", None, "active",
-     "UP Act 16 of 2010; Rules notified 16 Nov 2011; Model Bye-Laws under Sec 14(6)"),
     ("MH_COOP_1965", "MH", "Maharashtra Co-operative Housing Society",
      "Maharashtra Co-operative Societies Act, 1960",
      "Maharashtra Co-operative Societies Rules, 1961",
      "Model Bye-Laws for Housing Societies",
      "1962-01-26", None, "draft",
-     "MCS Act 1960; MCS Rules 1961; Model Bye-Laws"),
+     "MCS Act 1960; MCS Rules 1961; Model Bye-Laws", "COOP"),
 ]
 
 STATUTORY_HEADS_UP_AOA = [
@@ -1206,19 +1203,32 @@ LEGAL_INSTRUMENTS_UP_AOA = [
 ]
 
 
+def _pack_regime_profiles():
+    """Profiles of the schemes that have a pack (single source: schemes/*.toml)."""
+    import os
+    import sys
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from schemes.loader import load_all
+    return [(sc.code, sc.state_code, sc.name, sc.primary_law, sc.rules_version, sc.model_bye_laws_version,
+             sc.effective_from.isoformat(), None, sc.status, sc.source_reference, sc.constitution)
+            for sc in load_all()]
+
+
 def seed_legal_regime_profiles(cur, conn):
     inserted = 0
     for (code, state_code, name, primary_law, rules_version, model_bye_laws_version,
-         eff_from, eff_to, status, source_ref) in LEGAL_REGIME_PROFILES:
+         eff_from, eff_to, status, source_ref, constitution) in _pack_regime_profiles() + LEGAL_REGIME_PROFILES:
         row = _one(cur, "SELECT 1 FROM legal_regime_profiles WHERE code=%s", (code,))
         if row:
             continue
         cur.execute(
             """INSERT INTO legal_regime_profiles
-               (code, state_code, name, primary_law, rules_version, model_bye_laws_version,
+               (code, state_code, constitution, name, primary_law, rules_version, model_bye_laws_version,
                 effective_from, effective_to, status, source_reference)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (code, state_code, name, primary_law, rules_version, model_bye_laws_version,
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (code, state_code, constitution, name, primary_law, rules_version, model_bye_laws_version,
              eff_from, eff_to, status, source_ref),
         )
         conn.commit()

@@ -1,0 +1,454 @@
+# UP_AOA_2010 - Uttar Pradesh Apartment Owners Association.
+#
+# Layers: 0 = Act / Rules / Central Act (society cannot change), 1 = Model Bye-Law adoption,
+# 2 = Society policy (General Body), 3 = Board decision. See README -> "Layer of Authority".
+# `verification`: provisional = not checked against a source; checked = matches the text of the Act or of an
+# adopted copy of the Model Bye-Laws (gazette / advocate sign-off still pending); verified = advocate signed
+# off; disputed = commentary differs. Bye-law numbers follow the gazette numbering the engine has always used.
+# Choices are ordered loosest -> strictest; `tighten` says which direction is stricter for Layers 2 and 3.
+
+[scheme]
+code = "UP_AOA_2010"
+state_code = "UP"
+constitution = "AOA"
+name = "Uttar Pradesh Apartment Owners Association (AOA)"
+primary_law = "Uttar Pradesh Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010"
+rules_version = "Uttar Pradesh Apartment Rules, 2011"
+model_bye_laws_version = "Model Bye-Laws under Section 14(6), notified 16 November 2011"
+effective_from = 2011-11-16
+status = "active"
+source_reference = "UP Act 16 of 2010; Rules notified 16 Nov 2011; Model Bye-Laws under Sec 14(6)"
+
+[[parameter]]
+key = "s22_default_months"
+label = "s.22 default must exceed (months)"
+instrument = "UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010"
+provision = "s.22(1)"
+nature = "statutory"
+base_source = "state_act_rules"
+type = "int"
+unit = "months"
+value = 6
+min = 1
+max = 60
+layers = []
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_service_cutoff_check", "fn_get_standing"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """UP Apartment Act 2010 s.22: service cut-off only after MORE than 6 months of default"""
+
+[[parameter]]
+key = "s22_notice_days"
+label = "s.22 notice to defaulter (days)"
+instrument = "UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010"
+provision = "s.22(1)"
+nature = "statutory"
+base_source = "state_act_rules"
+type = "int"
+unit = "days"
+value = 7
+min = 1
+max = 90
+layers = []
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_service_cutoff_check", "fn_get_standing"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """UP Apartment Act 2010 s.22: 7 days notice to the defaulter"""
+
+[[parameter]]
+key = "s22_wait_months"
+label = "s.22 wait after certified copy (months)"
+instrument = "UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010"
+provision = "s.22(1) proviso"
+nature = "statutory"
+base_source = "state_act_rules"
+type = "int"
+unit = "months"
+value = 1
+min = 1
+max = 12
+layers = []
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_service_cutoff_check", "fn_get_standing"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """UP Apartment Act 2010 s.22: one-month wait after the certified copy is sent to the competent authority and the owner"""
+
+[[parameter]]
+key = "s22_appeal_days"
+label = "s.22 appeal window (days)"
+instrument = "UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010"
+provision = "s.22(2)"
+nature = "statutory"
+base_source = "state_act_rules"
+type = "int"
+unit = "days"
+value = 15
+min = 1
+max = 90
+layers = []
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_service_cutoff_check", "fn_get_standing"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """UP Apartment Act 2010 s.22: 15 days for the owner to appeal"""
+
+[[parameter]]
+key = "s20_recovery_months"
+label = "s.20 recovery after unpaid (months)"
+instrument = "UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010"
+provision = "s.20(2)"
+nature = "statutory"
+base_source = "state_act_rules"
+type = "int"
+unit = "months"
+value = 12
+min = 1
+max = 60
+layers = []
+tighten = "none"
+enforcement = "tracked"
+implemented = false
+verification = "checked"
+verified_on = 2026-10-07
+source = """UP Apartment Act 2010 s.20: after 12 months unpaid the competent authority may recover as arrears of land revenue"""
+description = """Defined but not yet enforced: nothing reads this value yet (README, Known gaps)."""
+
+[[parameter]]
+key = "arrears_disqualify_days"
+label = "Bye-law 7 arrears bar after (days)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 7"
+clause = "BL_07"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "days"
+value = 60
+min = 1
+max = 365
+vary_min = 1
+vary_max = 60
+layers = [2]
+tighten = "lower"
+enforcement = "gated"
+feeds = ["fn_get_standing", "fn_bye_law7_eligibility", "fn_common_expense_arrears_asof"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 7: arrears of more than 60 days bar voting / standing for the Board"""
+description = """A society may only shorten the 60 days (General Body policy); lengthening would loosen the Model Bye-Law."""
+
+[[parameter]]
+key = "transfer_fee_pct"
+label = "Bye-law 39 transfer fee (% of value)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 39"
+clause = "BL_39"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "num"
+unit = "% of value"
+value = 0.5
+min = 0.0001
+max = 5
+layers = []
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_record_apartment_transfer"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 39: 1/2% of transfer value, payable by the transferor on a sale, to the association for the major-repair fund"""
+
+[[parameter]]
+key = "nodues_deemed_days"
+label = "No Dues deemed granted after (days)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 39"
+clause = "BL_39"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "days"
+value = 15
+min = 1
+max = 90
+vary_min = 1
+vary_max = 15
+layers = [2]
+tighten = "lower"
+enforcement = "gated"
+feeds = ["fn_nodues_certificate_status"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 39: No Dues Certificate deemed granted if not refused within 15 days"""
+
+[[parameter]]
+key = "cash_payment_cheque_threshold"
+label = "Cash payments above this breach (INR)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-laws 46-52 (financial provisions)"
+clause = "BL_49"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "num"
+unit = "INR"
+value = 2500
+min = 1
+max = 10000000
+vary_min = 1
+vary_max = 2500
+layers = [2, 3]
+tighten = "lower"
+enforcement = "gated"
+feeds = ["fn_check_cash_payment_limit"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, financial provisions (bye-laws 46-52): payments above this by cheque (Secretary + one Board member). Pre-dates UPI/NEFT; this engine treats only mode=cash as the breach"""
+
+[[parameter]]
+key = "petty_cash_limit"
+label = "Petty cash ceiling (INR)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-laws 46-52 (financial provisions)"
+clause = "BL_49"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "num"
+unit = "INR"
+value = 20000
+min = 1
+max = 10000000
+vary_min = 1
+vary_max = 20000
+layers = [2, 3]
+tighten = "lower"
+enforcement = "gated"
+feeds = ["fn_petty_cash_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, financial provisions (bye-laws 46-52): petty cash ceiling"""
+
+[[parameter]]
+key = "statement_publish_due_month"
+label = "Bye-law 49 publish deadline - month"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 49"
+clause = "BL_49"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "month"
+value = 7
+min = 1
+max = 12
+layers = []
+tighten = "none"
+enforcement = "tracked"
+feeds = ["fn_statutory_calendar"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 49: audited statement published by 31 July"""
+
+[[parameter]]
+key = "statement_publish_due_day"
+label = "Bye-law 49 publish deadline - day"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 49"
+clause = "BL_49"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "day"
+value = 31
+min = 1
+max = 31
+layers = []
+tighten = "none"
+enforcement = "tracked"
+feeds = ["fn_statutory_calendar"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 49"""
+
+[[parameter]]
+key = "authority_copy_due_month"
+label = "Bye-law 49 authority copy - month"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 49"
+clause = "BL_49"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "month"
+value = 8
+min = 1
+max = 12
+layers = []
+tighten = "none"
+enforcement = "tracked"
+feeds = ["fn_statutory_calendar"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 49: copy to the competent authority by 15 August"""
+
+[[parameter]]
+key = "authority_copy_due_day"
+label = "Bye-law 49 authority copy - day"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 49"
+clause = "BL_49"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "day"
+value = 15
+min = 1
+max = 31
+layers = []
+tighten = "none"
+enforcement = "tracked"
+feeds = ["fn_statutory_calendar"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 49"""
+
+[[parameter]]
+key = "owner_summary_days"
+label = "Bye-law 49 owner summary within (days)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 49"
+clause = "BL_49"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "days"
+value = 15
+min = 1
+max = 90
+layers = []
+tighten = "none"
+enforcement = "tracked"
+feeds = ["fn_statutory_calendar"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 49: summary to every owner within 15 days of publication"""
+
+[[parameter]]
+key = "bye_law7_year_basis"
+label = "Bye-law 7 'year' basis (contested; default)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 7"
+clause = "BL_07"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "text"
+value_text = "financial_year"
+choices = ["financial_year", "calendar_year"]
+layers = [1, 2]
+tighten = "none"
+enforcement = "policy"
+feeds = ["fn_bye_law7_cutoff_date", "fn_bye_law7_eligibility"]
+verification = "disputed"
+needs_decision = true
+source = """Bye-law 7 says "the year preceding the election". Whether that is the financial or the calendar year is contested (advocate commentary differs); default financial_year, overridable per call"""
+
+[[parameter]]
+key = "cash_limit_default_mode"
+label = "Cash-limit enforcement default (engine policy)"
+instrument = "Engine policy (no statutory source)"
+provision = "-"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "text"
+value_text = "warn"
+choices = ["warn", "block"]
+layers = [2, 3]
+tighten = "higher"
+enforcement = "policy"
+feeds = ["fn_cash_limit_mode"]
+verification = "provisional"
+needs_decision = true
+source = """Engine policy, not statute: warn = record a compliance flag; block = refuse the posting. Override per society in societies.cash_limit_mode"""
+
+[[parameter]]
+key = "owner_loan_blocks_nodues"
+label = "Outstanding owner loan blocks issuing No Dues (1 = yes)"
+instrument = "Engine policy (no statutory source)"
+provision = "bye-law 3(1)(f) (loans)"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2]
+tighten = "higher"
+enforcement = "policy"
+feeds = ["fn_get_standing", "fn_nodues_issue_check"]
+verification = "provisional"
+source = """Engine policy (not statute): a loan outstanding from the association is a due to it, so the No Dues Certificate is not issued until it is recovered; the Board may instead record a refusal"""
+
+[[parameter]]
+key = "owner_loan_counts_bye_law7"
+label = "Overdue owner loan counts as bye-law 7 arrears (1 = yes)"
+instrument = "Engine policy (no statutory source)"
+provision = "bye-law 7"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "int"
+unit = "0/1"
+value = 0
+min = 0
+max = 1
+layers = [2]
+tighten = "higher"
+enforcement = "policy"
+feeds = ["fn_get_standing", "fn_bye_law7_eligibility"]
+verification = "provisional"
+source = """Engine policy (not statute): OFF by default - bye-law 7 speaks only of arrears of contributions for common expenses, so an overdue owner loan is not counted unless the society opts in on advice"""
+
+[[parameter]]
+key = "owner_loan_counts_s22"
+label = "Overdue owner loan counts toward the s.22 dues test (1 = yes)"
+instrument = "Engine policy (no statutory source)"
+provision = "s.22"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "int"
+unit = "0/1"
+value = 0
+min = 0
+max = 1
+layers = [2]
+tighten = "none"
+enforcement = "policy"
+feeds = ["fn_get_standing"]
+verification = "provisional"
+source = """Engine policy (not statute): off by default - s.22 concerns unpaid charges, so an overdue loan does not by itself justify cutting a service; enable only on advice"""
+
+[[parameter]]
+key = "reserve_appropriation_pct"
+label = "Reserve Fund share of net surplus at FY close (%)"
+instrument = "Engine policy (no statutory source)"
+provision = "bye-law 44(c) (common profits form the nucleus of reserve funds)"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "num"
+unit = "%"
+value = 25
+min = 0
+max = 100
+layers = [1, 2]
+tighten = "none"
+enforcement = "policy"
+feeds = ["fn_fy_close_preview", "fn_fy_close_reserve_appropriation"]
+verification = "provisional"
+needs_decision = true
+source = """Engine policy (not statute): share of net surplus moved to the Reserve Fund at FY close. Neither the UP Apartment Act 2010 nor the 2011 Model Bye-Laws fix a percentage (common profits are only said to form the nucleus of the reserve funds); 25% follows the co-operative-society convention. Set it by General Body resolution"""
