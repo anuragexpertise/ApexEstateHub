@@ -13827,7 +13827,14 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
  ('UP_AOA_2010', 'poll_majority_pct', 'Poll majority: share of the votes (%)', 'UP Model Bye-Laws, 2011', 'bye-law 2(e)', 'BL_02', 'non_statutory', 'model_bye_law', 'num', '% of votes', 1, 100, 51, 100, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'gated', ARRAY['fn_create_poll']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Applied to weighted polls only (polls.vote_basis = undivided_interest). A society may raise it, never lower it.'),
  ('UP_AOA_2010', 'poll_majority_of', 'Weighted-poll majority is measured against', 'Engine policy (no statutory source)', 'bye-laws 2(e) and 10', 'BL_10', 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['votes_cast', 'all_votes']::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'policy', ARRAY['fn_declare_results']::TEXT[], 'disputed', NULL, TRUE, TRUE, NULL),
  ('UP_AOA_2010', 'owner_loan_resolution_mode', 'Owner-loan consent must be a recorded resolution', 'Engine policy (no statutory source)', 'bye-law 3(1)(f)', 'BL_03', 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['text', 'linked']::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'policy', ARRAY['fn_disburse_owner_loan']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
- ('UP_AOA_2010', 'owner_loan_max_term_days', 'Owner loan: longest repayment term (days)', 'Engine policy (no statutory source)', 'bye-law 3(1)(f) (''short-term'')', 'BL_03', 'non_statutory', 'engine_default', 'int', 'days', 1, 3650, 1, 3650, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'lower', FALSE, 'policy', ARRAY['fn_disburse_owner_loan']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL)
+ ('UP_AOA_2010', 'owner_loan_max_term_days', 'Owner loan: longest repayment term (days)', 'Engine policy (no statutory source)', 'bye-law 3(1)(f) (''short-term'')', 'BL_03', 'non_statutory', 'engine_default', 'int', 'days', 1, 3650, 1, 3650, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'lower', FALSE, 'policy', ARRAY['fn_disburse_owner_loan']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
+ ('UP_AOA_2010', 'entrance_fee', 'Bye-law 4 entrance fee (INR)', 'UP Model Bye-Laws, 2011', 'bye-law 4', 'BL_04', 'non_statutory', 'model_bye_law', 'int', 'INR', 0, 100000, 0, 100000, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_entrance_fee_due']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'share_face_value', 'Bye-law 5 share face value (INR)', 'UP Model Bye-Laws, 2011', 'bye-law 5', 'BL_05', 'non_statutory', 'model_bye_law', 'int', 'INR', 1, 1000, 1, 1000, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_share_capital_due']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'cashbook_daily_signature', 'Bye-law 23(f) daily cashbook signature required', 'UP Model Bye-Laws, 2011', 'bye-law 23(f)', 'BL_23', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2, 3]::INT[], 'higher', FALSE, 'tracked', ARRAY['fn_cashbook_signature_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'investment_allowed_types', 'Bye-law 45 permitted investment types', 'UP Model Bye-Laws, 2011', 'bye-law 45', 'BL_45', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['coop_bank,trust_securities,approved_bank', 'coop_bank,trust_securities', 'coop_bank_only']::TEXT[], ARRAY[2]::INT[], 'lower', FALSE, 'gated', ARRAY['fn_investment_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'borrowing_requires_ca_approval', 'Bye-law 44(d) borrowing needs Competent Authority approval', 'UP Model Bye-Laws, 2011', 'bye-law 44(d)', 'BL_44', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_borrowing_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'tenant_joint_liability', 'Act s.18(2) tenant jointly liable with owner', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.18(2)', NULL, 'statutory', 'state_act_rules', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'hard_wired', ARRAY['fn_tenant_liability']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'board_election_voting_basis', 'Board election voting basis (Model Bye-Law 8)', 'UP Model Bye-Laws, 2011', 'bye-law 8', 'BL_08', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['one_apartment_one_vote', 'undivided_interest']::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_board_election_eligibility']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference, effective_from) VALUES
@@ -13858,7 +13865,14 @@ INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, un
  ('UP_AOA_2010', 'poll_majority_pct', 51, NULL, '% of votes', 'Model Bye-Laws 2011, bye-law 2(e): ''majority'' of owners means owners holding 51 per cent of the votes; bye-law 8 weights each vote by the owner''s percentage in the Declaration (Act s.12(1)(f): percentage ''for all purposes, including voting'')', DATE '2011-11-16'),
  ('UP_AOA_2010', 'poll_majority_of', NULL, 'all_votes', NULL, 'Engine policy, not statute: bye-law 2(e) defines a majority as owners holding 51% of THE votes (read here as all eligible votes, so abstentions count against a motion), while bye-law 10 speaks of a majority of owners CASTING votes. The stricter reading is the default; choose votes_cast only on advice', DATE '2011-11-16'),
  ('UP_AOA_2010', 'owner_loan_resolution_mode', NULL, 'linked', NULL, 'Engine policy, not statute: bye-law 3(1)(f) allows a short-term loan to an owner ''with the consent of the apartment owners'' in an emergent necessity. linked = the loan must cite a passed Approve Owner Loan resolution of a General Body meeting with quorum; text = any resolution reference is accepted (the old behaviour)', DATE '2011-11-16'),
- ('UP_AOA_2010', 'owner_loan_max_term_days', 365, NULL, 'days', 'Engine policy, not statute: the bye-law says only ''short-term'' and fixes no number of days. Applied when owner_loan_resolution_mode = linked, where a repayment date is mandatory', DATE '2011-11-16')
+ ('UP_AOA_2010', 'owner_loan_max_term_days', 365, NULL, 'days', 'Engine policy, not statute: the bye-law says only ''short-term'' and fixes no number of days. Applied when owner_loan_resolution_mode = linked, where a repayment date is mandatory', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'entrance_fee', 1000, NULL, 'INR', 'Model Bye-Laws 2011, bye-law 4: entrance fee of ₹1,000 per owner on admission', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'share_face_value', 100, NULL, 'INR', 'Model Bye-Laws 2011, bye-law 5: one share per owner, face value set by General Body', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'cashbook_daily_signature', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 23(f): daily cashbook to be signed by the Secretary and one Board member', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'investment_allowed_types', NULL, 'coop_bank,trust_securities,approved_bank', NULL, 'Model Bye-Laws 2011, bye-law 45: investments only in co-operative banks, Trust Act securities, or banks approved by the Competent Authority', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'borrowing_requires_ca_approval', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 44(d): borrowing requires Competent Authority approval', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'tenant_joint_liability', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(2): tenant is jointly liable with the owner for common expenses', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'board_election_voting_basis', NULL, 'undivided_interest', NULL, 'Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration (Act s.12(1)(f): percentage for all purposes including voting). Advisory polls may use one-apartment-one-vote.', DATE '2011-11-16')
 ON CONFLICT DO NOTHING;
 -- <<< END GENERATED
 
@@ -15047,6 +15061,336 @@ BEGIN
     END IF;
     RETURN NEXT;
 END $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- UP AOA COMPLIANCE — additional statutory requirements identified in audit
+--   (1) Bye-law 4: entrance fee (₹1,000) on owner admission
+--   (2) Bye-law 5: one share per owner on admission
+--   (3) Bye-law 23(f): daily cashbook signature
+--   (4) Bye-law 45: investment restriction (co-operative bank / Trust securities / approved bank)
+--   (5) Bye-law 44(d): borrowing needs Competent Authority approval
+--   (6) Act s.18(2): tenant jointly liable with owner
+--   (7) Bye-law 8: Board election voting by undivided-interest percentage
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- ── (1) Entrance fee + share capital (bye-laws 4 and 5) ─────────────────────────
+-- Recorded when a flat changes ownership. The fee is a receivable on the flat
+-- (a due to the association), charged once on first admission. The share capital
+-- entry is a register record; the physical share certificate is outside this engine.
+CREATE TABLE owner_admissions (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id    INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    admission_date  DATE NOT NULL,
+    owner_name      VARCHAR(100),
+    entrance_fee    NUMERIC(10, 2),              -- NULL = not yet applied / collected
+    entrance_fee_paid BOOLEAN NOT NULL DEFAULT FALSE,
+    share_count     INT DEFAULT 1,               -- one share per owner (bye-law 5)
+    share_face_value NUMERIC(10, 2),
+    share_paid      BOOLEAN NOT NULL DEFAULT FALSE,
+    receivable_id   INT REFERENCES receivables (id) ON DELETE SET NULL,
+    created_by      INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_owner_admission_apartment UNIQUE (society_id, apartment_id)
+);
+CREATE INDEX idx_owner_admissions_society ON owner_admissions (society_id, apartment_id);
+
+CREATE OR REPLACE FUNCTION fn_entrance_fee_due(p_society_id INT, p_apartment_id INT)
+RETURNS TABLE (entrance_fee NUMERIC, is_paid BOOLEAN, receivable_id INT, message TEXT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE v_fee NUMERIC; v_name TEXT; v_paid BOOLEAN; v_rec INT;
+BEGIN
+    v_fee := fn_regime_param_num(p_society_id, 'entrance_fee', CURRENT_DATE);
+    IF v_fee IS NULL THEN
+        RETURN QUERY SELECT NULL::NUMERIC, FALSE, NULL::INT, 'entrance fee not configured for this society''s regime'::TEXT;
+        RETURN;
+    END IF;
+    SELECT o.entrance_fee_paid, o.receivable_id
+      INTO v_paid, v_rec
+    FROM owner_admissions oa
+    JOIN apartments a ON a.id = oa.apartment_id
+    WHERE oa.society_id = p_society_id AND oa.apartment_id = p_apartment_id
+    ORDER BY oa.admission_date DESC LIMIT 1;
+
+    IF found THEN
+        RETURN QUERY SELECT v_fee, v_paid, v_rec,
+            CASE WHEN v_paid THEN 'paid' ELSE 'due' END;
+    ELSE
+        RETURN QUERY SELECT v_fee, FALSE, NULL, 'no admission recorded for this flat';
+    END IF;
+END
+$$;
+
+CREATE OR REPLACE FUNCTION fn_share_capital_due(p_society_id INT, p_apartment_id INT)
+RETURNS TABLE (share_count INT, face_value NUMERIC, is_paid BOOLEAN, message TEXT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE v_count INT; v_face NUMERIC; v_paid BOOLEAN;
+BEGIN
+    v_face := fn_regime_param_num(p_society_id, 'share_face_value', CURRENT_DATE);
+    IF v_face IS NULL THEN
+        RETURN QUERY SELECT 0, NULL::NUMERIC, FALSE, 'share capital not configured for this society''s regime'::TEXT;
+        RETURN;
+    END IF;
+    SELECT oa.share_count, oa.share_face_value, oa.share_paid INTO v_count, v_face, v_paid
+    FROM owner_admissions oa JOIN apartments a ON a.id = oa.apartment_id
+    WHERE oa.society_id = p_society_id AND oa.apartment_id = p_apartment_id
+    ORDER BY oa.admission_date DESC LIMIT 1;
+    IF FOUND THEN
+        RETURN QUERY SELECT v_count, v_face, v_paid,
+            CASE WHEN v_paid THEN 'paid' ELSE 'due' END;
+    ELSE
+        RETURN QUERY SELECT v_count, v_face, FALSE, 'no admission recorded for this flat';
+    END IF;
+END
+$$;
+
+-- ── (3) Daily cashbook signature (bye-law 23(f)) ────────────────────────────────
+CREATE TABLE cashbook_signatures (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    day             DATE NOT NULL,
+    signed_by       VARCHAR(100),            -- name/title of the signer (Secretary + 1 Board member)
+    signed_at       TIMESTAMP,
+    notes           TEXT,
+    created_by      INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_cashbook_day UNIQUE (society_id, day)
+);
+CREATE INDEX idx_cashbook_signatures_society ON cashbook_signatures (society_id, day);
+
+CREATE OR REPLACE FUNCTION fn_cashbook_signature_check(p_society_id INT, p_day DATE)
+RETURNS TABLE (is_signed BOOLEAN, signer TEXT, message TEXT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE v_required INT;
+BEGIN
+    v_required := COALESCE(fn_regime_param_num(p_society_id, 'cashbook_daily_signature', CURRENT_DATE)::INT, 1);
+    IF v_required = 0 THEN
+        RETURN QUERY SELECT TRUE, NULL::TEXT, 'bye-law 23(f) signature tracking is not required for this society'::TEXT;
+        RETURN;
+    END IF;
+    RETURN QUERY
+    SELECT EXISTS (SELECT 1 FROM cashbook_signatures WHERE society_id = p_society_id AND day = p_day) AS is_signed,
+           (SELECT signed_by FROM cashbook_signatures WHERE society_id = p_society_id AND day = p_day) AS signer,
+           CASE WHEN EXISTS (SELECT 1 FROM cashbook_signatures WHERE society_id = p_society_id AND day = p_day)
+                THEN 'signed'
+                ELSE 'unsigned: bye-law 23(f) requires the daily cashbook to be signed by the Secretary and one Board member'
+           END AS message;
+END
+$$;
+
+-- ── (4) Investment restriction (bye-law 45) ─────────────────────────────────────
+-- Bye-law 45 limits investments to co-operative banks, Trust Act securities, or
+-- banks approved by the Competent Authority. The `deposits` table (added in the main schema)
+-- holds investments; the new `institution_type` column classifies them for the check.
+ALTER TABLE deposits ADD COLUMN IF NOT EXISTS institution_type VARCHAR(50);
+CREATE OR REPLACE FUNCTION fn_investment_check(p_society_id INT, p_institution_type TEXT)
+RETURNS TABLE (allowed BOOLEAN, message TEXT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE v_allowed TEXT; v_msg TEXT;
+BEGIN
+    v_allowed := fn_regime_param_text(p_society_id, 'investment_allowed_types', CURRENT_DATE);
+    IF v_allowed IS NULL THEN
+        RETURN QUERY SELECT TRUE, 'no investment restriction configured for this society''s regime'::TEXT;
+        RETURN;
+    END IF;
+    IF p_institution_type = ANY (STRING_TO_ARRAY(v_allowed, ',')) THEN
+        RETURN QUERY SELECT TRUE, 'allowed'::TEXT;
+    ELSE
+        RETURN QUERY SELECT FALSE,
+            format('investment in "%s" is not permitted: bye-law 45 limits investments to %s',
+                   p_institution_type, REPLACE(REPLACE(v_allowed, ',', ' / '), '_', ' '))::TEXT;
+    END IF;
+END
+$$;
+
+-- ── (5) Borrowing approval (bye-law 44(d)) ──────────────────────────────────────
+-- By design, a borrowing over the society's threshold needs Competent Authority
+-- approval. This is a gated check: the loan is recorded but flagged until the
+-- approval is attached.
+CREATE TABLE borrowing_approvals (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    loan_source     VARCHAR(50) NOT NULL,       -- e.g. 'housing_board', 'bank', 'member_loan'
+    principal       NUMERIC(14, 2) NOT NULL,
+    purpose         TEXT,
+    ca_approval_ref VARCHAR(100),              -- Competent Authority approval reference
+    ca_approved_on  DATE,
+    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    created_by      INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_borrowing_approvals_society ON borrowing_approvals (society_id, ca_approved_on);
+
+CREATE OR REPLACE FUNCTION fn_borrowing_check(p_society_id INT, p_principal NUMERIC, p_loan_source TEXT)
+RETURNS TABLE (needs_approval BOOLEAN, has_approval BOOLEAN, message TEXT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE v_requires INT; v_appr BOOLEAN;
+BEGIN
+    v_requires := fn_regime_param_num(p_society_id, 'borrowing_requires_ca_approval', CURRENT_DATE)::INT;
+    IF v_requires IS NULL OR v_requires = 0 THEN
+        RETURN QUERY SELECT FALSE, TRUE, 'no CA approval required for this society''s regime'::TEXT;
+        RETURN;
+    END IF;
+    -- If a borrowing approval row exists with a CA approval ref and date, it's approved.
+    SELECT EXISTS (
+        SELECT 1 FROM borrowing_approvals ba
+        WHERE ba.society_id = p_society_id AND ba.principal = p_principal
+          AND ba.ca_approval_ref IS NOT NULL AND ba.ca_approved_on IS NOT NULL
+    ) INTO v_appr;
+
+    IF v_appr THEN
+        RETURN QUERY SELECT TRUE, TRUE, 'approved by Competent Authority'::TEXT;
+    ELSE
+        RETURN QUERY SELECT TRUE, FALSE,
+            format('borrowing of ₹%s needs Competent Authority approval under bye-law 44(d)', p_principal)::TEXT;
+    END IF;
+END
+$$;
+
+-- ── (6) Tenant joint liability (Act s.18(2)) ────────────────────────────────────
+-- The tenant of record for a flat is jointly liable with the owner for common
+-- expenses. This is a hard-wired statutory rule. The `tenants` table holds the
+-- current tenant per apartment; receivables generated against the flat are
+-- flagged to show the tenant is also on the hook.
+CREATE TABLE IF NOT EXISTS tenants (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id    INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    tenant_name     VARCHAR(100) NOT NULL,
+    tenant_mobile   VARCHAR(15),
+    tenancy_start   DATE NOT NULL,
+    tenancy_end     DATE,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by      INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_tenant_apartment UNIQUE (society_id, apartment_id, tenant_name)
+);
+CREATE INDEX IF NOT EXISTS idx_tenants_society_apartment ON tenants (society_id, apartment_id, is_active);
+
+CREATE OR REPLACE FUNCTION fn_tenant_liability(p_society_id INT, p_apartment_id INT, p_asof DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (tenant_name VARCHAR, joint_liability BOOLEAN, message TEXT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE v_active INT;
+BEGIN
+    -- s.18(2) is a hard-wired statute; the parameter confirms it is in force for this scheme.
+    v_active := fn_regime_param_num(p_society_id, 'tenant_joint_liability', p_asof)::INT;
+    IF v_active IS NULL OR v_active = 0 THEN
+        RETURN QUERY SELECT NULL::VARCHAR, FALSE, 'tenant joint liability (s.18(2)) not configured for this society''s regime'::TEXT;
+        RETURN;
+    END IF;
+    RETURN QUERY
+    SELECT t.tenant_name,
+           EXISTS(SELECT 1 FROM tenants t2 WHERE t2.society_id = p_society_id AND t2.apartment_id = p_apartment_id
+                    AND t2.is_active AND (t2.tenancy_end IS NULL OR t2.tenancy_end >= p_asof)) AS joint_liability,
+           CASE WHEN EXISTS(SELECT 1 FROM tenants t2 WHERE t2.society_id = p_society_id AND t2.apartment_id = p_apartment_id
+                            AND t2.is_active AND (t2.tenancy_end IS NULL OR t2.tenancy_end >= p_asof))
+                THEN 'tenant jointly liable with owner under s.18(2)'
+                ELSE 'no active tenant on record'
+           END AS message
+    FROM tenants t
+    WHERE t.society_id = p_society_id AND t.apartment_id = p_apartment_id AND t.is_active
+      AND (t.tenancy_end IS NULL OR t.tenancy_end >= p_asof)
+    ORDER BY t.tenancy_start DESC LIMIT 1;
+END
+$$;
+
+-- ── (7) Board election with weighted voting (bye-law 8) ─────────────────────────
+-- Bye-law 8 weights each vote by the owner's undivided-interest percentage in the
+-- Declaration (Act s.12(1)(f)). 'majority' means 51% of the votes. Quorum is 30%
+-- of owners present in person. This function supports both voting bases:
+-- one_apartment_one_vote (for advisory polls) and undivided_interest (for Board
+-- elections, budget approval, s.22 resolutions — statutory acts).
+CREATE TABLE IF NOT EXISTS board_candidates (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id    INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    candidate_name  VARCHAR(100) NOT NULL,
+    position        VARCHAR(50),
+    vote_basis      VARCHAR(30) NOT NULL DEFAULT 'undivided_interest'
+                    CHECK (vote_basis IN ('undivided_interest', 'one_apartment_one_vote')),
+    votes_received  NUMERIC(12, 6) DEFAULT 0,
+    votes_weight    NUMERIC(9, 6) DEFAULT 0,     -- the weight of this candidate's vote (only for undivided_interest voting)
+    created_by      INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_board_candidates_society ON board_candidates (society_id, position);
+
+CREATE TABLE IF NOT EXISTS board_election_votes (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    candidate_id    INT NOT NULL REFERENCES board_candidates (id) ON DELETE CASCADE,
+    voter_apartment_id INT NOT NULL REFERENCES apartments (id),
+    vote_date       DATE NOT NULL,
+    vote_weight     NUMERIC(9, 6) NOT NULL DEFAULT 1,  -- 1 for one_apartment_one_vote, undivided_interest_pct for weighted
+    cast_by         INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_board_votes_society ON board_election_votes (society_id, candidate_id);
+
+CREATE OR REPLACE FUNCTION fn_board_election_eligibility(p_society_id INT, p_election_date DATE, p_basis TEXT DEFAULT NULL)
+RETURNS TABLE (apartment_id INT, flat_number VARCHAR, owner_name VARCHAR,
+               eligible BOOLEAN, vote_weight NUMERIC, ineligible_reason TEXT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE v_basis TEXT; v_arrears_days INT; v_blocks_loans INT; v_cut DATE;
+BEGIN
+    v_basis := COALESCE(p_basis, fn_regime_param_text(p_society_id, 'board_election_voting_basis', p_election_date), 'undivided_interest');
+    v_arrears_days := COALESCE(fn_regime_param_num(p_society_id, 'arrears_disqualify_days', p_election_date)::INT, 60);
+    v_blocks_loans := COALESCE(fn_regime_param_num(p_society_id, 'owner_loan_counts_bye_law7', p_election_date)::INT, 0);
+    v_cut := fn_bye_law7_cutoff_date(p_society_id, p_election_date);
+
+    RETURN QUERY
+    SELECT a.id, a.flat_number, a.owner_name,
+           CASE WHEN COALESCE(ar.arrears, 0) = 0 AND COALESCE(lo.overdue, 0) = 0 THEN TRUE ELSE FALSE END AS eligible,
+           CASE WHEN v_basis = 'undivided_interest' THEN COALESCE(a.undivided_interest_pct, 0) ELSE 1 END AS vote_weight,
+           CASE
+               WHEN COALESCE(ar.arrears, 0) > 0 THEN format('arrears of ₹%s exceed %s days at cutoff', ar.arrears, v_arrears_days)
+               WHEN COALESCE(lo.overdue, 0) > 0 THEN format('overdue owner loan of ₹%s', lo.overdue)
+               ELSE NULL
+           END AS ineligible_reason
+    FROM apartments a
+    LEFT JOIN LATERAL fn_common_expense_arrears_asof(p_society_id, a.id, v_cut, v_arrears_days) ar ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(l.principal - l.repaid_amount) FILTER (
+                   WHERE v_blocks_loans = 1 AND l.due_date IS NOT NULL AND l.due_date < v_cut - v_arrears_days), 0) AS overdue
+        FROM owner_loans l WHERE l.society_id = p_society_id AND l.apartment_id = a.id AND l.principal > l.repaid_amount
+    ) lo ON TRUE
+    WHERE a.society_id = p_society_id AND a.active
+    ORDER BY a.flat_number;
+END
+$$;
+
+CREATE OR REPLACE FUNCTION fn_declare_board_election_results(p_society_id INT, p_position VARCHAR)
+RETURNS TABLE (candidate_name VARCHAR, flat_number VARCHAR, vote_count NUMERIC, vote_weight NUMERIC,
+               vote_pct NUMERIC, won BOOLEAN)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE v_basis TEXT; v_total_weight NUMERIC; v_quorum_owners INT;
+BEGIN
+    v_basis := fn_regime_param_text(p_society_id, 'board_election_voting_basis', CURRENT_DATE);
+    v_total_weight := (SELECT SUM(vote_weight) FROM board_candidates WHERE society_id = p_society_id AND position = p_position);
+    v_quorum_owners := (SELECT COUNT(*) FROM board_candidates bc
+                         WHERE bc.society_id = p_society_id AND bc.position = p_position
+                           AND EXISTS (SELECT 1 FROM apartments a WHERE a.id = bc.apartment_id AND a.society_id = p_society_id AND a.active));
+
+    RETURN QUERY
+    SELECT bc.candidate_name, a.flat_number,
+           (SELECT COUNT(*) FROM board_election_votes WHERE candidate_id = bc.id) AS vote_count,
+           bc.vote_weight,
+           ROUND(100.0 * (SELECT COUNT(*) FROM board_election_votes WHERE candidate_id = bc.id) /
+                 NULLIF(v_total_weight, 0), 2) AS vote_pct,
+           CASE WHEN v_basis = 'undivided_interest'
+                THEN (SELECT SUM(bev.vote_weight) FROM board_election_votes bev WHERE bev.candidate_id = bc.id) >=
+                     COALESCE(fn_regime_param_num(p_society_id, 'poll_majority_pct', CURRENT_DATE), 51) / 100.0 * v_total_weight
+                ELSE (SELECT COUNT(*) FROM board_election_votes WHERE candidate_id = bc.id) > 0
+                    AND (SELECT COUNT(*) FROM board_election_votes) >=
+                    COALESCE(fn_regime_param_num(p_society_id, 'poll_majority_pct', CURRENT_DATE), 51) / 100.0 *
+                    NULLIF((SELECT COUNT(*) FROM board_election_votes), 0)
+           END AS won
+    FROM board_candidates bc
+    JOIN apartments a ON a.id = bc.apartment_id
+    WHERE bc.society_id = p_society_id AND bc.position = p_position
+    ORDER BY vote_pct DESC, bc.id;
+END
+$$;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- MASTER RULE EDITOR — append-only audit log + societies.state → legal regime sync

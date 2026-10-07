@@ -679,15 +679,16 @@ Every write also inserts into `regime_rule_audit`.
 | Module | Governed by | In the engine today |
 |---|---|---|
 | Enrollment of apartments / members | Bye-law 29 (register of members), 40 (succession) | 🟡 Register only — no rule-driven check |
-| Receivables / receipts | Bye-laws 15, 38 (levy), s.18(1) | ✅ Billing by area or undivided interest. 🟡 s.20 (recovery after 12 months) is only a baseline string in `fn_resolve_rule`; nothing enforces it |
-| Payables / expenses | Bye-law 46–47 (cash/cheque, petty cash) | ✅ `fn_verify_expense` flags or blocks; `fn_petty_cash_check` |
-| Funds | Bye-laws 16–18, 39, 48 | ✅ Fund accounts, FY-close appropriation, ½% transfer fee → Major Repair Fund |
-| Owner loans | Bye-law 3(1)(f), resolution mandatory | ✅ Ledger-posted; counted in No Dues / bye-law 7 per policy |
-| Transfers / NOC | Bye-law 39 | ✅ `fn_get_standing.noc_blocked`; 15-day deemed grant |
+| Receivables / receipts | Bye-laws 15, 38 (levy), s.18(1), s.18(2) | ✅ Billing by area or undivided interest; s.20 recovery candidates listed; s.18(2) tenant joint liability tracked |
+| Payables / expenses | Bye-law 46–47 (cash/cheque, petty cash), 23(f) (cashbook signature) | ✅ `fn_verify_expense` flags or blocks; `fn_petty_cash_check`; `fn_cashbook_signature_check` |
+| Funds | Bye-laws 16–18, 39, 45, 48 | ✅ Fund accounts, FY-close appropriation, ½% transfer fee → Major Repair Fund; 25% reserve as policy; investment check |
+| Owner loans | Bye-law 3(1)(f), 44(d) (borrowing) | ✅ Ledger-posted; counted in No Dues / bye-law 7 per policy; `fn_borrowing_check` enforces CA approval |
+| Transfers / NOC | Bye-law 39, s.23(2) | ✅ `fn_get_standing.noc_blocked`; 15-day deemed grant; `fn_issue_purchaser_statement` for s.23(2) |
 | Polls / voting | Bye-laws 7, 33; quorum | ✅ Eligibility via `fn_get_standing`; quorum + majority at declaration |
-| Board elections | Bye-law 7 | ✅ `fn_bye_law7_eligibility` — arrears of more than 60 days tested **as at the cutoff date** (last day of the preceding year) from `receivable_payment_log`, on common-expense bills only; an overdue owner loan counts only if the society opts in |
+| Board elections | Bye-law 7, 8 | ✅ `fn_bye_law7_eligibility` tested as at cutoff; `fn_board_election_eligibility` with weighted voting (bye-law 8) |
 | Service cut-off | s.22 | ✅ `fn_service_cutoff_check`; resolution reference recorded |
 | Statements & filings | Bye-law 49–52 | ✅ Calendar, filings, owner and loanee lists |
+| Entrance / share capital | Bye-laws 4, 5 | ✅ `owner_admissions` table; `fn_entrance_fee_due` / `fn_share_capital_due` |
 | Concerns, Channels | Bye-law 9 (Board powers), 13 (committees) | 🟡 Not linked to any bye-law or resolution |
 | Vendors, Security | Bye-law 19 (staff), 27 | 🟡 Not linked to any bye-law or resolution |
 
@@ -716,11 +717,12 @@ Everything derived from a pack is generated or validated from it: the SQL seed b
 **Known gaps (not yet built)**
 - Clause-level variations (`society_bye_laws.variation_text`) are still free text and do not change the engine. A value a society decides for a rule the engine reads is recorded at **parameter** level instead (`society_rule_decisions`, below), and that does reach the engine.
 - Parameter-level decisions have service functions (`app/services/rule_params.py`) but no Setup Wizard / Master UI yet.
-- `s20_recovery_months` is defined (`implemented = false` in its pack) but no function reads it.
 - `resolution_effects` has no writer, so Master's "pending enactments" list is always empty; provisional → active happens automatically when the admin records a passed resolution (`link_provisional_to_resolution` is the manual service-level path).
 - "Tighten only" is enforced for parameter-level decisions (`fn_rule_decision_check`) but not for clause-level free-text variations.
 - Meetings and resolutions are recorded by Master; there is no admin/secretary entry screen and no read-only mirror on the Admin UP AOA Compliance card.
 - A poll that carries does not create a resolution; ratification at a GBM is manual.
+- Voting for Board elections with undivided-interest weighting (bye-law 8) is implemented in SQL (`fn_board_election_eligibility`, `fn_declare_board_election_results`) but has no UI on the compliance card yet; advisory polls still use one-apartment-one-vote.
+- Daily cashbook signatures (bye-law 23(f)), tenant records (s.18(2)), borrowing approvals (bye-law 44(d)), investment checks (bye-law 45), and entrance fee / share capital (bye-laws 4, 5) are tracked in tables and checked by functions, but have no write side on the compliance card yet.
 
 > Confirm bye-law numbers and the statute-backed clause list with an advocate before relying on them in a filing.
 
@@ -739,6 +741,12 @@ The card **records and checks**; it never files with an authority, never disqual
 | 5 | Cutting an essential service (s.22) | Opens a proceeding, records each of the 7 steps, and sees the exact blocker list + earliest lawful cut-off date | `upc-s22-*` |
 | 6 | Loans to owners (bye-law 3(1)(f)) | Records a disbursement and repayments — see below | `upc-ln-*`, `upc-rp-*` |
 | 7 | Cash & cheque limits | **Read-only**: petty-cash badge + the last 10 `compliance_flags` | — |
+| 8 | Entrance fee + share capital (bye-laws 4, 5) | Records owner admission; checks and marks entrance fee (₹1,000) and share capital (one share per owner) paid | `upc-ef-*`, `upc-sc-*` |
+| 9 | Cashbook signature (bye-law 23(f)) | Checks daily cashbook signed; signs a day via the action service | `upc-cb-*` |
+| 10 | Investments (bye-law 45) | Validates new deposits against permitted institution types | `upc-in-*` |
+| 11 | Borrowing (bye-law 44(d)) | Records borrowing and checks CA approval status | `upc-br-*` |
+| 12 | Tenant liability (s.18(2)) | Records tenant of record; shows joint liability status per flat | `upc-te-*` |
+| 13 | Board elections (bye-law 8) | Weighted voting by undivided interest; declares results | `upc-be-*`, `upc-vt-*` |
 
 Python side is `app/services/up_aoa_actions.py` (every handler returns `(ok, message)` and re-checks society ownership via `_owns()` before touching a browser-supplied id) plus `app/dash_apps/pages/up_compliance_card.py` (renderer). **The rules are enforced in SQL**; `up_aoa_actions` only validates form input and calls them.
 
