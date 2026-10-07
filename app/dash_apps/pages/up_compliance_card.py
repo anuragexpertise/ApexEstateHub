@@ -15,7 +15,7 @@ from decimal import Decimal
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
-from app.services.up_aoa_actions import NODUES_ACTIONS, PAY_MODES, S22_STEPS
+from app.services.up_aoa_actions import NODUES_ACTIONS, PAY_MODES, S22_STEPS, TRANSFER_TYPES
 
 COLOR = "#7a4f01"
 _STATUS_COLOR = {"done": "#17976e", "overdue": "#c0392b", "due_soon": "#d68910", "upcoming": "#566573",
@@ -172,11 +172,13 @@ def render_up_compliance_card(data: dict) -> html.Div:
                                                                    style={"fontSize": "11px"})])] for r in tr]),
         html.Hr(),
         dbc.Row([
-            _field("Flat", dcc.Dropdown(id="upc-tr-flat", options=flat_opts, placeholder="Select flat", style={"fontSize": "13px"}), 3),
+            _field("Flat", dcc.Dropdown(id="upc-tr-flat", options=flat_opts, placeholder="Select flat", style={"fontSize": "13px"}), 2),
+            _field("Type", dcc.Dropdown(id="upc-tr-type", options=[{"label": v, "value": k} for k, v in TRANSFER_TYPES.items()],
+                                        value="sale", clearable=False, style={"fontSize": "13px"}), 3),
             _field("Transfer date", _date("upc-tr-date"), 2),
             _field("Transfer value (\u20b9)", dbc.Input(id="upc-tr-value", type="number", min=0, step="0.01", style={"fontSize": "13px"}), 2),
             _field("Seller", dbc.Input(id="upc-tr-from", type="text", style={"fontSize": "13px"}), 2),
-            _field("Buyer", dbc.Input(id="upc-tr-to", type="text", style={"fontSize": "13px"}), 3),
+            _field("Buyer", dbc.Input(id="upc-tr-to", type="text", style={"fontSize": "13px"}), 2),
         ], className="g-2"),
         _btn("Record transfer and levy fee", "upc-tr-save", "fa-exchange-alt"),
         html.Hr(),

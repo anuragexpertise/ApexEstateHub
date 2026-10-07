@@ -148,6 +148,7 @@ def test_nodues_block_is_switchable_and_refusal_always_allowed(cur, actions):
 
 # ── bye-law 7 ────────────────────────────────────────────────────────────────
 def test_bye_law7_counts_only_overdue_outstanding_loans(cur):
+    set_rule(cur, "owner_loan_counts_bye_law7", 1)      # opt-in: off by default (bye-law 7 covers common-expense arrears only)
     apt = apartment(cur)
     base = b7(cur, apt)
     loan = make_loan(cur, apt, 50000, due=OLD_DUE)
@@ -164,15 +165,17 @@ def test_bye_law7_counts_only_overdue_outstanding_loans(cur):
     assert b7(cur, apt)["overdue_amount"] == base["overdue_amount"]
 
 
-def test_bye_law7_loan_term_is_switchable(cur):
+def test_bye_law7_loan_term_is_off_by_default_and_switchable(cur):
     apt = apartment(cur)
     base = b7(cur, apt)
     make_loan(cur, apt, 50000, due=OLD_DUE)
-    set_rule(cur, "owner_loan_counts_bye_law7", 0)
-    assert b7(cur, apt)["overdue_amount"] == base["overdue_amount"]
+    assert b7(cur, apt)["overdue_amount"] == base["overdue_amount"]          # default: a loan is not a common-expense arrear
+    set_rule(cur, "owner_loan_counts_bye_law7", 1)
+    assert b7(cur, apt)["overdue_amount"] - base["overdue_amount"] == 50000   # society opted in
 
 
 def test_bye_law7_partial_repayment_counts_remaining_balance(cur):
+    set_rule(cur, "owner_loan_counts_bye_law7", 1)
     apt = apartment(cur)
     base = b7(cur, apt)
     loan = make_loan(cur, apt, 50000, due=OLD_DUE)
@@ -189,16 +192,15 @@ def _proceeding(cur, apt):
 def _s22_dues_blocker(cur, pid, asof=date(2026, 9, 1)):
     """True when service cut-off is blocked because nothing is owed.
 
-    fn_service_cutoff_check() reports this as "outstanding dues or overdue
-    loans remain ... (s.22 blocked)". The wording is confusing at first glance:
-    s.22 lets a society cut a service only when charges have been unpaid for
-    over the statutory period, so a flat with nothing outstanding — or with an
-    overdue loan the society has chosen not to count — is *blocked*, not
-    cleared. The rule under test (owner_loan_counts_s22) decides which of those
+    fn_service_cutoff_check() reports this as "no common-expense dues are
+    unpaid for more than N months ... so s.22 is not triggered". s.22 lets a
+    society cut a service only when charges have been unpaid for over the
+    statutory period, so a flat with nothing outstanding — or with an overdue
+    loan the society has chosen not to count — is *blocked*, not cleared. The rule under test (owner_loan_counts_s22) decides which of those
     two the loan produces.
     """
     blockers = q1(cur, "SELECT blockers FROM fn_service_cutoff_check(%s,%s)", (pid, asof))["blockers"]
-    return any("(s.22 blocked)" in b for b in blockers)
+    return any("s.22 is not triggered" in b for b in blockers)
 
 
 def test_s22_ignores_loans_by_default_and_counts_them_when_switched_on(cur):

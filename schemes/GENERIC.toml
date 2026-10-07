@@ -1,0 +1,52 @@
+# GENERIC - fallback scheme for a society whose state or constitution has no researched pack yet.
+#
+# Central law applies everywhere, but no STATE statute is loaded: every parameter here is non-statutory and the
+# society decides. The Setup Wizard shows a banner saying state-specific statutory rules are not loaded.
+
+[scheme]
+code = "GENERIC"
+state_code = "ZZ"
+constitution = "GENERIC"
+name = "Generic (state rules not loaded)"
+primary_law = "No state statute loaded - central laws only"
+effective_from = 2000-01-01
+status = "active"
+source_reference = "Fallback scheme; the society's own resolutions are the only source of rules"
+
+[[parameter]]
+key = "cash_limit_default_mode"
+label = "Cash-limit enforcement default (engine policy)"
+instrument = "Engine policy (no statutory source)"
+provision = "-"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "text"
+value_text = "warn"
+choices = ["warn", "block"]
+layers = [1, 2, 3]
+tighten = "higher"
+enforcement = "policy"
+feeds = ["fn_cash_limit_mode"]
+verification = "provisional"
+needs_decision = true
+source = """Engine policy, not statute: warn = record a compliance flag; block = refuse the posting"""
+
+[[parameter]]
+key = "reserve_appropriation_pct"
+label = "Reserve Fund share of net surplus at FY close (%)"
+instrument = "Engine policy (no statutory source)"
+provision = "-"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "num"
+unit = "%"
+value = 25
+min = 0
+max = 100
+layers = [1, 2]
+tighten = "none"
+enforcement = "policy"
+feeds = ["fn_fy_close_preview", "fn_fy_close_reserve_appropriation"]
+verification = "provisional"
+needs_decision = true
+source = """Engine policy: share of net surplus moved to the Reserve Fund at FY close. No state statute is loaded for this scheme; the society sets it by resolution"""

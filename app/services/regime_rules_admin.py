@@ -40,41 +40,25 @@ class RuleSpec:
     label: str = ""
 
 
-# Only keys seeded in estatehub.sql can be edited: a new key would have no SQL function reading it.
-RULE_SPECS: dict[str, RuleSpec] = {
-    "transfer_fee_pct":              RuleSpec("num", 0.0001, 5, label="Bye-law 39 transfer fee (% of value)"),
-    "nodues_deemed_days":            RuleSpec("int", 1, 90, label="No Dues deemed granted after (days)"),
-    "petty_cash_limit":              RuleSpec("num", 1, 10_000_000, label="Petty cash ceiling (INR)"),
-    "cash_payment_cheque_threshold": RuleSpec("num", 1, 10_000_000, label="Cash payments above this breach (INR)"),
-    "cash_limit_default_mode":       RuleSpec("text", choices=("warn", "block"), statutory=False,
-                                              label="Cash-limit enforcement default (engine policy)"),
-    "statement_publish_due_month":   RuleSpec("int", 1, 12, label="Bye-law 49 publish deadline — month"),
-    "statement_publish_due_day":     RuleSpec("int", 1, 31, label="Bye-law 49 publish deadline — day"),
-    "authority_copy_due_month":      RuleSpec("int", 1, 12, label="Bye-law 49 authority copy — month"),
-    "authority_copy_due_day":        RuleSpec("int", 1, 31, label="Bye-law 49 authority copy — day"),
-    "owner_summary_days":            RuleSpec("int", 1, 90, label="Bye-law 49 owner summary within (days)"),
-    "arrears_disqualify_days":       RuleSpec("int", 1, 365, label="Bye-law 7 arrears bar after (days)"),
-    "owner_loan_blocks_nodues":      RuleSpec("int", 0, 1, statutory=False,
-                                              label="Outstanding owner loan blocks issuing No Dues (1 = yes)"),
-    "owner_loan_counts_bye_law7":    RuleSpec("int", 0, 1, statutory=False,
-                                              label="Overdue owner loan counts as bye-law 7 arrears (1 = yes)"),
-    "owner_loan_counts_s22":         RuleSpec("int", 0, 1, statutory=False,
-                                              label="Overdue owner loan counts toward the s.22 dues test (1 = yes)"),
-    "bye_law7_year_basis":           RuleSpec("text", choices=("financial_year", "calendar_year"), statutory=False,
-                                              label="Bye-law 7 'year' basis (contested; default)"),
-    "s22_default_months":            RuleSpec("int", 1, 60, label="s.22 default must exceed (months)"),
-    "s22_notice_days":               RuleSpec("int", 1, 90, label="s.22 notice to defaulter (days)"),
-    "s22_wait_months":               RuleSpec("int", 1, 12, label="s.22 wait after certified copy (months)"),
-    "s22_appeal_days":               RuleSpec("int", 1, 90, label="s.22 appeal window (days)"),
-    "s20_recovery_months":           RuleSpec("int", 1, 60, label="s.20 recovery after unpaid (months)"),
-}
+def _specs_from_pack(regime_code: str) -> dict[str, RuleSpec]:
+    """The editable rules and their limits come from the scheme pack (schemes/<CODE>.toml), the same file the SQL
+    seed block and the society-level resolver are generated from. `statutory` here means "the Master must confirm an
+    edit": true for everything with a legal source behind it, false for engine policy defaults."""
+    from schemes.loader import load_scheme
+    return {p.key: RuleSpec(p.type, p.min, p.max, p.choices, statutory=p.base_source != "engine_default", label=p.label)
+            for p in load_scheme(regime_code).params}
+
+
+# Only keys defined in the pack (and seeded from it) can be edited: a new key would have no SQL function reading it.
+RULE_SPECS: dict[str, RuleSpec] = _specs_from_pack(DEFAULT_REGIME)
 
 CATALOG_STATUSES = ("active", "superseded", "draft")
 CASH_MODES = ("warn", "block")
 
 # Tables the raw-SQL "Integrate to DB" box must not touch: edits there skip validation and the audit log.
 PROTECTED_TABLES = ("regime_rule_parameters", "legal_instrument_catalog", "legal_regime_profiles",
-                    "society_legal_regime", "regime_rule_audit")
+                    "society_legal_regime", "regime_rule_audit", "rule_parameter_defs", "society_rule_decisions",
+                    "receivable_payment_log")
 _PROTECTED_RE = re.compile(
     r"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE(?:\s+TABLE)?|ALTER\s+TABLE|DROP\s+TABLE|COPY)\s+"
     r"(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?\"?(?:public\"?\.\"?)?(" + "|".join(PROTECTED_TABLES) + r")\b",
@@ -931,6 +915,10 @@ def _auto_activate(actor_id, actor_role, society_id: int, resolution_id: int) ->
         ok, msg = _activate_provisional(actor_id, actor_role, society_id, prov, clause, layer, resolution_id,
                                         f"Activated automatically by passed resolution #{resolution_id}")
         notes.append(msg if ok else f"{clause}: {msg}")
+
+    # Parameter-level decisions (rule_parameter_defs) named by the same key.
+    from app.services import rule_params
+    notes.extend(rule_params.auto_activate(actor_id, actor_role, society_id, resolution_id, clause))
 
     # Society policy choices (Setup Wizard) on this clause are Layer-2 decisions. One valid resolution on the
     # clause confirms every pending policy choice of that clause (e.g. both BL_08 voting settings).

@@ -4340,8 +4340,9 @@ def render_fy_closing_card(rows: list, error: str | None,
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# STATUTORY RESERVE APPROPRIATION PANEL (UP AOA Model Bye-Laws Ch.VII
-# Para 46(c) & 3(d) — a fixed share of net surplus to the Reserve Fund)
+# RESERVE APPROPRIATION PANEL (share of net surplus to the Reserve Fund; the
+# percentage is society policy - regime parameter reserve_appropriation_pct -
+# not a rate fixed by the UP Act or the Model Bye-Laws)
 # ════════════════════════════════════════════════════════════════════════════
 # Sits on the FY Closing card, which is where the year's result already lives.
 # The panel is read-only by itself; the single write it can trigger is

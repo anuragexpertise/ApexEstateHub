@@ -59,6 +59,9 @@ CREATE TABLE societies (
     -- remains a separate, still-open gap (thresholds table has no
     -- per-state row differentiation to key off of yet).
     state VARCHAR(50),
+    -- How the society is constituted; with `state` it selects the legal scheme (fn_sync_society_regime).
+    -- Existing societies were all treated as apartment owners' associations, hence the default.
+    constitution VARCHAR(20) NOT NULL DEFAULT 'AOA' CHECK (constitution IN ('AOA', 'REG_SOCIETY', 'COOP', 'GENERIC')),
     -- signing_secret_enc: this society's own QR SIGNING_SECRET, Fernet-encrypted
     -- (reversible) under the deployment's SECRET_VAULT_KEY — see
     -- app/services/secret_vault.py. It must be reversible, because an HMAC key
@@ -773,8 +776,66 @@ CREATE TABLE receivables (
     reported_mode VARCHAR(20),
     reported_reference VARCHAR(255),
     reported_at TIMESTAMP,
-    reported_by INT REFERENCES users (id)
+    reported_by INT REFERENCES users (id),
+    -- 'common_expense' (default) = maintenance, fund contributions, GST on them and any other sum
+    -- the Association assesses on owners (Act s.2 "common expenses"). 'transfer_fee' = the bye-law
+    -- transfer fee: payable by the TRANSFEROR on a sale, so it is not a common-expense arrear for
+    -- bye-law 7 or the s.22 six-month test (and does not pass to a purchaser under s.23).
+    charge_kind VARCHAR(20) NOT NULL DEFAULT 'common_expense'
+        CHECK (charge_kind IN ('common_expense', 'transfer_fee', 'other'))
 );
+
+-- ── PAYMENT LOG ────────────────────────────────────────────────────
+-- Bye-law 7 tests arrears ON A PAST DATE (last day of the year before the election), so the
+-- balance today is the wrong number: an owner who paid after that date is still barred, one who
+-- fell behind after it is not. receivables only stores running totals, so every change to
+-- paid_amount / paid_principal is logged here by trigger, whatever code path made it.
+-- paid_on is the posting date (CURRENT_DATE) unless the session sets app.payment_date
+-- (SET LOCAL app.payment_date = 'YYYY-MM-DD') to back-date a late-entered receipt.
+CREATE TABLE receivable_payment_log (
+    id              BIGSERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    receivable_id   INT NOT NULL REFERENCES receivables (id) ON DELETE CASCADE,
+    paid_on         DATE NOT NULL,
+    principal_delta NUMERIC(12, 2) NOT NULL,
+    total_delta     NUMERIC(12, 2) NOT NULL,
+    logged_at       TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_receivable_payment_log_rec ON receivable_payment_log (receivable_id, paid_on);
+
+CREATE OR REPLACE FUNCTION fn_trg_log_receivable_payment() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_total NUMERIC := NEW.paid_amount - COALESCE(OLD.paid_amount, 0);
+    v_prin  NUMERIC;
+    v_on    DATE := COALESCE(NULLIF(current_setting('app.payment_date', TRUE), '')::DATE, CURRENT_DATE);
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        v_prin := NEW.paid_principal;
+    ELSIF NEW.paid_principal IS DISTINCT FROM OLD.paid_principal THEN
+        v_prin := NEW.paid_principal - OLD.paid_principal;
+    ELSE
+        -- paid_amount moved without paid_principal (a hand-written UPDATE): treat it as principal
+        -- up to what principal is still unpaid, so such a payment is never lost from the log.
+        v_prin := LEAST(v_total, GREATEST((NEW.amount - NEW.interest_amount) - OLD.paid_principal, 0));
+    END IF;
+    IF v_total <> 0 OR v_prin <> 0 THEN
+        INSERT INTO receivable_payment_log (society_id, receivable_id, paid_on, principal_delta, total_delta)
+        VALUES (NEW.society_id, NEW.id, v_on, v_prin, v_total);
+    END IF;
+    RETURN NEW;
+END $$;
+
+CREATE TRIGGER trg_receivable_payment_log_upd
+    AFTER UPDATE OF paid_amount, paid_principal ON receivables
+    FOR EACH ROW
+    WHEN (NEW.paid_amount IS DISTINCT FROM OLD.paid_amount OR NEW.paid_principal IS DISTINCT FROM OLD.paid_principal)
+    EXECUTE FUNCTION fn_trg_log_receivable_payment();
+CREATE TRIGGER trg_receivable_payment_log_ins
+    AFTER INSERT ON receivables
+    FOR EACH ROW
+    WHEN (NEW.paid_amount > 0 OR NEW.paid_principal > 0)
+    EXECUTE FUNCTION fn_trg_log_receivable_payment();
 
 -- ── BANK RECONCILIATION ────────────────────────────────────────────
 -- bank_statement_lines: raw rows from an admin-uploaded CSV/Excel bank
@@ -1136,8 +1197,8 @@ CREATE INDEX idx_fund_appropr_pending
 -- computation (see its header at ~line 7900 — "Nothing is posted to
 -- transactions, nothing is written to brought_forward"), so before this
 -- table there was no persistent notion of "this FY is closed" anywhere in
--- the schema. The statutory reserve appropriation (UP AOA Model Bye-Laws
--- Ch.VII Para 46(c)&3(d): a fixed share of net surplus to Reserve Fund) was
+-- the schema. The reserve appropriation (a share of net surplus to the
+-- Reserve Fund; the percentage is society policy, see reserve_appropriation_pct) was
 -- therefore not just un-implemented but un-representable — and, crucially,
 -- there was no way to make it idempotent. A close that could run twice
 -- would silently double-appropriation the reserve.
@@ -2098,6 +2159,9 @@ CREATE TABLE state_compliance_thresholds (
 CREATE TABLE legal_regime_profiles (
     code VARCHAR(30) PRIMARY KEY,
     state_code VARCHAR(2) NOT NULL,
+    -- A scheme is state x constitution: the same state has different statutes for an apartment owners'
+    -- association, a registered society and a co-operative housing society. GENERIC = no state rules loaded.
+    constitution VARCHAR(20) NOT NULL DEFAULT 'AOA' CHECK (constitution IN ('AOA', 'REG_SOCIETY', 'COOP', 'GENERIC')),
     name VARCHAR(120) NOT NULL,
     primary_law VARCHAR(255) NOT NULL,
     rules_version VARCHAR(100),
@@ -7175,9 +7239,10 @@ $$;
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FY CLOSE — statutory reserve appropriation
 -- ═══════════════════════════════════════════════════════════════════════════
--- UP AOA Model Bye-Laws Ch.VII Para 46(c) & 3(d) require a fixed share of
--- net surplus (the Model Bye-Laws indicate 25%) to be transferred to the
--- Reserve Fund each year. That rule was previously only prose: it appeared in
+-- The Model Bye-Laws say common profits form the nucleus of the reserve funds
+-- but set NO percentage, so the share of net surplus moved to the Reserve Fund
+-- each year is society policy (regime parameter reserve_appropriation_pct, seeded
+-- 25, set by General Body resolution). That rule was previously only prose: it appeared in
 -- the comment block above fn_process_fund_utilization and as a "Manual —
 -- not yet implemented" row in the README, with no SQL, no loader, no button.
 -- These three functions implement it end to end.
@@ -7310,7 +7375,7 @@ $$;
 CREATE OR REPLACE FUNCTION fn_fy_close_preview(
     p_society_id  INT,
     p_fy          INT,
-    p_reserve_pct NUMERIC DEFAULT 25.0
+    p_reserve_pct NUMERIC DEFAULT NULL
 )
 RETURNS TABLE(
     fy                INT,
@@ -7343,7 +7408,7 @@ DECLARE
     v_blockers   TEXT := '';
     v_notes      TEXT := '';
 BEGIN
-    v_pct := LEAST(GREATEST(COALESCE(p_reserve_pct, 25.0), 0), 100);
+    v_pct := LEAST(GREATEST(COALESCE(p_reserve_pct, fn_regime_param_num(p_society_id, 'reserve_appropriation_pct'), 25.0), 0), 100);
 
     -- Root total: the double-entry identity in fn_fy_closing_report's
     -- Cr-positive sign convention. Must be ~0 for the books to balance.
@@ -7450,7 +7515,7 @@ $$;
 CREATE OR REPLACE FUNCTION fn_fy_close_reserve_appropriation(
     p_society_id  INT,
     p_fy          INT,
-    p_reserve_pct NUMERIC DEFAULT 25.0,
+    p_reserve_pct NUMERIC DEFAULT NULL,
     p_created_by  INT  DEFAULT NULL
 )
 RETURNS TABLE(
@@ -7486,7 +7551,7 @@ DECLARE
     v_name       TEXT;
     v_tn         VARCHAR(64);
 BEGIN
-    v_pct := LEAST(GREATEST(COALESCE(p_reserve_pct, 25.0), 0), 100);
+    v_pct := LEAST(GREATEST(COALESCE(p_reserve_pct, fn_regime_param_num(p_society_id, 'reserve_appropriation_pct'), 25.0), 0), 100);
 
     -- Idempotency.
     --
@@ -13581,44 +13646,233 @@ CREATE TABLE regime_rule_parameters (
     PRIMARY KEY (regime_code, rule_key, effective_from)
 );
 
-INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference) VALUES
- ('UP_AOA_2010', 'transfer_fee_pct',            0.5,   NULL, '% of value', 'Model Bye-Laws 2011, bye-law 39: ½% of transfer value payable to the association for the major-repair fund'),
- ('UP_AOA_2010', 'nodues_deemed_days',          15,    NULL, 'days',       'Model Bye-Laws 2011, bye-law 39: No Dues Certificate deemed granted if not refused within 15 days'),
- ('UP_AOA_2010', 'petty_cash_limit',            20000, NULL, 'INR',        'Model Bye-Laws 2011, financial provisions (bye-laws 46-52): petty cash ceiling'),
- ('UP_AOA_2010', 'cash_payment_cheque_threshold', 2500, NULL, 'INR',       'Model Bye-Laws 2011, financial provisions (bye-laws 46-52): payments above this by cheque (Secretary + one Board member). Pre-dates UPI/NEFT; this engine treats only mode=cash as the breach'),
- ('UP_AOA_2010', 'cash_limit_default_mode',     NULL,  'warn','',          'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting. Override per society in societies.cash_limit_mode'),
- ('UP_AOA_2010', 'statement_publish_due_month', 7,     NULL, 'month',      'Model Bye-Laws 2011, bye-law 49: audited statement published by 31 July'),
- ('UP_AOA_2010', 'statement_publish_due_day',   31,    NULL, 'day',        'Model Bye-Laws 2011, bye-law 49'),
- ('UP_AOA_2010', 'authority_copy_due_month',    8,     NULL, 'month',      'Model Bye-Laws 2011, bye-law 49: copy to the competent authority by 15 August'),
- ('UP_AOA_2010', 'authority_copy_due_day',      15,    NULL, 'day',        'Model Bye-Laws 2011, bye-law 49'),
- ('UP_AOA_2010', 'owner_summary_days',          15,    NULL, 'days',       'Model Bye-Laws 2011, bye-law 49: summary to every owner within 15 days of publication'),
- ('UP_AOA_2010', 'arrears_disqualify_days',     60,    NULL, 'days',       'Model Bye-Laws 2011, bye-law 7: arrears of more than 60 days bar voting / standing for the Board'),
- ('UP_AOA_2010', 'bye_law7_year_basis',         NULL,  'financial_year', '', 'Bye-law 7 says "the year preceding the election". Whether that is the financial or the calendar year is contested (advocate commentary differs); default financial_year, overridable per call'),
- ('UP_AOA_2010', 's22_default_months',          6,     NULL, 'months',     'UP Apartment Act 2010 s.22: service cut-off only after MORE than 6 months of default'),
- ('UP_AOA_2010', 's22_notice_days',             7,     NULL, 'days',       'UP Apartment Act 2010 s.22: 7 days notice to the defaulter'),
- ('UP_AOA_2010', 's22_wait_months',             1,     NULL, 'months',     'UP Apartment Act 2010 s.22: one-month wait after the certified copy is sent to the competent authority and the owner'),
- ('UP_AOA_2010', 's22_appeal_days',             15,    NULL, 'days',       'UP Apartment Act 2010 s.22: 15 days for the owner to appeal'),
- ('UP_AOA_2010', 's20_recovery_months',         12,    NULL, 'months',     'UP Apartment Act 2010 s.20: after 12 months unpaid the competent authority may recover as arrears of land revenue')
+-- ── RULE PARAMETER DEFINITIONS ───────────────────────────────────────────────────
+-- What each regime_rule_parameters row IS: which instrument and provision it comes from, whether it is
+-- statutory (Layer 0, society cannot change it) or non-statutory, who may vary it and within what limits,
+-- how it is enforced and which code reads it. Generated from schemes/<CODE>.toml (see below); the Master
+-- rule editor's RULE_SPECS and the society-level resolver fn_rule() read it too, so a rule is written once.
+CREATE TABLE rule_parameter_defs (
+    regime_code    VARCHAR(30) NOT NULL,     -- no FK, like regime_rule_parameters
+    rule_key       VARCHAR(30) NOT NULL,     -- <= 30: also used as resolutions.clause_id
+    label          VARCHAR(200) NOT NULL,
+    instrument     VARCHAR(300) NOT NULL,
+    provision      VARCHAR(200) NOT NULL,
+    clause_id      VARCHAR(30),              -- Model Bye-Law clause the parameter belongs to, if any
+    nature         VARCHAR(15) NOT NULL CHECK (nature IN ('statutory', 'non_statutory')),
+    base_source    VARCHAR(20) NOT NULL CHECK (base_source IN ('central', 'state_act_rules', 'model_bye_law', 'engine_default')),
+    value_type     VARCHAR(5)  NOT NULL CHECK (value_type IN ('int', 'num', 'text')),
+    unit           VARCHAR(20),
+    min_value      NUMERIC(14, 4),           -- sanity bounds for any value of the rule
+    max_value      NUMERIC(14, 4),
+    vary_min       NUMERIC(14, 4),           -- the envelope a SOCIETY may vary within (default = min/max)
+    vary_max       NUMERIC(14, 4),
+    choices        TEXT[] NOT NULL DEFAULT '{}',   -- text rules, ordered loosest -> strictest
+    layers         INT[]  NOT NULL DEFAULT '{}' CHECK (layers <@ ARRAY[1, 2, 3]),   -- layers that may set a value
+    tighten        VARCHAR(6) NOT NULL DEFAULT 'none' CHECK (tighten IN ('lower', 'higher', 'none')),
+    droppable      BOOLEAN NOT NULL DEFAULT FALSE,
+    enforcement    VARCHAR(10) NOT NULL CHECK (enforcement IN ('hard_wired', 'gated', 'tracked', 'policy')),
+    feeds          TEXT[] NOT NULL DEFAULT '{}',
+    verification   VARCHAR(12) NOT NULL DEFAULT 'provisional' CHECK (verification IN ('provisional', 'checked', 'verified', 'disputed')),
+    verified_on    DATE,
+    needs_decision BOOLEAN NOT NULL DEFAULT FALSE,
+    implemented    BOOLEAN NOT NULL DEFAULT TRUE,
+    description    TEXT,
+    PRIMARY KEY (regime_code, rule_key),
+    CONSTRAINT ck_rule_defs_statutory CHECK ((nature = 'statutory') = (base_source IN ('central', 'state_act_rules'))),
+    CONSTRAINT ck_rule_defs_statutory_locked CHECK (nature <> 'statutory' OR (layers = '{}' AND NOT droppable))
+);
+
+-- >>> GENERATED by scripts/build_scheme_sql.py from schemes/*.toml. Do not edit by hand.
+INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provision, clause_id, nature,
+    base_source, value_type, unit, min_value, max_value, vary_min, vary_max, choices, layers, tighten,
+    droppable, enforcement, feeds, verification, verified_on, needs_decision, implemented, description) VALUES
+ ('GENERIC', 'cash_limit_default_mode', 'Cash-limit enforcement default (engine policy)', 'Engine policy (no statutory source)', '-', NULL, 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['warn', 'block']::TEXT[], ARRAY[1, 2, 3]::INT[], 'higher', FALSE, 'policy', ARRAY['fn_cash_limit_mode']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
+ ('GENERIC', 'reserve_appropriation_pct', 'Reserve Fund share of net surplus at FY close (%)', 'Engine policy (no statutory source)', '-', NULL, 'non_statutory', 'engine_default', 'num', '%', 0, 100, 0, 100, ARRAY[]::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_fy_close_preview', 'fn_fy_close_reserve_appropriation']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
+ ('UP_AOA_2010', 's22_default_months', 's.22 default must exceed (months)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.22(1)', NULL, 'statutory', 'state_act_rules', 'int', 'months', 1, 60, 1, 60, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_service_cutoff_check', 'fn_get_standing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 's22_notice_days', 's.22 notice to defaulter (days)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.22(1)', NULL, 'statutory', 'state_act_rules', 'int', 'days', 1, 90, 1, 90, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_service_cutoff_check', 'fn_get_standing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 's22_wait_months', 's.22 wait after certified copy (months)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.22(1) proviso', NULL, 'statutory', 'state_act_rules', 'int', 'months', 1, 12, 1, 12, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_service_cutoff_check', 'fn_get_standing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 's22_appeal_days', 's.22 appeal window (days)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.22(2)', NULL, 'statutory', 'state_act_rules', 'int', 'days', 1, 90, 1, 90, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_service_cutoff_check', 'fn_get_standing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 's20_recovery_months', 's.20 recovery after unpaid (months)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.20(2)', NULL, 'statutory', 'state_act_rules', 'int', 'months', 1, 60, 1, 60, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'tracked', ARRAY[]::TEXT[], 'checked', DATE '2026-10-07', FALSE, FALSE, 'Defined but not yet enforced: nothing reads this value yet (README, Known gaps).'),
+ ('UP_AOA_2010', 'arrears_disqualify_days', 'Bye-law 7 arrears bar after (days)', 'UP Model Bye-Laws, 2011', 'bye-law 7', 'BL_07', 'non_statutory', 'model_bye_law', 'int', 'days', 1, 365, 1, 60, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'lower', FALSE, 'gated', ARRAY['fn_get_standing', 'fn_bye_law7_eligibility', 'fn_common_expense_arrears_asof']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'A society may only shorten the 60 days (General Body policy); lengthening would loosen the Model Bye-Law.'),
+ ('UP_AOA_2010', 'transfer_fee_pct', 'Bye-law 39 transfer fee (% of value)', 'UP Model Bye-Laws, 2011', 'bye-law 39', 'BL_39', 'non_statutory', 'model_bye_law', 'num', '% of value', 0.0001, 5, 0.0001, 5, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_record_apartment_transfer']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'nodues_deemed_days', 'No Dues deemed granted after (days)', 'UP Model Bye-Laws, 2011', 'bye-law 39', 'BL_39', 'non_statutory', 'model_bye_law', 'int', 'days', 1, 90, 1, 15, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'lower', FALSE, 'gated', ARRAY['fn_nodues_certificate_status']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'cash_payment_cheque_threshold', 'Cash payments above this breach (INR)', 'UP Model Bye-Laws, 2011', 'bye-laws 46-52 (financial provisions)', 'BL_49', 'non_statutory', 'model_bye_law', 'num', 'INR', 1, 10000000, 1, 2500, ARRAY[]::TEXT[], ARRAY[2, 3]::INT[], 'lower', FALSE, 'gated', ARRAY['fn_check_cash_payment_limit']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'petty_cash_limit', 'Petty cash ceiling (INR)', 'UP Model Bye-Laws, 2011', 'bye-laws 46-52 (financial provisions)', 'BL_49', 'non_statutory', 'model_bye_law', 'num', 'INR', 1, 10000000, 1, 20000, ARRAY[]::TEXT[], ARRAY[2, 3]::INT[], 'lower', FALSE, 'gated', ARRAY['fn_petty_cash_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'statement_publish_due_month', 'Bye-law 49 publish deadline - month', 'UP Model Bye-Laws, 2011', 'bye-law 49', 'BL_49', 'non_statutory', 'model_bye_law', 'int', 'month', 1, 12, 1, 12, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_statutory_calendar']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'statement_publish_due_day', 'Bye-law 49 publish deadline - day', 'UP Model Bye-Laws, 2011', 'bye-law 49', 'BL_49', 'non_statutory', 'model_bye_law', 'int', 'day', 1, 31, 1, 31, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_statutory_calendar']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'authority_copy_due_month', 'Bye-law 49 authority copy - month', 'UP Model Bye-Laws, 2011', 'bye-law 49', 'BL_49', 'non_statutory', 'model_bye_law', 'int', 'month', 1, 12, 1, 12, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_statutory_calendar']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'authority_copy_due_day', 'Bye-law 49 authority copy - day', 'UP Model Bye-Laws, 2011', 'bye-law 49', 'BL_49', 'non_statutory', 'model_bye_law', 'int', 'day', 1, 31, 1, 31, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_statutory_calendar']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'owner_summary_days', 'Bye-law 49 owner summary within (days)', 'UP Model Bye-Laws, 2011', 'bye-law 49', 'BL_49', 'non_statutory', 'model_bye_law', 'int', 'days', 1, 90, 1, 90, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_statutory_calendar']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'bye_law7_year_basis', 'Bye-law 7 ''year'' basis (contested; default)', 'UP Model Bye-Laws, 2011', 'bye-law 7', 'BL_07', 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['financial_year', 'calendar_year']::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_bye_law7_cutoff_date', 'fn_bye_law7_eligibility']::TEXT[], 'disputed', NULL, TRUE, TRUE, NULL),
+ ('UP_AOA_2010', 'cash_limit_default_mode', 'Cash-limit enforcement default (engine policy)', 'Engine policy (no statutory source)', '-', NULL, 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['warn', 'block']::TEXT[], ARRAY[2, 3]::INT[], 'higher', FALSE, 'policy', ARRAY['fn_cash_limit_mode']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
+ ('UP_AOA_2010', 'owner_loan_blocks_nodues', 'Outstanding owner loan blocks issuing No Dues (1 = yes)', 'Engine policy (no statutory source)', 'bye-law 3(1)(f) (loans)', NULL, 'non_statutory', 'engine_default', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'policy', ARRAY['fn_get_standing', 'fn_nodues_issue_check']::TEXT[], 'provisional', NULL, FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'owner_loan_counts_bye_law7', 'Overdue owner loan counts as bye-law 7 arrears (1 = yes)', 'Engine policy (no statutory source)', 'bye-law 7', NULL, 'non_statutory', 'engine_default', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'policy', ARRAY['fn_get_standing', 'fn_bye_law7_eligibility']::TEXT[], 'provisional', NULL, FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'owner_loan_counts_s22', 'Overdue owner loan counts toward the s.22 dues test (1 = yes)', 'Engine policy (no statutory source)', 's.22', NULL, 'non_statutory', 'engine_default', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_get_standing']::TEXT[], 'provisional', NULL, FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'reserve_appropriation_pct', 'Reserve Fund share of net surplus at FY close (%)', 'Engine policy (no statutory source)', 'bye-law 44(c) (common profits form the nucleus of reserve funds)', NULL, 'non_statutory', 'engine_default', 'num', '%', 0, 100, 0, 100, ARRAY[]::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_fy_close_preview', 'fn_fy_close_reserve_appropriation']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL)
 ON CONFLICT DO NOTHING;
 
+INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference, effective_from) VALUES
+ ('GENERIC', 'cash_limit_default_mode', NULL, 'warn', NULL, 'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting', DATE '2000-01-01'),
+ ('GENERIC', 'reserve_appropriation_pct', 25, NULL, '%', 'Engine policy: share of net surplus moved to the Reserve Fund at FY close. No state statute is loaded for this scheme; the society sets it by resolution', DATE '2000-01-01'),
+ ('UP_AOA_2010', 's22_default_months', 6, NULL, 'months', 'UP Apartment Act 2010 s.22: service cut-off only after MORE than 6 months of default', DATE '2011-11-16'),
+ ('UP_AOA_2010', 's22_notice_days', 7, NULL, 'days', 'UP Apartment Act 2010 s.22: 7 days notice to the defaulter', DATE '2011-11-16'),
+ ('UP_AOA_2010', 's22_wait_months', 1, NULL, 'months', 'UP Apartment Act 2010 s.22: one-month wait after the certified copy is sent to the competent authority and the owner', DATE '2011-11-16'),
+ ('UP_AOA_2010', 's22_appeal_days', 15, NULL, 'days', 'UP Apartment Act 2010 s.22: 15 days for the owner to appeal', DATE '2011-11-16'),
+ ('UP_AOA_2010', 's20_recovery_months', 12, NULL, 'months', 'UP Apartment Act 2010 s.20: after 12 months unpaid the competent authority may recover as arrears of land revenue', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'arrears_disqualify_days', 60, NULL, 'days', 'Model Bye-Laws 2011, bye-law 7: arrears of more than 60 days bar voting / standing for the Board', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'transfer_fee_pct', 0.5, NULL, '% of value', 'Model Bye-Laws 2011, bye-law 39: 1/2% of transfer value, payable by the transferor on a sale, to the association for the major-repair fund', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'nodues_deemed_days', 15, NULL, 'days', 'Model Bye-Laws 2011, bye-law 39: No Dues Certificate deemed granted if not refused within 15 days', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'cash_payment_cheque_threshold', 2500, NULL, 'INR', 'Model Bye-Laws 2011, financial provisions (bye-laws 46-52): payments above this by cheque (Secretary + one Board member). Pre-dates UPI/NEFT; this engine treats only mode=cash as the breach', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'petty_cash_limit', 20000, NULL, 'INR', 'Model Bye-Laws 2011, financial provisions (bye-laws 46-52): petty cash ceiling', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'statement_publish_due_month', 7, NULL, 'month', 'Model Bye-Laws 2011, bye-law 49: audited statement published by 31 July', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'statement_publish_due_day', 31, NULL, 'day', 'Model Bye-Laws 2011, bye-law 49', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'authority_copy_due_month', 8, NULL, 'month', 'Model Bye-Laws 2011, bye-law 49: copy to the competent authority by 15 August', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'authority_copy_due_day', 15, NULL, 'day', 'Model Bye-Laws 2011, bye-law 49', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'owner_summary_days', 15, NULL, 'days', 'Model Bye-Laws 2011, bye-law 49: summary to every owner within 15 days of publication', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'bye_law7_year_basis', NULL, 'financial_year', NULL, 'Bye-law 7 says "the year preceding the election". Whether that is the financial or the calendar year is contested (advocate commentary differs); default financial_year, overridable per call', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'cash_limit_default_mode', NULL, 'warn', NULL, 'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting. Override per society in societies.cash_limit_mode', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'owner_loan_blocks_nodues', 1, NULL, '0/1', 'Engine policy (not statute): a loan outstanding from the association is a due to it, so the No Dues Certificate is not issued until it is recovered; the Board may instead record a refusal', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'owner_loan_counts_bye_law7', 0, NULL, '0/1', 'Engine policy (not statute): OFF by default - bye-law 7 speaks only of arrears of contributions for common expenses, so an overdue owner loan is not counted unless the society opts in on advice', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'owner_loan_counts_s22', 0, NULL, '0/1', 'Engine policy (not statute): off by default - s.22 concerns unpaid charges, so an overdue loan does not by itself justify cutting a service; enable only on advice', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'reserve_appropriation_pct', 25, NULL, '%', 'Engine policy (not statute): share of net surplus moved to the Reserve Fund at FY close. Neither the UP Apartment Act 2010 nor the 2011 Model Bye-Laws fix a percentage (common profits are only said to form the nucleus of the reserve funds); 25% follows the co-operative-society convention. Set it by General Body resolution', DATE '2011-11-16')
+ON CONFLICT DO NOTHING;
+-- <<< END GENERATED
+
+-- ── LAYERED RULE RESOLVER ─────────────────────────────────────────────────────
+-- Effective value of a rule for a society on a date. Authority decides VALIDITY, specificity decides VALUE:
+--   baseline  regime_rule_parameters (Layer 0 Act/Rules/Central, or Layer 1 Model Bye-Law, or an engine default)
+--   then the society's own decisions, lowest layer first: 1 Model Bye-Law adoption, 2 Society policy (GBM),
+--   3 Board decision (MC). A decision counts only if it is backed by a passed resolution (resolution_id),
+--   has not been flagged on spot-check, is in date, and passes fn_rule_decision_check against the value
+--   below it (inside the rule's limits; Layers 2-3 may only tighten). An invalid decision is ignored, never
+--   applied. Statutory rules are Layer 0: no society decision can touch them. A Model Bye-Law clause recorded
+--   'not adopted' (droppable rules only) resolves to value NULL = "rule not active".
+-- p_below_layer lets the write path ask "what value applies beneath the layer I am about to set?".
+CREATE OR REPLACE FUNCTION fn_rule_decision_check(
+    p_society_id INT, p_key VARCHAR, p_layer INT, p_status VARCHAR,
+    p_value NUMERIC, p_value_text TEXT, p_current_value NUMERIC, p_current_text TEXT, p_on DATE DEFAULT CURRENT_DATE)
+RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
+DECLARE d rule_parameter_defs%ROWTYPE; v_pos INT; v_cur_pos INT;
+BEGIN
+    SELECT df.* INTO d FROM society_legal_regime slr
+      JOIN rule_parameter_defs df ON df.regime_code = slr.regime_code AND df.rule_key = p_key
+     WHERE slr.society_id = p_society_id;
+    IF NOT FOUND THEN RETURN format('%s is not a configurable rule in this society''s legal scheme', p_key); END IF;
+    IF p_layer NOT IN (1, 2, 3) THEN RETURN 'Layer must be 1, 2 or 3'; END IF;
+    IF d.nature = 'statutory' THEN
+        RETURN format('%s is fixed by %s (%s): it is Layer 0 and a society cannot vary or drop it', p_key, d.instrument, d.provision);
+    END IF;
+    IF p_status = 'adopted_as_is' THEN
+        IF d.base_source <> 'model_bye_law' THEN RETURN format('%s is not a Model Bye-Law value, so there is nothing to adopt as-is; set a value', p_key); END IF;
+        IF p_layer <> 1 THEN RETURN 'Adopting as-is is a Layer 1 (Model Bye-Law) decision'; END IF;
+        RETURN NULL;
+    ELSIF p_status = 'not_adopted' THEN
+        IF p_layer <> 1 THEN RETURN 'Only a Model Bye-Law (Layer 1) rule can be recorded as not adopted'; END IF;
+        IF NOT d.droppable THEN RETURN format('%s is backed by the Act/Rules or enforced by the engine and cannot be not-adopted', p_key); END IF;
+        RETURN NULL;
+    ELSIF p_status <> 'adopted_with_variation' THEN
+        RETURN 'Unknown decision status';
+    END IF;
+    IF NOT (p_layer = ANY (d.layers)) THEN
+        RETURN format('%s may be set at Layer %s only, not Layer %s', p_key, COALESCE(array_to_string(d.layers, '/'), '-'), p_layer);
+    END IF;
+    IF d.value_type = 'text' THEN
+        IF p_value_text IS NULL OR NOT (p_value_text = ANY (d.choices)) THEN
+            RETURN format('%s must be one of: %s', p_key, array_to_string(d.choices, ', '));
+        END IF;
+        IF p_layer >= 2 AND d.tighten <> 'none' AND p_current_text IS NOT NULL THEN
+            v_pos := array_position(d.choices, p_value_text); v_cur_pos := array_position(d.choices, p_current_text);
+            IF (d.tighten = 'higher' AND v_pos < v_cur_pos) OR (d.tighten = 'lower' AND v_pos > v_cur_pos) THEN
+                RETURN format('A Layer %s decision may only tighten %s (%s), not loosen it to %s', p_layer, p_key, p_current_text, p_value_text);
+            END IF;
+        END IF;
+        RETURN NULL;
+    END IF;
+    IF p_value IS NULL THEN RETURN format('%s needs a value', p_key); END IF;
+    IF d.value_type = 'int' AND p_value <> trunc(p_value) THEN RETURN format('%s must be a whole number', p_key); END IF;
+    IF (d.vary_min IS NOT NULL AND p_value < d.vary_min) OR (d.vary_max IS NOT NULL AND p_value > d.vary_max) THEN
+        RETURN format('%s must be between %s and %s for a society decision', p_key, trim_scale(d.vary_min), trim_scale(d.vary_max));
+    END IF;
+    IF p_layer >= 2 AND d.tighten <> 'none' AND p_current_value IS NOT NULL THEN
+        IF (d.tighten = 'lower' AND p_value > p_current_value) OR (d.tighten = 'higher' AND p_value < p_current_value) THEN
+            RETURN format('A Layer %s decision may only tighten %s (now %s), not loosen it to %s', p_layer, p_key, trim_scale(p_current_value), trim_scale(p_value));
+        END IF;
+    END IF;
+    RETURN NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION fn_rule(p_society_id INT, p_key VARCHAR, p_on DATE DEFAULT CURRENT_DATE, p_below_layer INT DEFAULT 4)
+RETURNS TABLE (value NUMERIC, value_text TEXT, layer INT, status TEXT, source TEXT,
+               nature TEXT, base_source TEXT, decision_id BIGINT, ignored INT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_regime VARCHAR(30);
+    b regime_rule_parameters%ROWTYPE;
+    d rule_parameter_defs%ROWTYPE;
+    r RECORD;   -- not %ROWTYPE: society_rule_decisions is created later in this file
+    v_val NUMERIC; v_txt TEXT; v_layer INT; v_status TEXT; v_source TEXT; v_dec BIGINT := NULL; v_ign INT := 0; v_err TEXT;
+BEGIN
+    SELECT slr.regime_code INTO v_regime FROM society_legal_regime slr WHERE slr.society_id = p_society_id;
+    IF v_regime IS NULL THEN RETURN; END IF;
+    SELECT rp.* INTO b FROM regime_rule_parameters rp
+     WHERE rp.regime_code = v_regime AND rp.rule_key = p_key
+       AND rp.effective_from <= p_on AND (rp.effective_to IS NULL OR rp.effective_to >= p_on)
+     ORDER BY rp.effective_from DESC LIMIT 1;
+    IF NOT FOUND THEN RETURN; END IF;
+    v_val := b.value; v_txt := b.value_text; v_source := b.source_reference;
+    SELECT df.* INTO d FROM rule_parameter_defs df WHERE df.regime_code = v_regime AND df.rule_key = p_key;
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT v_val, v_txt, NULL::INT, 'baseline'::TEXT, v_source, NULL::TEXT, NULL::TEXT, NULL::BIGINT, 0;
+        RETURN;
+    END IF;
+    v_layer := CASE d.base_source WHEN 'central' THEN 0 WHEN 'state_act_rules' THEN 0 WHEN 'model_bye_law' THEN 1 ELSE NULL END;
+    v_status := CASE d.base_source WHEN 'model_bye_law' THEN 'model_default' WHEN 'engine_default' THEN 'engine_default' ELSE 'statute' END;
+
+    IF d.nature = 'non_statutory' THEN
+        FOR r IN
+            SELECT q.* FROM (
+                SELECT DISTINCT ON (x.layer) x.* FROM society_rule_decisions x
+                 WHERE x.society_id = p_society_id AND x.rule_key = p_key AND x.layer < p_below_layer
+                   AND x.status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted')
+                   AND x.resolution_id IS NOT NULL AND x.review_status <> 'flagged'
+                   AND x.effective_from <= p_on AND (x.effective_to IS NULL OR x.effective_to >= p_on)
+                 ORDER BY x.layer, x.effective_from DESC, x.id DESC) q
+            ORDER BY q.layer
+        LOOP
+            IF r.status = 'not_adopted' THEN
+                IF r.layer = 1 AND d.droppable THEN
+                    RETURN QUERY SELECT NULL::NUMERIC, NULL::TEXT, 1, 'not_adopted'::TEXT,
+                                        'Not adopted by the society (Model Bye-Law clause dropped by resolution)'::TEXT,
+                                        d.nature::TEXT, d.base_source::TEXT, r.id, v_ign;
+                    RETURN;
+                END IF;
+                v_ign := v_ign + 1; CONTINUE;
+            END IF;
+            v_err := fn_rule_decision_check(p_society_id, p_key, r.layer, r.status, r.value, r.value_text, v_val, v_txt, p_on);
+            IF v_err IS NOT NULL THEN v_ign := v_ign + 1; CONTINUE; END IF;
+            IF r.status = 'adopted_as_is' THEN
+                v_layer := 1; v_status := 'adopted_as_is'; v_source := 'Model Bye-Law adopted as-is by the society'; v_dec := r.id;
+            ELSE
+                v_val := r.value; v_txt := r.value_text; v_layer := r.layer; v_status := 'adopted_with_variation'; v_dec := r.id;
+                v_source := CASE r.layer WHEN 1 THEN 'Model Bye-Law variation (General Body resolution)'
+                                         WHEN 2 THEN 'Society policy (General Body resolution)'
+                                         ELSE 'Board decision (Managing Committee resolution)' END;
+            END IF;
+        END LOOP;
+    END IF;
+    RETURN QUERY SELECT v_val, v_txt, v_layer, v_status, v_source, d.nature::TEXT, d.base_source::TEXT, v_dec, v_ign;
+END $$;
+
+-- Every SQL function reads rules through these two, so a society's adopted variation reaches the engine
+-- with no change at the call sites. With no decisions they return exactly the regime baseline, as before.
 CREATE OR REPLACE FUNCTION fn_regime_param_num(p_society_id INT, p_key VARCHAR, p_on DATE DEFAULT CURRENT_DATE)
 RETURNS NUMERIC LANGUAGE sql STABLE AS $$
-    SELECT rp.value
-    FROM society_legal_regime slr
-    JOIN regime_rule_parameters rp ON rp.regime_code = slr.regime_code
-    WHERE slr.society_id = p_society_id AND rp.rule_key = p_key
-      AND rp.effective_from <= p_on AND (rp.effective_to IS NULL OR rp.effective_to >= p_on)
-    ORDER BY rp.effective_from DESC LIMIT 1
+    SELECT r.value FROM fn_rule(p_society_id, p_key, p_on) r
 $$;
 
 CREATE OR REPLACE FUNCTION fn_regime_param_text(p_society_id INT, p_key VARCHAR, p_on DATE DEFAULT CURRENT_DATE)
 RETURNS TEXT LANGUAGE sql STABLE AS $$
-    SELECT rp.value_text
-    FROM society_legal_regime slr
-    JOIN regime_rule_parameters rp ON rp.regime_code = slr.regime_code
-    WHERE slr.society_id = p_society_id AND rp.rule_key = p_key
-      AND rp.effective_from <= p_on AND (rp.effective_to IS NULL OR rp.effective_to >= p_on)
-    ORDER BY rp.effective_from DESC LIMIT 1
+    SELECT r.value_text FROM fn_rule(p_society_id, p_key, p_on) r
 $$;
 
 -- ───────────────────────────────────────────────────────────────────────────────
@@ -13770,7 +14024,9 @@ CREATE TABLE apartment_transfers (
     transfer_date       DATE NOT NULL,
     transferor_name     VARCHAR(100),
     transferee_name     VARCHAR(100),
-    transfer_value      NUMERIC(14, 2) NOT NULL CHECK (transfer_value > 0),
+    -- The model bye-law's ½% is payable by the transferor on a SALE. Gift / succession carry no fee.
+    transfer_type       VARCHAR(20) NOT NULL DEFAULT 'sale' CHECK (transfer_type IN ('sale', 'gift', 'succession')),
+    transfer_value      NUMERIC(14, 2) NOT NULL CHECK (transfer_value >= 0),
     fee_pct             NUMERIC(6, 3) NOT NULL,
     fee_amount          NUMERIC(12, 2) NOT NULL,
     fee_receivable_id   INT REFERENCES receivables (id) ON DELETE SET NULL,
@@ -13784,11 +14040,16 @@ CREATE INDEX idx_apartment_transfers_society ON apartment_transfers (society_id,
 
 CREATE OR REPLACE FUNCTION fn_record_apartment_transfer(
     p_society_id INT, p_apartment_id INT, p_transfer_date DATE, p_transfer_value NUMERIC,
-    p_transferor VARCHAR, p_transferee VARCHAR, p_created_by INT)
+    p_transferor VARCHAR, p_transferee VARCHAR, p_created_by INT, p_transfer_type VARCHAR DEFAULT 'sale')
 RETURNS TABLE (transfer_id INT, receivable_id INT, fee_amount NUMERIC, msg TEXT)
 LANGUAGE plpgsql AS $$
 DECLARE v_pct NUMERIC; v_fee NUMERIC; v_acc INT; v_rec INT; v_tr INT; v_flat VARCHAR;
 BEGIN
+    p_transfer_type := COALESCE(NULLIF(trim(p_transfer_type), ''), 'sale');
+    IF p_transfer_type NOT IN ('sale', 'gift', 'succession') THEN
+        transfer_id := NULL; receivable_id := NULL; fee_amount := NULL;
+        msg := 'Error: transfer type must be sale, gift or succession'; RETURN NEXT; RETURN;
+    END IF;
     SELECT flat_number INTO v_flat FROM apartments WHERE id = p_apartment_id AND society_id = p_society_id;
     IF NOT FOUND THEN
         transfer_id := NULL; receivable_id := NULL; fee_amount := NULL;
@@ -13799,6 +14060,18 @@ BEGIN
         transfer_id := NULL; receivable_id := NULL; fee_amount := NULL;
         msg := 'Error: no transfer-fee rule for this society''s legal regime'; RETURN NEXT; RETURN;
     END IF;
+
+    IF p_transfer_type <> 'sale' THEN
+        -- Gift / succession: record the change of ownership, levy nothing.
+        INSERT INTO apartment_transfers (society_id, apartment_id, transfer_date, transferor_name, transferee_name,
+                                         transfer_type, transfer_value, fee_pct, fee_amount, fee_receivable_id, created_by)
+        VALUES (p_society_id, p_apartment_id, p_transfer_date, p_transferor, p_transferee,
+                p_transfer_type, COALESCE(p_transfer_value, 0), 0, 0, NULL, p_created_by)
+        RETURNING id INTO v_tr;
+        transfer_id := v_tr; receivable_id := NULL; fee_amount := 0;
+        msg := 'OK: no transfer fee on a ' || p_transfer_type; RETURN NEXT; RETURN;
+    END IF;
+
     IF p_transfer_value IS NULL OR p_transfer_value <= 0 THEN
         transfer_id := NULL; receivable_id := NULL; fee_amount := NULL;
         msg := 'Error: transfer value must be positive'; RETURN NEXT; RETURN;
@@ -13808,10 +14081,10 @@ BEGIN
     v_fee := ROUND(p_transfer_value * v_pct / 100, 2);
 
     INSERT INTO receivables (society_id, entity_id, role, acc_id, description,
-                             base_amount, interest_amount, amount, due_date, status)
+                             base_amount, interest_amount, amount, due_date, status, charge_kind)
     VALUES (p_society_id, p_apartment_id, 'apartment', v_acc,
-            'Major Repair Fund - transfer fee ' || trim_scale(v_pct) || '% on transfer of ' || v_flat,
-            v_fee, 0, v_fee, p_transfer_date, 'pending')
+            'Major Repair Fund - transfer fee ' || trim_scale(v_pct) || '% on transfer of ' || v_flat || ' (payable by transferor)',
+            v_fee, 0, v_fee, p_transfer_date, 'pending', 'transfer_fee')
     RETURNING id INTO v_rec;
 
     -- Accrual leg (Dr Sundry Debtors / Cr fund), exactly as the bill generator does
@@ -13822,9 +14095,9 @@ BEGIN
         'Major Repair Fund - transfer fee on transfer of ' || v_flat);
 
     INSERT INTO apartment_transfers (society_id, apartment_id, transfer_date, transferor_name, transferee_name,
-                                     transfer_value, fee_pct, fee_amount, fee_receivable_id, created_by)
+                                     transfer_type, transfer_value, fee_pct, fee_amount, fee_receivable_id, created_by)
     VALUES (p_society_id, p_apartment_id, p_transfer_date, p_transferor, p_transferee,
-            p_transfer_value, v_pct, v_fee, v_rec, p_created_by)
+            'sale', p_transfer_value, v_pct, v_fee, v_rec, p_created_by)
     RETURNING id INTO v_tr;
 
     transfer_id := v_tr; receivable_id := v_rec; fee_amount := v_fee; msg := 'OK';
@@ -13844,16 +14117,15 @@ BEGIN
     IF t.nodues_requested_on IS NULL THEN status := 'not_requested'; deemed_on := NULL; RETURN NEXT; RETURN; END IF;
     deemed_on := t.nodues_requested_on + v_days;
     IF t.nodues_refused_on IS NOT NULL AND t.nodues_refused_on <= deemed_on THEN status := 'refused';
-    ELSIF p_asof >= deemed_on THEN status := 'deemed_granted';
+    ELSIF p_asof > deemed_on THEN status := 'deemed_granted';   -- a refusal on day 15 itself is still in time
     ELSE status := 'pending'; END IF;
     RETURN NEXT;
 END $$;
 
 -- ───────────────────────────────────────────────────────────────────────────────
 -- 3. Bye-law 7: arrears > 60 days bar voting / standing for the Board
---    Balance used is the outstanding balance AS AT THE CALL (settlement dates are
---    not stored on receivables), so run it at election-notice time.
---    Now uses fn_get_standing for unified eligibility (Phase 2).
+--    Tested AS AT the cutoff date from receivable_payment_log (see
+--    fn_common_expense_arrears_asof), not the balance today.
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION fn_bye_law7_cutoff_date(p_society_id INT, p_election_date DATE, p_basis TEXT DEFAULT NULL)
 RETURNS DATE LANGUAGE plpgsql STABLE AS $$
@@ -13869,42 +14141,63 @@ BEGIN
     RETURN v_fy_start - 1;
 END $$;
 
+-- Common-expense arrears AS AT p_asof: every common-expense receivable due more than p_margin_days
+-- before p_asof, less the principal paid ON OR BEFORE p_asof (receivable_payment_log). Interest is
+-- left out (bye-law 7 speaks of "contributions for common expenses"). A receivable with no log
+-- rows but some principal paid predates the log: it is treated as paid in time rather than
+-- guessing a date and disqualifying an owner on that guess.
+CREATE OR REPLACE FUNCTION fn_common_expense_arrears_asof(
+    p_society_id INT, p_apartment_id INT, p_asof DATE, p_margin_days INT DEFAULT 60)
+RETURNS TABLE (arrears NUMERIC, oldest_due_date DATE, max_days_overdue INT)
+LANGUAGE sql STABLE AS $$
+    WITH x AS (
+        SELECT r.due_date,
+               GREATEST((r.amount - r.interest_amount) - CASE
+                   WHEN EXISTS (SELECT 1 FROM receivable_payment_log g WHERE g.receivable_id = r.id)
+                   THEN COALESCE((SELECT SUM(g.principal_delta) FROM receivable_payment_log g
+                                  WHERE g.receivable_id = r.id AND g.paid_on <= p_asof), 0)
+                   ELSE LEAST(r.paid_principal, r.amount - r.interest_amount) END, 0) AS owed
+          FROM receivables r
+         WHERE r.society_id = p_society_id AND r.entity_id = p_apartment_id AND r.role = 'apartment'
+           AND r.charge_kind = 'common_expense'
+           AND r.status IN ('pending', 'partial', 'unverified', 'paid')
+           AND r.due_date IS NOT NULL AND r.due_date < p_asof - p_margin_days
+    )
+    SELECT COALESCE(SUM(owed), 0)::NUMERIC,
+           MIN(due_date) FILTER (WHERE owed > 0),
+           COALESCE(MAX(p_asof - due_date) FILTER (WHERE owed > 0), 0)::INT
+      FROM x
+$$;
+
+-- Bye-law 7: arrears of MORE than 60 days ON THE LAST DAY of the year before the election bar a
+-- person from voting or standing. Tested as at that date (not today) on common-expense contributions
+-- only. An overdue owner-loan balance counts only if the society opts in (owner_loan_counts_bye_law7,
+-- default 0); loans carry no payment dates, so that part still uses today's balance.
 CREATE OR REPLACE FUNCTION fn_bye_law7_eligibility(p_society_id INT, p_election_date DATE, p_basis TEXT DEFAULT NULL)
 RETURNS TABLE (apartment_id INT, flat_number VARCHAR, owner_name VARCHAR, cutoff_date DATE,
                overdue_amount NUMERIC, oldest_due_date DATE, days_overdue INT, eligible BOOLEAN)
 LANGUAGE plpgsql STABLE AS $$
-DECLARE v_days INT; v_cut DATE;
+DECLARE v_days INT; v_cut DATE; v_loans INT;
 BEGIN
     v_days := fn_regime_param_num(p_society_id, 'arrears_disqualify_days', p_election_date)::INT;
     IF v_days IS NULL THEN RETURN; END IF;           -- rule not active for this society
-    v_cut := fn_bye_law7_cutoff_date(p_society_id, p_election_date, p_basis);
-    
+    v_cut   := fn_bye_law7_cutoff_date(p_society_id, p_election_date, p_basis);
+    v_loans := COALESCE(fn_regime_param_num(p_society_id, 'owner_loan_counts_bye_law7', p_election_date)::INT, 0);
+
     RETURN QUERY
     SELECT a.id, a.flat_number, a.owner_name, v_cut,
-           (s.arrears_bye_law7 + s.loan_overdue) AS overdue_amount,
-           -- oldest_due_date: earliest due_date of overdue receivables/loans
-           LEAST(
-               (SELECT MIN(r.due_date) FROM receivables r
-                WHERE r.society_id = p_society_id AND r.entity_id = a.id AND r.role = 'apartment'
-                  AND r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL AND r.due_date < v_cut - v_days),
-               (SELECT MIN(l.due_date) FROM owner_loans l
-                WHERE l.society_id = p_society_id AND l.apartment_id = a.id AND l.principal > l.repaid_amount
-                  AND l.due_date IS NOT NULL AND l.due_date < v_cut - v_days)
-           ) AS oldest_due_date,
-           -- days_overdue: max days from due_date to cutoff_date for overdue items
-           GREATEST(COALESCE((
-               SELECT MAX(v_cut - r.due_date) FROM receivables r
-               WHERE r.society_id = p_society_id AND r.entity_id = a.id AND r.role = 'apartment'
-                 AND r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL AND r.due_date < v_cut - v_days
-           ), 0),
-           COALESCE((
-               SELECT MAX(v_cut - l.due_date) FROM owner_loans l
-               WHERE l.society_id = p_society_id AND l.apartment_id = a.id AND l.principal > l.repaid_amount
-                 AND l.due_date IS NOT NULL AND l.due_date < v_cut - v_days
-           ), 0), 0)::INT AS days_overdue,
-           NOT s.ineligible_stand AS eligible
+           (COALESCE(ar.arrears, 0) + COALESCE(lo.amt, 0))::NUMERIC,
+           LEAST(ar.oldest_due_date, lo.oldest),
+           GREATEST(COALESCE(ar.max_days_overdue, 0), COALESCE(lo.max_days, 0))::INT,
+           (COALESCE(ar.arrears, 0) = 0 AND COALESCE(lo.amt, 0) = 0)
     FROM apartments a
-    LEFT JOIN LATERAL fn_get_standing(p_society_id, a.id, v_cut) s ON TRUE
+    LEFT JOIN LATERAL fn_common_expense_arrears_asof(p_society_id, a.id, v_cut, v_days) ar ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT SUM(l.principal - l.repaid_amount) AS amt, MIN(l.due_date) AS oldest, MAX(v_cut - l.due_date) AS max_days
+          FROM owner_loans l
+         WHERE v_loans = 1 AND l.society_id = p_society_id AND l.apartment_id = a.id
+           AND l.principal > l.repaid_amount AND l.due_date IS NOT NULL AND l.due_date < v_cut - v_days
+    ) lo ON TRUE
     WHERE a.society_id = p_society_id AND a.active
     ORDER BY a.flat_number;
 END $$;
@@ -13923,6 +14216,7 @@ CREATE TABLE service_cutoff_proceedings (
     gb_resolution_on           DATE,
     copy_sent_to_authority_on  DATE,
     copy_sent_to_owner_on      DATE,
+    copy_received_by_owner_on  DATE,   -- the 15-day appeal runs from RECEIPT (s.22(2)); falls back to dispatch if blank
     display_notice_on          DATE,
     appeal_filed_on            DATE,
     appeal_outcome             VARCHAR(20) CHECK (appeal_outcome IN ('pending', 'dismissed', 'allowed')),
@@ -13945,7 +14239,7 @@ DECLARE
     p service_cutoff_proceedings%ROWTYPE;
     v_months INT; v_notice INT; v_wait INT; v_appeal INT;
     b TEXT[] := ARRAY[]::TEXT[]; e DATE[] := ARRAY[]::DATE[];
-    v_copy DATE; d DATE;
+    v_copy DATE; d DATE; v_since DATE; v_oldest DATE; v_recv DATE;
     v_standing RECORD;
 BEGIN
     SELECT * INTO p FROM service_cutoff_proceedings WHERE id = p_proceeding_id;
@@ -13959,7 +14253,14 @@ BEGIN
     v_wait   := fn_regime_param_num(p.society_id, 's22_wait_months', p_asof)::INT;
     v_appeal := fn_regime_param_num(p.society_id, 's22_appeal_days', p_asof)::INT;
 
-    d := (p.default_since + make_interval(months => v_months))::DATE + 1;     -- "more than" 6 months
+    -- The default clock starts at the oldest UNPAID common-expense bill on the books. A typed
+    -- default_since can only push it later (conservative), never earlier than the records show.
+    SELECT MIN(r.due_date) INTO v_oldest FROM receivables r
+     WHERE r.society_id = p.society_id AND r.entity_id = p.apartment_id AND r.role = 'apartment'
+       AND r.charge_kind = 'common_expense' AND r.status IN ('pending', 'partial', 'unverified')
+       AND r.due_date IS NOT NULL AND r.due_date <= p_asof;
+    v_since := GREATEST(p.default_since, COALESCE(v_oldest, p.default_since));
+    d := (v_since + make_interval(months => v_months))::DATE + 1;     -- "more than" 6 months
     e := e || d;
     IF p_asof < d THEN b := b || format('default must exceed %s months (earliest %s)', v_months, d); END IF;
 
@@ -13967,30 +14268,45 @@ BEGIN
     ELSE d := p.notice_served_on + v_notice; e := e || d;
          IF p_asof < d THEN b := b || format('%s-day notice period runs until %s', v_notice, d); END IF; END IF;
 
-    IF p.gb_resolution_on IS NULL THEN b := array_append(b, 'no general-body resolution recorded'); END IF;
+    IF p.gb_resolution_on IS NULL THEN b := array_append(b, 'no general-body resolution recorded');
+    ELSIF p.notice_served_on IS NOT NULL AND p.gb_resolution_on < p.notice_served_on + v_notice THEN
+        -- s.22(1): the resolution is passed AFTER notice of not less than 7 days
+        b := b || format('resolution dated %s precedes the end of the %s-day notice (%s); it must be passed after the notice period',
+                         p.gb_resolution_on, v_notice, p.notice_served_on + v_notice);
+    END IF;
 
-    IF p.copy_sent_to_authority_on IS NULL THEN b := array_append(b, 'certified copy not sent to the competent authority (registered/speed post)'); END IF;
-    IF p.copy_sent_to_owner_on IS NULL THEN b := array_append(b, 'certified copy not sent to the owner (registered/speed post)'); END IF;
+    IF p.copy_sent_to_authority_on IS NULL THEN b := array_append(b, 'certified copy not sent to the competent authority (registered/speed post)');
+    ELSIF p.gb_resolution_on IS NOT NULL AND p.copy_sent_to_authority_on < p.gb_resolution_on THEN
+        b := b || format('copy to the competent authority is dated %s, before the resolution (%s)', p.copy_sent_to_authority_on, p.gb_resolution_on);
+    END IF;
+    IF p.copy_sent_to_owner_on IS NULL THEN b := array_append(b, 'certified copy not sent to the owner (registered/speed post)');
+    ELSIF p.gb_resolution_on IS NOT NULL AND p.copy_sent_to_owner_on < p.gb_resolution_on THEN
+        b := b || format('copy to the owner is dated %s, before the resolution (%s)', p.copy_sent_to_owner_on, p.gb_resolution_on);
+    END IF;
     IF p.copy_sent_to_authority_on IS NOT NULL AND p.copy_sent_to_owner_on IS NOT NULL THEN
         v_copy := GREATEST(p.copy_sent_to_authority_on, p.copy_sent_to_owner_on);
         d := (v_copy + make_interval(months => v_wait))::DATE; e := e || d;
         IF p_asof < d THEN b := b || format('one-month wait after dispatch runs until %s', d); END IF;
     END IF;
 
-    IF p.display_notice_on IS NULL THEN b := array_append(b, 'notice not displayed'); END IF;
+    IF p.display_notice_on IS NULL THEN b := array_append(b, 'notice not displayed');
+    ELSIF p.gb_resolution_on IS NOT NULL AND p.display_notice_on < p.gb_resolution_on THEN
+        b := b || format('display is dated %s, before the resolution (%s)', p.display_notice_on, p.gb_resolution_on);
+    END IF;
 
-    IF p.copy_sent_to_owner_on IS NOT NULL THEN
-        d := p.copy_sent_to_owner_on + v_appeal; e := e || d;
+    v_recv := COALESCE(p.copy_received_by_owner_on, p.copy_sent_to_owner_on);
+    IF v_recv IS NOT NULL THEN
+        d := v_recv + v_appeal; e := e || d;
         IF p_asof < d THEN b := b || format('%s-day appeal window open until %s', v_appeal, d); END IF;
     END IF;
     IF p.appeal_filed_on IS NOT NULL AND COALESCE(p.appeal_outcome, 'pending') <> 'dismissed' THEN
         b := array_append(b, 'appeal filed and not dismissed');
     END IF;
 
-    -- Use fn_get_standing for unified s22_blocked check
+    -- s22_blocked = TRUE means NO common-expense dues are unpaid for more than the default period
     SELECT * INTO v_standing FROM fn_get_standing(p.society_id, p.apartment_id, p_asof);
     IF v_standing.s22_blocked THEN
-        b := array_append(b, 'outstanding dues or overdue loans remain for this apartment (s.22 blocked)');
+        b := array_append(b, format('no common-expense dues are unpaid for more than %s months on this flat, so s.22 is not triggered', v_months));
     END IF;
 
     can_cut_off := COALESCE(array_length(b, 1), 0) = 0;
@@ -14342,17 +14658,13 @@ $$;
 -- saw it. owner_loans had no repayment date either, so "overdue" could not be decided.
 -- What counts is engine POLICY, not statute, and is editable by master (AOA Rule Editor):
 --   owner_loan_blocks_nodues    1  an outstanding loan blocks ISSUING a No Dues Certificate
---   owner_loan_counts_bye_law7  1  an overdue loan balance counts as arrears for bye-law 7
+--   owner_loan_counts_bye_law7  0  an overdue loan balance counts as arrears for bye-law 7 (opt-in)
 --   owner_loan_counts_s22       0  an overdue loan balance counts toward the s.22 "dues remain" test
 -- fn_apartment_outstanding is deliberately untouched (it also drives NOC and the deactivation guard).
 -- owner_loans.due_date / owner_loans_due_after_loan are declared inline on the
 -- table itself (see the owner_loans CREATE TABLE earlier in this file).
 -- ═══════════════════════════════════════════════════════════════════════════════
-INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference) VALUES
- ('UP_AOA_2010', 'owner_loan_blocks_nodues',   1, NULL, '0/1', 'Engine policy (not statute): a loan outstanding from the association is a due to it, so the No Dues Certificate is not issued until it is recovered; the Board may instead record a refusal'),
- ('UP_AOA_2010', 'owner_loan_counts_bye_law7', 1, NULL, '0/1', 'Engine policy (not statute): an owner-loan balance past its repayment date is treated as arrears for bye-law 7; confirm with an advocate'),
- ('UP_AOA_2010', 'owner_loan_counts_s22',      0, NULL, '0/1', 'Engine policy (not statute): off by default - s.22 concerns unpaid charges, so an overdue loan does not by itself justify cutting a service; enable only on advice')
-ON CONFLICT DO NOTHING;
+-- (The default values of these three rules, and of reserve_appropriation_pct, are in schemes/UP_AOA_2010.toml.)
 
 CREATE OR REPLACE FUNCTION fn_set_owner_loan_due_date(p_loan_id INT, p_due DATE) RETURNS TEXT
 LANGUAGE plpgsql AS $$
@@ -14462,7 +14774,7 @@ END $$;
 CREATE TABLE regime_rule_audit (
     id              BIGSERIAL PRIMARY KEY,
     target_table    VARCHAR(40) NOT NULL CHECK (target_table IN
-                        ('regime_rule_parameters', 'legal_instrument_catalog', 'societies.cash_limit_mode', 'society_bye_laws', 'meetings', 'resolutions', 'society_policy_settings')),
+                        ('regime_rule_parameters', 'legal_instrument_catalog', 'societies.cash_limit_mode', 'society_bye_laws', 'meetings', 'resolutions', 'society_policy_settings', 'society_rule_decisions')),
     regime_code     VARCHAR(30),
     society_id      INT,
     rule_key        VARCHAR(300),
@@ -14495,11 +14807,12 @@ CREATE TRIGGER regime_rule_audit_immutable BEFORE UPDATE OR DELETE ON regime_rul
 CREATE OR REPLACE FUNCTION fn_sync_society_regime(p_society_id INT) RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
     v_state  TEXT;
+    v_const  TEXT;
     v_code   TEXT;
     v_regime VARCHAR(30);
     v_from   DATE;
 BEGIN
-    SELECT btrim(state) INTO v_state FROM societies WHERE id = p_society_id;
+    SELECT btrim(state), constitution INTO v_state, v_const FROM societies WHERE id = p_society_id;
     IF v_state IS NULL OR v_state = '' THEN
         RETURN 'no_state';
     END IF;
@@ -14509,18 +14822,23 @@ BEGIN
                  ('GJ','GUJARAT'), ('TS','TELANGANA'), ('AP','ANDHRA PRADESH'), ('BR','BIHAR'),
                  ('HR','HARYANA'), ('PB','PUNJAB'), ('KL','KERALA')) AS m(code, name)
     WHERE m.code = upper(v_state) OR m.name = upper(v_state);
-    IF v_code IS NULL THEN
-        RETURN 'unknown_state';
+    -- A scheme is state x constitution. Where no researched scheme exists for that pair (another state, or
+    -- a UP society that is not an AOA) the society gets the GENERIC scheme: central laws only, the society decides.
+    IF v_code IS NOT NULL THEN
+        SELECT code, effective_from INTO v_regime, v_from
+        FROM legal_regime_profiles
+        WHERE state_code = v_code AND constitution = v_const AND status = 'active'
+        ORDER BY effective_from DESC LIMIT 1;
     END IF;
-    SELECT code, effective_from INTO v_regime, v_from
-    FROM legal_regime_profiles
-    WHERE state_code = v_code AND status = 'active'
-    ORDER BY effective_from DESC LIMIT 1;
     IF v_regime IS NULL THEN
-        RETURN 'no_active_regime';
+        SELECT code, effective_from INTO v_regime, v_from
+        FROM legal_regime_profiles WHERE code = 'GENERIC' AND status = 'active';
+    END IF;
+    IF v_regime IS NULL THEN
+        RETURN CASE WHEN v_code IS NULL THEN 'unknown_state' ELSE 'no_active_regime' END;
     END IF;
     INSERT INTO society_legal_regime (society_id, regime_code, effective_from, source_reference)
-    VALUES (p_society_id, v_regime, v_from, 'auto: societies.state = ' || v_state)
+    VALUES (p_society_id, v_regime, v_from, 'auto: societies.state = ' || v_state || ', constitution = ' || v_const)
     ON CONFLICT (society_id) DO UPDATE
         SET regime_code = EXCLUDED.regime_code, effective_from = EXCLUDED.effective_from,
             source_reference = EXCLUDED.source_reference, updated_at = NOW()
@@ -14536,7 +14854,7 @@ BEGIN
 END
 $$;
 
-CREATE TRIGGER societies_sync_regime AFTER INSERT OR UPDATE OF state ON societies
+CREATE TRIGGER societies_sync_regime AFTER INSERT OR UPDATE OF state, constitution ON societies
     FOR EACH ROW EXECUTE FUNCTION trg_societies_sync_regime();
 
 -- One-off backfill for societies that already picked a state in the wizard.
@@ -14635,6 +14953,42 @@ CREATE TABLE society_bye_laws (
 );
 CREATE INDEX idx_society_bye_laws_lookup ON society_bye_laws (society_id, clause_id, layer, effective_from DESC);
 CREATE INDEX idx_society_bye_laws_provisional ON society_bye_laws (society_id, status) WHERE status = 'provisional';
+
+-- 5b. society_rule_decisions - the same four-layer model at PARAMETER level.
+--     society_bye_laws records "this clause is adopted / varied / not adopted" as free text; this table
+--     records the actual VALUE a society has decided for a rule the engine reads (rule_parameter_defs), so
+--     fn_rule() can apply it. Layer 1 = Model Bye-Law adoption (as-is / variation / not adopted),
+--     2 = Society policy (GBM), 3 = Board decision (MC). Provisional until a passed resolution backs it.
+--     review_status: the society admin records the decision with the meeting minutes attached; Master
+--     spot-checks it. 'flagged' suspends it (fn_rule ignores it) until cleared.
+CREATE TABLE society_rule_decisions (
+    id              BIGSERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    rule_key        VARCHAR(30) NOT NULL,
+    layer           INT NOT NULL CHECK (layer IN (1, 2, 3)),
+    status          VARCHAR(25) NOT NULL CHECK (status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted', 'provisional')),
+    proposed_status VARCHAR(25) CHECK (proposed_status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted')),
+    value           NUMERIC(14, 4),
+    value_text      TEXT,
+    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    review_status   VARCHAR(10) NOT NULL DEFAULT 'unreviewed' CHECK (review_status IN ('unreviewed', 'confirmed', 'flagged')),
+    reviewed_by     INT REFERENCES users (id),
+    reviewed_on     TIMESTAMP,
+    review_note     TEXT,
+    effective_from  DATE NOT NULL DEFAULT CURRENT_DATE,
+    effective_to    DATE,
+    created_by      INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (society_id, rule_key, layer, effective_from),
+    -- a variation carries exactly one of value / value_text; as-is and not-adopted carry neither
+    CONSTRAINT ck_rule_decision_value CHECK (
+        CASE WHEN COALESCE(CASE WHEN status = 'provisional' THEN proposed_status ELSE status END, '') = 'adopted_with_variation'
+             THEN (value IS NOT NULL) <> (value_text IS NOT NULL)
+             ELSE value IS NULL AND value_text IS NULL END)
+);
+CREATE INDEX idx_society_rule_decisions_lookup ON society_rule_decisions (society_id, rule_key, layer, effective_from DESC);
+CREATE INDEX idx_society_rule_decisions_provisional ON society_rule_decisions (society_id) WHERE status = 'provisional';
 
 -- 6. Seed decision_types (10 rows) — whitelisted codes for resolutions
 INSERT INTO decision_types (code, label, required_body, majority_pct, description) VALUES
@@ -14751,7 +15105,7 @@ BEGIN
     -- Fetch regime parameters (with defaults if not set)
     v_arrears_days    := COALESCE(fn_regime_param_num(p_society_id, 'arrears_disqualify_days', p_asof)::INT, 60);
     v_blocks_nodues   := COALESCE(fn_regime_param_num(p_society_id, 'owner_loan_blocks_nodues', p_asof)::INT, 1);
-    v_counts_bye_law7 := COALESCE(fn_regime_param_num(p_society_id, 'owner_loan_counts_bye_law7', p_asof)::INT, 1);
+    v_counts_bye_law7 := COALESCE(fn_regime_param_num(p_society_id, 'owner_loan_counts_bye_law7', p_asof)::INT, 0);
     v_counts_s22      := COALESCE(fn_regime_param_num(p_society_id, 'owner_loan_counts_s22', p_asof)::INT, 0);
     v_s22_months      := COALESCE(fn_regime_param_num(p_society_id, 's22_default_months', p_asof)::INT, 6);
 
@@ -14765,10 +15119,12 @@ BEGIN
             ), 0) AS overdue,
             COALESCE(SUM(r.amount - r.paid_amount) FILTER (
                 WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL
+                  AND r.charge_kind = 'common_expense'
                   AND r.due_date < p_asof - v_arrears_days
             ), 0) AS arrears_bl7,
             COALESCE(SUM(r.amount - r.paid_amount) FILTER (
-                WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL 
+                WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL
+                  AND r.charge_kind = 'common_expense'
                   AND r.due_date <= p_asof - make_interval(months => v_s22_months)
             ), 0) AS overdue_s22_months
         FROM receivables r

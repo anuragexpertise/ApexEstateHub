@@ -68,36 +68,40 @@ STATUTORY_ROWS = {
     ),
     "reserve": (
         "Reserve Fund",
-        "Societies Registration Act / State Cooperative Societies Acts",
-        "Statutory reserve from net surplus, for long-term solvency (25% of "
-        "net surplus under the UP AOA regime). The UP transfer fee (1/2%) goes to "
-        "the Major Repair Fund under bye-law 39, not here.",
+        "UP Model Bye-Laws 2011 (common profits form the nucleus of the reserve funds)",
+        "Reserve from net surplus, for long-term solvency. The UP Act and Model "
+        "Bye-Laws fix no percentage: the share set aside at FY close (default 25%) "
+        "is society policy, edited by General Body resolution. The UP transfer fee "
+        "(1/2%, paid by the seller) goes to the Major Repair Fund, not here.",
         True,
         "Mapped to the RESERVE_FUND head; FY close appropriates the surplus.",
     ),
     "sinking": (
         "Sinking Fund",
-        "Model Bye-laws 13(c)/14(c), State Apartment Ownership Acts",
-        "Dedicated fund for structural overhauls, lifts and DG sets; about "
-        "0.25–0.33%/yr of construction cost.",
+        "Not prescribed by the UP Apartment Act 2010 or the 2011 Model Bye-Laws",
+        "Dedicated fund for structural overhauls, lifts and DG sets, levied under "
+        "a General Body resolution; any rate (e.g. 0.25–0.33%/yr of construction "
+        "cost) is a society or builder-agreement choice, not a UP statutory rate.",
         True,
         "Dedicated ledger account, per-society rate basis, auto-billed monthly.",
     ),
     "repair": (
         "Repair & Maintenance Fund",
-        "Model Bye-laws 13(a)/14(b)",
-        "Routine upkeep of common areas, plumbing and electricals; typically "
-        "at least 0.75%/yr of construction cost.",
+        "UP Apartment Act 2010 s.18 (common expenses charged by undivided interest)",
+        "Routine upkeep of common areas, plumbing and electricals, charged as "
+        "common expenses. No minimum rate (such as 0.75%/yr of construction "
+        "cost) is fixed by the UP Act or Model Bye-Laws; it is a society choice.",
         True,
         "Dedicated ledger account, same rate config and billing as Sinking Fund.",
     ),
     "corpus": (
         "Corpus Fund",
-        "RERA Act 2016 Sec. 11(4)(g), 17; State Apartment Ownership Acts",
-        "One-time builder-handover capital receipt; principal is inviolable, "
-        "only the interest is deployable.",
+        "Builder-buyer agreement / General Body resolution (not an UP Act or Bye-Law rule)",
+        "One-time builder-handover capital receipt. Keeping the principal intact "
+        "and spending only the interest is a society / agreement policy, not a "
+        "requirement of the UP Act, the Rules or the Model Bye-Laws.",
         True,
-        "Dedicated ledger account; principal locked via statutory_lock_pct.",
+        "Dedicated ledger account; principal locked by policy via statutory_lock_pct.",
     ),
     "up_aoa_act": (
         "Governing Statute — UP Apartment Act, 2010",
@@ -112,12 +116,14 @@ STATUTORY_ROWS = {
     ),
     "up_aoa_rules": (
         "UP Apartment Rules, 2011 & Model Bye-Laws",
-        "Rules notified 16-11-2011; Model Bye-laws 13(a)/13(c), 14(b)/14(c), "
-        "39 (transfer fee ½%), 46 (reserve & share capital), 49 (audit), "
-        "54 (Act prevails), 58 (adoption by 2/3rd majority)",
+        "Rules notified 16-11-2011; Model Bye-laws on arrears (bye-law 7), "
+        "transfer fee ½% and No Dues (39), accounts & audit (49), "
+        "Act prevails (54), adoption by 2/3rd majority (58). Numbers follow the "
+        "gazette; confirm against your society's adopted copy.",
         "Procedural code under the Act — competent authority, Declaration and "
         "Deed of Apartment forms; bye-laws fix the financial framework "
-        "(sinking, repair, reserve, corpus) this wizard is setting rates for.",
+        "(funds, accounts, audit); it does not fix sinking / repair / reserve "
+        "rates, which this wizard sets as society policy.",
         True,
         "Fund bases and rates configured on the Society Compliance / "
         "Apartment Charges steps; statutory_calendar tracks the filings.",

@@ -120,8 +120,8 @@ def test_no_dues_certificate_deemed_after_15_days(cur):
     tr = one(cur, "SELECT transfer_id FROM fn_record_apartment_transfer(%s,%s,%s,1000000,'a','b',NULL)",
              (SOC, apt_id, date(2026, 9, 1)))[0]
     cur.execute("UPDATE apartment_transfers SET nodues_requested_on=%s WHERE id=%s", (date(2026, 9, 10), tr))
-    assert one(cur, "SELECT status FROM fn_nodues_certificate_status(%s,%s)", (tr, date(2026, 9, 24)))[0] == "pending"
-    assert one(cur, "SELECT status FROM fn_nodues_certificate_status(%s,%s)", (tr, date(2026, 9, 25)))[0] == "deemed_granted"
+    assert one(cur, "SELECT status FROM fn_nodues_certificate_status(%s,%s)", (tr, date(2026, 9, 25)))[0] == "pending"        # a refusal on day 15 is still in time
+    assert one(cur, "SELECT status FROM fn_nodues_certificate_status(%s,%s)", (tr, date(2026, 9, 26)))[0] == "deemed_granted"
     cur.execute("UPDATE apartment_transfers SET nodues_refused_on=%s WHERE id=%s", (date(2026, 9, 20), tr))
     assert one(cur, "SELECT status FROM fn_nodues_certificate_status(%s,%s)", (tr, date(2026, 9, 30)))[0] == "refused"
 
