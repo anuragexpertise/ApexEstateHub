@@ -2476,6 +2476,12 @@ CREATE TABLE polls (
     -- Phase 4: Poll quorum and majority requirements
     quorum_pct NUMERIC(5,2) NOT NULL DEFAULT 33.33 CHECK (quorum_pct > 0 AND quorum_pct <= 100),
     majority_pct NUMERIC(5,2) NOT NULL DEFAULT 50.00 CHECK (majority_pct > 0 AND majority_pct <= 100),
+    -- Bye-law 8 / Act s.12(1)(f): in the Model Bye-Laws a vote carries the owner's undivided-interest
+    -- percentage, not one vote per flat. 'apartment' (default) is the advisory one-flat-one-vote poll;
+    -- 'undivided_interest' tallies each flat's percentage and takes quorum / majority from the society's
+    -- rules (poll_quorum_pct, poll_majority_pct). Either way an online poll is NOT a General Body
+    -- resolution (bye-law 10: votes are cast in person) - see fn_declare_results.
+    vote_basis VARCHAR(20) NOT NULL DEFAULT 'apartment' CHECK (vote_basis IN ('apartment', 'undivided_interest')),
     results_announced_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP,
@@ -2506,6 +2512,16 @@ CREATE TABLE poll_participation (
 CREATE TABLE poll_ballots (
     poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
     choice SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5)
+);
+
+-- Weighted polls (vote_basis = 'undivided_interest') keep the secret ballot: the weight is added to a
+-- per-choice running total, never stored beside an individual ballot, so a flat's percentage cannot be
+-- matched to its choice. Only fn_cast_vote writes here; only fn_declare_results reads it.
+CREATE TABLE poll_weight_tally (
+    poll_id    INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
+    choice     SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5),
+    weight_sum NUMERIC(10, 4) NOT NULL DEFAULT 0 CHECK (weight_sum >= 0),
+    PRIMARY KEY (poll_id, choice)
 );
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -11628,10 +11644,15 @@ CREATE OR REPLACE FUNCTION fn_create_poll(
     p_choice_4     VARCHAR(100) DEFAULT NULL,
     p_choice_5     VARCHAR(100) DEFAULT NULL,
     p_ends_at      TIMESTAMP DEFAULT NULL,
-    p_open_to      VARCHAR(20) DEFAULT 'no_dues'
+    p_open_to      VARCHAR(20) DEFAULT 'no_dues',
+    p_vote_basis   VARCHAR(20) DEFAULT 'apartment'
 ) RETURNS INT LANGUAGE plpgsql AS $$
 DECLARE
     v_poll_id INT;
+    v_quorum  NUMERIC := NULL;
+    v_major   NUMERIC := NULL;
+    v_missing INT;
+    v_sum     NUMERIC;
 BEGIN
     IF p_choice_count < 2 OR p_choice_count > 5 THEN
         RAISE EXCEPTION 'choice_count must be between 2 and 5';
@@ -11641,12 +11662,34 @@ BEGIN
         RAISE EXCEPTION 'open_to must be no_dues or all_members';
     END IF;
 
+    IF p_vote_basis IS NULL OR p_vote_basis NOT IN ('apartment', 'undivided_interest') THEN
+        RAISE EXCEPTION 'vote_basis must be apartment or undivided_interest';
+    END IF;
+
     IF p_ends_at IS NOT NULL AND p_ends_at <= NOW() THEN
         RAISE EXCEPTION 'ends_at must be in the future';
     END IF;
 
-    INSERT INTO polls (society_id, title, description, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5, ends_at, open_to)
-    VALUES (p_society_id, p_title, p_description, p_choice_count, p_choice_1, p_choice_2, p_choice_3, p_choice_4, p_choice_5, p_ends_at, p_open_to)
+    IF p_vote_basis = 'undivided_interest' THEN
+        -- A weighted poll is only meaningful if every flat has a percentage and they add up to the whole
+        -- building (Act s.5(2), s.12(1)(f)); otherwise the tally would silently under- or over-count.
+        SELECT COUNT(*) FILTER (WHERE undivided_interest_pct IS NULL), COALESCE(SUM(undivided_interest_pct), 0)
+          INTO v_missing, v_sum
+          FROM apartments WHERE society_id = p_society_id AND active;
+        IF v_missing > 0 THEN
+            RAISE EXCEPTION '% flat(s) have no undivided-interest percentage; enter the Declaration figures (or run the backfill) before a weighted poll', v_missing;
+        END IF;
+        IF v_sum < 99.9 OR v_sum > 100.1 THEN
+            RAISE EXCEPTION 'undivided-interest percentages add up to %, not 100; correct them before a weighted poll', ROUND(v_sum, 4);
+        END IF;
+        v_quorum := fn_regime_param_num(p_society_id, 'poll_quorum_pct');
+        v_major  := fn_regime_param_num(p_society_id, 'poll_majority_pct');
+    END IF;
+
+    INSERT INTO polls (society_id, title, description, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5,
+                       ends_at, open_to, vote_basis, quorum_pct, majority_pct)
+    VALUES (p_society_id, p_title, p_description, p_choice_count, p_choice_1, p_choice_2, p_choice_3, p_choice_4, p_choice_5,
+            p_ends_at, p_open_to, p_vote_basis, COALESCE(v_quorum, 33.33), COALESCE(v_major, 50.00))
     RETURNING id INTO v_poll_id;
 
     RETURN v_poll_id;
@@ -11866,6 +11909,7 @@ DECLARE
     v_existing  INT;
     v_total     BIGINT;
     v_standing  RECORD;
+    v_weight    NUMERIC;
 BEGIN
     SELECT * INTO v_poll FROM polls WHERE id = p_poll_id AND society_id = p_society_id;
 
@@ -11926,6 +11970,16 @@ BEGIN
     INSERT INTO poll_participation (poll_id, apartment_id) VALUES (p_poll_id, v_apt_id);
     INSERT INTO poll_ballots (poll_id, choice) VALUES (p_poll_id, p_choice);
 
+    IF v_poll.vote_basis = 'undivided_interest' THEN
+        SELECT undivided_interest_pct INTO v_weight FROM apartments WHERE id = v_apt_id;
+        IF v_weight IS NULL OR v_weight <= 0 THEN
+            -- Roll the whole call back: the two inserts above must not survive without a weight.
+            RAISE EXCEPTION 'no_weight';
+        END IF;
+        INSERT INTO poll_weight_tally (poll_id, choice, weight_sum) VALUES (p_poll_id, p_choice, v_weight)
+        ON CONFLICT (poll_id, choice) DO UPDATE SET weight_sum = poll_weight_tally.weight_sum + EXCLUDED.weight_sum;
+    END IF;
+
     SELECT COUNT(*) INTO v_total FROM poll_participation WHERE poll_id = p_poll_id;
 
     RETURN QUERY SELECT TRUE, 'Vote cast successfully'::TEXT, v_total;
@@ -11933,6 +11987,12 @@ EXCEPTION
     WHEN unique_violation THEN
         RETURN QUERY SELECT FALSE, 'A vote has already been cast for this apartment'::TEXT, 0::BIGINT;
         RETURN;
+    WHEN raise_exception THEN
+        IF SQLERRM = 'no_weight' THEN
+            RETURN QUERY SELECT FALSE, 'This apartment has no undivided-interest percentage, so it cannot vote in a weighted poll - ask the Secretary to record it'::TEXT, 0::BIGINT;
+            RETURN;
+        END IF;
+        RAISE;
 END;
 $$;
 
@@ -12014,6 +12074,13 @@ DECLARE
     v_winning_votes BIGINT;
     v_majority_met BOOLEAN;
     v_results JSONB;
+    v_weighted BOOLEAN;
+    v_win_weight NUMERIC;
+    v_cast_weight NUMERIC;
+    v_base_weight NUMERIC;
+    v_basis TEXT;
+    v_pct NUMERIC;
+    v_note TEXT;
 BEGIN
     SELECT * INTO v_poll FROM polls WHERE id = p_poll_id AND society_id = p_society_id;
     IF NOT FOUND THEN
@@ -12026,39 +12093,67 @@ BEGIN
         RETURN;
     END IF;
 
+    v_weighted := (v_poll.vote_basis = 'undivided_interest');
+
     -- Count total votes
     SELECT COUNT(*) INTO v_total_votes FROM poll_ballots WHERE poll_id = p_poll_id;
 
-    -- Count eligible voters (apartments that can vote based on open_to)
+    -- Count eligible voters (apartments that can vote based on open_to) and, for a weighted poll, their
+    -- combined undivided-interest percentage (the "100%" a majority is measured against).
     IF v_poll.open_to = 'no_dues' THEN
-        -- Count apartments with no outstanding dues/loans
-        SELECT COUNT(*) INTO v_eligible_voters
+        SELECT COUNT(*), COALESCE(SUM(a.undivided_interest_pct), 0) INTO v_eligible_voters, v_base_weight
         FROM apartments a
         LEFT JOIN LATERAL fn_get_standing(p_society_id, a.id, CURRENT_DATE) s ON TRUE
         WHERE a.society_id = p_society_id AND a.active
           AND NOT s.ineligible_vote;
     ELSE
-        SELECT COUNT(*) INTO v_eligible_voters FROM apartments WHERE society_id = p_society_id AND active;
+        SELECT COUNT(*), COALESCE(SUM(undivided_interest_pct), 0) INTO v_eligible_voters, v_base_weight
+        FROM apartments WHERE society_id = p_society_id AND active;
     END IF;
 
-    -- Check quorum
+    -- Quorum is a head-count of owners (bye-law 9: "30 percent of owners"), for both vote bases.
     v_quorum_met := (v_eligible_voters = 0) OR (v_total_votes * 100.0 / NULLIF(v_eligible_voters, 0) >= v_poll.quorum_pct);
 
-    -- Determine winning choice
-    SELECT choice, COUNT(*) INTO v_winning_choice, v_winning_votes
-    FROM poll_ballots
-    WHERE poll_id = p_poll_id
-    GROUP BY choice
-    ORDER BY COUNT(*) DESC, choice ASC
-    LIMIT 1;
-
-    -- Check majority (if only one choice has votes, it wins; otherwise need majority_pct)
-    IF v_winning_votes IS NULL THEN
-        v_majority_met := FALSE;
-    ELSIF v_total_votes = v_winning_votes THEN
-        v_majority_met := TRUE; -- unanimous
+    IF v_weighted THEN
+        -- Bye-law 8: a vote carries the owner's percentage. Bye-law 2(e): a "majority" is owners holding 51%
+        -- of the votes. By default (poll_majority_of = all_votes) that is 51% of ALL eligible votes, so
+        -- abstentions count against a motion; the society may not loosen that, only choose it explicitly.
+        SELECT choice, weight_sum INTO v_winning_choice, v_win_weight
+          FROM poll_weight_tally WHERE poll_id = p_poll_id
+         ORDER BY weight_sum DESC, choice ASC LIMIT 1;
+        SELECT COALESCE(SUM(weight_sum), 0) INTO v_cast_weight FROM poll_weight_tally WHERE poll_id = p_poll_id;
+        SELECT COUNT(*) INTO v_winning_votes FROM poll_ballots WHERE poll_id = p_poll_id AND choice = v_winning_choice;
+        v_basis := COALESCE(fn_regime_param_text(p_society_id, 'poll_majority_of'), 'all_votes');
+        IF v_basis NOT IN ('all_votes', 'votes_cast') THEN v_basis := 'all_votes'; END IF;
+        IF v_basis = 'all_votes' THEN
+            v_pct := v_win_weight * 100.0 / NULLIF(v_base_weight, 0);
+        ELSE
+            v_pct := v_win_weight * 100.0 / NULLIF(v_cast_weight, 0);
+        END IF;
+        v_majority_met := COALESCE(v_pct >= v_poll.majority_pct, FALSE);
+        v_note := 'Weighted online poll (bye-laws 8 and 2(e)). Bye-laws 9-10 require a General Body quorum present in person, '
+                  'so this result is evidence of owners'' will, not a General Body resolution: record it in a meeting and '
+                  'resolution before acting on it as a statutory decision.';
     ELSE
-        v_majority_met := (v_winning_votes * 100.0 / NULLIF(v_total_votes, 0) >= v_poll.majority_pct);
+        -- Determine winning choice
+        SELECT choice, COUNT(*) INTO v_winning_choice, v_winning_votes
+        FROM poll_ballots
+        WHERE poll_id = p_poll_id
+        GROUP BY choice
+        ORDER BY COUNT(*) DESC, choice ASC
+        LIMIT 1;
+
+        -- Check majority (if only one choice has votes, it wins; otherwise need majority_pct)
+        IF v_winning_votes IS NULL THEN
+            v_majority_met := FALSE;
+        ELSIF v_total_votes = v_winning_votes THEN
+            v_majority_met := TRUE; -- unanimous
+        ELSE
+            v_majority_met := (v_winning_votes * 100.0 / NULLIF(v_total_votes, 0) >= v_poll.majority_pct);
+        END IF;
+        v_pct := v_winning_votes * 100.0 / NULLIF(v_total_votes, 0);
+        v_note := 'Advisory one-flat-one-vote poll. The Model Bye-Laws weight votes by undivided interest (bye-law 8) and '
+                  'require a quorum present in person (bye-law 9), so this is not a General Body resolution.';
     END IF;
 
     -- Build results JSON
@@ -12071,6 +12166,9 @@ BEGIN
         'majority_met', v_majority_met,
         'winning_choice', v_winning_choice,
         'winning_votes', v_winning_votes,
+        'vote_basis', v_poll.vote_basis,
+        'statutory_resolution', FALSE,
+        'note', v_note,
         'choice_breakdown', (
             SELECT jsonb_object_agg('choice_' || choice, cnt)
             FROM (
@@ -12081,6 +12179,17 @@ BEGIN
             ) sub
         )
     );
+    IF v_weighted THEN
+        v_results := v_results || jsonb_build_object(
+            'winning_weight_pct', ROUND(COALESCE(v_win_weight, 0), 4),
+            'cast_weight_pct', ROUND(v_cast_weight, 4),
+            'eligible_weight_pct', ROUND(v_base_weight, 4),
+            'majority_of', v_basis,
+            'weight_breakdown', (
+                SELECT COALESCE(jsonb_object_agg('choice_' || choice, ROUND(weight_sum, 4)), '{}'::JSONB)
+                FROM poll_weight_tally WHERE poll_id = p_poll_id)
+        );
+    END IF;
 
     -- A poll that misses quorum or majority is NOT declared: it stays as it was so the admin sees
     -- the reason (and the poll is not silently closed out as if it had carried).
@@ -12093,8 +12202,13 @@ BEGIN
     END IF;
 
     RETURN QUERY SELECT v_quorum_met AND v_majority_met,
-           CASE WHEN v_quorum_met AND v_majority_met THEN 'Results declared - quorum and majority met'
+           CASE WHEN v_quorum_met AND v_majority_met THEN
+                    CASE WHEN v_weighted THEN 'Results declared - quorum and weighted majority met (advisory: not a General Body resolution)'
+                         ELSE 'Results declared - quorum and majority met' END
                 WHEN NOT v_quorum_met THEN 'Quorum not met (' || ROUND(v_total_votes * 100.0 / NULLIF(v_eligible_voters, 0), 1) || '% of ' || v_eligible_voters || ' eligible)'
+                WHEN v_weighted THEN 'Majority not met (' || COALESCE(ROUND(v_pct, 1)::TEXT, '0') || '% of '
+                                     || CASE WHEN v_basis = 'all_votes' THEN 'all eligible votes' ELSE 'votes cast' END
+                                     || ' for choice ' || COALESCE(v_winning_choice::TEXT, '-') || ', need ' || v_poll.majority_pct || '%)'
                 ELSE 'Majority not met (' || ROUND(v_winning_votes * 100.0 / NULLIF(v_total_votes, 0), 1) || '% for choice ' || v_winning_choice || ')'
            END,
            v_results;
@@ -13692,7 +13806,7 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
  ('UP_AOA_2010', 's22_notice_days', 's.22 notice to defaulter (days)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.22(1)', NULL, 'statutory', 'state_act_rules', 'int', 'days', 1, 90, 1, 90, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_service_cutoff_check', 'fn_get_standing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 's22_wait_months', 's.22 wait after certified copy (months)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.22(1) proviso', NULL, 'statutory', 'state_act_rules', 'int', 'months', 1, 12, 1, 12, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_service_cutoff_check', 'fn_get_standing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 's22_appeal_days', 's.22 appeal window (days)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.22(2)', NULL, 'statutory', 'state_act_rules', 'int', 'days', 1, 90, 1, 90, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_service_cutoff_check', 'fn_get_standing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
- ('UP_AOA_2010', 's20_recovery_months', 's.20 recovery after unpaid (months)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.20(2)', NULL, 'statutory', 'state_act_rules', 'int', 'months', 1, 60, 1, 60, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'tracked', ARRAY[]::TEXT[], 'checked', DATE '2026-10-07', FALSE, FALSE, 'Defined but not yet enforced: nothing reads this value yet (README, Known gaps).'),
+ ('UP_AOA_2010', 's20_recovery_months', 's.20 recovery after unpaid (months)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.20(2)', NULL, 'statutory', 'state_act_rules', 'int', 'months', 1, 60, 1, 60, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_s20_recovery_candidates']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Reported, not automated: fn_s20_recovery_candidates lists the flats whose common-expense bills are older than this; the application to the Competent Authority is made by the association.'),
  ('UP_AOA_2010', 'arrears_disqualify_days', 'Bye-law 7 arrears bar after (days)', 'UP Model Bye-Laws, 2011', 'bye-law 7', 'BL_07', 'non_statutory', 'model_bye_law', 'int', 'days', 1, 365, 1, 60, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'lower', FALSE, 'gated', ARRAY['fn_get_standing', 'fn_bye_law7_eligibility', 'fn_common_expense_arrears_asof']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'A society may only shorten the 60 days (General Body policy); lengthening would loosen the Model Bye-Law.'),
  ('UP_AOA_2010', 'transfer_fee_pct', 'Bye-law 39 transfer fee (% of value)', 'UP Model Bye-Laws, 2011', 'bye-law 39', 'BL_39', 'non_statutory', 'model_bye_law', 'num', '% of value', 0.0001, 5, 0.0001, 5, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_record_apartment_transfer']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'nodues_deemed_days', 'No Dues deemed granted after (days)', 'UP Model Bye-Laws, 2011', 'bye-law 39', 'BL_39', 'non_statutory', 'model_bye_law', 'int', 'days', 1, 90, 1, 15, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'lower', FALSE, 'gated', ARRAY['fn_nodues_certificate_status']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
@@ -13708,7 +13822,12 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
  ('UP_AOA_2010', 'owner_loan_blocks_nodues', 'Outstanding owner loan blocks issuing No Dues (1 = yes)', 'Engine policy (no statutory source)', 'bye-law 3(1)(f) (loans)', NULL, 'non_statutory', 'engine_default', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'policy', ARRAY['fn_get_standing', 'fn_nodues_issue_check']::TEXT[], 'provisional', NULL, FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'owner_loan_counts_bye_law7', 'Overdue owner loan counts as bye-law 7 arrears (1 = yes)', 'Engine policy (no statutory source)', 'bye-law 7', NULL, 'non_statutory', 'engine_default', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'policy', ARRAY['fn_get_standing', 'fn_bye_law7_eligibility']::TEXT[], 'provisional', NULL, FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'owner_loan_counts_s22', 'Overdue owner loan counts toward the s.22 dues test (1 = yes)', 'Engine policy (no statutory source)', 's.22', NULL, 'non_statutory', 'engine_default', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_get_standing']::TEXT[], 'provisional', NULL, FALSE, TRUE, NULL),
- ('UP_AOA_2010', 'reserve_appropriation_pct', 'Reserve Fund share of net surplus at FY close (%)', 'Engine policy (no statutory source)', 'bye-law 44(c) (common profits form the nucleus of reserve funds)', NULL, 'non_statutory', 'engine_default', 'num', '%', 0, 100, 0, 100, ARRAY[]::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_fy_close_preview', 'fn_fy_close_reserve_appropriation']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL)
+ ('UP_AOA_2010', 'reserve_appropriation_pct', 'Reserve Fund share of net surplus at FY close (%)', 'Engine policy (no statutory source)', 'bye-law 46(c) (common profits form the nucleus of reserve funds)', NULL, 'non_statutory', 'engine_default', 'num', '%', 0, 100, 0, 100, ARRAY[]::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_fy_close_preview', 'fn_fy_close_reserve_appropriation']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
+ ('UP_AOA_2010', 'poll_quorum_pct', 'Poll quorum: owners voting (% of owners)', 'UP Model Bye-Laws, 2011', 'bye-law 9', 'BL_09', 'non_statutory', 'model_bye_law', 'num', '% of owners', 1, 100, 30, 100, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'gated', ARRAY['fn_create_poll', 'fn_declare_results']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Applied to weighted polls only. A society may raise it, never lower it. Bye-law 9 speaks of owners present IN PERSON, so an online poll reaching this figure still does not make a General Body quorum.'),
+ ('UP_AOA_2010', 'poll_majority_pct', 'Poll majority: share of the votes (%)', 'UP Model Bye-Laws, 2011', 'bye-law 2(e)', 'BL_02', 'non_statutory', 'model_bye_law', 'num', '% of votes', 1, 100, 51, 100, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'gated', ARRAY['fn_create_poll']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Applied to weighted polls only (polls.vote_basis = undivided_interest). A society may raise it, never lower it.'),
+ ('UP_AOA_2010', 'poll_majority_of', 'Weighted-poll majority is measured against', 'Engine policy (no statutory source)', 'bye-laws 2(e) and 10', 'BL_10', 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['votes_cast', 'all_votes']::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'policy', ARRAY['fn_declare_results']::TEXT[], 'disputed', NULL, TRUE, TRUE, NULL),
+ ('UP_AOA_2010', 'owner_loan_resolution_mode', 'Owner-loan consent must be a recorded resolution', 'Engine policy (no statutory source)', 'bye-law 3(1)(f)', 'BL_03', 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['text', 'linked']::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'policy', ARRAY['fn_disburse_owner_loan']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
+ ('UP_AOA_2010', 'owner_loan_max_term_days', 'Owner loan: longest repayment term (days)', 'Engine policy (no statutory source)', 'bye-law 3(1)(f) (''short-term'')', 'BL_03', 'non_statutory', 'engine_default', 'int', 'days', 1, 3650, 1, 3650, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'lower', FALSE, 'policy', ARRAY['fn_disburse_owner_loan']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference, effective_from) VALUES
@@ -13718,7 +13837,7 @@ INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, un
  ('UP_AOA_2010', 's22_notice_days', 7, NULL, 'days', 'UP Apartment Act 2010 s.22: 7 days notice to the defaulter', DATE '2011-11-16'),
  ('UP_AOA_2010', 's22_wait_months', 1, NULL, 'months', 'UP Apartment Act 2010 s.22: one-month wait after the certified copy is sent to the competent authority and the owner', DATE '2011-11-16'),
  ('UP_AOA_2010', 's22_appeal_days', 15, NULL, 'days', 'UP Apartment Act 2010 s.22: 15 days for the owner to appeal', DATE '2011-11-16'),
- ('UP_AOA_2010', 's20_recovery_months', 12, NULL, 'months', 'UP Apartment Act 2010 s.20: after 12 months unpaid the competent authority may recover as arrears of land revenue', DATE '2011-11-16'),
+ ('UP_AOA_2010', 's20_recovery_months', 12, NULL, 'months', 'UP Apartment Act 2010 s.20(2): common expenses unpaid for more than 12 months may be recovered through the Competent Authority as arrears of land revenue', DATE '2011-11-16'),
  ('UP_AOA_2010', 'arrears_disqualify_days', 60, NULL, 'days', 'Model Bye-Laws 2011, bye-law 7: arrears of more than 60 days bar voting / standing for the Board', DATE '2011-11-16'),
  ('UP_AOA_2010', 'transfer_fee_pct', 0.5, NULL, '% of value', 'Model Bye-Laws 2011, bye-law 39: 1/2% of transfer value, payable by the transferor on a sale, to the association for the major-repair fund', DATE '2011-11-16'),
  ('UP_AOA_2010', 'nodues_deemed_days', 15, NULL, 'days', 'Model Bye-Laws 2011, bye-law 39: No Dues Certificate deemed granted if not refused within 15 days', DATE '2011-11-16'),
@@ -13734,7 +13853,12 @@ INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, un
  ('UP_AOA_2010', 'owner_loan_blocks_nodues', 1, NULL, '0/1', 'Engine policy (not statute): a loan outstanding from the association is a due to it, so the No Dues Certificate is not issued until it is recovered; the Board may instead record a refusal', DATE '2011-11-16'),
  ('UP_AOA_2010', 'owner_loan_counts_bye_law7', 0, NULL, '0/1', 'Engine policy (not statute): OFF by default - bye-law 7 speaks only of arrears of contributions for common expenses, so an overdue owner loan is not counted unless the society opts in on advice', DATE '2011-11-16'),
  ('UP_AOA_2010', 'owner_loan_counts_s22', 0, NULL, '0/1', 'Engine policy (not statute): off by default - s.22 concerns unpaid charges, so an overdue loan does not by itself justify cutting a service; enable only on advice', DATE '2011-11-16'),
- ('UP_AOA_2010', 'reserve_appropriation_pct', 25, NULL, '%', 'Engine policy (not statute): share of net surplus moved to the Reserve Fund at FY close. Neither the UP Apartment Act 2010 nor the 2011 Model Bye-Laws fix a percentage (common profits are only said to form the nucleus of the reserve funds); 25% follows the co-operative-society convention. Set it by General Body resolution', DATE '2011-11-16')
+ ('UP_AOA_2010', 'reserve_appropriation_pct', 25, NULL, '%', 'Engine policy (not statute): share of net surplus moved to the Reserve Fund at FY close. Neither the UP Apartment Act 2010 nor the 2011 Model Bye-Laws fix a percentage (common profits are only said to form the nucleus of the reserve funds); 25% follows the co-operative-society convention. Set it by General Body resolution', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'poll_quorum_pct', 30, NULL, '% of owners', 'Model Bye-Laws 2011, bye-law 9: the presence in person of 30 percent of owners is a quorum (a head-count of owners, not of votes)', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'poll_majority_pct', 51, NULL, '% of votes', 'Model Bye-Laws 2011, bye-law 2(e): ''majority'' of owners means owners holding 51 per cent of the votes; bye-law 8 weights each vote by the owner''s percentage in the Declaration (Act s.12(1)(f): percentage ''for all purposes, including voting'')', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'poll_majority_of', NULL, 'all_votes', NULL, 'Engine policy, not statute: bye-law 2(e) defines a majority as owners holding 51% of THE votes (read here as all eligible votes, so abstentions count against a motion), while bye-law 10 speaks of a majority of owners CASTING votes. The stricter reading is the default; choose votes_cast only on advice', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'owner_loan_resolution_mode', NULL, 'linked', NULL, 'Engine policy, not statute: bye-law 3(1)(f) allows a short-term loan to an owner ''with the consent of the apartment owners'' in an emergent necessity. linked = the loan must cite a passed Approve Owner Loan resolution of a General Body meeting with quorum; text = any resolution reference is accepted (the old behaviour)', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'owner_loan_max_term_days', 365, NULL, 'days', 'Engine policy, not statute: the bye-law says only ''short-term'' and fixes no number of days. Applied when owner_loan_resolution_mode = linked, where a repayment date is mandatory', DATE '2011-11-16')
 ON CONFLICT DO NOTHING;
 -- <<< END GENERATED
 
@@ -14033,6 +14157,10 @@ CREATE TABLE apartment_transfers (
     nodues_requested_on DATE,
     nodues_refused_on   DATE,
     nodues_issued_on    DATE,
+    -- Act s.23(2): the Board's statement of unpaid common-expense assessment, frozen when issued.
+    statement_amount    NUMERIC(12, 2),
+    statement_issued_on DATE,
+    statement_issued_by INT REFERENCES users (id),
     created_by          INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -14369,12 +14497,20 @@ CREATE TABLE aoa_statutory_filings (
     copy_to_authority_on     DATE,
     owner_summaries_sent_on  DATE,
     auditor_name             VARCHAR(150),
+    -- Bye-law 49(3) publishes an AUDITED statement; bye-law 51 has the general meeting appoint the auditor.
+    -- A statement cannot be recorded as published unless an auditor is named and signed it off on or before
+    -- the publication date.
+    audit_signed_off_on      DATE,
     owner_list_attached      BOOLEAN NOT NULL DEFAULT FALSE,
     loanee_list_attached     BOOLEAN NOT NULL DEFAULT FALSE,
     notes                    TEXT,
     updated_by               INT REFERENCES users (id),
     updated_at               TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_aoa_filing UNIQUE (society_id, fy_start_year)
+    CONSTRAINT uq_aoa_filing UNIQUE (society_id, fy_start_year),
+    CONSTRAINT chk_aoa_published_is_audited CHECK (
+        statements_published_on IS NULL
+        OR (COALESCE(btrim(auditor_name), '') <> '' AND audit_signed_off_on IS NOT NULL
+            AND audit_signed_off_on <= statements_published_on))
 );
 
 CREATE OR REPLACE FUNCTION fn_statutory_calendar(p_society_id INT, p_asof DATE DEFAULT CURRENT_DATE, p_years INT DEFAULT 3)
@@ -14426,6 +14562,10 @@ CREATE TABLE owner_loans (
     interest_rate_pct NUMERIC(5, 2) NOT NULL DEFAULT 0,
     purpose           TEXT,
     resolution_ref    VARCHAR(100),
+    -- Bye-law 3(1)(f): a loan needs "the consent of the apartment owners". resolution_id points at the passed
+    -- Approve Owner Loan resolution that records it (FK added after the resolutions table, below);
+    -- resolution_ref stays as free text for loans entered before this link existed.
+    resolution_id     INT,
     repaid_amount     NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (repaid_amount >= 0),
     -- Bye-law 3(1)(f) lets the association lend to an owner. The register row
     -- alone is not a money movement: ledger_posted records whether the
@@ -14533,22 +14673,70 @@ BEGIN
     ON CONFLICT DO NOTHING;
 END $$;
 
--- Disbursement: Dr Loans to Owners / Cr cash or bank. Engine policy (not statute):
--- a resolution reference is mandatory, and the cash-payment limit applies.
+-- Is this resolution valid consent for an owner loan (bye-law 3(1)(f))? Returns NULL when it is, otherwise
+-- the reason it is not. Engine policy on what counts as "the consent of the apartment owners": a PASSED
+-- Approve Owner Loan resolution, of this society, taken at a General Body / Extraordinary meeting that
+-- recorded a quorum, on or before the loan date.
+CREATE OR REPLACE FUNCTION fn_check_loan_resolution(p_society_id INT, p_resolution_id INT, p_loan_date DATE)
+RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
+DECLARE x RECORD;
+BEGIN
+    SELECT r.id, r.passed, r.passed_on, dt.code AS dcode, m.society_id, m.type AS mtype, m.quorum_met, m.held_on
+      INTO x
+      FROM resolutions r
+      JOIN meetings m ON m.id = r.meeting_id
+      JOIN decision_types dt ON dt.id = r.decision_type_id
+     WHERE r.id = p_resolution_id;
+    IF NOT FOUND OR x.society_id IS DISTINCT FROM p_society_id THEN RETURN 'that resolution is not one of this society''s'; END IF;
+    IF x.dcode <> 'APPROVE_LOAN' THEN RETURN 'that resolution is not an Approve Owner Loan resolution'; END IF;
+    IF NOT x.passed THEN RETURN 'that resolution did not pass'; END IF;
+    IF x.mtype NOT IN ('GBM', 'EGM') THEN RETURN 'owner loans need the consent of the owners: the resolution must be taken at a General Body meeting, not a Board meeting'; END IF;
+    IF NOT x.quorum_met THEN RETURN 'the meeting that passed that resolution did not record a quorum'; END IF;
+    IF COALESCE(x.passed_on, x.held_on) > p_loan_date THEN RETURN 'that resolution was passed after the loan date'; END IF;
+    RETURN NULL;
+END $$;
+
+-- Disbursement: Dr Loans to Owners / Cr cash or bank. The cash-payment limit applies. What counts as consent
+-- depends on owner_loan_resolution_mode: 'linked' (UP default) needs a valid, passed Approve Owner Loan
+-- resolution (p_resolution_id), a stated purpose (emergent necessity) and a repayment date within
+-- owner_loan_max_term_days (short-term); 'text' keeps the old rule of any non-blank resolution reference.
 CREATE OR REPLACE FUNCTION fn_disburse_owner_loan(
     p_society_id INT, p_apartment_id INT, p_loan_date DATE, p_principal NUMERIC, p_rate_pct NUMERIC,
-    p_mode VARCHAR, p_purpose TEXT, p_resolution_ref VARCHAR, p_created_by INT)
+    p_mode VARCHAR, p_purpose TEXT, p_resolution_ref VARCHAR, p_created_by INT,
+    p_resolution_id INT DEFAULT NULL, p_due_date DATE DEFAULT NULL)
 RETURNS TABLE (loan_id INT, msg TEXT)
 LANGUAGE plpgsql AS $$
 DECLARE v_flat VARCHAR; v_loan INT; v_bank INT; v_journal INT; v_limit TEXT;
+        v_mode TEXT; v_why TEXT; v_ref VARCHAR; v_max NUMERIC;
 BEGIN
     SELECT flat_number INTO v_flat FROM apartments WHERE id = p_apartment_id AND society_id = p_society_id AND active;
     IF NOT FOUND THEN loan_id := NULL; msg := 'Error: apartment not found in this society'; RETURN NEXT; RETURN; END IF;
     IF p_principal IS NULL OR p_principal <= 0 THEN loan_id := NULL; msg := 'Error: principal must be positive'; RETURN NEXT; RETURN; END IF;
     IF COALESCE(p_rate_pct, 0) < 0 THEN loan_id := NULL; msg := 'Error: interest rate cannot be negative'; RETURN NEXT; RETURN; END IF;
-    IF COALESCE(TRIM(p_resolution_ref), '') = '' THEN
-        loan_id := NULL; msg := 'Error: a Board / general-body resolution reference is required'; RETURN NEXT; RETURN; END IF;
     IF p_mode IS NULL OR p_mode = 'journal' THEN loan_id := NULL; msg := 'Error: choose how the money was paid out'; RETURN NEXT; RETURN; END IF;
+
+    v_mode := COALESCE(fn_regime_param_text(p_society_id, 'owner_loan_resolution_mode', p_loan_date), 'text');
+    v_ref := NULLIF(TRIM(COALESCE(p_resolution_ref, '')), '');
+    IF v_mode = 'linked' THEN
+        IF p_resolution_id IS NULL THEN
+            loan_id := NULL; msg := 'Error: choose the General Body resolution that approved this loan (bye-law 3(1)(f): consent of the owners)'; RETURN NEXT; RETURN; END IF;
+        v_why := fn_check_loan_resolution(p_society_id, p_resolution_id, p_loan_date);
+        IF v_why IS NOT NULL THEN loan_id := NULL; msg := 'Error: ' || v_why; RETURN NEXT; RETURN; END IF;
+        IF COALESCE(TRIM(p_purpose), '') = '' THEN
+            loan_id := NULL; msg := 'Error: state the emergent necessity the loan is for (bye-law 3(1)(f))'; RETURN NEXT; RETURN; END IF;
+        IF p_due_date IS NULL OR p_due_date <= p_loan_date THEN
+            loan_id := NULL; msg := 'Error: a short-term loan needs a repayment date after the loan date'; RETURN NEXT; RETURN; END IF;
+        v_max := fn_regime_param_num(p_society_id, 'owner_loan_max_term_days', p_loan_date);
+        IF v_max IS NOT NULL AND p_due_date - p_loan_date > v_max THEN
+            loan_id := NULL; msg := format('Error: repayment date is %s days out; the society''s short-term limit is %s days', p_due_date - p_loan_date, v_max::INT); RETURN NEXT; RETURN; END IF;
+        IF v_ref IS NULL THEN
+            SELECT format('GBM %s / resolution #%s', m.held_on, r.id) INTO v_ref
+              FROM resolutions r JOIN meetings m ON m.id = r.meeting_id WHERE r.id = p_resolution_id;
+        END IF;
+    ELSE
+        IF v_ref IS NULL THEN
+            loan_id := NULL; msg := 'Error: a Board / general-body resolution reference is required'; RETURN NEXT; RETURN; END IF;
+    END IF;
 
     v_limit := fn_check_cash_payment_limit(p_society_id, p_principal, p_mode);
     IF v_limit IS NOT NULL AND fn_cash_limit_mode(p_society_id) = 'block' THEN
@@ -14562,15 +14750,16 @@ BEGIN
     v_journal := NEXTVAL('seq_transaction_number');
 
     INSERT INTO owner_loans (society_id, apartment_id, loan_date, principal, interest_rate_pct, purpose,
-                             resolution_ref, created_by, ledger_posted, disbursal_mode, journal_id)
+                             resolution_ref, resolution_id, due_date, created_by, ledger_posted, disbursal_mode, journal_id)
     VALUES (p_society_id, p_apartment_id, p_loan_date, p_principal, COALESCE(p_rate_pct, 0), p_purpose,
-            TRIM(p_resolution_ref), p_created_by, TRUE, p_mode, v_journal)
+            v_ref, CASE WHEN v_mode = 'linked' THEN p_resolution_id END,
+            CASE WHEN v_mode = 'linked' THEN p_due_date END, p_created_by, TRUE, p_mode, v_journal)
     RETURNING id INTO v_loan;
 
     INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
                               amount, mode, status, created_by, created_at, source_table, source_id, journal_id)
     VALUES (p_society_id, 'Dr', p_loan_date, 1410, p_apartment_id, 'apartment',
-            'Loan to owner of ' || v_flat || ' (' || TRIM(p_resolution_ref) || ')',
+            'Loan to owner of ' || v_flat || ' (' || v_ref || ')',
             p_principal, p_mode, 'paid', p_created_by, NOW(), 'owner_loans', v_loan, v_journal);
     IF v_bank IS NOT NULL THEN
         INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
@@ -14736,6 +14925,99 @@ RETURNS TEXT LANGUAGE sql STABLE AS $$
                    WHEN 'droppable_BL_49' THEN 'locked' WHEN 'droppable_BL_55' THEN 'locked'
                    ELSE NULL END)
 $$;
+
+-- ───────────────────────────────────────────────────────────────────────────────
+-- Common-expense bills still unpaid AS AT a date (Act s.20(2), s.23). A bill counts from the month it accrues
+-- (period_month, else due date, else creation date); what is owed is its principal less payments made on or
+-- before the date (receivable_payment_log; rows without a log fall back to paid_principal). Interest, fines and
+-- the transfer fee are not "common expenses" and are left out.
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION fn_common_expense_bills_asof(p_society_id INT, p_apartment_id INT, p_asof DATE)
+RETURNS TABLE (receivable_id INT, accrued_on DATE, due_date DATE, owed NUMERIC)
+LANGUAGE sql STABLE AS $$
+    SELECT r.id,
+           COALESCE(r.period_month, r.due_date, r.created_at::DATE),
+           r.due_date,
+           GREATEST((r.amount - r.interest_amount) - CASE
+               WHEN EXISTS (SELECT 1 FROM receivable_payment_log g WHERE g.receivable_id = r.id)
+               THEN COALESCE((SELECT SUM(g.principal_delta) FROM receivable_payment_log g
+                              WHERE g.receivable_id = r.id AND g.paid_on <= p_asof), 0)
+               ELSE LEAST(r.paid_principal, r.amount - r.interest_amount) END, 0)::NUMERIC
+      FROM receivables r
+     WHERE r.society_id = p_society_id AND r.entity_id = p_apartment_id AND r.role = 'apartment'
+       AND r.charge_kind = 'common_expense'
+       AND r.status IN ('pending', 'partial', 'unverified', 'paid')
+       AND COALESCE(r.period_month, r.due_date, r.created_at::DATE) <= p_asof
+$$;
+
+-- Act s.20(2): common expenses unpaid for MORE than 12 months may be recovered, through the Competent
+-- Authority, as arrears of land revenue. This lists the flats that have reached that point; the application
+-- is the association's to make (nothing is filed from here). s20_recovery_months is a Layer-0 rule.
+CREATE OR REPLACE FUNCTION fn_s20_recovery_candidates(p_society_id INT, p_asof DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (apartment_id INT, flat_number VARCHAR, owner_name VARCHAR, bills INT, oldest_due_date DATE,
+               amount_due NUMERIC, months_threshold INT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE v_months INT;
+BEGIN
+    v_months := fn_regime_param_num(p_society_id, 's20_recovery_months', p_asof)::INT;
+    IF v_months IS NULL THEN RETURN; END IF;
+    RETURN QUERY
+    SELECT a.id, a.flat_number, a.owner_name, COUNT(*)::INT, MIN(b.due_date), SUM(b.owed)::NUMERIC, v_months
+      FROM apartments a
+      JOIN LATERAL fn_common_expense_bills_asof(p_society_id, a.id, p_asof) b ON TRUE
+     WHERE a.society_id = p_society_id AND a.active
+       AND b.owed > 0
+       AND b.due_date IS NOT NULL AND b.due_date < (p_asof - make_interval(months => v_months))::DATE
+     GROUP BY a.id, a.flat_number, a.owner_name
+     ORDER BY SUM(b.owed) DESC, a.flat_number;
+END $$;
+
+-- Act s.23(2): on a sale, bequest or transfer the purchaser / transferee is entitled to a statement from the
+-- Board of the unpaid common-expense assessment against the transferor, and is not liable for more than the
+-- amount it sets out. This computes that figure as at the transfer date (what s.23(1) makes the transferee
+-- jointly liable for); fn_issue_purchaser_statement freezes it on the transfer record. The transfer fee is
+-- shown separately because it is not a common expense and so is outside s.23.
+CREATE OR REPLACE FUNCTION fn_purchaser_dues_statement(p_transfer_id INT, p_asof DATE DEFAULT NULL)
+RETURNS TABLE (transfer_id INT, apartment_id INT, flat_number VARCHAR, transferor_name VARCHAR, transferee_name VARCHAR,
+               as_at DATE, bills INT, common_expense_unpaid NUMERIC, oldest_due_date DATE,
+               transfer_fee_unpaid NUMERIC, statement_issued_on DATE, statement_amount NUMERIC)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE t apartment_transfers%ROWTYPE; v_asof DATE;
+BEGIN
+    SELECT * INTO t FROM apartment_transfers WHERE id = p_transfer_id;
+    IF NOT FOUND THEN RETURN; END IF;
+    v_asof := COALESCE(p_asof, t.transfer_date);
+    RETURN QUERY
+    SELECT t.id, t.apartment_id, a.flat_number, t.transferor_name, t.transferee_name, v_asof,
+           COALESCE(x.n, 0)::INT, COALESCE(x.amt, 0)::NUMERIC, x.oldest,
+           COALESCE((SELECT GREATEST(r.amount - r.paid_amount, 0) FROM receivables r
+                      WHERE r.id = t.fee_receivable_id AND r.status NOT IN ('cancelled', 'rejected')), 0)::NUMERIC,
+           t.statement_issued_on, t.statement_amount
+      FROM apartments a
+      LEFT JOIN LATERAL (
+            SELECT COUNT(*) FILTER (WHERE b.owed > 0) AS n, SUM(b.owed) AS amt, MIN(b.due_date) FILTER (WHERE b.owed > 0) AS oldest
+              FROM fn_common_expense_bills_asof(t.society_id, t.apartment_id, v_asof) b) x ON TRUE
+     WHERE a.id = t.apartment_id;
+END $$;
+
+-- Freeze the s.23(2) figure: the amount the Board states becomes the ceiling on what the purchaser can be
+-- asked to pay, so it is recorded once and cannot be silently re-issued at a different number.
+CREATE OR REPLACE FUNCTION fn_issue_purchaser_statement(p_transfer_id INT, p_issued_by INT, p_asof DATE DEFAULT NULL)
+RETURNS TABLE (ok BOOLEAN, msg TEXT, statement_amount NUMERIC)
+LANGUAGE plpgsql AS $$
+DECLARE t apartment_transfers%ROWTYPE; v_amt NUMERIC;
+BEGIN
+    SELECT * INTO t FROM apartment_transfers WHERE id = p_transfer_id FOR UPDATE;
+    IF NOT FOUND THEN ok := FALSE; msg := 'Error: transfer not found'; statement_amount := NULL; RETURN NEXT; RETURN; END IF;
+    IF t.statement_issued_on IS NOT NULL THEN
+        ok := FALSE; msg := format('Error: a statement of %s was already issued on %s', t.statement_amount, t.statement_issued_on);
+        statement_amount := t.statement_amount; RETURN NEXT; RETURN; END IF;
+    SELECT s.common_expense_unpaid INTO v_amt FROM fn_purchaser_dues_statement(p_transfer_id, p_asof) s;
+    UPDATE apartment_transfers
+       SET statement_amount = COALESCE(v_amt, 0), statement_issued_on = CURRENT_DATE, statement_issued_by = p_issued_by
+     WHERE id = p_transfer_id;
+    ok := TRUE; msg := 'OK'; statement_amount := COALESCE(v_amt, 0); RETURN NEXT;
+END $$;
 
 -- May the No Dues Certificate for this transfer be ISSUED? (Refusing is always allowed, and the bye-law
 -- 39 deemed grant still runs by the calendar, so the Board must refuse inside the window.)
@@ -14903,6 +15185,9 @@ CREATE TABLE resolutions (
     created_by          INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
+ALTER TABLE owner_loans
+    ADD CONSTRAINT owner_loans_resolution_id_fkey
+    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
 CREATE INDEX idx_resolutions_meeting ON resolutions (meeting_id);
 CREATE INDEX idx_resolutions_clause ON resolutions (clause_id);
 

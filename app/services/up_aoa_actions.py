@@ -60,25 +60,37 @@ def _owns(table: str, row_id, society_id: int) -> bool:
 
 # ── bye-law 49 filings ────────────────────────────────────────────────────────
 def save_filing(society_id: int, user_id: int | None, fy_start_year, published, authority, summaries,
-                auditor, owner_list_attached, loanee_list_attached):
+                auditor, owner_list_attached, loanee_list_attached, audit_signed_off=None):
     if not fy_start_year:
         return False, "Choose the financial year."
-    pub, auth, summ = _d(published), _d(authority), _d(summaries)
+    pub, auth, summ, signed = _d(published), _d(authority), _d(summaries), _d(audit_signed_off)
+    if audit_signed_off and not signed:
+        return False, "The audit sign-off date is not a valid date."
     if pub and auth and auth < pub:
         return False, "The copy to the competent authority cannot be dated before the statements were published."
+    # Bye-law 49(3) publishes an AUDITED statement: recording one as published needs a named auditor and a sign-off
+    # on or before the publication date (the table enforces the same rule).
+    if pub and not (auditor or "").strip():
+        return False, "Name the auditor: bye-law 49(3) requires the published statement to be audited."
+    if pub and not signed:
+        return False, "Enter the date the auditor signed off the accounts before recording them as published."
+    if pub and signed and signed > pub:
+        return False, "The audit sign-off cannot be dated after the statements were published."
     db._execute(
         """INSERT INTO aoa_statutory_filings (society_id, fy_start_year, statements_published_on, copy_to_authority_on,
-                  owner_summaries_sent_on, auditor_name, owner_list_attached, loanee_list_attached, updated_by, updated_at)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                  owner_summaries_sent_on, auditor_name, audit_signed_off_on, owner_list_attached, loanee_list_attached,
+                  updated_by, updated_at)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
            ON CONFLICT (society_id, fy_start_year) DO UPDATE SET
                   statements_published_on = EXCLUDED.statements_published_on,
                   copy_to_authority_on    = EXCLUDED.copy_to_authority_on,
                   owner_summaries_sent_on = EXCLUDED.owner_summaries_sent_on,
                   auditor_name            = EXCLUDED.auditor_name,
+                  audit_signed_off_on     = EXCLUDED.audit_signed_off_on,
                   owner_list_attached     = EXCLUDED.owner_list_attached,
                   loanee_list_attached    = EXCLUDED.loanee_list_attached,
                   updated_by = EXCLUDED.updated_by, updated_at = NOW()""",
-        (society_id, int(fy_start_year), pub, auth, summ, (auditor or "").strip() or None,
+        (society_id, int(fy_start_year), pub, auth, summ, (auditor or "").strip() or None, signed,
          bool(owner_list_attached), bool(loanee_list_attached), user_id))
     return True, "Filing record saved."
 
@@ -154,6 +166,16 @@ def set_nodues(society_id: int, transfer_id, action, on):
     return True, "No Dues Certificate record updated."
 
 
+def issue_statement(society_id: int, user_id, transfer_id):
+    """Act s.23(2): freeze the Board's statement of unpaid common-expense assessment on the transfer."""
+    if not transfer_id or not _owns("apartment_transfers", transfer_id, society_id):
+        return False, "Choose a transfer."
+    row = db._execute("SELECT * FROM fn_issue_purchaser_statement(%s, %s)", (int(transfer_id), user_id), fetch_one=True) or {}
+    if not row.get("ok"):
+        return False, str(row.get("msg") or "Could not issue the statement.").replace("Error: ", "")
+    return True, f"Statement issued: unpaid common expenses \u20b9{row.get('statement_amount')}. The purchaser is not liable for more than this (s.23(2))."
+
+
 # ── section 22 ────────────────────────────────────────────────────────────────
 def start_cutoff(society_id: int, user_id, apartment_id, service_type, default_since, notes):
     d = _d(default_since)
@@ -191,7 +213,8 @@ def set_cutoff_step(society_id: int, proceeding_id, step, on, appeal_outcome=Non
 
 
 # ── owner loans ───────────────────────────────────────────────────────────────
-def disburse_loan(society_id: int, user_id, apartment_id, loan_date, principal, rate, mode, purpose, resolution_ref, due_date=None):
+def disburse_loan(society_id: int, user_id, apartment_id, loan_date, principal, rate, mode, purpose, resolution_ref, due_date=None,
+                  resolution_id=None):
     p, d = _num(principal), _d(loan_date)
     due = _d(due_date)
     if due_date and not due:
@@ -204,12 +227,19 @@ def disburse_loan(society_id: int, user_id, apartment_id, loan_date, principal, 
         return False, "Enter the loan date and a positive principal."
     if mode not in PAY_MODES:
         return False, "Choose how the money was paid out."
-    row = db._execute("SELECT * FROM fn_disburse_owner_loan(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+    res_id = None
+    if resolution_id not in (None, "", 0):
+        try:
+            res_id = int(resolution_id)
+        except (TypeError, ValueError):
+            return False, "Choose a valid resolution."
+    row = db._execute("SELECT * FROM fn_disburse_owner_loan(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                       (society_id, int(apartment_id), d, p, _num(rate) or 0, mode, (purpose or "").strip() or None,
-                       (resolution_ref or "").strip(), user_id), fetch_one=True) or {}
+                       (resolution_ref or "").strip(), user_id, res_id, due), fetch_one=True) or {}
     if row.get("msg") != "OK":
         return False, str(row.get("msg") or "Could not record the loan.").replace("Error: ", "")
-    if due:   # a failure here leaves a posted loan with no repayment date: say so rather than hide it
+    chk = db._execute("SELECT due_date FROM owner_loans WHERE id = %s", (int(row["loan_id"]),), fetch_one=True) or {}
+    if due and chk.get("due_date") != due:   # a failure here leaves a posted loan with no repayment date: say so rather than hide it
         res = db._execute("SELECT fn_set_owner_loan_due_date(%s, %s) AS m", (int(row["loan_id"]), due), fetch_one=True) or {}
         if res.get("m") != "OK":
             return True, (f"Loan of \u20b9{p:,.2f} posted, but the repayment date was not saved "
@@ -260,7 +290,8 @@ def load_card_data(society_id: int) -> dict:
                       WHERE society_id=%s AND apt_id IS NULL AND apt_status=TRUE ORDER BY start_date DESC LIMIT 1""", society_id) or {},
         apartments=q("SELECT id, flat_number, owner_name FROM apartments WHERE society_id=%s AND active ORDER BY flat_number", society_id),
         transfers=q("""SELECT t.id, a.flat_number, t.transfer_date, t.transferee_name, t.transfer_value, t.fee_amount, t.fee_pct,
-                              s.status AS nodues_status, s.deemed_on,
+                              s.status AS nodues_status, s.deemed_on, t.statement_amount, t.statement_issued_on,
+                              (SELECT st.common_expense_unpaid FROM fn_purchaser_dues_statement(t.id) st) AS statement_now,
                               COALESCE(dp.loan_outstanding, 0) AS loan_outstanding, COALESCE(dp.receivables_outstanding, 0) AS dues_outstanding
                          FROM apartment_transfers t JOIN apartments a ON a.id = t.apartment_id
                          LEFT JOIN LATERAL fn_nodues_certificate_status(t.id) s ON TRUE
@@ -275,6 +306,13 @@ def load_card_data(society_id: int) -> dict:
                           l.due_date, (l.due_date IS NOT NULL AND l.due_date < CURRENT_DATE AND l.principal > l.repaid_amount) AS overdue
                      FROM owner_loans l JOIN apartments a ON a.id = l.apartment_id
                     WHERE l.society_id=%s ORDER BY l.loan_date DESC, l.id DESC LIMIT 20""", society_id),
+        loan_resolutions=q("""SELECT r.id, m.held_on, r.body AS title FROM resolutions r
+                                JOIN meetings m ON m.id = r.meeting_id
+                                JOIN decision_types dt ON dt.id = r.decision_type_id
+                               WHERE m.society_id=%s AND dt.code='APPROVE_LOAN' AND r.passed AND m.type IN ('GBM','EGM') AND m.quorum_met
+                               ORDER BY m.held_on DESC, r.id DESC LIMIT 30""", society_id),
+        loan_mode=(one("SELECT fn_regime_param_text(%s, 'owner_loan_resolution_mode') AS m", society_id) or {}).get("m"),
+        s20=q("SELECT * FROM fn_s20_recovery_candidates(%s)", society_id),
         petty=one("SELECT * FROM fn_petty_cash_check(%s)", society_id),
         flags=q("""SELECT rule_code, source_table, source_id, detail, flagged_at FROM compliance_flags
                     WHERE society_id=%s ORDER BY flagged_at DESC LIMIT 10""", society_id),

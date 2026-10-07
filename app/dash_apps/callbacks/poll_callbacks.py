@@ -99,12 +99,13 @@ def register_poll_callbacks(app):
         State("poll-choice-5", "value"),
         State("poll-ends-at", "value"),
         State("poll-open-to", "value"),
+        State("poll-vote-basis", "value"),
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
     def save_poll(n_clicks, poll_id, title, description, choice_count,
-                  c1, c2, c3, c4, c5, ends_at, open_to, auth_data):
+                  c1, c2, c3, c4, c5, ends_at, open_to, vote_basis, auth_data):
         """Handles both Create Poll (poll_id empty) and Edit Poll
         (poll_id set — the hidden field from poll_page.poll_form)."""
         user_id, society_id, auth_error = _require_auth(auth_data, required_role="admin")
@@ -188,10 +189,10 @@ def register_poll_callbacks(app):
             result = db._execute(
                 "SELECT fn_create_poll(%s::INT, %s::VARCHAR(200), %s::TEXT, "
                 "%s::SMALLINT, %s::VARCHAR(100), %s::VARCHAR(100), %s::VARCHAR(100), "
-                "%s::VARCHAR(100), %s::VARCHAR(100), %s::TIMESTAMP, %s::VARCHAR(20)) AS poll_id",
+                "%s::VARCHAR(100), %s::VARCHAR(100), %s::TIMESTAMP, %s::VARCHAR(20), %s::VARCHAR(20)) AS poll_id",
                 (society_id, title, description, choice_count,
                  choices[0], choices[1], choices[2], choices[3], choices[4],
-                 ends_at or None, open_to or 'no_dues'),
+                 ends_at or None, open_to or 'no_dues', vote_basis or 'apartment'),
                 fetch_one=True
             )
             new_poll_id = result["poll_id"] if result else None
