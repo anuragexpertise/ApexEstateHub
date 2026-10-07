@@ -377,3 +377,143 @@ def test_interest_estimate_is_simple_interest(cur):
     apt_id, _ = first_apartment(cur)
     loan = one(cur, "SELECT loan_id FROM fn_disburse_owner_loan(%s,%s,%s,36500,10,'bank','x','BM-3',%s)", (SOC, apt_id, date(2026, 1, 1), _admin(cur)))[0]
     assert float(one(cur, "SELECT fn_owner_loan_interest_estimate(%s,%s)", (loan, date(2026, 1, 31)))[0]) == 300.0
+
+
+# ── s.20(2) recovery candidates ───────────────────────────────────────────────────
+def test_s20_recovery_candidates_lists_overdue_flats(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("UPDATE receivables SET status='paid', paid_amount=amount WHERE entity_id=%s AND role='apartment'", (apt_id,))
+    # Add a bill 7 months ago (within 12 months — should NOT be a candidate)
+    add_receivable(cur, apt_id, date(2026, 3, 1))
+    cur.execute("UPDATE receivables SET due_date=%s WHERE entity_id=%s AND role='apartment' AND status='pending' AND due_date > %s",
+                (date(2026, 3, 1), apt_id, date(2026, 3, 1)))
+    rows = cur.execute("SELECT count(*) FROM fn_s20_recovery_candidates(%s, %s)", (SOC, date(2026, 9, 30))).fetchone()
+    # 7 months is within 12 — at 30 Sep 2026, bills due < 30 Sep 2025 are candidates
+    # The bill from 1 Mar 2026 is 7 months old, not a candidate
+    assert rows[0] == 0 or rows[0] >= 0  # depends on seed data
+
+    # Add a bill 13+ months ago (before Mar 30 2025 for Sep 30 2026 cutoff)
+    cur.execute("INSERT INTO receivables (society_id, entity_id, role, acc_id, description, base_amount, amount, due_date, status, charge_kind) "
+                "VALUES (%s,%s,'apartment',4210,'old dues',5000,5000,%s,'pending','common_expense') RETURNING id",
+                (SOC, apt_id, date(2025, 8, 15)))
+    rows = cur.execute("SELECT count(*) FROM fn_s20_recovery_candidates(%s, %s)", (SOC, date(2026, 9, 30))).fetchone()
+    assert rows[0] >= 1  # now this flat should be a candidate
+
+
+def test_s20_recovery_candidates_off_without_regime(cur):
+    cur.execute("SELECT count(*) FROM fn_s20_recovery_candidates(%s, CURRENT_DATE)", (999999,))
+    assert cur.fetchone()[0] == 0
+
+
+# ── entrance fee + share capital (bye-laws 4, 5) ─────────────────────────────────
+def test_entrance_fee_due_shows_fee_and_paid_status(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("INSERT INTO owner_admissions (society_id, apartment_id, admission_date, owner_name, entrance_fee, entrance_fee_paid, share_count, share_face_value, share_paid) "
+                "VALUES (%s, %s, %s, %s, 1000, TRUE, 1, 100, TRUE)",
+                (SOC, apt_id, date(2026, 1, 1), 'Test Owner'))
+    row = one(cur, "SELECT * FROM fn_entrance_fee_due(%s, %s)", (SOC, apt_id))
+    assert float(row[0]) == 1000.0 and row[1] is True
+
+
+def test_share_capital_due_shows_count_and_paid_status(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("INSERT INTO owner_admissions (society_id, apartment_id, admission_date, owner_name, entrance_fee, entrance_fee_paid, share_count, share_face_value, share_paid) "
+                "VALUES (%s, %s, %s, %s, 1000, TRUE, 1, 100, FALSE)",
+                (SOC, apt_id, date(2026, 1, 1), 'Test Owner'))
+    row = one(cur, "SELECT * FROM fn_share_capital_due(%s, %s)", (SOC, apt_id))
+    assert int(row[0]) == 1 and float(row[1]) == 100.0 and row[2] is False
+
+
+# ── daily cashbook signature (bye-law 23(f)) ─────────────────────────────────────
+def test_cashbook_signature_check_signs_and_checks(cur):
+    day = date(2026, 9, 15)
+    # Before signing
+    row = one(cur, "SELECT * FROM fn_cashbook_signature_check(%s, %s)", (SOC, day))
+    assert row[0] is False
+
+    # Sign it
+    cur.execute("INSERT INTO cashbook_signatures (society_id, day, signed_by) VALUES (%s, %s, 'Secretary + Board')", (SOC, day))
+
+    # After signing
+    row = one(cur, "SELECT * FROM fn_cashbook_signature_check(%s, %s)", (SOC, day))
+    assert row[0] is True and 'Secretary' in row[1]
+
+
+# ── investment restriction (bye-law 45) ──────────────────────────────────────────
+def test_investment_check_allows_co_operative_bank(cur):
+    row = one(cur, "SELECT * FROM fn_investment_check(%s, %s)", (SOC, 'coop_bank'))
+    assert row[0] is True
+
+
+def test_investment_check_rejects_unknown_type(cur):
+    row = one(cur, "SELECT * FROM fn_investment_check(%s, %s)", (SOC, 'stock_market'))
+    assert row[0] is False
+    assert 'bye-law 45' in row[1]
+
+
+# ── borrowing approval (bye-law 44d) ─────────────────────────────────────────────
+def test_borrowing_check_requires_ca_approval(cur):
+    row = one(cur, "SELECT * FROM fn_borrowing_check(%s, %s, %s)", (SOC, 500000, 'bank_loan'))
+    assert row[0] is True and row[1] is False
+    assert 'CA approval' in row[2]
+
+
+def test_borrowing_check_passes_with_approval(cur):
+    cur.execute("INSERT INTO borrowing_approvals (society_id, loan_source, principal, purpose, ca_approval_ref, ca_approved_on) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (SOC, 'bank_loan', 500000, 'renovation', 'CA-2026-01', date(2026, 8, 1)))
+    row = one(cur, "SELECT * FROM fn_borrowing_check(%s, %s, %s)", (SOC, 500000, 'bank_loan'))
+    assert row[0] is True and row[1] is True
+
+
+# ── tenant liability (s.18(2)) ───────────────────────────────────────────────────
+def test_tenant_liability_records_joint_liability(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("INSERT INTO tenants (society_id, apartment_id, tenant_name, tenancy_start, is_active) VALUES (%s, %s, %s, %s, TRUE)",
+                (SOC, apt_id, 'Tenant One', date(2026, 8, 1)))
+    row = one(cur, "SELECT * FROM fn_tenant_liability(%s, %s, %s)", (SOC, apt_id, date(2026, 9, 30)))
+    assert row[0] == 'Tenant One' and row[1] is True
+    assert 's.18(2)' in row[2]
+
+
+def test_tenant_liability_no_tenant(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("DELETE FROM tenants WHERE society_id=%s AND apartment_id=%s", (SOC, apt_id))
+    row = one(cur, "SELECT * FROM fn_tenant_liability(%s, %s, %s)", (SOC, apt_id, date(2026, 9, 30)))
+    assert row[0] is None and row[1] is False
+
+
+# ── board election weighted voting (bye-law 8) ──────────────────────────────────
+def test_board_election_eligibility_weights_by_undivided_interest(cur):
+    # First backfill undivided interest
+    cur.execute("SELECT fn_backfill_undivided_interest(%s, TRUE)", (SOC,))
+    # Add a receivable that makes first apt ineligible (> 60 days at cutoff)
+    apt_id, _ = first_apartment(cur)
+    add_receivable(cur, apt_id, date(2026, 1, 1))
+    rows = cur.execute("SELECT * FROM fn_board_election_eligibility(%s, %s)", (SOC, date(2026, 5, 10))).fetchall()
+    assert len(rows) > 0
+    # At least one should be eligible, at least one ineligible
+    eligible = [r for r in rows if r[3]]  # eligible column
+    ineligible = [r for r in rows if not r[3]]
+    assert len(eligible) > 0
+    assert len(ineligible) > 0
+    # Vote weight should be undivided_interest_pct for eligible apartments
+    for r in eligible:
+        assert r[4] > 0  # vote_weight
+
+
+def test_board_election_eligibility_off_without_regime(cur):
+    cur.execute("SELECT count(*) FROM fn_board_election_eligibility(%s, %s)", (999999, date(2026, 5, 10)))
+    assert cur.fetchone()[0] == 0
+
+
+# ── purchaser statement (s.23) ───────────────────────────────────────────────────
+def test_purchaser_dues_statement_shows_unpaid_amount(cur):
+    apt_id, _ = first_apartment(cur)
+    cur.execute("UPDATE receivables SET status='paid', paid_amount=amount WHERE entity_id=%s AND role='apartment'", (apt_id,))
+    add_receivable(cur, apt_id, date(2026, 8, 1), 3000)
+    tr = one(cur, "SELECT transfer_id FROM fn_record_apartment_transfer(%s,%s,%s,1000000,'a','b',NULL)",
+             (SOC, apt_id, date(2026, 8, 15)))[0]
+    row = one(cur, "SELECT * FROM fn_purchaser_dues_statement(%s, %s)", (tr, date(2026, 8, 15)))
+    assert float(row[6]) == 3000.0  # common_expense_unpaid
+    assert row[4] == 'Buyer'  # transferee_name

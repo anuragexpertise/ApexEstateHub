@@ -248,10 +248,10 @@ def test_master_flag_suspends_and_confirm_restores(pg):
 def test_effective_rules_view_lists_every_rule_with_its_layer(pg):
     backed_decision(pg, "arrears_disqualify_days", 2, "adopted_with_variation", value=45)
     rows = {r["rule_key"]: r for r in rp.effective_rules_for_society(SOC)}
-    assert len(rows) == 21
+    assert len(rows) == 33
     assert rows["arrears_disqualify_days"]["layer"] == 2 and float(rows["arrears_disqualify_days"]["value"]) == 45
     assert rows["s22_default_months"]["nature"] == "statutory" and rows["s22_default_months"]["layer"] == 0
-    assert rows["s20_recovery_months"]["implemented"] is False
+    assert rows["s20_recovery_months"]["implemented"] is True
     assert rows["reserve_appropriation_pct"]["needs_decision"] is True and rows["reserve_appropriation_pct"]["layer"] is None
 
 

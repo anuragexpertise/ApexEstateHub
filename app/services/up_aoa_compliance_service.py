@@ -74,3 +74,60 @@ def loanee_list(society_id: int) -> list[dict]:
 def petty_cash_check(society_id: int, as_of: date | None = None) -> dict | None:
     rows = _rows("SELECT * FROM fn_petty_cash_check(%s, COALESCE(%s, CURRENT_DATE))", (society_id, as_of))
     return rows[0] if rows else None
+
+
+def s20_recovery_candidates(society_id: int, as_of: date | None = None) -> list[dict]:
+    """Section 20(2): flats with common-expense dues unpaid for more than 12 months — candidates for recovery as land revenue."""
+    return _rows("SELECT * FROM fn_s20_recovery_candidates(%s, COALESCE(%s, CURRENT_DATE))", (society_id, as_of))
+
+
+def entrance_fee_due(society_id: int, apartment_id: int) -> dict | None:
+    """Bye-law 4: ₹1,000 entrance fee on owner admission."""
+    rows = _rows("SELECT * FROM fn_entrance_fee_due(%s, %s)", (society_id, apartment_id))
+    return rows[0] if rows else None
+
+
+def share_capital_due(society_id: int, apartment_id: int) -> dict | None:
+    """Bye-law 5: one share per owner at admission."""
+    rows = _rows("SELECT * FROM fn_share_capital_due(%s, %s)", (society_id, apartment_id))
+    return rows[0] if rows else None
+
+
+def cashbook_signature_check(society_id: int, day: date) -> dict | None:
+    """Bye-law 23(f): daily cashbook signature check."""
+    rows = _rows("SELECT * FROM fn_cashbook_signature_check(%s, %s)", (society_id, day))
+    return rows[0] if rows else None
+
+
+def investment_check(society_id: int, institution_type: str) -> dict | None:
+    """Bye-law 45: investment restriction check."""
+    rows = _rows("SELECT * FROM fn_investment_check(%s, %s)", (society_id, institution_type))
+    return rows[0] if rows else None
+
+
+def borrowing_check(society_id: int, principal: float, loan_source: str) -> dict | None:
+    """Bye-law 44(d): borrowing approval check."""
+    rows = _rows("SELECT * FROM fn_borrowing_check(%s, %s, %s)", (society_id, principal, loan_source))
+    return rows[0] if rows else None
+
+
+def tenant_liability(society_id: int, apartment_id: int, as_of: date | None = None) -> dict | None:
+    """Act s.18(2): tenant jointly liable with owner for common expenses."""
+    rows = _rows("SELECT * FROM fn_tenant_liability(%s, %s, COALESCE(%s, CURRENT_DATE))", (society_id, apartment_id, as_of))
+    return rows[0] if rows else None
+
+
+def board_election_eligibility(society_id: int, election_date: date, basis: str | None = None) -> list[dict]:
+    """Bye-law 8: Board election voting eligibility, weighted by undivided interest."""
+    return _rows("SELECT * FROM fn_board_election_eligibility(%s, %s, %s)", (society_id, election_date, basis))
+
+
+def board_election_results(society_id: int, position: str) -> list[dict]:
+    """Declare Board election results with weighted vote percentages."""
+    return _rows("SELECT * FROM fn_declare_board_election_results(%s, %s)", (society_id, position))
+
+
+def purchaser_dues_statement(transfer_id: int, as_of: date | None = None) -> dict | None:
+    """Act s.23: statement of unpaid common-expense assessment for the purchaser."""
+    rows = _rows("SELECT * FROM fn_purchaser_dues_statement(%s, %s)", (transfer_id, as_of))
+    return rows[0] if rows else None

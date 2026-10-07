@@ -109,7 +109,7 @@ def test_every_implemented_rule_is_actually_read_by_the_sql():
         if p.implemented:
             assert re.search(rf"'{p.key}'", SQL_OUTSIDE_GENERATED), f"{p.key} is never read by any function"
     unread = [p.key for p in UP.params if not p.implemented]
-    assert unread == ["s20_recovery_months"]       # the one known unenforced rule; remove this line when it is built
+    assert unread == []       # all rules are now implemented
 
 
 def test_every_rule_the_sql_reads_has_a_definition():
@@ -121,7 +121,8 @@ def test_every_rule_the_sql_reads_has_a_definition():
 
 def test_statutory_rules_are_layer_zero_and_locked():
     st = [p for p in UP.params if p.statutory]
-    assert {p.key for p in st} >= {"s22_default_months", "s22_notice_days", "s22_wait_months", "s22_appeal_days", "s20_recovery_months"}
+    assert {p.key for p in st} >= {"s22_default_months", "s22_notice_days", "s22_wait_months", "s22_appeal_days",
+                                    "s20_recovery_months", "tenant_joint_liability"}
     assert all(p.layers == () and not p.droppable and p.base_layer == 0 for p in st)
 
 

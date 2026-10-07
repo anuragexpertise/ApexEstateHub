@@ -107,7 +107,7 @@ import random
 import string
 import datetime
 import argparse
-from datetime import date
+from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -2737,6 +2737,8 @@ def run_seed(conn):
 
     seed_polls(cur, conn, society_id, admin_uid, users)
 
+    seed_up_aoa_compliance_data(cur, conn, society_id, admin_uid, apt1_id, apt2_id)
+
     print()
     print("  Seed rule audit:")
     if not audit_seed_invariants(cur, society_id):
@@ -2753,6 +2755,64 @@ def run_seed(conn):
         tag = u["role"][:7].ljust(8)
         print(f"  │  {tag}: {u['email']:<38} {u['password']:<14}│")
     print("  └─────────────────────────────────────────────────────────────┘")
+
+
+def seed_up_aoa_compliance_data(cur, conn, society_id, admin_uid, apt1_id, apt2_id):
+    """Seed additional UP AOA compliance data: entrance fees, cashbook signatures,
+    tenant records, deposits with investment types, and borrowing approvals."""
+
+    # ── Entrance fees + share capital (bye-laws 4, 5) ────────────────────────────
+    # First two owners already admitted; mark their entrance fee and share capital as paid.
+    for apt_id, owner_name in [(apt1_id, "Ramesh Kumar"), (apt2_id, "Priya Sharma")]:
+        cur.execute(
+            """INSERT INTO owner_admissions (society_id, apartment_id, admission_date, owner_name,
+               entrance_fee, entrance_fee_paid, share_count, share_face_value, share_paid, created_by)
+               VALUES (%s, %s, %s, %s, 1000, TRUE, 1, 100, TRUE, %s)
+               ON CONFLICT (society_id, apartment_id) DO UPDATE SET
+               entrance_fee_paid = EXCLUDED.entrance_fee_paid,
+               share_paid = EXCLUDED.share_paid""",
+            (society_id, apt_id, date(2026, 4, 1), owner_name, admin_uid))
+    print("  ✓ Owner admissions (entrance fee + share capital) seeded")
+
+    # ── Daily cashbook signatures (bye-law 23(f)) ───────────────────────────────
+    # Sign the last 5 days of the seed period.
+    for i in range(5):
+        d = SEED_CUTOFF_DATE - timedelta(days=i)
+        cur.execute(
+            """INSERT INTO cashbook_signatures (society_id, day, signed_by, signed_at, created_by)
+               VALUES (%s, %s, 'Secretary + Board', NOW(), %s)
+               ON CONFLICT (society_id, day) DO UPDATE SET
+               signed_by = EXCLUDED.signed_by, signed_at = EXCLUDED.signed_at""",
+            (society_id, d, admin_uid))
+    print("  ✓ Cashbook signatures seeded for last 5 days")
+
+    # ── Tenant records (s.18(2) joint liability) ────────────────────────────────
+    cur.execute(
+        """INSERT INTO tenants (society_id, apartment_id, tenant_name, tenant_mobile, tenancy_start, is_active, created_by)
+           VALUES (%s, %s, 'Arjun Verma', '9876543210', %s, TRUE, %s)
+           ON CONFLICT (society_id, apartment_id, tenant_name) DO UPDATE SET
+           tenant_mobile = EXCLUDED.tenant_mobile, is_active = TRUE""",
+        (society_id, apt1_id, date(2026, 6, 1), admin_uid))
+    print("  ✓ Tenant records (s.18(2) joint liability) seeded")
+
+    # ── Deposits with institution_type (bye-law 45) ─────────────────────────────
+    # Update existing deposits to have institution_type
+    cur.execute(
+        "UPDATE deposits SET institution_type = 'coop_bank' WHERE society_id = %s AND institution_type IS NULL",
+        (society_id,))
+    print("  ✓ Deposit institution types seeded (coop_bank)")
+
+    # ── Borrowing approval tracking (bye-law 44(d)) ─────────────────────────────
+    cur.execute(
+        """INSERT INTO borrowing_approvals (society_id, loan_source, principal, purpose, ca_approval_ref, ca_approved_on, created_by)
+           VALUES (%s, 'bank_loan', 500000, 'corridor repair fund', 'CA/UP/2026-01', %s, %s)
+           ON CONFLICT (society_id, loan_source, principal) DO UPDATE SET
+           ca_approval_ref = EXCLUDED.ca_approval_ref,
+           ca_approved_on = EXCLUDED.ca_approved_on""",
+        (society_id, date(2026, 7, 1), admin_uid))
+    print("  ✓ Borrowing approval (CA-approved) seeded")
+
+    conn.commit()
 
 
 def main():

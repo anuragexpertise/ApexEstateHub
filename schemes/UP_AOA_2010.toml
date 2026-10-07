@@ -559,3 +559,145 @@ feeds = ["fn_disburse_owner_loan"]
 verification = "provisional"
 needs_decision = true
 source = """Engine policy, not statute: the bye-law says only 'short-term' and fixes no number of days. Applied when owner_loan_resolution_mode = linked, where a repayment date is mandatory"""
+
+[[parameter]]
+key = "entrance_fee"
+label = "Bye-law 4 entrance fee (INR)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 4"
+clause = "BL_04"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "INR"
+value = 1000
+min = 0
+max = 100000
+layers = [2]
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_entrance_fee_due"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 4: entrance fee of ₹1,000 per owner on admission"""
+
+[[parameter]]
+key = "share_face_value"
+label = "Bye-law 5 share face value (INR)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 5"
+clause = "BL_05"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "INR"
+value = 100
+min = 1
+max = 1000
+layers = [2]
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_share_capital_due"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 5: one share per owner, face value set by General Body"""
+
+[[parameter]]
+key = "cashbook_daily_signature"
+label = "Bye-law 23(f) daily cashbook signature required"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 23(f)"
+clause = "BL_23"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2, 3]
+tighten = "higher"
+enforcement = "tracked"
+feeds = ["fn_cashbook_signature_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 23(f): daily cashbook to be signed by the Secretary and one Board member"""
+
+[[parameter]]
+key = "investment_allowed_types"
+label = "Bye-law 45 permitted investment types"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 45"
+clause = "BL_45"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "text"
+value_text = "coop_bank,trust_securities,approved_bank"
+choices = ["coop_bank,trust_securities,approved_bank", "coop_bank,trust_securities", "coop_bank_only"]
+layers = [2]
+tighten = "lower"
+enforcement = "gated"
+feeds = ["fn_investment_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 45: investments only in co-operative banks, Trust Act securities, or banks approved by the Competent Authority"""
+
+[[parameter]]
+key = "borrowing_requires_ca_approval"
+label = "Bye-law 44(d) borrowing needs Competent Authority approval"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 44(d)"
+clause = "BL_44"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2]
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_borrowing_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 44(d): borrowing requires Competent Authority approval"""
+
+[[parameter]]
+key = "tenant_joint_liability"
+label = "Act s.18(2) tenant jointly liable with owner"
+instrument = "UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010"
+provision = "s.18(2)"
+nature = "statutory"
+base_source = "state_act_rules"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = []
+tighten = "none"
+enforcement = "hard_wired"
+feeds = ["fn_tenant_liability"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """UP Apartment Act 2010 s.18(2): tenant is jointly liable with the owner for common expenses"""
+
+[[parameter]]
+key = "board_election_voting_basis"
+label = "Board election voting basis (Model Bye-Law 8)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 8"
+clause = "BL_08"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "text"
+value_text = "undivided_interest"
+choices = ["one_apartment_one_vote", "undivided_interest"]
+layers = [2]
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_board_election_eligibility"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration (Act s.12(1)(f): percentage for all purposes including voting). Advisory polls may use one-apartment-one-vote."""

@@ -273,6 +273,165 @@ def repay_loan(society_id: int, user_id, loan_id, repay_date, principal, interes
     return True, "Repayment recorded: principal reduces the loan, interest is booked as income."
 
 
+# ── entrance fee + share capital (bye-laws 4, 5) ──────────────────────────────────
+def record_admission(society_id: int, user_id: int, apartment_id: int, admission_date: str,
+                     owner_name: str, entrance_fee_paid: bool = False, share_paid: bool = False):
+    """Record owner admission with entrance fee and share capital."""
+    d = _d(admission_date)
+    if not d:
+        return False, "Enter the admission date."
+    if not _owns("apartments", apartment_id, society_id):
+        return False, "Choose a flat."
+
+    fee = db._execute("SELECT fn_regime_param_num(%s, 'entrance_fee', %s) AS v", (society_id, d), fetch_one=True)
+    face = db._execute("SELECT fn_regime_param_num(%s, 'share_face_value', %s) AS v", (society_id, d), fetch_one=True)
+    fee_val = float(fee["v"]) if fee and fee.get("v") is not None else 0
+    face_val = float(face["v"]) if face and face.get("v") is not None else 0
+
+    db._execute(
+        """INSERT INTO owner_admissions (society_id, apartment_id, admission_date, owner_name,
+           entrance_fee, entrance_fee_paid, share_count, share_face_value, share_paid, created_by)
+           VALUES (%s, %s, %s, %s, %s, %s, 1, %s, %s, %s)
+           ON CONFLICT (society_id, apartment_id) DO UPDATE SET
+           admission_date = EXCLUDED.admission_date,
+           owner_name = EXCLUDED.owner_name,
+           entrance_fee = EXCLUDED.entrance_fee,
+           entrance_fee_paid = EXCLUDED.entrance_fee_paid,
+           share_count = EXCLUDED.share_count,
+           share_face_value = EXCLUDED.share_face_value,
+           share_paid = EXCLUDED.share_paid""",
+        (society_id, int(apartment_id), d, (owner_name or "").strip() or None,
+         fee_val, entrance_fee_paid, face_val, share_paid, user_id))
+    return True, f"Admission recorded for {owner_name or 'the owner'}."
+
+
+def pay_admission_fee(society_id: int, user_id: int, apartment_id: int,
+                      entrance_fee_paid: bool = True, share_paid: bool = True):
+    """Mark entrance fee and/or share capital as paid."""
+    row = db._execute("SELECT id FROM owner_admissions WHERE society_id=%s AND apartment_id=%s",
+                      (society_id, int(apartment_id)), fetch_one=True)
+    if not row:
+        return False, "No admission recorded for this flat. Record an admission first."
+    db._execute(
+        "UPDATE owner_admissions SET entrance_fee_paid=%s, share_paid=%s WHERE society_id=%s AND apartment_id=%s",
+        (entrance_fee_paid, share_paid, society_id, int(apartment_id)))
+    msg = []
+    if entrance_fee_paid:
+        msg.append("entrance fee marked paid")
+    if share_paid:
+        msg.append("share capital marked paid")
+    return True, " and ".join(msg) + "."
+
+
+# ── cashbook signature (bye-law 23(f)) ─────────────────────────────────────────────
+def sign_cashbook(society_id: int, user_id: int, day: str, signer_name: str):
+    """Record a daily cashbook signature."""
+    d = _d(day)
+    if not d:
+        return False, "Enter the cashbook day."
+    db._execute(
+        """INSERT INTO cashbook_signatures (society_id, day, signed_by, signed_at, created_by)
+           VALUES (%s, %s, %s, NOW(), %s)
+           ON CONFLICT (society_id, day) DO UPDATE SET
+           signed_by = EXCLUDED.signed_by, signed_at = EXCLUDED.signed_at""",
+        (society_id, d, (signer_name or "").strip() or None, user_id))
+    return True, f"Cashbook signed for {d.isoformat()} by {signer_name or 'the Secretary / Board member'}."
+
+
+# ── investment (bye-law 45) ────────────────────────────────────────────────────────
+def record_investment(society_id: int, user_id: int, institution_type: str, amount: float,
+                      deposit_name: str, acc_id: int | None = None):
+    """Check and record an investment in the deposits table; flagged if it violates bye-law 45."""
+    p = _num(amount)
+    if not p or p <= 0:
+        return False, "Enter a positive investment amount."
+    if not institution_type:
+        return False, "Specify the institution type (e.g. coop_bank, trust_securities, approved_bank)."
+    chk = db._execute("SELECT * FROM fn_investment_check(%s, %s)", (society_id, institution_type.strip().lower()),
+                      fetch_one=True) or {}
+    if not chk.get("allowed"):
+        return False, chk.get("message") or "Investment not permitted by bye-law 45."
+    if not (deposit_name or "").strip():
+        return False, "Enter a description for the investment."
+    db._execute(
+        """INSERT INTO deposits (society_id, deposit_name, institution_type, purchase_date, purchase_value, acc_id, created_at)
+           VALUES (%s, %s, %s, CURRENT_DATE, %s, %s, NOW())""",
+        (society_id, deposit_name.strip(), institution_type.strip().lower(), p, acc_id))
+    return True, f"Investment of ₹{p:,.2f} in {institution_type} recorded."
+
+
+# ── borrowing (bye-law 44(d)) ──────────────────────────────────────────────────────
+def record_borrowing(society_id: int, user_id: int, principal: float, loan_source: str, purpose: str,
+                     resolution_id: int | None = None):
+    """Record a borrowing; flagged if it needs CA approval."""
+    p = _num(principal)
+    if not p or p <= 0:
+        return False, "Enter a positive borrowing amount."
+    chk = db._execute("SELECT * FROM fn_borrowing_check(%s, %s, %s)", (society_id, p, loan_source or ""), fetch_one=True) or {}
+    if not chk.get("has_approval") and chk.get("needs_approval"):
+        # Record it anyway with compliance_flags so the Board can follow up
+        db._execute(
+            """INSERT INTO borrowing_approvals (society_id, loan_source, principal, purpose, resolution_id, created_by)
+               VALUES (%s, %s, %s, %s, %s, %s)
+               ON CONFLICT (society_id, loan_source, principal) DO UPDATE SET purpose = EXCLUDED.purpose""",
+            (society_id, loan_source or "", p, (purpose or "").strip() or None, resolution_id, user_id))
+        db._execute(
+            """INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
+               SELECT %s, 'BORROWING_CA_APPROVAL', 'borrowing_approvals',
+                      (SELECT id FROM borrowing_approvals WHERE society_id=%s AND loan_source=%s AND principal=%s),
+                      format('Borrowing of ₹%s needs Competent Authority approval', %s)
+               ON CONFLICT (source_table, source_id, rule_code) DO NOTHING""",
+            (society_id, society_id, loan_source or "", p, p))
+        return False, (chk.get("message") or "Needs CA approval") + ". Recorded for follow-up."
+    db._execute(
+        "INSERT INTO borrowing_approvals (society_id, loan_source, principal, purpose, resolution_id, created_by) VALUES (%s, %s, %s, %s, %s, %s)",
+        (society_id, loan_source or "", p, (purpose or "").strip() or None, resolution_id, user_id))
+    return True, f"Borrowing of ₹{p:,.2f} recorded."
+
+
+# ── tenant (s.18(2)) ───────────────────────────────────────────────────────────────
+def record_tenant(society_id: int, user_id: int, apartment_id: int, tenant_name: str,
+                  start_date: str, end_date: str | None = None, mobile: str | None = None):
+    """Record a tenant; the tenant is jointly liable with the owner for common expenses (s.18(2))."""
+    d, e = _d(start_date), _d(end_date)
+    if not _owns("apartments", apartment_id, society_id):
+        return False, "Choose a flat."
+    if not d:
+        return False, "Enter the tenancy start date."
+    if not (tenant_name or "").strip():
+        return False, "Enter the tenant name."
+    db._execute(
+        """INSERT INTO tenants (society_id, apartment_id, tenant_name, tenant_mobile, tenancy_start, tenancy_end, is_active, created_by)
+           VALUES (%s, %s, %s, %s, %s, %s, TRUE, %s)
+           ON CONFLICT (society_id, apartment_id, tenant_name) DO UPDATE SET
+           tenant_mobile = EXCLUDED.tenant_mobile,
+           tenancy_start = EXCLUDED.tenancy_start,
+           tenancy_end = EXCLUDED.tenancy_end,
+           is_active = TRUE""",
+        (society_id, int(apartment_id), tenant_name.strip(), (mobile or "").strip() or None, d, e, user_id))
+    return True, f"Tenant {tenant_name.strip()} recorded for joint liability (s.18(2))."
+
+
+# ── board election voting (bye-law 8) ──────────────────────────────────────────────
+def cast_board_vote(society_id: int, voter_apartment_id: int, candidate_id: int, vote_weight: float | None = None):
+    """Cast a Board election vote with the voter's undivided-interest weight."""
+    if not _owns("apartments", voter_apartment_id, society_id):
+        return False, "Choose a valid voter flat."
+    # Determine vote weight from the apartment's undivided interest
+    pct = db._execute("SELECT undivided_interest_pct FROM apartments WHERE id=%s AND society_id=%s AND active",
+                      (int(voter_apartment_id), society_id), fetch_one=True)
+    if not pct:
+        return False, "Voter flat not found or inactive."
+    weight = float(vote_weight or (pct["undivided_interest_pct"] or 1))
+    db._execute(
+        """INSERT INTO board_election_votes (society_id, candidate_id, voter_apartment_id, vote_date, vote_weight, cast_by)
+           SELECT %s, %s, %s, CURRENT_DATE, %s, %s
+           WHERE EXISTS (SELECT 1 FROM board_candidates WHERE id=%s AND society_id=%s)""",
+        (society_id, int(candidate_id), int(voter_apartment_id), weight, 0,  # cast_by=0 for system
+         int(candidate_id), society_id))
+    return True, "Vote recorded."
+
+
 # ── read side for the card ────────────────────────────────────────────────────
 def load_card_data(society_id: int) -> dict:
     q = lambda sql, *p: db._execute(sql, p, fetch_all=True) or []
@@ -322,6 +481,29 @@ def load_card_data(society_id: int) -> dict:
                           FROM apartments a
                           LEFT JOIN LATERAL fn_get_standing(%s, a.id, CURRENT_DATE) s ON TRUE
                          WHERE a.society_id=%s AND a.active ORDER BY a.flat_number""", society_id, society_id),
+        # Entrance fee + share capital
+        admissions=q("""SELECT oa.id, a.flat_number, oa.owner_name, oa.admission_date,
+                              oa.entrance_fee, oa.entrance_fee_paid, oa.share_count, oa.share_face_value, oa.share_paid
+                         FROM owner_admissions oa JOIN apartments a ON a.id = oa.apartment_id
+                        WHERE oa.society_id=%s ORDER BY oa.admission_date DESC LIMIT 10""", society_id),
+        # Cashbook signatures
+        cashbook_unsignged=q("""SELECT generate_series(current_date - 6, current_date, '1 day')::DATE AS day
+                                WHERE NOT EXISTS (SELECT 1 FROM cashbook_signatures WHERE society_id=%s AND day = generate_series(current_date - 6, current_date, '1 day')::DATE)
+                                ORDER BY day DESC""", society_id),
+        # Investments
+        investments=q("""SELECT id, institution_type, deposit_name, purchase_value, purchase_date FROM deposits
+                         WHERE society_id=%s AND disposed=FALSE ORDER BY purchase_date DESC LIMIT 10""", society_id),
+        # Borrowings
+        borrowings=q("""SELECT id, loan_source, principal, purpose, ca_approved_on FROM borrowing_approvals
+                        WHERE society_id=%s ORDER BY created_at DESC LIMIT 10""", society_id),
+        # Tenants
+        tenants=q("""SELECT t.id, a.flat_number, t.tenant_name, t.tenancy_start, t.tenancy_end, t.is_active
+                     FROM tenants t JOIN apartments a ON a.id = t.apartment_id
+                    WHERE t.society_id=%s AND t.is_active ORDER BY t.tenancy_start DESC LIMIT 10""", society_id),
+        # Board election candidates
+        board_candidates=q("""SELECT id, a.flat_number, candidate_name, position, vote_basis, vote_weight
+                              FROM board_candidates bc JOIN apartments a ON a.id = bc.apartment_id
+                             WHERE bc.society_id=%s ORDER BY bc.created_at DESC LIMIT 20""", society_id),
     )
     return data
 
