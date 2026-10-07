@@ -1950,3 +1950,12 @@ The following tables map every user-reachable workflow in the application, organ
 ---
 
 *EstateHub — Built for societies that mean business.*
+
+### Stage 2 compliance changes (UP Apartment Act 2010 / Model Bye-Laws 2011, gazette numbering)
+
+- **Weighted polls.** `polls.vote_basis = 'undivided_interest'` weights each vote by the flat's percentage (bye-law 8, Act s.12(1)(f)); quorum is 30% of owners (bye-law 9) and the majority is 51% of all eligible votes (bye-law 2(e)); both come from `poll_quorum_pct` / `poll_majority_pct`. Weights live in a per-choice tally so the ballot stays secret. An online poll is never a General Body resolution (bye-law 10: votes are cast in person) - results say so.
+- **Owner loans** need a passed General Body "Approve owner loan" resolution, a stated purpose and a repayment date within `owner_loan_max_term_days` (`owner_loan_resolution_mode = linked`, the UP default; `text` restores free-text references). The mode and the term limit are engine policy, not statute.
+- **s.20(2)**: `fn_s20_recovery_candidates` lists flats with common expenses unpaid beyond `s20_recovery_months`. **s.23(2)**: `fn_issue_purchaser_statement` freezes the unpaid-assessment figure on the transfer.
+- **Audit gate**: a statement cannot be recorded as published without an auditor and a sign-off date on or before publication.
+- Citation fix: the reserve appropriation provision is bye-law 46(c). The Corpus Fund's RERA citations in this README were not found in the UP Act or bye-laws and should be read as unverified.
+- Not yet built: cheque co-signatories (bye-law 49(1)), interest-rate resolution, investment limits (bye-law 47), borrowing approval (46(d)), daily cashbook signature (25(f)), s.18(2) tenant liability. Bye-law 35 (assessment on "value of the unit") versus s.18(1) (undivided interest) needs an advocate's view.

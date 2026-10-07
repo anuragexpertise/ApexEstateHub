@@ -114,11 +114,11 @@ max = 60
 layers = []
 tighten = "none"
 enforcement = "tracked"
-implemented = false
+feeds = ["fn_s20_recovery_candidates"]
 verification = "checked"
 verified_on = 2026-10-07
-source = """UP Apartment Act 2010 s.20: after 12 months unpaid the competent authority may recover as arrears of land revenue"""
-description = """Defined but not yet enforced: nothing reads this value yet (README, Known gaps)."""
+source = """UP Apartment Act 2010 s.20(2): common expenses unpaid for more than 12 months may be recovered through the Competent Authority as arrears of land revenue"""
+description = """Reported, not automated: fn_s20_recovery_candidates lists the flats whose common-expense bills are older than this; the application to the Competent Authority is made by the association."""
 
 [[parameter]]
 key = "arrears_disqualify_days"
@@ -437,7 +437,7 @@ source = """Engine policy (not statute): off by default - s.22 concerns unpaid c
 key = "reserve_appropriation_pct"
 label = "Reserve Fund share of net surplus at FY close (%)"
 instrument = "Engine policy (no statutory source)"
-provision = "bye-law 44(c) (common profits form the nucleus of reserve funds)"
+provision = "bye-law 46(c) (common profits form the nucleus of reserve funds)"
 nature = "non_statutory"
 base_source = "engine_default"
 type = "num"
@@ -452,3 +452,110 @@ feeds = ["fn_fy_close_preview", "fn_fy_close_reserve_appropriation"]
 verification = "provisional"
 needs_decision = true
 source = """Engine policy (not statute): share of net surplus moved to the Reserve Fund at FY close. Neither the UP Apartment Act 2010 nor the 2011 Model Bye-Laws fix a percentage (common profits are only said to form the nucleus of the reserve funds); 25% follows the co-operative-society convention. Set it by General Body resolution"""
+
+[[parameter]]
+key = "poll_quorum_pct"
+label = "Poll quorum: owners voting (% of owners)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 9"
+clause = "BL_09"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "num"
+unit = "% of owners"
+value = 30
+min = 1
+max = 100
+vary_min = 30
+vary_max = 100
+layers = [2]
+tighten = "higher"
+enforcement = "gated"
+feeds = ["fn_create_poll", "fn_declare_results"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 9: the presence in person of 30 percent of owners is a quorum (a head-count of owners, not of votes)"""
+description = """Applied to weighted polls only. A society may raise it, never lower it. Bye-law 9 speaks of owners present IN PERSON, so an online poll reaching this figure still does not make a General Body quorum."""
+
+[[parameter]]
+key = "poll_majority_pct"
+label = "Poll majority: share of the votes (%)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 2(e)"
+clause = "BL_02"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "num"
+unit = "% of votes"
+value = 51
+min = 1
+max = 100
+vary_min = 51
+vary_max = 100
+layers = [2]
+tighten = "higher"
+enforcement = "gated"
+feeds = ["fn_create_poll"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 2(e): 'majority' of owners means owners holding 51 per cent of the votes; bye-law 8 weights each vote by the owner's percentage in the Declaration (Act s.12(1)(f): percentage 'for all purposes, including voting')"""
+description = """Applied to weighted polls only (polls.vote_basis = undivided_interest). A society may raise it, never lower it."""
+
+[[parameter]]
+key = "poll_majority_of"
+label = "Weighted-poll majority is measured against"
+instrument = "Engine policy (no statutory source)"
+provision = "bye-laws 2(e) and 10"
+clause = "BL_10"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "text"
+value_text = "all_votes"
+choices = ["votes_cast", "all_votes"]
+layers = [2]
+tighten = "higher"
+enforcement = "policy"
+feeds = ["fn_declare_results"]
+verification = "disputed"
+needs_decision = true
+source = """Engine policy, not statute: bye-law 2(e) defines a majority as owners holding 51% of THE votes (read here as all eligible votes, so abstentions count against a motion), while bye-law 10 speaks of a majority of owners CASTING votes. The stricter reading is the default; choose votes_cast only on advice"""
+
+[[parameter]]
+key = "owner_loan_resolution_mode"
+label = "Owner-loan consent must be a recorded resolution"
+instrument = "Engine policy (no statutory source)"
+provision = "bye-law 3(1)(f)"
+clause = "BL_03"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "text"
+value_text = "linked"
+choices = ["text", "linked"]
+layers = [2]
+tighten = "higher"
+enforcement = "policy"
+feeds = ["fn_disburse_owner_loan"]
+verification = "provisional"
+needs_decision = true
+source = """Engine policy, not statute: bye-law 3(1)(f) allows a short-term loan to an owner 'with the consent of the apartment owners' in an emergent necessity. linked = the loan must cite a passed Approve Owner Loan resolution of a General Body meeting with quorum; text = any resolution reference is accepted (the old behaviour)"""
+
+[[parameter]]
+key = "owner_loan_max_term_days"
+label = "Owner loan: longest repayment term (days)"
+instrument = "Engine policy (no statutory source)"
+provision = "bye-law 3(1)(f) ('short-term')"
+clause = "BL_03"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "int"
+unit = "days"
+value = 365
+min = 1
+max = 3650
+layers = [2]
+tighten = "lower"
+enforcement = "policy"
+feeds = ["fn_disburse_owner_loan"]
+verification = "provisional"
+needs_decision = true
+source = """Engine policy, not statute: the bye-law says only 'short-term' and fixes no number of days. Applied when owner_loan_resolution_mode = linked, where a repayment date is mandatory"""

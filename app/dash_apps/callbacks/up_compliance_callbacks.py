@@ -50,13 +50,13 @@ def register_up_compliance_callbacks(app):
     @app.callback(_TOAST, _BODY, Input("upc-fil-save", "n_clicks"),
                   State("upc-fil-fy", "value"), State("upc-fil-pub", "date"), State("upc-fil-auth", "date"),
                   State("upc-fil-sum", "date"), State("upc-fil-auditor", "value"), State("upc-fil-attach", "value"),
-                  prevent_initial_call=True)
+                  State("upc-fil-signed", "date"), prevent_initial_call=True)
     @require_session
-    def save_filing(n, fy, pub, auth, summ, auditor, attach):
+    def save_filing(n, fy, pub, auth, summ, auditor, attach, signed):
         if not n:
             raise PreventUpdate
         attach = attach or []
-        return _run(lambda sid, uid: act.save_filing(sid, uid, fy, pub, auth, summ, auditor, "owners" in attach, "loanees" in attach))
+        return _run(lambda sid, uid: act.save_filing(sid, uid, fy, pub, auth, summ, auditor, "owners" in attach, "loanees" in attach, signed))
 
     @app.callback(Output("upc-export-dl", "data"), Input("upc-export-btn", "n_clicks"), prevent_initial_call=True)
     @require_session
@@ -101,6 +101,13 @@ def register_up_compliance_callbacks(app):
         if not n:
             raise PreventUpdate
         return _run(lambda sid, uid: act.set_nodues(sid, transfer, action, d))
+
+    @app.callback(_TOAST, _BODY, Input("upc-st-save", "n_clicks"), State("upc-nd-transfer", "value"), prevent_initial_call=True)
+    @require_session
+    def issue_statement(n, transfer):
+        if not n:
+            raise PreventUpdate
+        return _run(lambda sid, uid: act.issue_statement(sid, uid, transfer))
 
     @app.callback(Output("upc-b7-result", "children"), Input("upc-b7-run", "n_clicks"),
                   State("upc-b7-date", "date"), State("upc-b7-basis", "value"), prevent_initial_call=True)
@@ -147,12 +154,13 @@ def register_up_compliance_callbacks(app):
     @app.callback(_TOAST, _BODY, Input("upc-ln-save", "n_clicks"),
                   State("upc-ln-flat", "value"), State("upc-ln-date", "date"), State("upc-ln-principal", "value"),
                   State("upc-ln-rate", "value"), State("upc-ln-mode", "value"), State("upc-ln-purpose", "value"),
-                  State("upc-ln-ref", "value"), State("upc-ln-due", "date"), prevent_initial_call=True)
+                  State("upc-ln-ref", "value"), State("upc-ln-due", "date"),
+                  State("upc-ln-resid", "value"), prevent_initial_call=True)
     @require_session
-    def save_loan(n, flat, d, principal, rate, mode, purpose, ref, due):
+    def save_loan(n, flat, d, principal, rate, mode, purpose, ref, due, resid):
         if not n:
             raise PreventUpdate
-        return _run(lambda sid, uid: act.disburse_loan(sid, uid, flat, d, principal, rate, mode, purpose, ref, due))
+        return _run(lambda sid, uid: act.disburse_loan(sid, uid, flat, d, principal, rate, mode, purpose, ref, due, resid))
 
     @app.callback(_TOAST, _BODY, Input("upc-ld-save", "n_clicks"),
                   State("upc-ld-loan", "value"), State("upc-ld-date", "date"), prevent_initial_call=True)

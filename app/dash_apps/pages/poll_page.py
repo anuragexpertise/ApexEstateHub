@@ -101,6 +101,20 @@ def poll_form(sid=None, user_id=None, role=None, prefill: dict | None = None):
                         clearable=False,
                     ),
                 ], width=4, className="mb-3"),
+                dbc.Col([
+                    dbc.Label("Vote counted as", html_for="poll-vote-basis"),
+                    dcc.Dropdown(
+                        id="poll-vote-basis",
+                        options=[
+                            {"label": "One vote per flat (advisory)", "value": "apartment"},
+                            {"label": "Weighted by undivided interest (bye-law 8)", "value": "undivided_interest"},
+                        ],
+                        value=prefill.get("vote_basis") or "apartment",
+                        clearable=False,
+                        disabled=bool(prefill),   # fixed once the poll exists: changing it would change how cast votes count
+                    ),
+                    dbc.FormText("Either way an online poll is not a General Body resolution (bye-law 10: votes are cast in person)."),
+                ], width=4, className="mb-3"),
             ]),
             dbc.Row([
                 dbc.Col([

@@ -106,7 +106,7 @@ def render_up_compliance_card(data: dict) -> html.Div:
     fy_opts = sorted({int(r["fy_label"][:4]) for r in cal}, reverse=True)
     secs.append(_section(
         "Statement filings (bye-law 49)",
-        "Audited statement published by 31 July, copy to the competent authority by 15 August, summary to every owner within 15 days "
+        "Audited statement published by 31 July (a statement can only be recorded as published once the auditor is named and has signed off), copy to the competent authority by 15 August, summary to every owner within 15 days "
         "of publication, with owner and loanee lists attached.",
         _table(["Year", "Step", "Due", "Done on", "Status"],
                [[r["fy_label"], r["step"], _fmt(r["due_date"]), _fmt(r["done_on"]), _badge(r["status"])] for r in cal]),
@@ -117,7 +117,8 @@ def render_up_compliance_card(data: dict) -> html.Div:
             _field("Statements published", _date("upc-fil-pub"), 2),
             _field("Copy to authority", _date("upc-fil-auth"), 2),
             _field("Summaries sent to owners", _date("upc-fil-sum"), 2),
-            _field("Auditor", dbc.Input(id="upc-fil-auditor", type="text", placeholder="Name of auditor", style={"fontSize": "13px"}), 4),
+            _field("Auditor *", dbc.Input(id="upc-fil-auditor", type="text", placeholder="Name of auditor", style={"fontSize": "13px"}), 3),
+            _field("Audit signed off *", _date("upc-fil-signed"), 2),
         ], className="g-2"),
         dbc.Row([dbc.Col(dbc.Checklist(id="upc-fil-attach", options=[
             {"label": "Owner list attached", "value": "owners"}, {"label": "Loanee list attached", "value": "loanees"}],
@@ -165,9 +166,11 @@ def render_up_compliance_card(data: dict) -> html.Div:
         "dues. A No Dues Certificate is treated as granted if not refused within 15 days of the request. "
         "An owner loan still outstanding on the flat blocks recording the certificate as issued (record a refusal instead, inside the 15 days); "
         "master can change this in the AOA Rule Editor.",
-        _table(["Flat", "Date", "Buyer", "Value", "Fee", "Loan o/s", "No Dues"],
+        _table(["Flat", "Date", "Buyer", "Value", "Fee", "Loan o/s", "s.23 statement", "No Dues"],
                [[r["flat_number"], _fmt(r["transfer_date"]), r.get("transferee_name") or "-", _fmt(r["transfer_value"]), _fmt(r["fee_amount"]),
                  html.Span(_fmt(r["loan_outstanding"]), style={"color": "#c0392b", "fontWeight": "700"}) if r.get("loan_outstanding") else "-",
+                 (f"\u20b9{_fmt(r['statement_amount'])} on {_fmt(r['statement_issued_on'])}" if r.get("statement_issued_on")
+                  else f"not issued (now \u20b9{_fmt(r.get('statement_now') or 0)})"),
                  html.Span([_badge(r["nodues_status"]), html.Span(f"  deemed {_fmt(r['deemed_on'])}" if r.get("deemed_on") and r["nodues_status"] == "pending" else "",
                                                                    style={"fontSize": "11px"})])] for r in tr]),
         html.Hr(),
@@ -190,6 +193,21 @@ def render_up_compliance_card(data: dict) -> html.Div:
             _field("Date", _date("upc-nd-date"), 2),
         ], className="g-2"),
         _btn("Update No Dues record", "upc-nd-save", "fa-stamp"),
+        html.Div([html.Small("Act s.23(2): the purchaser is entitled to the Board's statement of unpaid common-expense assessment and is not liable "
+                             "for more than it states. Issuing freezes the figure as at the transfer date (select the transfer above); the transfer fee is not part of it.",
+                             className="text-muted"),
+                  _btn("Issue purchaser statement (s.23)", "upc-st-save", "fa-file-invoice")], className="mt-2"),
+    ))
+
+    # ── 3b. s.20(2) recovery ─────────────────────────────────────────────────
+    s20 = data.get("s20") or []
+    secs.append(_section(
+        "Long-unpaid common expenses (Act s.20(2))",
+        "Common expenses unpaid for more than the period set by the s20_recovery_months rule (12 months in the Act) may be recovered through the "
+        "Competent Authority as arrears of land revenue. This lists the flats that have reached that point; the application itself is made by the association.",
+        _table(["Flat", "Owner", "Bills", "Oldest due", "Unpaid common expenses"],
+               [[r["flat_number"], r.get("owner_name") or "-", r["bills"], _fmt(r["oldest_due_date"]), _fmt(r["amount_due"])] for r in s20],
+               empty="No flat has common-expense bills unpaid for that long."),
     ))
 
     # ── 4. Bye-law 7 ─────────────────────────────────────────────────────────
@@ -241,7 +259,7 @@ def render_up_compliance_card(data: dict) -> html.Div:
     secs.append(_section(
         "Loans to owners (bye-law 3(1)(f))",
         "Posted to the ledger: a loan debits Loans to Owners and credits cash or bank; a repayment credits Loans to Owners for principal and "
-        "Interest on Owner Loans for interest. A resolution reference is required. Interest shown is a simple-interest estimate only. "
+        "Interest on Owner Loans for interest. Under the UP default the loan must cite a passed General Body 'Approve owner loan' resolution (the consent of the owners), state the emergent necessity, and carry a short repayment date; the AOA Rule Editor can relax this to a free-text reference. Interest shown is a simple-interest estimate only. "
         "A loan with no repayment date can never be overdue, so set one to have it count under bye-law 7.",
         _table(["Flat", "Date", "Principal", "Repaid", "Outstanding", "Rate %", "Interest est.", "Repay by", "Resolution", "Ledger"],
                [[r["flat_number"], _fmt(r["loan_date"]), _fmt(r["principal"]), _fmt(r["repaid_amount"]), _fmt(r["outstanding"]),
@@ -259,8 +277,11 @@ def render_up_compliance_card(data: dict) -> html.Div:
             _field("Paid out by", _mode_dd("upc-ln-mode"), 3),
         ], className="g-2"),
         dbc.Row([
-            _field("Resolution reference *", dbc.Input(id="upc-ln-ref", type="text", placeholder="Board / GB resolution #", style={"fontSize": "13px"}), 4),
-            _field("Repay by (optional)", _date("upc-ln-due"), 2),
+            _field("Approving GB resolution *", dcc.Dropdown(id="upc-ln-resid", options=[
+                {"label": f"{_fmt(r['held_on'])} - {(r['title'] or 'Approve owner loan')[:60]} (#{r['id']})", "value": r["id"]}
+                for r in (data.get("loan_resolutions") or [])], placeholder="Passed Approve Owner Loan resolution", style={"fontSize": "13px"}), 4),
+            _field("Reference (optional)", dbc.Input(id="upc-ln-ref", type="text", placeholder="Free-text note", style={"fontSize": "13px"}), 2),
+            _field("Repay by *", _date("upc-ln-due"), 2),
             _field("Purpose", dbc.Input(id="upc-ln-purpose", type="text", style={"fontSize": "13px"}), 6),
         ], className="g-2 mt-1"),
         _btn("Record loan", "upc-ln-save", "fa-hand-holding-usd"),
