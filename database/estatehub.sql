@@ -13970,11 +13970,17 @@ BEGIN
         FOR r IN
             SELECT q.* FROM (
                 SELECT DISTINCT ON (x.layer) x.* FROM society_rule_decisions x
-                 WHERE x.society_id = p_society_id AND x.rule_key = p_key AND x.layer < p_below_layer
-                   AND x.status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted')
-                   AND x.resolution_id IS NOT NULL AND x.review_status <> 'flagged'
-                   AND x.effective_from <= p_on AND (x.effective_to IS NULL OR x.effective_to >= p_on)
-                 ORDER BY x.layer, x.effective_from DESC, x.id DESC) q
+                WHERE x.society_id = p_society_id AND x.rule_key = p_key AND x.layer < p_below_layer
+                  AND x.status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted')
+                  AND x.resolution_id IS NOT NULL AND x.review_status <> 'flagged'
+                  AND x.effective_from <= p_on AND (x.effective_to IS NULL OR x.effective_to >= p_on)
+                  -- Exclude Layer 3 decisions that are pending/expired/rejected ratification:
+                  -- the Board is acting within delegated powers, but until the GBM ratifies,
+                  -- the engine falls through to the Society policy (Layer 2) beneath it.
+                  AND NOT EXISTS (
+                      SELECT 1 FROM loa_ratification lr WHERE lr.decision_id = x.id AND lr.status IN ('pending', 'expired')
+                  )
+                ORDER BY x.layer, x.effective_from DESC, x.id DESC) q
             ORDER BY q.layer
         LOOP
             IF r.status = 'not_adopted' THEN
@@ -15619,7 +15625,157 @@ CREATE TABLE society_rule_decisions (
 CREATE INDEX idx_society_rule_decisions_lookup ON society_rule_decisions (society_id, rule_key, layer, effective_from DESC);
 CREATE INDEX idx_society_rule_decisions_provisional ON society_rule_decisions (society_id) WHERE status = 'provisional';
 
--- 6. Seed decision_types (10 rows) — whitelisted codes for resolutions
+-- ── LoA WORKFLOW: pending ratification tracking ──────────────────────────────────
+-- Layer 3 Board decisions (SET_BOARD_PARAM) are operational: ratified by a simple MC majority,
+-- but bye-law 47(1) requires Board resolutions to be placed before the next General Body for
+-- ratification. Until ratified, the decision is "pending_ratification" — the engine still
+-- applies it (the MC is a delegate acting within delegated powers), but it is flagged for
+-- the pending-ratification list and auto-expires if not ratified within the ratification window.
+CREATE TABLE loa_ratification (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    decision_id     BIGINT NOT NULL REFERENCES society_rule_decisions (id) ON DELETE CASCADE,
+    rule_key        VARCHAR(30) NOT NULL,
+    board_layer     INT NOT NULL CHECK (board_layer IN (1, 2, 3)),   -- the layer of the decision needing ratification
+    status          VARCHAR(25) NOT NULL CHECK (status IN ('pending', 'ratified', 'rejected', 'expired')) DEFAULT 'pending',
+    decision_effective DATE NOT NULL,                         -- when the Board decision took effect
+    ratify_by       DATE NOT NULL,                           -- deadline for GBM ratification
+    ratified_at     TIMESTAMP,
+    ratified_by     INT REFERENCES users (id),
+    ratified_resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    rejected_at     TIMESTAMP,
+    rejected_by     INT REFERENCES users (id),
+    rejected_resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    rejection_reason TEXT,
+    created_by      INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_loa_ratification_society ON loa_ratification (society_id, status, ratify_by);
+CREATE INDEX idx_loa_ratification_decision ON loa_ratification (decision_id);
+
+CREATE OR REPLACE FUNCTION fn_pending_ratification(p_society_id INT)
+RETURNS TABLE (
+    decision_id     BIGINT,
+    rule_key        VARCHAR,
+    label           VARCHAR,
+    layer           INT,
+    value           NUMERIC,
+    value_text      TEXT,
+    decision_effective DATE,
+    ratify_by        DATE,
+    days_remaining   INT,
+    status          VARCHAR
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT lr.decision_id, lr.rule_key, d.label, lr.board_layer AS layer,
+           sd.value, sd.value_text, lr.decision_effective, lr.ratify_by,
+           lr.ratify_by - CURRENT_DATE AS days_remaining,
+           lr.status
+      FROM loa_ratification lr
+      JOIN society_rule_decisions sd ON sd.id = lr.decision_id
+      JOIN rule_parameter_defs d ON d.regime_code = (SELECT regime_code FROM society_legal_regime WHERE society_id = p_society_id)
+                                 AND d.rule_key = lr.rule_key
+     WHERE lr.society_id = p_society_id AND lr.status = 'pending'
+     ORDER BY lr.ratify_by;
+END $$;
+
+CREATE OR REPLACE FUNCTION fn_ratify_board_decision(
+    p_user_id INT,
+    p_society_id INT,
+    p_decision_id BIGINT,
+    p_resolution_id INT,
+    p_ratify BOOLEAN,              -- TRUE = ratify, FALSE = reject
+    p_reason TEXT DEFAULT NULL     -- required if rejecting
+)
+RETURNS TABLE (ok BOOLEAN, message TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_status VARCHAR(25);
+    v_days INT;
+BEGIN
+    -- Verify the decision belongs to this society and is pending ratification
+    SELECT lr.status INTO v_status
+      FROM loa_ratification lr
+      JOIN society_rule_decisions sd ON sd.id = lr.decision_id
+     WHERE lr.society_id = p_society_id AND lr.decision_id = p_decision_id
+       AND lr.status = 'pending';
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT FALSE, 'No pending ratification found for that decision in this society.'::TEXT;
+        RETURN;
+    END IF;
+
+    -- Verify the resolution is valid for this society and passed
+    IF NOT EXISTS (
+        SELECT 1 FROM resolutions r
+        JOIN meetings m ON m.id = r.meeting_id
+        WHERE r.id = p_resolution_id AND r.society_id IS NOT NULL
+    ) THEN
+        -- resolutions.society_id is derived from meeting.society_id
+        IF NOT EXISTS (
+            SELECT 1 FROM resolutions r
+            JOIN meetings m ON m.id = r.meeting_id
+            WHERE r.id = p_resolution_id AND m.society_id = p_society_id
+        ) THEN
+            RETURN QUERY SELECT FALSE, 'Resolution does not belong to this society.'::TEXT;
+            RETURN;
+        END IF;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM resolutions r
+        JOIN meetings m ON m.id = r.meeting_id
+        WHERE r.id = p_resolution_id AND m.society_id = p_society_id AND r.passed = TRUE
+    ) THEN
+        RETURN QUERY SELECT FALSE, 'Resolution must be a passed meeting resolution.'::TEXT;
+        RETURN;
+    END IF;
+
+    IF p_ratify THEN
+        UPDATE loa_ratification
+           SET status = 'ratified',
+               ratified_at = NOW(),
+               ratified_by = p_user_id,
+               ratified_resolution_id = p_resolution_id,
+               updated_at = NOW()
+         WHERE society_id = p_society_id AND decision_id = p_decision_id;
+        RETURN QUERY SELECT TRUE, 'Board decision ratified by General Body.'::TEXT;
+    ELSE
+        IF p_reason IS NULL OR length(trim(p_reason)) < 10 THEN
+            RETURN QUERY SELECT FALSE, 'Rejection requires a reason of at least 10 characters.'::TEXT;
+            RETURN;
+        END IF;
+        UPDATE loa_ratification
+           SET status = 'rejected',
+               rejected_at = NOW(),
+               rejected_by = p_user_id,
+               rejected_resolution_id = p_resolution_id,
+               rejection_reason = p_reason,
+               updated_at = NOW()
+         WHERE society_id = p_society_id AND decision_id = p_decision_id;
+        -- Mark the decision as expired so the resolver picks the next layer up
+        UPDATE society_rule_decisions SET status = 'not_adopted'
+         WHERE id = p_decision_id;
+        RETURN QUERY SELECT TRUE, format('Board decision rejected; effective rule reverts to the next layer up.')::TEXT;
+    END IF;
+END $$;
+
+-- Auto-expire ratifications that miss the deadline (called by a scheduled job or on read).
+CREATE OR REPLACE FUNCTION fn_expire_overdue_ratifications()
+RETURNS INT
+LANGUAGE plpgsql AS $$
+DECLARE v_count INT;
+BEGIN
+    UPDATE loa_ratification lr
+       SET status = 'expired'
+     WHERE status = 'pending' AND ratify_by < CURRENT_DATE;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    RETURN v_count;
+END $$;
+
+
 INSERT INTO decision_types (code, label, required_body, majority_pct, description) VALUES
     ('ADOPT_BYE_LAW',        'Adopt Model Bye-Law Clause',            'GBM', 66.67, 'Adopt a Model Bye-Law 2011 clause as-is or with variation (2/3 majority per Model Bye-Law 58)'),
     ('VARY_BYE_LAW',         'Vary Adopted Bye-Law Clause',           'GBM', 66.67, 'Change variation text of an already-adopted clause (2/3 majority)'),
