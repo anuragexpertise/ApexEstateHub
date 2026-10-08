@@ -1544,9 +1544,12 @@ TDS_SECTION_RATE_SEED = [
     ('194F', None, 'Repurchase of units by Mutual Fund/UTI', 20.00, 20.00, 0, 0),
     ('194G', None, 'Commission on sale of lottery tickets', 5.00, 20.00, 15000, 15000),
     ('194H', None, 'Brokerage or commission', 2.00, 20.00, 15000, 15000),
-    ('194-I', 'land_building', 'Rent on land, building, or furniture', 10.00, 20.00, 600000, 600000),
-    ('194-I', 'plant_machinery', 'Rent on plant, machinery, or equipment', 2.00, 20.00, 600000, 600000),
-    ('194-IB', None, 'Rent paid by Individual / HUF', 2.00, 20.00, 600000, 600000),
+    # 194-I threshold: ₹2,40,000 per year (₹20,000/month) for land/building/furniture/plant/machinery.
+    # Finance Act 2019 raised it from ₹1,80,000 (₹15,000/month) to ₹2,40,000. The previous seed had
+    # ₹6,00,000 which was incorrect and would cause under-deduction on rents of ₹20,001–₹50,000/month.
+    ('194-I', 'land_building', 'Rent on land, building, or furniture', 10.00, 20.00, 240000, 240000),
+    ('194-I', 'plant_machinery', 'Rent on plant, machinery, or equipment', 2.00, 20.00, 240000, 240000),
+    ('194-IB', None, 'Rent paid by Individual / HUF (monthly rent > ₹50,000)', 5.00, 20.00, 600000, 600000),
     ('194-IA', None, 'Payment on transfer of immovable property', 1.00, 20.00, 5000000, 5000000),
     ('194-IC', None, 'Monetary payment under Joint Development Agreement', 10.00, 20.00, 0, 0),
     ('194J', 'technical', 'Technical fees, royalty, call centre operator', 2.00, 20.00, 50000, 50000),
