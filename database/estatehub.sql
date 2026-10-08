@@ -753,7 +753,8 @@ CREATE TABLE receivables (
         role IN (
             'apartment',
             'vendor',
-            'security'
+            'security',
+            'society'
         )
     ),
     acc_id INT, -- income account for base amount
@@ -803,7 +804,7 @@ CREATE TABLE receivables (
     -- transfer fee: payable by the TRANSFEROR on a sale, so it is not a common-expense arrear for
     -- bye-law 7 or the s.22 six-month test (and does not pass to a purchaser under s.23).
     charge_kind VARCHAR(20) NOT NULL DEFAULT 'common_expense'
-        CHECK (charge_kind IN ('common_expense', 'transfer_fee', 'other'))
+        CHECK (charge_kind IN ('common_expense', 'transfer_fee', 'depreciation_fund', 'other'))
 );
 
 -- ── PAYMENT LOG ────────────────────────────────────────────────────
@@ -13861,23 +13862,23 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
  ('UP_AOA_2010', 'share_face_value', 'Bye-law 5 share face value (INR)', 'UP Model Bye-Laws, 2011', 'bye-law 5', 'BL_05', 'non_statutory', 'model_bye_law', 'int', 'INR', 1, 1000, 1, 1000, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_share_capital_due']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'cashbook_daily_signature', 'Bye-law 23(f) daily cashbook signature required', 'UP Model Bye-Laws, 2011', 'bye-law 23(f)', 'BL_23', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2, 3]::INT[], 'higher', FALSE, 'tracked', ARRAY['fn_cashbook_signature_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'investment_allowed_types', 'Bye-law 45 permitted investment types', 'UP Model Bye-Laws, 2011', 'bye-law 45', 'BL_45', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['coop_bank,trust_securities,approved_bank', 'coop_bank,trust_securities', 'coop_bank_only']::TEXT[], ARRAY[2]::INT[], 'lower', FALSE, 'gated', ARRAY['fn_investment_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
- ('UP_AOA_2010', 'borrowing_requires_ca_approval', 'Bye-law 44(d) borrowing needs Competent Authority approval', 'UP Model Bye-Laws, 2011', 'bye-law 44(d)', 'BL_44', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_borrowing_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'borrowing_ca_approval', 'Bye-law 44(d) borrowing needs Competent Authority approval', 'UP Model Bye-Laws, 2011', 'bye-law 44(d)', 'BL_44', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_borrowing_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'tenant_joint_liability', 'Act s.18(2) tenant jointly liable with owner', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.18(2)', NULL, 'statutory', 'state_act_rules', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'hard_wired', ARRAY['fn_tenant_liability']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'board_election_voting_basis', 'Board election voting basis (Model Bye-Law 8)', 'UP Model Bye-Laws, 2011', 'bye-law 8', 'BL_08', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['one_apartment_one_vote', 'undivided_interest']::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_board_election_eligibility']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
   ('UP_AOA_2010', 'depreciation_fund_pct', 'Bye-law 46(d) depreciation fund (% of asset value or fixed amount)', 'UP Model Bye-Laws, 2011', 'bye-law 46(d)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', '% or INR', 0, 100, 0, 10, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_ensure_depreciation_fund', 'fn_appropriate_depreciation_fund']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Society sets the rate by General Body resolution; no statutory rate fixed by UP Act or Model Bye-Laws'),
   ('UP_AOA_2010', 'depreciation_fund_basis', 'Depreciation fund contribution basis', 'UP Model Bye-Laws, 2011', 'bye-law 46(d)', 'BL_46', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['pct_of_asset_value', 'fixed_amount_per_sqft', 'fixed_amount_per_flat']::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_appropriate_depreciation_fund']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'How the depreciation fund contribution is calculated'),
   ('UP_AOA_2010', 'depreciation_fund_rate', 'Depreciation fund rate (per sq ft or per flat)', 'UP Model Bye-Laws, 2011', 'bye-law 46(d)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', 'INR', 0, 1000, 0, 10, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_appropriate_depreciation_fund']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Rate when basis is fixed_amount_per_sqft or fixed_amount_per_flat'),
-  ('UP_AOA_2010', 'investment_register_maintained', 'Bye-law 47 investment register maintained', 'UP Model Bye-Laws, 2011', 'bye-law 47', 'BL_47', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2, 3]::INT[], 'higher', FALSE, 'tracked', ARRAY['fn_investment_register_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Board must maintain a register of all investments with details'),
-  ('UP_AOA_2010', 'affiliation_register_maintained', 'Bye-law 48 affiliation register maintained', 'UP Model Bye-Laws, 2011', 'bye-law 48', 'BL_48', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_affiliation_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Association may affiliate with federation/apex body; register maintained per bye-law 48'),
+  ('UP_AOA_2010', 'investment_register', 'Bye-law 47 investment register maintained', 'UP Model Bye-Laws, 2011', 'bye-law 47', 'BL_47', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2, 3]::INT[], 'higher', FALSE, 'tracked', ARRAY['fn_investment_register_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Board must maintain a register of all investments with details'),
+  ('UP_AOA_2010', 'affiliation_register', 'Bye-law 48 affiliation register maintained', 'UP Model Bye-Laws, 2011', 'bye-law 48', 'BL_48', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_affiliation_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Association may affiliate with federation/apex body; register maintained per bye-law 48'),
   ('UP_AOA_2010', 'accounts_inspection_allowed', 'Bye-law 48 accounts open for member inspection', 'UP Model Bye-Laws, 2011', 'bye-law 48', 'BL_48', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'tracked', ARRAY['fn_accounts_inspection_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Books of account must be open to inspection by any member at reasonable times'),
   ('UP_AOA_2010', 'accounts_publication_enabled', 'Bye-law 50 publication of accounts', 'UP Model Bye-Laws, 2011', 'bye-law 50', 'BL_50', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_accounts_publication_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Annual accounts to be published and circulated to members per bye-law 50'),
   ('UP_AOA_2010', 'auditor_appointment_by_gbm', 'Bye-law 51 auditor appointed by General Body', 'UP Model Bye-Laws, 2011', 'bye-law 51', 'BL_51', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_auditor_appointment_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Auditor must be appointed at each Annual General Body Meeting'),
-  ('UP_AOA_2010', 'auditor_remuneration_fixed_by_gbm', 'Bye-law 52 auditor remuneration fixed by General Body', 'UP Model Bye-Laws, 2011', 'bye-law 52', 'BL_52', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_auditor_remuneration_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Auditor remuneration fixed by General Body Meeting'),
+  ('UP_AOA_2010', 'auditor_remuneration_gbm', 'Bye-law 52 auditor remuneration fixed by General Body', 'UP Model Bye-Laws, 2011', 'bye-law 52', 'BL_52', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_auditor_remuneration_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Auditor remuneration fixed by General Body Meeting'),
   ('UP_AOA_2010', 'mortgage_notice_required', 'Bye-law 53 mortgage notice to association', 'UP Model Bye-Laws, 2011', 'bye-law 53', 'BL_53', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_mortgage_notice_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Owner must notify association of any mortgage/charge on apartment'),
   ('UP_AOA_2010', 'unpaid_assessments_notice', 'Bye-law 54 notice of unpaid assessments on transfer', 'UP Model Bye-Laws, 2011', 'bye-law 54', 'BL_54', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_unpaid_assessments_notice']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Association must provide statement of unpaid assessments on transfer'),
   ('UP_AOA_2010', 'act_prevails_over_byelaws', 'Bye-law 55 Act prevails over bye-laws', 'UP Model Bye-Laws, 2011', 'bye-law 55', 'BL_55', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 1, 1, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'hard_wired', ARRAY[]::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'UP Apartment Act 2010 provisions prevail over any inconsistent bye-law'),
   ('UP_AOA_2010', 'seal_register_maintained', 'Bye-law 56 common seal register', 'UP Model Bye-Laws, 2011', 'bye-law 56', 'BL_56', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_seal_register_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Association must maintain a register of the common seal usage'),
-  ('UP_AOA_2010', 'competent_authority_inspection', 'Bye-law 57 Competent Authority inspection', 'UP Model Bye-Laws, 2011', 'bye-law 57', 'BL_57', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_ca_inspection_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Competent Authority may inspect association records'),
+  ('UP_AOA_2010', 'ca_inspection', 'Bye-law 57 Competent Authority inspection', 'UP Model Bye-Laws, 2011', 'bye-law 57', 'BL_57', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_ca_inspection_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Competent Authority may inspect association records'),
   ('UP_AOA_2010', 'bye_law_amendment_tracker', 'Bye-law 58 amendment tracking enabled', 'UP Model Bye-Laws, 2011', 'bye-law 58', 'BL_58', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_bye_law_amendment_log']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)'),
   ('UP_AOA_2010', 'sinking_fund_rate_basis', 'Sinking Fund rate basis', 'UP Model Bye-Laws, 2011 (not prescribed; society choice)', 'bye-law 46 (funds)', 'BL_46', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['per_sq_ft', 'construction_cost', 'flat_based']::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_fund_billing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Sinking Fund rate basis: per_sq_ft / construction_cost / flat_based (no statutory rate in UP Act/Bye-Laws)'),
   ('UP_AOA_2010', 'sinking_fund_rate', 'Sinking Fund rate per unit', 'UP Model Bye-Laws, 2011 (not prescribed; society choice)', 'bye-law 46 (funds)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', 'INR', 0, 1000, 0, 10, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_fund_billing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Sinking Fund rate per sq ft or per flat or % of construction cost (no statutory rate)'),
@@ -13919,23 +13920,23 @@ INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, un
  ('UP_AOA_2010', 'share_face_value', 100, NULL, 'INR', 'Model Bye-Laws 2011, bye-law 5: one share per owner, face value set by General Body', DATE '2011-11-16'),
  ('UP_AOA_2010', 'cashbook_daily_signature', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 23(f): daily cashbook to be signed by the Secretary and one Board member', DATE '2011-11-16'),
  ('UP_AOA_2010', 'investment_allowed_types', NULL, 'coop_bank,trust_securities,approved_bank', NULL, 'Model Bye-Laws 2011, bye-law 45: investments only in co-operative banks, Trust Act securities, or banks approved by the Competent Authority', DATE '2011-11-16'),
- ('UP_AOA_2010', 'borrowing_requires_ca_approval', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 44(d): borrowing requires Competent Authority approval', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'borrowing_ca_approval', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 44(d): borrowing requires Competent Authority approval', DATE '2011-11-16'),
  ('UP_AOA_2010', 'tenant_joint_liability', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(2): tenant is jointly liable with the owner for common expenses', DATE '2011-11-16'),
  ('UP_AOA_2010', 'board_election_voting_basis', NULL, 'undivided_interest', NULL, 'Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration (Act s.12(1)(f): percentage for all purposes including voting). Advisory polls may use one-apartment-one-vote.', DATE '2011-11-16'),
   ('UP_AOA_2010', 'depreciation_fund_pct', 5, NULL, '%', 'Model Bye-Laws 2011, bye-law 46(d): depreciation fund for replacement of assets; rate set by General Body resolution (no statutory rate)', DATE '2011-11-16'),
   ('UP_AOA_2010', 'depreciation_fund_basis', NULL, 'pct_of_asset_value', NULL, 'Model Bye-Laws 2011, bye-law 46(d): basis for depreciation fund contribution', DATE '2011-11-16'),
   ('UP_AOA_2010', 'depreciation_fund_rate', 2.0, NULL, 'INR per sq ft/flat', 'Model Bye-Laws 2011, bye-law 46(d): rate when basis is fixed amount', DATE '2011-11-16'),
-  ('UP_AOA_2010', 'investment_register_maintained', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 47: Board shall maintain a register of all investments', DATE '2011-11-16'),
-  ('UP_AOA_2010', 'affiliation_register_maintained', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 48: association may affiliate with federation; register maintained', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'investment_register', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 47: Board shall maintain a register of all investments', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'affiliation_register', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 48: association may affiliate with federation; register maintained', DATE '2011-11-16'),
   ('UP_AOA_2010', 'accounts_inspection_allowed', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 48: books of account open to inspection by any member at reasonable times', DATE '2011-11-16'),
   ('UP_AOA_2010', 'accounts_publication_enabled', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 50: annual accounts to be published and circulated to members', DATE '2011-11-16'),
   ('UP_AOA_2010', 'auditor_appointment_by_gbm', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 51: auditor appointed at each Annual General Body Meeting', DATE '2011-11-16'),
-  ('UP_AOA_2010', 'auditor_remuneration_fixed_by_gbm', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 52: auditor remuneration fixed by General Body Meeting', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'auditor_remuneration_gbm', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 52: auditor remuneration fixed by General Body Meeting', DATE '2011-11-16'),
   ('UP_AOA_2010', 'mortgage_notice_required', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 53: owner must notify association of any mortgage/charge', DATE '2011-11-16'),
   ('UP_AOA_2010', 'unpaid_assessments_notice', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 54: association provides statement of unpaid assessments on transfer', DATE '2011-11-16'),
   ('UP_AOA_2010', 'act_prevails_over_byelaws', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 55: UP Apartment Act 2010 prevails over inconsistent bye-laws', DATE '2011-11-16'),
   ('UP_AOA_2010', 'seal_register_maintained', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 56: association shall have a common seal and maintain register of its use', DATE '2011-11-16'),
-  ('UP_AOA_2010', 'competent_authority_inspection', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 57: Competent Authority may inspect association records', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'ca_inspection', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 57: Competent Authority may inspect association records', DATE '2011-11-16'),
   ('UP_AOA_2010', 'bye_law_amendment_tracker', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 58: track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)', DATE '2011-11-16'),
   ('UP_AOA_2010', 'sinking_fund_rate_basis', NULL, 'per_sq_ft', NULL, 'Sinking Fund rate basis (per_sq_ft / construction_cost / flat_based) — no statutory rate in UP Act/Bye-Laws; set by GBM', DATE '2011-11-16'),
   ('UP_AOA_2010', 'sinking_fund_rate', 2.5, NULL, 'INR per sq ft', 'Sinking Fund rate — no statutory rate; society sets by GBM resolution', DATE '2011-11-16'),
@@ -14286,11 +14287,11 @@ BEGIN
     v_period_end   := (v_period_start + INTERVAL '1 year - 1 day')::DATE;
 
     IF v_basis = 'pct_of_asset_value' THEN
-        SELECT COALESCE(SUM(asset_value), 0) INTO v_asset_value
-        FROM society_assets
+        SELECT COALESCE(SUM(purchase_value), 0) INTO v_asset_value
+        FROM assets
         WHERE society_id = p_society_id
-          AND acquisition_date <= v_period_end
-          AND (disposal_date IS NULL OR disposal_date > v_period_end);
+          AND purchase_date <= v_period_end
+          AND (disposed_at IS NULL OR disposed_at > v_period_end);
         v_appropriation_amount := ROUND(v_asset_value * v_pct / 100, 2);
     ELSIF v_basis = 'fixed_amount_per_sqft' THEN
         SELECT COALESCE(SUM(built_up_area), 0) INTO v_total_sqft
@@ -14340,7 +14341,7 @@ CREATE TABLE IF NOT EXISTS investment_register (
     maturity_date   DATE,
     rate_pct        NUMERIC(6,3),
     purpose         VARCHAR(200),
-    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    resolution_id   INT,
     created_by      INT REFERENCES users (id),
     created_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -14388,7 +14389,7 @@ CREATE TABLE IF NOT EXISTS affiliation_register (
     affiliation_date    DATE NOT NULL,
     affiliation_number  VARCHAR(50),
     expiry_date         DATE,
-    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    resolution_id       INT,
     is_active           BOOLEAN NOT NULL DEFAULT TRUE,
     created_by          INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
@@ -14505,7 +14506,7 @@ CREATE TABLE IF NOT EXISTS auditor_appointments (
     financial_year_from INT NOT NULL,
     financial_year_to   INT NOT NULL,
     remuneration        NUMERIC(12,2),
-    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    resolution_id       INT,
     created_by          INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -14515,17 +14516,17 @@ CREATE OR REPLACE FUNCTION fn_auditor_appointment_check(p_society_id INT, p_fy I
 RETURNS TABLE (appointed BOOLEAN, auditor_name VARCHAR, msg TEXT)
 LANGUAGE plpgsql AS $$
 DECLARE
-    v_name VARCHAR;
+    v_auditor_name VARCHAR;
     v_exists BOOLEAN;
 BEGIN
-    SELECT auditor_name INTO v_name
+    SELECT auditor_appointments.auditor_name INTO v_auditor_name
     FROM auditor_appointments
     WHERE society_id = p_society_id AND financial_year_from = p_fy
     ORDER BY appointment_date DESC LIMIT 1;
 
-    v_exists := v_name IS NOT NULL;
+    v_exists := v_auditor_name IS NOT NULL;
     appointed := v_exists;
-    auditor_name := v_name;
+    auditor_name := v_auditor_name;
     IF v_exists THEN
         msg := 'OK: Auditor appointed for FY ' || p_fy;
     ELSE
@@ -14540,7 +14541,7 @@ LANGUAGE plpgsql AS $$
 DECLARE
     v_rem NUMERIC;
 BEGIN
-    SELECT remuneration INTO v_rem
+    SELECT auditor_appointments.remuneration INTO v_rem
     FROM auditor_appointments
     WHERE society_id = p_society_id AND financial_year_from = p_fy
     ORDER BY appointment_date DESC LIMIT 1;
@@ -14589,7 +14590,8 @@ BEGIN
       AND mn.notice_received_on <= p_as_of
       AND NOT EXISTS (
           SELECT 1 FROM resolutions r
-          WHERE r.society_id = p_society_id
+          JOIN meetings m ON r.meeting_id = m.id
+          WHERE m.society_id = p_society_id
             AND r.resolution_type = 'mortgage_notice_acknowledged'
             AND r.reference_id = mn.id
             AND r.status = 'passed'
@@ -14612,7 +14614,7 @@ DECLARE
     v_total NUMERIC;
     v_oldest DATE;
 BEGIN
-    SELECT flat_number INTO v_flat
+    SELECT apartments.flat_number INTO v_flat
     FROM apartments WHERE id = p_apartment_id AND society_id = p_society_id;
 
     IF v_flat IS NULL THEN
@@ -14720,7 +14722,7 @@ CREATE TABLE IF NOT EXISTS bye_law_amendments (
     bye_law_number      VARCHAR(20) NOT NULL,
     old_text            TEXT,
     new_text            TEXT,
-    gbm_resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    gbm_resolution_id   INT,
     ca_approval_ref     VARCHAR(100),
     ca_approval_date    DATE,
     effective_date      DATE,
@@ -15812,9 +15814,10 @@ CREATE TABLE borrowing_approvals (
     purpose         TEXT,
     ca_approval_ref VARCHAR(100),              -- Competent Authority approval reference
     ca_approved_on  DATE,
-    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    resolution_id   INT,
     created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_borrowing_approval UNIQUE (society_id, loan_source, principal)
 );
 CREATE INDEX idx_borrowing_approvals_society ON borrowing_approvals (society_id, ca_approved_on);
 
@@ -16303,6 +16306,9 @@ CREATE TABLE resolutions (
     passed              BOOLEAN NOT NULL DEFAULT FALSE,
     passed_on           DATE,
     text                TEXT,
+    resolution_type     VARCHAR(50),
+    reference_id        INT,
+    status              VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'passed', 'rejected')),
     created_by          INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -16317,6 +16323,31 @@ CREATE INDEX idx_resolutions_clause ON resolutions (clause_id);
 -- forward reference as societies.fk_primary_bank_account above.
 ALTER TABLE society_policy_settings
     ADD CONSTRAINT society_policy_settings_resolution_id_fkey
+    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
+
+-- investment_register was defined earlier than resolutions table
+ALTER TABLE investment_register
+    ADD CONSTRAINT investment_register_resolution_id_fkey
+    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
+
+-- affiliation_register was defined earlier than resolutions table
+ALTER TABLE affiliation_register
+    ADD CONSTRAINT affiliation_register_resolution_id_fkey
+    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
+
+-- auditor_appointments was defined earlier than resolutions table
+ALTER TABLE auditor_appointments
+    ADD CONSTRAINT auditor_appointments_resolution_id_fkey
+    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
+
+-- bye_law_amendments was defined earlier than resolutions table
+ALTER TABLE bye_law_amendments
+    ADD CONSTRAINT bye_law_amendments_gbm_resolution_id_fkey
+    FOREIGN KEY (gbm_resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
+
+-- borrowing_approvals was defined earlier than resolutions table
+ALTER TABLE borrowing_approvals
+    ADD CONSTRAINT borrowing_approvals_resolution_id_fkey
     FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
 
 -- 4. resolution_effects — Enactment queue (whitelisted handlers only)
