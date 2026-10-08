@@ -108,8 +108,8 @@ def test_every_implemented_rule_is_actually_read_by_the_sql():
     for p in UP.params:
         if p.implemented:
             assert re.search(rf"'{p.key}'", SQL_OUTSIDE_GENERATED), f"{p.key} is never read by any function"
-    unread = [p.key for p in UP.params if not p.implemented]
-    assert unread == []       # all rules are now implemented
+    # a rule marked implemented = false is a known gap and must be named here, so it cannot linger unnoticed
+    assert [p.key for p in UP.params if not p.implemented] == []
 
 
 def test_every_rule_the_sql_reads_has_a_definition():

@@ -100,9 +100,11 @@ def test_card_shows_inactive_notice_when_regime_off(act):
 
 # ── handlers ──────────────────────────────────────────────────────────────────
 def test_filing_upsert_and_validation(act):
-    ok, _ = act.save_filing(SOC, None, 2025, "2026-07-20", "2026-08-05", "2026-08-04", "ABC & Co", True, False)
-    assert ok
-    ok, _ = act.save_filing(SOC, None, 2025, "2026-07-21", "2026-08-06", None, "ABC & Co", True, True)      # update, not duplicate
+    ok, msg = act.save_filing(SOC, None, 2025, "2026-07-20", "2026-08-05", "2026-08-04", "ABC & Co", True, False,
+                              audit_signed_off="2026-07-10")
+    assert ok, msg
+    ok, _ = act.save_filing(SOC, None, 2025, "2026-07-21", "2026-08-06", None, "ABC & Co", True, True,
+                            audit_signed_off="2026-07-10")      # update, not duplicate
     assert act.db._execute("SELECT count(*) AS n FROM aoa_statutory_filings WHERE society_id=%s AND fy_start_year=2025", (SOC,), fetch_one=True)["n"] == 1
     ok, msg = act.save_filing(SOC, None, 2025, "2026-08-10", "2026-08-01", None, None, False, False)
     assert not ok and "before" in msg
@@ -160,8 +162,11 @@ def test_loan_and_repayment_round_trip(act):
     apt = _apt(act)
     ok, msg = act.disburse_loan(SOC, None, apt, "2026-09-01", 40000, 12, "bank", "roof", "")
     assert not ok and "resolution" in msg
-    ok, msg = act.disburse_loan(SOC, None, apt, "2026-09-01", 40000, 12, "bank", "roof", "BM-9")
-    assert ok
+    from test.loan_fixtures import approved_loan_resolution
+    res = approved_loan_resolution(lambda sql, p=None: act.db._execute(sql, p, fetch_one=True))
+    ok, msg = act.disburse_loan(SOC, None, apt, "2026-09-01", 40000, 12, "bank", "roof", "BM-9",
+                                due_date="2026-12-01", resolution_id=res)
+    assert ok, msg
     loan = act.load_card_data(SOC)["loans"][0]
     assert float(loan["outstanding"]) == 40000.0 and loan["ledger_posted"]
     ok, _ = act.repay_loan(SOC, None, loan["id"], "2026-10-01", 15000, 400, "bank")

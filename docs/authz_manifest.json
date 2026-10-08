@@ -667,6 +667,9 @@
     "callback:up_compliance_callbacks.py::fill_ui": {
       "classification": "unclassified"
     },
+    "callback:up_compliance_callbacks.py::issue_statement": {
+      "classification": "legacy-gated"
+    },
     "callback:up_compliance_callbacks.py::record_s22": {
       "classification": "unclassified"
     },

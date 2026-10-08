@@ -12,6 +12,7 @@ from datetime import date, timedelta
 import pytest
 
 from test.live_db_gate import LIVE_DB_REASON, live_db_enabled
+from test.loan_fixtures import approved_loan_resolution, cur_runner, disburse
 
 psycopg2 = pytest.importorskip("psycopg2")
 pytestmark = pytest.mark.skipif(not live_db_enabled(), reason=LIVE_DB_REASON)
@@ -71,11 +72,11 @@ def admin(cur):
 
 
 def make_loan(cur, apt, principal=50000, due=OLD_DUE, loan_date=LOAN_DATE):
-    row = q1(cur, "SELECT * FROM fn_disburse_owner_loan(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-             (SOC, apt, loan_date, principal, 0, "bank", "test", "BM-TEST", admin(cur)))
+    """A lawful loan: UP loans need a passed General Body resolution, a purpose and a short-term repayment date."""
+    row = disburse(cur_runner(cur), apt, loan_date, principal, 0, "bank", "test", admin(cur), due=due)
     assert row["msg"] == "OK", row
-    if due:
-        assert q1(cur, "SELECT fn_set_owner_loan_due_date(%s,%s) AS m", (row["loan_id"], due))["m"] == "OK"
+    if not due:                      # tests of the "no repayment date yet" state clear the date the rule insists on
+        cur.execute("UPDATE owner_loans SET due_date = NULL WHERE id = %s", (row["loan_id"],))
     return row["loan_id"]
 
 
@@ -217,11 +218,13 @@ def test_s22_ignores_loans_by_default_and_counts_them_when_switched_on(cur):
 # ── actions layer ────────────────────────────────────────────────────────────
 def test_disburse_loan_with_due_date_and_set_due_date_action(cur, actions):
     apt = apartment(cur)
-    ok, msg = actions.disburse_loan(SOC, admin(cur), apt, LOAN_DATE, 40000, 0, "bank", "t", "BM-9", due_date=OLD_DUE)
+    res = approved_loan_resolution(cur_runner(cur))
+    ok, msg = actions.disburse_loan(SOC, admin(cur), apt, LOAN_DATE, 40000, 0, "bank", "t", "BM-9", due_date=OLD_DUE, resolution_id=res)
     assert ok, msg
     loan = q1(cur, "SELECT id, due_date FROM owner_loans WHERE resolution_ref='BM-9' ORDER BY id DESC LIMIT 1")
     assert loan["due_date"] == OLD_DUE
-    assert not actions.disburse_loan(SOC, admin(cur), apt, LOAN_DATE, 40000, 0, "bank", "t", "BM-10", due_date=LOAN_DATE - timedelta(days=1))[0]
+    assert not actions.disburse_loan(SOC, admin(cur), apt, LOAN_DATE, 40000, 0, "bank", "t", "BM-10",
+                                     due_date=LOAN_DATE - timedelta(days=1), resolution_id=res)[0]
     assert actions.set_loan_due_date(SOC, loan["id"], None)[0] is True
     assert q1(cur, "SELECT due_date FROM owner_loans WHERE id=%s", (loan["id"],))["due_date"] is None
     assert not actions.set_loan_due_date(SOC, 999999, OLD_DUE)[0]
