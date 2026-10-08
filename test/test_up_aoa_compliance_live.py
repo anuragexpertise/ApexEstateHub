@@ -11,7 +11,7 @@ left untouched.
 """
 
 import os
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -517,3 +517,90 @@ def test_purchaser_dues_statement_shows_unpaid_amount(cur):
     row = one(cur, "SELECT * FROM fn_purchaser_dues_statement(%s, %s)", (tr, date(2026, 8, 15)))
     assert float(row[6]) == 3000.0  # common_expense_unpaid
     assert row[4] == 'Buyer'  # transferee_name
+
+
+# ── LoA Workflow: pending ratification ───────────────────────────────────────────
+def _make_layer3_decision(cur, rule_key="petty_cash_limit", value=15000):
+    """Insert a Layer 3 decision backed by an MC resolution, returning the decision id."""
+    apt_id, _ = first_apartment(cur)
+    cur.execute("INSERT INTO meetings (society_id,type,held_on,quorum_met,minutes_pdf) VALUES (%s,'MC',%s,TRUE,'m.pdf') RETURNING id", (SOC, date.today()))
+    m_id = cur.fetchone()[0]
+    cur.execute("SELECT id, majority_pct FROM decision_types WHERE code='SET_BOARD_PARAM'")
+    d = cur.fetchone()
+    cur.execute("INSERT INTO resolutions (meeting_id,clause_id,decision_type_id,body,majority_required,passed,passed_on) VALUES (%s,%s,%s,'test',%s,TRUE,%s) RETURNING id",
+                (m_id, rule_key, d[0], d[1], date.today()))
+    r_id = cur.fetchone()[0]
+    cur.execute("INSERT INTO society_rule_decisions (society_id,rule_key,layer,status,value,resolution_id,effective_from) VALUES (%s,%s,3,'adopted_with_variation',%s,%s,%s) RETURNING id",
+                (SOC, rule_key, value, r_id, date.today()))
+    did = cur.fetchone()[0]
+    # Manually create the ratification entry (simulating what save_decision does)
+    cur.execute("INSERT INTO loa_ratification (society_id,decision_id,rule_key,board_layer,decision_effective,ratify_by,created_by) VALUES (%s,%s,%s,3,%s,%s,1)",
+                 (SOC, did, rule_key, date.today(), date.today() + timedelta(days=180)))
+    return did, r_id
+
+
+def test_layer3_decision_appears_in_pending_ratification(cur):
+    did, _ = _make_layer3_decision(cur, value=15000)
+    rows = cur.execute("SELECT * FROM fn_pending_ratification(%s)", (SOC,)).fetchall()
+    assert len(rows) > 0
+    match = [r for r in rows if r[0] == did]  # decision_id is first column
+    assert len(match) == 1
+    assert match[0][2] == 'petty_cash_limit'  # rule_key
+    assert match[0][4] == 15000               # value
+
+
+def test_ratify_board_decision(cur):
+    did, r_id = _make_layer3_decision(cur, value=15000)
+    row = one(cur, "SELECT * FROM fn_ratify_board_decision(%s,%s,%s,%s,%s)",
+              (1, SOC, did, r_id, True))
+    assert row[0] is True
+    assert 'ratified' in row[1].lower()
+    # Verify it's removed from pending list
+    rows = cur.execute("SELECT * FROM fn_pending_ratification(%s)", (SOC,)).fetchall()
+    assert len([r for r in rows if r[0] == did]) == 0
+    # Verify the rule resolver now picks up the Layer 3 value
+    r = one(cur, "SELECT value,layer FROM fn_rule(%s,'petty_cash_limit')", (SOC,))
+    assert float(r[0]) == 15000 and r[1] == 3
+
+
+def test_reject_board_decision(cur):
+    did, r_id = _make_layer3_decision(cur, value=15000)
+    row = one(cur, "SELECT * FROM fn_ratify_board_decision(%s,%s,%s,%s,%s,%s)",
+              (1, SOC, did, r_id, False, 'Not in line with society policy'))
+    assert row[0] is True
+    assert 'rejected' in row[1].lower()
+    # Verify the ratification is marked rejected
+    r = one(cur, "SELECT status FROM loa_ratification WHERE decision_id=%s", (did,))
+    assert r[0] == 'rejected'
+
+
+def test_ratify_rejects_without_pending(cur):
+    did, r_id = _make_layer3_decision(cur, value=15000)
+    # Mark it as already ratified
+    cur.execute("UPDATE loa_ratification SET status='ratified' WHERE decision_id=%s", (did,))
+    row = one(cur, "SELECT * FROM fn_ratify_board_decision(%s,%s,%s,%s,%s)",
+              (1, SOC, did, r_id, True))
+    assert row[0] is False
+    assert 'pending' in row[1].lower()
+
+
+def test_expire_overdue_ratifications(cur):
+    did, r_id = _make_layer3_decision(cur, value=15000)
+    # Set ratify_by to yesterday
+    cur.execute("UPDATE loa_ratification SET ratify_by=%s WHERE decision_id=%s", (date.today(), did))
+    # Actually set it to yesterday
+    cur.execute("UPDATE loa_ratification SET ratify_by=%s WHERE decision_id=%s", (date.today() - timedelta(days=1), did))
+    expired = one(cur, "SELECT fn_expire_overdue_ratifications()")
+    assert expired[0] >= 1
+    # Verify the decision is now excluded from fn_rule
+    r = one(cur, "SELECT value,layer FROM fn_rule(%s,'petty_cash_limit')", (SOC,))
+    assert float(r[0]) == 20000 and r[1] != 3  # fell through to baseline 20000
+
+
+def test_ratify_rejects_bad_resolution(cur):
+    did, _ = _make_layer3_decision(cur, value=15000)
+    # Use a non-existent resolution
+    row = one(cur, "SELECT * FROM fn_ratify_board_decision(%s,%s,%s,%s,%s)",
+              (1, SOC, did, 999999, True))
+    assert row[0] is False
+    assert 'resolution' in row[1].lower()

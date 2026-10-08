@@ -543,3 +543,63 @@ def annexure_workbook_bytes(society_id: int) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+# ── LoA Workflow: pending ratification ────────────────────────────────────────────
+
+def _ratify_check(society_id: int, decision_id, actor_society_id=None) -> str | None:
+    """Verify the decision belongs to this society and is pending ratification."""
+    if decision_id in (None, ""):
+        return "Pick a decision."
+    row = db._execute(
+        """SELECT lr.status FROM loa_ratification lr
+           JOIN society_rule_decisions sd ON sd.id = lr.decision_id
+          WHERE lr.society_id = %s AND lr.decision_id = %s""",
+        (society_id, int(decision_id)), fetch_one=True)
+    if not row:
+        return "That decision is not pending ratification in this society."
+    if row["status"] != 'pending':
+        return f"That decision's ratification status is '{row['status']}' — only pending items can be ratified or rejected."
+    return None
+
+
+def list_pending_ratification(society_id: int) -> list[dict]:
+    """All Layer 3 Board decisions awaiting GBM ratification."""
+    return db._execute("SELECT * FROM fn_pending_ratification(%s)", (society_id,), fetch_all=True) or []
+
+
+def ratify_board_decision(society_id: int, actor_id: int, decision_id, resolution_id,
+                          actor_society_id=None) -> tuple[bool, str]:
+    """Ratify a Layer 3 Board decision via a passed GBM resolution (bye-law 47(1))."""
+    err = _ratify_check(society_id, decision_id, actor_society_id)
+    if err:
+        return False, err
+    if resolution_id in (None, ""):
+        return False, "Link a passed General Body resolution."
+    row = db._execute(
+        "SELECT ok, message FROM fn_ratify_board_decision(%s, %s, %s, %s, %s)",
+        (actor_id, society_id, int(decision_id), int(resolution_id), True), fetch_one=True)
+    return bool(row["ok"]), str(row["message"])
+
+
+def reject_board_decision(society_id: int, actor_id: int, decision_id, resolution_id,
+                          reason: str, actor_society_id=None) -> tuple[bool, str]:
+    """Reject a Layer 3 Board decision via a passed GBM resolution."""
+    err = _ratify_check(society_id, decision_id, actor_society_id)
+    if err:
+        return False, err
+    if resolution_id in (None, ""):
+        return False, "Link a passed General Body resolution."
+    why = reason if reason and len(reason.strip()) >= 10 else None
+    if not why:
+        return False, "Say why (at least 10 characters)."
+    row = db._execute(
+        "SELECT ok, message FROM fn_ratify_board_decision(%s, %s, %s, %s, %s, %s)",
+        (actor_id, society_id, int(decision_id), int(resolution_id), False, reason), fetch_one=True)
+    return bool(row["ok"]), str(row["message"])
+
+
+def expire_overdue_ratifications() -> int:
+    """Scheduled job: expire ratifications past their deadline."""
+    row = db._execute("SELECT fn_expire_overdue_ratifications() AS n", fetch_one=True)
+    return int(row["n"]) if row and row["n"] is not None else 0

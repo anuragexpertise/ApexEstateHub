@@ -287,3 +287,66 @@ def test_changing_constitution_moves_the_scheme(pg):
     sid = _new_society(pg, "UP")
     pg.execute("UPDATE societies SET constitution='REG_SOCIETY' WHERE id=%s", (sid,))
     assert _regime(pg, sid) == "GENERIC"
+
+
+# ── LoA Workflow: ratification of Layer 3 decisions ─────────────────────────────────
+def test_layer3_decision_pending_ratification_is_ignored_by_resolver(pg):
+    """A Layer 3 decision awaiting GBM ratification should NOT be applied by fn_rule;
+    the resolver must fall through to the Layer 2 / Layer 1 / baseline value beneath."""
+    did = backed_decision(pg, "petty_cash_limit", 3, "adopted_with_variation", value=15000,
+                          dt="SET_BOARD_PARAM")
+    # Create the ratification entry manually (as save_decision would)
+    pg.execute("""INSERT INTO loa_ratification (society_id, decision_id, rule_key, board_layer,
+                                                 decision_effective, ratify_by, created_by)
+                  VALUES (%s, %s, 'petty_cash_limit', 3, %s, %s, 1)""",
+               (SOC, did, date.today(), date.today() + timedelta(days=180)))
+    # fn_rule should NOT pick up the Layer 3 value — it should fall through to baseline (20000)
+    r = rule(pg, "petty_cash_limit")
+    assert float(r["value"]) == 20000
+    assert r["layer"] != 3
+    assert r["status"] != "adopted_with_variation"
+    assert r["ignored"] == 1    # the resolver counted it as ignored
+
+
+def test_layer3_decision_after_ratification_is_applied(pg):
+    """After GBM ratification, a Layer 3 decision becomes active and is applied by fn_rule."""
+    did = backed_decision(pg, "petty_cash_limit", 3, "adopted_with_variation", value=15000,
+                          dt="SET_BOARD_PARAM")
+    pg.execute("""INSERT INTO loa_ratification (society_id, decision_id, rule_key, board_layer,
+                                                 decision_effective, ratify_by, created_by, status,
+                                                 ratified_at, ratified_by, ratified_resolution_id)
+                  VALUES (%s, %s, 'petty_cash_limit', 3, %s, %s, 1, 'ratified', NOW(), 1, 1)""",
+               (SOC, did, date.today(), date.today() + timedelta(days=180)))
+    # Now fn_rule should pick it up
+    r = rule(pg, "petty_cash_limit")
+    assert float(r["value"]) == 15000
+    assert r["layer"] == 3
+
+
+def test_layer3_decision_expired_ratification_falls_through(pg):
+    """A Layer 3 decision whose ratification expired should be ignored by fn_rule."""
+    did = backed_decision(pg, "petty_cash_limit", 3, "adopted_with_variation", value=15000,
+                          dt="SET_BOARD_PARAM")
+    pg.execute("""INSERT INTO loa_ratification (society_id, decision_id, rule_key, board_layer,
+                                                 decision_effective, ratify_by, created_by, status)
+                  VALUES (%s, %s, 'petty_cash_limit', 3, %s, %s, 1, 'expired')""",
+               (SOC, did, date.today(), date.today() - timedelta(days=1)))
+    r = rule(pg, "petty_cash_limit")
+    assert float(r["value"]) == 20000     # fell through to baseline
+    assert r["layer"] != 3
+
+
+def test_pending_ratification_view_lists_layer3_decisions(pg):
+    """fn_pending_ratification should list active Layer 3 decisions awaiting GBM endorsement."""
+    backed_decision(pg, "cash_payment_cheque_threshold", 3, "adopted_with_variation", value=1500,
+                    dt="SET_BOARD_PARAM")
+    # Manually create ratification entry for the latest decision
+    pg.execute("""SELECT id FROM society_rule_decisions WHERE society_id=%s AND rule_key='cash_payment_cheque_threshold' AND layer=3 ORDER BY id DESC LIMIT 1""", (SOC,))
+    did = pg.fetchone()["id"]
+    pg.execute("""INSERT INTO loa_ratification (society_id, decision_id, rule_key, board_layer,
+                                                 decision_effective, ratify_by, created_by)
+                  VALUES (%s, %s, 'cash_payment_cheque_threshold', 3, %s, %s, 1)""",
+               (SOC, did, date.today(), date.today() + timedelta(days=180)))
+    rows = rra._rows("SELECT * FROM fn_pending_ratification(%s)", (SOC,))
+    assert len(rows) > 0
+    assert any(r["rule_key"] == "cash_payment_cheque_threshold" for r in rows)

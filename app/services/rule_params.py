@@ -14,7 +14,7 @@ Who does what (the same split as the clause-level register):
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 
 from app.services import regime_rules_admin as rra
 
@@ -81,14 +81,19 @@ def _resolution_ok(society_id: int, rule_key: str, layer: int, choice: str, reso
 
 # ── reads ─────────────────────────────────────────────────────────────────────
 def effective_rules_for_society(society_id: int, on: date | None = None) -> list[dict]:
-    """Every rule of the society's scheme with its effective value, the layer that supplied it and its status."""
+    """Every rule of the society's scheme with its effective value, the layer that supplied it and its status.
+    Includes ratification status for Layer 3 decisions that need GBM endorsement."""
     return rra._rows("""
         SELECT d.rule_key, d.label, d.instrument, d.provision, d.clause_id, d.nature, d.base_source, d.value_type,
                d.unit, d.layers, d.tighten, d.droppable, d.enforcement, d.feeds, d.verification, d.needs_decision,
                d.implemented, d.choices, d.vary_min, d.vary_max,
                r.value, r.value_text, r.layer, r.status, r.source, r.decision_id, r.ignored,
                (SELECT COUNT(*) FROM society_rule_decisions p
-                 WHERE p.society_id = slr.society_id AND p.rule_key = d.rule_key AND p.status = 'provisional') AS provisional
+                 WHERE p.society_id = slr.society_id AND p.rule_key = d.rule_key AND p.status = 'provisional') AS provisional,
+               COALESCE((SELECT lr.status FROM loa_ratification lr
+                          WHERE lr.decision_id = r.decision_id AND lr.society_id = slr.society_id), 'n/a') AS ratification_status,
+               (SELECT lr.ratify_by FROM loa_ratification lr
+                 WHERE lr.decision_id = r.decision_id AND lr.society_id = slr.society_id) AS ratify_by
           FROM society_legal_regime slr
           JOIN rule_parameter_defs d ON d.regime_code = slr.regime_code
           LEFT JOIN LATERAL fn_rule(slr.society_id, d.rule_key, %s) r ON TRUE
@@ -167,8 +172,34 @@ def save_decision(actor_id, actor_role, society_id: int, rule_key: str, layer: i
          "res": resolution_id, "start": start, "why": why, "uid": actor_id, "role": actor_role})
     if not row:
         return False, "Nothing was saved."
-    state = "provisional until a passed resolution backs it" if status == "provisional" else "active"
+
+    # If this is a Layer 3 decision that became active (backed by a resolution),
+    # create a pending-ratification entry. Bye-law 47(1) requires Board resolutions
+    # to be placed before the next General Body for endorsement.
+    if layer == 3 and status == choice:
+        v_ratify_days = _ratify_deadline_days(society_id, start)
+        # ratify_by = decision_effective + ratify_deadline, but at least today
+        ratify_by_date = max(start + timedelta(days=v_ratify_days), date.today())
+        decision_id = row.get("id") if isinstance(row, dict) else None
+        if decision_id is not None:
+            rra.db._execute("""INSERT INTO loa_ratification (society_id, decision_id, rule_key, board_layer,
+                            decision_effective, ratify_by, created_by)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                            (society_id, decision_id, rule_key, layer, start, ratify_by_date, actor_id))
+        state = "active (pending GBM ratification)"
+    else:
+        state = "provisional until a passed resolution backs it" if status == "provisional" else "active"
     return True, f"{rule_key} (layer {layer}) saved from {start:%d %b %Y} - {state}."
+
+
+def _ratify_deadline_days(society_id: int, effective_from: date) -> int:
+    """How many days a Layer 3 Board decision has for GBM ratification before it auto-expires.
+    Default 180 days (about 6 months — the interval between ordinary AGMs)."""
+    row = rra._row("""SELECT value FROM fn_society_policy(%s, 'ratify_deadline_days', %s)""",
+                   (society_id, effective_from))
+    if row and row["value"] is not None:
+        return int(row["value"])
+    return 180
 
 
 def _latest_provisional(society_id: int, rule_key: str, layer: int) -> dict | None:
@@ -206,6 +237,17 @@ def auto_activate(actor_id, actor_role, society_id: int, resolution_id: int, rul
                            VALUES ('society_rule_decisions', %s, %s, 'confirm_provisional', %s::jsonb, %s::jsonb, %s, %s, %s)""",
                         (society_id, rule_key, json.dumps(_json_safe(dict(prov))), json.dumps(_json_safe(dict(row))),
                          f"Activated automatically by passed resolution #{resolution_id}", actor_id, actor_role))
+
+        # Layer 3 decisions need GBM ratification under bye-law 47(1).
+        if layer == 3:
+            v_ratify_days = _ratify_deadline_days(society_id, start)
+            ratify_by_date = max(start + timedelta(days=v_ratify_days), date.today())
+            rra.db._execute("""INSERT INTO loa_ratification (society_id, decision_id, rule_key, board_layer,
+                                  decision_effective, ratify_by, created_by)
+                                  VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                            (society_id, row["id"], rule_key, layer, start, ratify_by_date, actor_id))
+            notes.append(f"{rule_key} (layer 3) saved — pending GBM ratification by {ratify_by_date:%d %b %Y}.")
+
         notes.append(f"{rule_key} (layer {layer}) is now active as {want.replace('_', ' ')} via resolution #{resolution_id}.")
     return notes
 
