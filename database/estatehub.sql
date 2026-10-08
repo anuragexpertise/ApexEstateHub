@@ -15806,6 +15806,113 @@ BEGIN
 END
 $$;
 
+-- fn_record_admission (bye-law 4 gap fix, 2026-10)
+-- Atomically: upserts owner_admissions, then — if the entrance fee is > 0
+-- and no receivable already exists — inserts a 'pending' receivable so the
+-- amount appears in the flat's ledger balance immediately, without waiting
+-- for a separate pay_admission_fee() call.
+-- Returns: (admission_id INT, receivable_id INT, fee_amount NUMERIC, msg TEXT)
+CREATE OR REPLACE FUNCTION fn_record_admission(
+    p_society_id    INT,
+    p_apartment_id  INT,
+    p_admission_date DATE,
+    p_owner_name    VARCHAR(100),
+    p_fee_paid      BOOLEAN DEFAULT FALSE,
+    p_share_paid    BOOLEAN DEFAULT FALSE,
+    p_created_by    INT     DEFAULT NULL
+)
+RETURNS TABLE (admission_id INT, receivable_id INT, fee_amount NUMERIC, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_fee       NUMERIC;
+    v_face      NUMERIC;
+    v_adm_id    INT;
+    v_rec_id    INT;
+    v_apt_id    INT;
+    v_inc_acc   INT;
+BEGIN
+    -- Resolve regime-driven fee and share face value
+    v_fee  := COALESCE(fn_regime_param_num(p_society_id, 'entrance_fee',   p_admission_date), 0);
+    v_face := COALESCE(fn_regime_param_num(p_society_id, 'share_face_value', p_admission_date), 0);
+
+    -- Upsert the admission record (ON CONFLICT because the table has a unique
+    -- constraint on (society_id, apartment_id) — only one admission record per flat)
+    INSERT INTO owner_admissions
+        (society_id, apartment_id, admission_date, owner_name,
+         entrance_fee, entrance_fee_paid, share_count, share_face_value, share_paid, created_by)
+    VALUES
+        (p_society_id, p_apartment_id, p_admission_date, p_owner_name,
+         v_fee, p_fee_paid, 1, v_face, p_share_paid, p_created_by)
+    ON CONFLICT (society_id, apartment_id) DO UPDATE
+        SET admission_date    = EXCLUDED.admission_date,
+            owner_name        = EXCLUDED.owner_name,
+            entrance_fee      = EXCLUDED.entrance_fee,
+            entrance_fee_paid = EXCLUDED.entrance_fee_paid,
+            share_count       = EXCLUDED.share_count,
+            share_face_value  = EXCLUDED.share_face_value,
+            share_paid        = EXCLUDED.share_paid
+    RETURNING id INTO v_adm_id;
+
+    -- Retrieve the existing receivable_id (if any) from the admission row
+    SELECT receivable_id INTO v_rec_id
+    FROM owner_admissions
+    WHERE id = v_adm_id;
+
+    -- If the fee is > 0 and there is no receivable yet, create one now so that
+    -- the amount appears in the flat's outstanding dues immediately (bye-law 4).
+    IF v_fee > 0 AND v_rec_id IS NULL THEN
+        -- Resolve the income account for entrance fees (tag: ENTRANCE_FEE or fallback to COMMON_PROFITS)
+        SELECT id INTO v_inc_acc FROM accounts
+        WHERE society_id = p_society_id
+          AND (tab_name IN ('ENTRANCE_FEE', 'COMMON_PROFITS') OR name ILIKE '%entrance%fee%')
+          AND active = TRUE
+        ORDER BY CASE WHEN tab_name = 'ENTRANCE_FEE' THEN 0
+                      WHEN tab_name = 'COMMON_PROFITS' THEN 1
+                      ELSE 2 END
+        LIMIT 1;
+
+        IF v_inc_acc IS NOT NULL THEN
+            INSERT INTO receivables
+                (society_id, entity_id, role, description, amount, paid_amount,
+                 balance, due_date, status, charge_kind, source_table, source_id)
+            VALUES
+                (p_society_id, p_apartment_id, 'apartment',
+                 'Entrance fee — bye-law 4 (owner admission: ' || COALESCE(p_owner_name, 'new owner') || ')',
+                 v_fee, CASE WHEN p_fee_paid THEN v_fee ELSE 0 END,
+                 CASE WHEN p_fee_paid THEN 0 ELSE v_fee END,
+                 p_admission_date,
+                 CASE WHEN p_fee_paid THEN 'paid' ELSE 'pending' END,
+                 'other', 'owner_admissions', v_adm_id)
+            RETURNING id INTO v_rec_id;
+
+            -- Link back so fn_entrance_fee_due can find the receivable
+            UPDATE owner_admissions SET receivable_id = v_rec_id WHERE id = v_adm_id;
+
+            -- Accrue to the income account if not already paid
+            IF NOT p_fee_paid THEN
+                PERFORM fn_post_receivable_accrual(
+                    p_society_id, v_rec_id, p_apartment_id, 'apartment', v_inc_acc, v_fee,
+                    'Entrance fee — bye-law 4 (' || COALESCE(p_owner_name, 'new owner') || ')'
+                );
+            END IF;
+        END IF;
+    END IF;
+
+    admission_id  := v_adm_id;
+    receivable_id := v_rec_id;
+    fee_amount    := v_fee;
+    msg := CASE
+        WHEN v_fee = 0 THEN 'Admission recorded (entrance fee is zero for this regime).'
+        WHEN v_rec_id IS NOT NULL AND NOT p_fee_paid THEN
+            format('Admission recorded. Entrance fee ₹%s posted as pending receivable (bye-law 4).', trim_scale(v_fee))
+        WHEN v_rec_id IS NOT NULL AND p_fee_paid THEN
+            format('Admission recorded. Entrance fee ₹%s marked paid (bye-law 4).', trim_scale(v_fee))
+        ELSE 'Admission recorded (income account not configured; receivable not posted).'
+    END;
+    RETURN NEXT;
+END
+$$;
+
 CREATE OR REPLACE FUNCTION fn_share_capital_due(p_society_id INT, p_apartment_id INT)
 RETURNS TABLE (share_count INT, face_value NUMERIC, is_paid BOOLEAN, message TEXT)
 LANGUAGE plpgsql STABLE AS $$
