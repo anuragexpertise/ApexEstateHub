@@ -643,7 +643,7 @@ verified_on = 2026-10-07
 source = """Model Bye-Laws 2011, bye-law 45: investments only in co-operative banks, Trust Act securities, or banks approved by the Competent Authority"""
 
 [[parameter]]
-key = "borrowing_requires_ca_approval"
+key = "borrowing_ca_approval"
 label = "Bye-law 44(d) borrowing needs Competent Authority approval"
 instrument = "UP Model Bye-Laws, 2011"
 provision = "bye-law 44(d)"
@@ -701,3 +701,320 @@ feeds = ["fn_board_election_eligibility"]
 verification = "checked"
 verified_on = 2026-10-07
 source = """Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration (Act s.12(1)(f): percentage for all purposes including voting). Advisory polls may use one-apartment-one-vote."""
+
+[[parameter]]
+key = "depreciation_fund_pct"
+label = "Bye-law 46(d) depreciation fund (% of asset value or fixed amount)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 46(d)"
+clause = "BL_46"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "num"
+unit = "% or INR"
+value = 5
+min = 0
+max = 100
+vary_max = 10
+layers = [2]
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_ensure_depreciation_fund", "fn_appropriate_depreciation_fund"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 46(d): depreciation fund for replacement of assets; rate set by General Body resolution (no statutory rate)"""
+
+[[parameter]]
+key = "depreciation_fund_basis"
+label = "Depreciation fund contribution basis"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 46(d)"
+clause = "BL_46"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "text"
+value_text = "pct_of_asset_value"
+choices = ["pct_of_asset_value", "fixed_amount_per_sqft", "fixed_amount_per_flat"]
+layers = [2]
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_appropriate_depreciation_fund"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 46(d): basis for depreciation fund contribution"""
+
+[[parameter]]
+key = "depreciation_fund_rate"
+label = "Depreciation fund rate (per sq ft or per flat)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 46(d)"
+clause = "BL_46"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "num"
+unit = "INR per sq ft/flat"
+value = 2.0
+min = 0
+max = 1000
+vary_max = 10
+layers = [2]
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_appropriate_depreciation_fund"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 46(d): rate when basis is fixed amount"""
+
+[[parameter]]
+key = "investment_register"
+label = "Bye-law 47 investment register maintained"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 47"
+clause = "BL_47"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2, 3]
+tighten = "higher"
+enforcement = "tracked"
+feeds = ["fn_investment_register_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 47: Board shall maintain a register of all investments"""
+
+[[parameter]]
+key = "affiliation_register"
+label = "Bye-law 48 affiliation register maintained"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 48"
+clause = "BL_48"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2]
+tighten = "none"
+enforcement = "tracked"
+feeds = ["fn_affiliation_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 48: association may affiliate with federation; register maintained"""
+
+[[parameter]]
+key = "accounts_inspection_allowed"
+label = "Bye-law 48 accounts open for member inspection"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 48"
+clause = "BL_48"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2]
+tighten = "higher"
+enforcement = "tracked"
+feeds = ["fn_accounts_inspection_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 48: books of account open to inspection by any member at reasonable times"""
+
+[[parameter]]
+key = "accounts_publication_enabled"
+label = "Bye-law 50 publication of accounts"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 50"
+clause = "BL_50"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2]
+tighten = "none"
+enforcement = "tracked"
+feeds = ["fn_accounts_publication_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 50: annual accounts to be published and circulated to members"""
+
+[[parameter]]
+key = "auditor_appointment_by_gbm"
+label = "Bye-law 51 auditor appointed by General Body"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 51"
+clause = "BL_51"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2]
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_auditor_appointment_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 51: auditor appointed at each Annual General Body Meeting"""
+
+[[parameter]]
+key = "auditor_remuneration_gbm"
+label = "Bye-law 52 auditor remuneration fixed by General Body"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 52"
+clause = "BL_52"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2]
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_auditor_remuneration_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 52: auditor remuneration fixed by General Body Meeting"""
+
+[[parameter]]
+key = "mortgage_notice_required"
+label = "Bye-law 53 mortgage notice to association"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 53"
+clause = "BL_53"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2]
+tighten = "none"
+enforcement = "tracked"
+feeds = ["fn_mortgage_notice_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 53: owner must notify association of any mortgage/charge"""
+
+[[parameter]]
+key = "unpaid_assessments_notice"
+label = "Bye-law 54 notice of unpaid assessments on transfer"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 54"
+clause = "BL_54"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2]
+tighten = "none"
+enforcement = "tracked"
+feeds = ["fn_unpaid_assessments_notice"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 54: association provides statement of unpaid assessments on transfer"""
+
+[[parameter]]
+key = "act_prevails_over_byelaws"
+label = "Bye-law 55 Act prevails over bye-laws"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 55"
+clause = "BL_55"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = []
+tighten = "none"
+enforcement = "hard_wired"
+feeds = ["fn_act_prevails_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 55: UP Apartment Act 2010 prevails over inconsistent bye-laws"""
+description = """UP Apartment Act 2010 provisions prevail over any inconsistent bye-law"""
+
+[[parameter]]
+key = "seal_register_maintained"
+label = "Bye-law 56 common seal register"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 56"
+clause = "BL_56"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2]
+tighten = "none"
+enforcement = "tracked"
+feeds = ["fn_seal_register_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 56: association shall have a common seal and maintain register of its use"""
+
+[[parameter]]
+key = "ca_inspection"
+label = "Bye-law 57 Competent Authority inspection"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 57"
+clause = "BL_57"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2]
+tighten = "none"
+enforcement = "tracked"
+feeds = ["fn_ca_inspection_check"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 57: Competent Authority may inspect association records"""
+
+[[parameter]]
+key = "bye_law_amendment_tracker"
+label = "Bye-law 58 amendment tracking enabled"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 58"
+clause = "BL_58"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = [2]
+tighten = "none"
+enforcement = "tracked"
+feeds = ["fn_bye_law_amendment_log"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 58: track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)"""
+

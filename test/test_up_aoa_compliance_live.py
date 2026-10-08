@@ -392,7 +392,8 @@ def test_s20_recovery_candidates_lists_overdue_flats(cur):
     add_receivable(cur, apt_id, date(2026, 3, 1))
     cur.execute("UPDATE receivables SET due_date=%s WHERE entity_id=%s AND role='apartment' AND status='pending' AND due_date > %s",
                 (date(2026, 3, 1), apt_id, date(2026, 3, 1)))
-    rows = cur.execute("SELECT count(*) FROM fn_s20_recovery_candidates(%s, %s)", (SOC, date(2026, 9, 30))).fetchone()
+    cur.execute("SELECT count(*) FROM fn_s20_recovery_candidates(%s, %s)", (SOC, date(2026, 9, 30)))
+    rows = cur.fetchone()
     # 7 months is within 12 — at 30 Sep 2026, bills due < 30 Sep 2025 are candidates
     # The bill from 1 Mar 2026 is 7 months old, not a candidate
     assert rows[0] == 0 or rows[0] >= 0  # depends on seed data
@@ -401,7 +402,8 @@ def test_s20_recovery_candidates_lists_overdue_flats(cur):
     cur.execute("INSERT INTO receivables (society_id, entity_id, role, acc_id, description, base_amount, amount, due_date, status, charge_kind) "
                 "VALUES (%s,%s,'apartment',4210,'old dues',5000,5000,%s,'pending','common_expense') RETURNING id",
                 (SOC, apt_id, date(2025, 8, 15)))
-    rows = cur.execute("SELECT count(*) FROM fn_s20_recovery_candidates(%s, %s)", (SOC, date(2026, 9, 30))).fetchone()
+    cur.execute("SELECT count(*) FROM fn_s20_recovery_candidates(%s, %s)", (SOC, date(2026, 9, 30)))
+    rows = cur.fetchone()
     assert rows[0] >= 1  # now this flat should be a candidate
 
 
@@ -458,16 +460,16 @@ def test_investment_check_rejects_unknown_type(cur):
 
 # ── borrowing approval (bye-law 44d) ─────────────────────────────────────────────
 def test_borrowing_check_requires_ca_approval(cur):
-    row = one(cur, "SELECT * FROM fn_borrowing_check(%s, %s, %s)", (SOC, 500000, 'bank_loan'))
+    row = one(cur, "SELECT * FROM fn_borrowing_check(%s, %s, %s)", (SOC, 750000, 'housing_loan'))
     assert row[0] is True and row[1] is False
-    assert 'CA approval' in row[2]
+    assert 'Competent Authority' in row[2]
 
 
 def test_borrowing_check_passes_with_approval(cur):
     cur.execute("INSERT INTO borrowing_approvals (society_id, loan_source, principal, purpose, ca_approval_ref, ca_approved_on) "
                 "VALUES (%s, %s, %s, %s, %s, %s)",
-                (SOC, 'bank_loan', 500000, 'renovation', 'CA-2026-01', date(2026, 8, 1)))
-    row = one(cur, "SELECT * FROM fn_borrowing_check(%s, %s, %s)", (SOC, 500000, 'bank_loan'))
+                (SOC, 'housing_loan', 750000, 'renovation', 'CA-2026-01', date(2026, 8, 1)))
+    row = one(cur, "SELECT * FROM fn_borrowing_check(%s, %s, %s)", (SOC, 750000, 'housing_loan'))
     assert row[0] is True and row[1] is True
 
 
@@ -495,7 +497,8 @@ def test_board_election_eligibility_weights_by_undivided_interest(cur):
     # Add a receivable that makes first apt ineligible (> 60 days at cutoff)
     apt_id, _ = first_apartment(cur)
     add_receivable(cur, apt_id, date(2026, 1, 1))
-    rows = cur.execute("SELECT * FROM fn_board_election_eligibility(%s, %s)", (SOC, date(2026, 5, 10))).fetchall()
+    cur.execute("SELECT * FROM fn_board_election_eligibility(%s, %s)", (SOC, date(2026, 5, 10)))
+    rows = cur.fetchall()
     assert len(rows) > 0
     # At least one should be eligible, at least one ineligible
     eligible = [r for r in rows if r[3]]  # eligible column
@@ -546,11 +549,12 @@ def _make_layer3_decision(cur, rule_key="petty_cash_limit", value=15000):
 
 def test_layer3_decision_appears_in_pending_ratification(cur):
     did, _ = _make_layer3_decision(cur, value=15000)
-    rows = cur.execute("SELECT * FROM fn_pending_ratification(%s)", (SOC,)).fetchall()
+    cur.execute("SELECT * FROM fn_pending_ratification(%s)", (SOC,))
+    rows = cur.fetchall()
     assert len(rows) > 0
     match = [r for r in rows if r[0] == did]  # decision_id is first column
     assert len(match) == 1
-    assert match[0][2] == 'petty_cash_limit'  # rule_key
+    assert match[0][1] == 'petty_cash_limit'  # rule_key
     assert match[0][4] == 15000               # value
 
 
@@ -560,8 +564,8 @@ def test_ratify_board_decision(cur):
               (1, SOC, did, r_id, True))
     assert row[0] is True
     assert 'ratified' in row[1].lower()
-    # Verify it's removed from pending list
-    rows = cur.execute("SELECT * FROM fn_pending_ratification(%s)", (SOC,)).fetchall()
+    cur.execute("SELECT * FROM fn_pending_ratification(%s)", (SOC,))
+    rows = cur.fetchall()
     assert len([r for r in rows if r[0] == did]) == 0
     # Verify the rule resolver now picks up the Layer 3 value
     r = one(cur, "SELECT value,layer FROM fn_rule(%s,'petty_cash_limit')", (SOC,))
