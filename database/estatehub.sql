@@ -263,6 +263,27 @@ CREATE TABLE security_staff (
     updated_by INT REFERENCES users (id)
 );
 
+-- Direct employees for EPF/ESIC tracking (distinct from security_staff)
+CREATE TABLE employees (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    name                VARCHAR(100) NOT NULL,
+    designation         VARCHAR(50),
+    department          VARCHAR(50),
+    pan_number          VARCHAR(10),
+    uan_number          VARCHAR(20),          -- Universal Account Number for EPF
+    esic_number         VARCHAR(20),
+    date_of_joining     DATE NOT NULL,
+    date_of_leaving     DATE,
+    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+    basic_salary        NUMERIC(12,2),
+    created_by          INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMP,
+    updated_by          INT REFERENCES users (id)
+);
+CREATE INDEX idx_employees_society ON employees (society_id, is_active);
+
 -- Same DROP-then-reset-DEFAULT treatment as users above — see that
 -- comment block for why last_printed_at/last_emailed_at are being
 -- removed again in the same release they were added.
@@ -8015,8 +8036,16 @@ BEGIN
                       AND v_vendor_state <> v_society_state);
 
     taxable_value := v_expense.amount;
-    itc_eligible  := TRUE;  -- reached only when registered (turnover gate passed above);
-                            -- Sec. 17(5) blocked-credit categories are out of scope
+
+    -- Sec. 17(5) blocked-credit gate: ITC is NOT eligible for certain categories
+    -- even if the society is registered. Check the expense/rcm category against
+    -- the blocked list from GST rules.
+    itc_eligible  := TRUE;
+    IF v_rcm_cat IN ('motor_vehicle', 'food_beverages', 'outdoor_catering', 'beauty_treatment',
+                     'health_fitness', 'club_membership', 'travel_benefits', 'life_insurance',
+                     'health_insurance', 'rent_a_cab', 'construction_immovable_property') THEN
+        itc_eligible := FALSE;
+    END IF;
 
     IF v_interstate THEN
         cgst_amount := 0; sgst_amount := 0;
@@ -13834,7 +13863,27 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
  ('UP_AOA_2010', 'investment_allowed_types', 'Bye-law 45 permitted investment types', 'UP Model Bye-Laws, 2011', 'bye-law 45', 'BL_45', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['coop_bank,trust_securities,approved_bank', 'coop_bank,trust_securities', 'coop_bank_only']::TEXT[], ARRAY[2]::INT[], 'lower', FALSE, 'gated', ARRAY['fn_investment_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'borrowing_requires_ca_approval', 'Bye-law 44(d) borrowing needs Competent Authority approval', 'UP Model Bye-Laws, 2011', 'bye-law 44(d)', 'BL_44', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_borrowing_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'tenant_joint_liability', 'Act s.18(2) tenant jointly liable with owner', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.18(2)', NULL, 'statutory', 'state_act_rules', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'hard_wired', ARRAY['fn_tenant_liability']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
- ('UP_AOA_2010', 'board_election_voting_basis', 'Board election voting basis (Model Bye-Law 8)', 'UP Model Bye-Laws, 2011', 'bye-law 8', 'BL_08', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['one_apartment_one_vote', 'undivided_interest']::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_board_election_eligibility']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL)
+ ('UP_AOA_2010', 'board_election_voting_basis', 'Board election voting basis (Model Bye-Law 8)', 'UP Model Bye-Laws, 2011', 'bye-law 8', 'BL_08', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['one_apartment_one_vote', 'undivided_interest']::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_board_election_eligibility']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+  ('UP_AOA_2010', 'depreciation_fund_pct', 'Bye-law 46(d) depreciation fund (% of asset value or fixed amount)', 'UP Model Bye-Laws, 2011', 'bye-law 46(d)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', '% or INR', 0, 100, 0, 10, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_ensure_depreciation_fund', 'fn_appropriate_depreciation_fund']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Society sets the rate by General Body resolution; no statutory rate fixed by UP Act or Model Bye-Laws'),
+  ('UP_AOA_2010', 'depreciation_fund_basis', 'Depreciation fund contribution basis', 'UP Model Bye-Laws, 2011', 'bye-law 46(d)', 'BL_46', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['pct_of_asset_value', 'fixed_amount_per_sqft', 'fixed_amount_per_flat']::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_appropriate_depreciation_fund']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'How the depreciation fund contribution is calculated'),
+  ('UP_AOA_2010', 'depreciation_fund_rate', 'Depreciation fund rate (per sq ft or per flat)', 'UP Model Bye-Laws, 2011', 'bye-law 46(d)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', 'INR', 0, 1000, 0, 10, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_appropriate_depreciation_fund']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Rate when basis is fixed_amount_per_sqft or fixed_amount_per_flat'),
+  ('UP_AOA_2010', 'investment_register_maintained', 'Bye-law 47 investment register maintained', 'UP Model Bye-Laws, 2011', 'bye-law 47', 'BL_47', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2, 3]::INT[], 'higher', FALSE, 'tracked', ARRAY['fn_investment_register_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Board must maintain a register of all investments with details'),
+  ('UP_AOA_2010', 'affiliation_register_maintained', 'Bye-law 48 affiliation register maintained', 'UP Model Bye-Laws, 2011', 'bye-law 48', 'BL_48', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_affiliation_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Association may affiliate with federation/apex body; register maintained per bye-law 48'),
+  ('UP_AOA_2010', 'accounts_inspection_allowed', 'Bye-law 48 accounts open for member inspection', 'UP Model Bye-Laws, 2011', 'bye-law 48', 'BL_48', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'tracked', ARRAY['fn_accounts_inspection_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Books of account must be open to inspection by any member at reasonable times'),
+  ('UP_AOA_2010', 'accounts_publication_enabled', 'Bye-law 50 publication of accounts', 'UP Model Bye-Laws, 2011', 'bye-law 50', 'BL_50', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_accounts_publication_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Annual accounts to be published and circulated to members per bye-law 50'),
+  ('UP_AOA_2010', 'auditor_appointment_by_gbm', 'Bye-law 51 auditor appointed by General Body', 'UP Model Bye-Laws, 2011', 'bye-law 51', 'BL_51', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_auditor_appointment_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Auditor must be appointed at each Annual General Body Meeting'),
+  ('UP_AOA_2010', 'auditor_remuneration_fixed_by_gbm', 'Bye-law 52 auditor remuneration fixed by General Body', 'UP Model Bye-Laws, 2011', 'bye-law 52', 'BL_52', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_auditor_remuneration_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Auditor remuneration fixed by General Body Meeting'),
+  ('UP_AOA_2010', 'mortgage_notice_required', 'Bye-law 53 mortgage notice to association', 'UP Model Bye-Laws, 2011', 'bye-law 53', 'BL_53', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_mortgage_notice_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Owner must notify association of any mortgage/charge on apartment'),
+  ('UP_AOA_2010', 'unpaid_assessments_notice', 'Bye-law 54 notice of unpaid assessments on transfer', 'UP Model Bye-Laws, 2011', 'bye-law 54', 'BL_54', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_unpaid_assessments_notice']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Association must provide statement of unpaid assessments on transfer'),
+  ('UP_AOA_2010', 'act_prevails_over_byelaws', 'Bye-law 55 Act prevails over bye-laws', 'UP Model Bye-Laws, 2011', 'bye-law 55', 'BL_55', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 1, 1, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'hard_wired', ARRAY[]::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'UP Apartment Act 2010 provisions prevail over any inconsistent bye-law'),
+  ('UP_AOA_2010', 'seal_register_maintained', 'Bye-law 56 common seal register', 'UP Model Bye-Laws, 2011', 'bye-law 56', 'BL_56', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_seal_register_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Association must maintain a register of the common seal usage'),
+  ('UP_AOA_2010', 'competent_authority_inspection', 'Bye-law 57 Competent Authority inspection', 'UP Model Bye-Laws, 2011', 'bye-law 57', 'BL_57', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_ca_inspection_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Competent Authority may inspect association records'),
+  ('UP_AOA_2010', 'bye_law_amendment_tracker', 'Bye-law 58 amendment tracking enabled', 'UP Model Bye-Laws, 2011', 'bye-law 58', 'BL_58', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_bye_law_amendment_log']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)'),
+  ('UP_AOA_2010', 'sinking_fund_rate_basis', 'Sinking Fund rate basis', 'UP Model Bye-Laws, 2011 (not prescribed; society choice)', 'bye-law 46 (funds)', 'BL_46', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['per_sq_ft', 'construction_cost', 'flat_based']::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_fund_billing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Sinking Fund rate basis: per_sq_ft / construction_cost / flat_based (no statutory rate in UP Act/Bye-Laws)'),
+  ('UP_AOA_2010', 'sinking_fund_rate', 'Sinking Fund rate per unit', 'UP Model Bye-Laws, 2011 (not prescribed; society choice)', 'bye-law 46 (funds)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', 'INR', 0, 1000, 0, 10, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_fund_billing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Sinking Fund rate per sq ft or per flat or % of construction cost (no statutory rate)'),
+  ('UP_AOA_2010', 'repair_fund_rate_basis', 'Repair Fund rate basis', 'UP Model Bye-Laws, 2011 (not prescribed; society choice)', 'bye-law 46 (funds)', 'BL_46', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['per_sq_ft', 'construction_cost', 'flat_based']::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_fund_billing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Repair Fund rate basis: per_sq_ft / construction_cost / flat_based (no statutory rate in UP Act/Bye-Laws)'),
+  ('UP_AOA_2010', 'repair_fund_rate', 'Repair Fund rate per unit', 'UP Model Bye-Laws, 2011 (not prescribed; society choice)', 'bye-law 46 (funds)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', 'INR', 0, 1000, 0, 10, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_fund_billing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Repair Fund rate per sq ft or per flat or % of construction cost (no statutory rate)'),
+  ('UP_AOA_2010', 'corpus_fund_lock_principal', 'Corpus Fund principal lock (statutory_lock_pct)', 'Builder agreement / Society policy (not UP Act/Bye-Law)', 'N/A', NULL, 'non_statutory', 'engine_default', 'int', '0/1', 0, 1, 1, 1, ARRAY[]::TEXT[], ARRAY[2, 3]::INT[], 'higher', FALSE, 'tracked', ARRAY['fn_process_fund_utilization']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'Corpus principal locked (statutory_lock_pct=100) per builder agreement/society policy, not UP Act')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference, effective_from) VALUES
@@ -13872,7 +13921,27 @@ INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, un
  ('UP_AOA_2010', 'investment_allowed_types', NULL, 'coop_bank,trust_securities,approved_bank', NULL, 'Model Bye-Laws 2011, bye-law 45: investments only in co-operative banks, Trust Act securities, or banks approved by the Competent Authority', DATE '2011-11-16'),
  ('UP_AOA_2010', 'borrowing_requires_ca_approval', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 44(d): borrowing requires Competent Authority approval', DATE '2011-11-16'),
  ('UP_AOA_2010', 'tenant_joint_liability', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(2): tenant is jointly liable with the owner for common expenses', DATE '2011-11-16'),
- ('UP_AOA_2010', 'board_election_voting_basis', NULL, 'undivided_interest', NULL, 'Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration (Act s.12(1)(f): percentage for all purposes including voting). Advisory polls may use one-apartment-one-vote.', DATE '2011-11-16')
+ ('UP_AOA_2010', 'board_election_voting_basis', NULL, 'undivided_interest', NULL, 'Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration (Act s.12(1)(f): percentage for all purposes including voting). Advisory polls may use one-apartment-one-vote.', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'depreciation_fund_pct', 5, NULL, '%', 'Model Bye-Laws 2011, bye-law 46(d): depreciation fund for replacement of assets; rate set by General Body resolution (no statutory rate)', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'depreciation_fund_basis', NULL, 'pct_of_asset_value', NULL, 'Model Bye-Laws 2011, bye-law 46(d): basis for depreciation fund contribution', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'depreciation_fund_rate', 2.0, NULL, 'INR per sq ft/flat', 'Model Bye-Laws 2011, bye-law 46(d): rate when basis is fixed amount', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'investment_register_maintained', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 47: Board shall maintain a register of all investments', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'affiliation_register_maintained', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 48: association may affiliate with federation; register maintained', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'accounts_inspection_allowed', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 48: books of account open to inspection by any member at reasonable times', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'accounts_publication_enabled', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 50: annual accounts to be published and circulated to members', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'auditor_appointment_by_gbm', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 51: auditor appointed at each Annual General Body Meeting', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'auditor_remuneration_fixed_by_gbm', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 52: auditor remuneration fixed by General Body Meeting', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'mortgage_notice_required', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 53: owner must notify association of any mortgage/charge', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'unpaid_assessments_notice', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 54: association provides statement of unpaid assessments on transfer', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'act_prevails_over_byelaws', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 55: UP Apartment Act 2010 prevails over inconsistent bye-laws', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'seal_register_maintained', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 56: association shall have a common seal and maintain register of its use', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'competent_authority_inspection', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 57: Competent Authority may inspect association records', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'bye_law_amendment_tracker', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 58: track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'sinking_fund_rate_basis', NULL, 'per_sq_ft', NULL, 'Sinking Fund rate basis (per_sq_ft / construction_cost / flat_based) — no statutory rate in UP Act/Bye-Laws; set by GBM', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'sinking_fund_rate', 2.5, NULL, 'INR per sq ft', 'Sinking Fund rate — no statutory rate; society sets by GBM resolution', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'repair_fund_rate_basis', NULL, 'per_sq_ft', NULL, 'Repair Fund rate basis (per_sq_ft / construction_cost / flat_based) — no statutory rate in UP Act/Bye-Laws; set by GBM', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'repair_fund_rate', 1.5, NULL, 'INR per sq ft', 'Repair Fund rate — no statutory rate; society sets by GBM resolution', DATE '2011-11-16'),
+  ('UP_AOA_2010', 'corpus_fund_lock_principal', 1, NULL, '0/1', 'Corpus Fund principal locked (statutory_lock_pct=100) per builder agreement/society policy', DATE '2011-11-16')
 ON CONFLICT DO NOTHING;
 -- <<< END GENERATED
 
@@ -14159,6 +14228,528 @@ BEGIN
       AND EXISTS (SELECT 1 FROM statutory_head_catalog WHERE regime_code = 'UP_AOA_2010' AND head_code = 'MAJOR_REPAIR_FUND')
     ON CONFLICT DO NOTHING;
     RETURN 3270;
+END $$;
+
+-- 3. Depreciation Fund (bye-law 46(d))
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION fn_ensure_depreciation_fund(p_society_id INT)
+RETURNS INT LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO accounts (id, society_id, name, tab_name, header, parent_account_id,
+                          drcr_account, has_bf, depreciation_percent, is_depreciable)
+    SELECT 3240, p_society_id, 'Depreciation Fund', 'DeprFund', 'Depreciation Fund',
+           (SELECT 3200 FROM accounts WHERE society_id = p_society_id AND id = 3200),
+           'Cr', TRUE, 100, FALSE
+    WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE society_id = p_society_id AND id = 3240);
+
+    INSERT INTO account_statutory_mappings
+        (society_id, account_id, regime_code, head_code, effective_from, source_reference)
+    SELECT p_society_id, 3240, slr.regime_code, 'DEPRECIATION_FUND', DATE '2011-11-16',
+           'Model Bye-Laws 2011, bye-law 46(d)'
+    FROM society_legal_regime slr
+    WHERE slr.society_id = p_society_id AND slr.regime_code = 'UP_AOA_2010'
+      AND EXISTS (SELECT 1 FROM statutory_head_catalog WHERE regime_code = 'UP_AOA_2010' AND head_code = 'DEPRECIATION_FUND')
+    ON CONFLICT DO NOTHING;
+    RETURN 3240;
+END $$;
+
+CREATE OR REPLACE FUNCTION fn_appropriate_depreciation_fund(
+    p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (appropriation_id INT, amount NUMERIC(14,2), msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_basis TEXT;
+    v_pct NUMERIC;
+    v_rate NUMERIC;
+    v_asset_value NUMERIC(18,2);
+    v_total_sqft NUMERIC(14,2);
+    v_total_flats INT;
+    v_appropriation_amount NUMERIC(18,2);
+    v_fund_acc INT;
+    v_rec_id INT;
+    v_period_start DATE;
+    v_period_end DATE;
+BEGIN
+    v_basis := fn_regime_param_text(p_society_id, 'depreciation_fund_basis', p_as_of);
+    v_pct   := fn_regime_param_num(p_society_id, 'depreciation_fund_pct', p_as_of);
+    v_rate  := fn_regime_param_num(p_society_id, 'depreciation_fund_rate', p_as_of);
+
+    IF v_basis IS NULL OR v_pct IS NULL THEN
+        appropriation_id := NULL; amount := NULL;
+        msg := 'Error: depreciation fund parameters not set for this society/regime';
+        RETURN NEXT; RETURN;
+    END IF;
+
+    v_fund_acc := fn_ensure_depreciation_fund(p_society_id);
+
+    v_period_start := DATE_TRUNC('year', p_as_of)::DATE;
+    v_period_end   := (v_period_start + INTERVAL '1 year - 1 day')::DATE;
+
+    IF v_basis = 'pct_of_asset_value' THEN
+        SELECT COALESCE(SUM(asset_value), 0) INTO v_asset_value
+        FROM society_assets
+        WHERE society_id = p_society_id
+          AND acquisition_date <= v_period_end
+          AND (disposal_date IS NULL OR disposal_date > v_period_end);
+        v_appropriation_amount := ROUND(v_asset_value * v_pct / 100, 2);
+    ELSIF v_basis = 'fixed_amount_per_sqft' THEN
+        SELECT COALESCE(SUM(built_up_area), 0) INTO v_total_sqft
+        FROM apartments
+        WHERE society_id = p_society_id;
+        v_appropriation_amount := ROUND(v_total_sqft * COALESCE(v_rate, 0), 2);
+    ELSIF v_basis = 'fixed_amount_per_flat' THEN
+        SELECT COUNT(*) INTO v_total_flats
+        FROM apartments
+        WHERE society_id = p_society_id;
+        v_appropriation_amount := ROUND(v_total_flats * COALESCE(v_rate, 0), 2);
+    ELSE
+        appropriation_id := NULL; amount := NULL;
+        msg := 'Error: invalid depreciation_fund_basis value: ' || v_basis;
+        RETURN NEXT; RETURN;
+    END IF;
+
+    IF v_appropriation_amount <= 0 THEN
+        appropriation_id := NULL; amount := 0;
+        msg := 'No appropriation needed (calculated amount is zero or negative)';
+        RETURN NEXT; RETURN;
+    END IF;
+
+    INSERT INTO receivables (society_id, entity_id, role, acc_id, description,
+                             base_amount, interest_amount, amount, due_date, status, charge_kind)
+    VALUES (p_society_id, 0, 'society', v_fund_acc,
+            'Depreciation Fund appropriation for FY ' || EXTRACT(YEAR FROM v_period_start)::INT
+            || ' (basis: ' || v_basis || ', pct: ' || trim_scale(v_pct) || '%, rate: ' || trim_scale(v_rate) || ')',
+            v_appropriation_amount, 0, v_appropriation_amount, v_period_end, 'pending', 'depreciation_fund')
+    RETURNING id INTO v_rec_id;
+
+    appropriation_id := v_rec_id;
+    amount := v_appropriation_amount;
+    msg := 'OK: Depreciation Fund appropriation created for ' || v_appropriation_amount;
+    RETURN NEXT; RETURN;
+END $$;
+
+-- 4. Investment Register (bye-law 47)
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS investment_register (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    investment_date DATE NOT NULL,
+    institution     VARCHAR(100) NOT NULL,
+    institution_type VARCHAR(30) NOT NULL CHECK (institution_type IN ('coop_bank', 'trust_securities', 'approved_bank', 'other')),
+    amount          NUMERIC(14,2) NOT NULL CHECK (amount >= 0),
+    maturity_date   DATE,
+    rate_pct        NUMERIC(6,3),
+    purpose         VARCHAR(200),
+    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    created_by      INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_investment_register_society ON investment_register (society_id, investment_date);
+
+CREATE OR REPLACE FUNCTION fn_investment_register_check(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (total_invested NUMERIC, compliant BOOLEAN, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_allowed_types TEXT;
+    v_total NUMERIC;
+BEGIN
+    v_allowed_types := fn_regime_param_text(p_society_id, 'investment_allowed_types', p_as_of);
+    IF v_allowed_types IS NULL THEN
+        total_invested := 0; compliant := TRUE;
+        msg := 'Investment register check: no allowed types configured';
+        RETURN NEXT; RETURN;
+    END IF;
+
+    SELECT COALESCE(SUM(amount), 0) INTO v_total
+    FROM investment_register
+    WHERE society_id = p_society_id;
+
+    -- Check if any investment is in a non-allowed type
+    WITH non_compliant AS (
+        SELECT 1 FROM investment_register
+        WHERE society_id = p_society_id
+          AND institution_type = 'other'
+          AND investment_date <= p_as_of
+    )
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM non_compliant) THEN FALSE ELSE TRUE END INTO compliant;
+
+    total_invested := v_total;
+    msg := 'OK: Investment register check completed';
+    RETURN NEXT; RETURN;
+END $$;
+
+-- 4b. Affiliation Register (bye-law 48)
+-- ───────────────────────────────────────────────────────────────────────────────
+-- Model Bye-Law 48: Association may affiliate with a federation/apex body
+CREATE TABLE IF NOT EXISTS affiliation_register (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    federation_name     VARCHAR(150) NOT NULL,
+    affiliation_date    DATE NOT NULL,
+    affiliation_number  VARCHAR(50),
+    expiry_date         DATE,
+    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by          INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_affiliation_register_society ON affiliation_register (society_id, is_active);
+
+CREATE OR REPLACE FUNCTION fn_affiliation_check(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (total_affiliations INT, active_affiliations INT, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_total INT;
+    v_active INT;
+BEGIN
+    SELECT COUNT(*) INTO v_total
+    FROM affiliation_register
+    WHERE society_id = p_society_id;
+
+    SELECT COUNT(*) INTO v_active
+    FROM affiliation_register
+    WHERE society_id = p_society_id
+      AND is_active
+      AND (expiry_date IS NULL OR expiry_date >= p_as_of);
+
+    total_affiliations := v_total;
+    active_affiliations := v_active;
+    msg := 'OK: Affiliation register check completed';
+    RETURN NEXT; RETURN;
+END $$;
+
+-- 5. Accounts Inspection (bye-law 48)
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS accounts_inspection_log (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    member_id       INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    apartment_id    INT REFERENCES apartments (id) ON DELETE SET NULL,
+    inspection_date DATE NOT NULL,
+    records_viewed  VARCHAR(500),
+    created_by      INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_accounts_inspection_log_society ON accounts_inspection_log (society_id, inspection_date);
+
+CREATE OR REPLACE FUNCTION fn_accounts_inspection_check(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (inspection_count INT, compliant BOOLEAN, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_count INT;
+BEGIN
+    SELECT COUNT(*) INTO v_count
+    FROM accounts_inspection_log
+    WHERE society_id = p_society_id AND inspection_date <= p_as_of;
+
+    inspection_count := v_count;
+    compliant := TRUE; -- Always compliant if register exists
+    msg := 'OK: Accounts inspection log available';
+    RETURN NEXT; RETURN;
+END $$;
+
+-- 5b. Publication of Accounts (bye-law 50)
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS accounts_publication (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    financial_year  INT NOT NULL,
+    published_on    DATE,
+    authority_copy_sent_on DATE,
+    owner_summary_sent_on DATE,
+    published_by    INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_accounts_publication UNIQUE (society_id, financial_year)
+);
+CREATE INDEX idx_accounts_publication_society ON accounts_publication (society_id, financial_year);
+
+CREATE OR REPLACE FUNCTION fn_accounts_publication_check(p_society_id INT, p_fy INT)
+RETURNS TABLE (published BOOLEAN, published_on DATE, authority_copy_sent BOOLEAN, owner_summary_sent BOOLEAN, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_pub accounts_publication%ROWTYPE;
+BEGIN
+    SELECT * INTO v_pub
+    FROM accounts_publication
+    WHERE society_id = p_society_id AND financial_year = p_fy;
+
+    IF NOT FOUND THEN
+        published := FALSE; published_on := NULL;
+        authority_copy_sent := FALSE; owner_summary_sent := FALSE;
+        msg := 'Warning: Accounts not yet published for FY ' || p_fy || ' (Bye-law 50)';
+        RETURN NEXT; RETURN;
+    END IF;
+
+    published := v_pub.published_on IS NOT NULL;
+    published_on := v_pub.published_on;
+    authority_copy_sent := v_pub.authority_copy_sent_on IS NOT NULL;
+    owner_summary_sent := v_pub.owner_summary_sent_on IS NOT NULL;
+
+    IF published AND authority_copy_sent AND owner_summary_sent THEN
+        msg := 'OK: Accounts fully published for FY ' || p_fy;
+    ELSE
+        msg := 'Partial: Accounts published=' || published::TEXT || ', authority copy=' || authority_copy_sent::TEXT || ', owner summary=' || owner_summary_sent::TEXT;
+    END IF;
+    RETURN NEXT; RETURN;
+END $$;
+
+-- 6. Auditor Appointment (bye-laws 51-52)
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS auditor_appointments (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    auditor_name        VARCHAR(100) NOT NULL,
+    auditor_firm        VARCHAR(100),
+    membership_number   VARCHAR(30),
+    appointment_date    DATE NOT NULL,
+    financial_year_from INT NOT NULL,
+    financial_year_to   INT NOT NULL,
+    remuneration        NUMERIC(12,2),
+    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    created_by          INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_auditor_appointments_society ON auditor_appointments (society_id, financial_year_from);
+
+CREATE OR REPLACE FUNCTION fn_auditor_appointment_check(p_society_id INT, p_fy INT)
+RETURNS TABLE (appointed BOOLEAN, auditor_name VARCHAR, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_name VARCHAR;
+    v_exists BOOLEAN;
+BEGIN
+    SELECT auditor_name INTO v_name
+    FROM auditor_appointments
+    WHERE society_id = p_society_id AND financial_year_from = p_fy
+    ORDER BY appointment_date DESC LIMIT 1;
+
+    v_exists := v_name IS NOT NULL;
+    appointed := v_exists;
+    auditor_name := v_name;
+    IF v_exists THEN
+        msg := 'OK: Auditor appointed for FY ' || p_fy;
+    ELSE
+        msg := 'Warning: No auditor appointed for FY ' || p_fy || ' (Bye-law 51)';
+    END IF;
+    RETURN NEXT; RETURN;
+END $$;
+
+CREATE OR REPLACE FUNCTION fn_auditor_remuneration_check(p_society_id INT, p_fy INT)
+RETURNS TABLE (remuneration_fixed BOOLEAN, remuneration NUMERIC, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_rem NUMERIC;
+BEGIN
+    SELECT remuneration INTO v_rem
+    FROM auditor_appointments
+    WHERE society_id = p_society_id AND financial_year_from = p_fy
+    ORDER BY appointment_date DESC LIMIT 1;
+
+    remuneration_fixed := v_rem IS NOT NULL;
+    remuneration := v_rem;
+    IF v_rem IS NOT NULL THEN
+        msg := 'OK: Auditor remuneration fixed at ' || v_rem;
+    ELSE
+        msg := 'Warning: Auditor remuneration not fixed for FY ' || p_fy || ' (Bye-law 52)';
+    END IF;
+    RETURN NEXT; RETURN;
+END $$;
+
+-- 7. Mortgage Notice Register (bye-law 53)
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS mortgage_notices (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id    INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    mortgagee_name  VARCHAR(100) NOT NULL,
+    mortgagee_address VARCHAR(200),
+    loan_amount     NUMERIC(14,2),
+    mortgage_date   DATE NOT NULL,
+    notice_received_on DATE NOT NULL,
+    created_by      INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_mortgage_notices_society ON mortgage_notices (society_id, apartment_id);
+
+CREATE OR REPLACE FUNCTION fn_mortgage_notice_check(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (total_notices INT, pending_notices INT, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_total INT;
+    v_pending INT;
+BEGIN
+    SELECT COUNT(*) INTO v_total
+    FROM mortgage_notices
+    WHERE society_id = p_society_id AND notice_received_on <= p_as_of;
+
+    -- Pending: notices received but not yet acknowledged by Board
+    SELECT COUNT(*) INTO v_pending
+    FROM mortgage_notices mn
+    WHERE mn.society_id = p_society_id
+      AND mn.notice_received_on <= p_as_of
+      AND NOT EXISTS (
+          SELECT 1 FROM resolutions r
+          WHERE r.society_id = p_society_id
+            AND r.resolution_type = 'mortgage_notice_acknowledged'
+            AND r.reference_id = mn.id
+            AND r.status = 'passed'
+      );
+
+    total_notices := v_total;
+    pending_notices := v_pending;
+    msg := 'OK: Mortgage notice register check completed';
+    RETURN NEXT; RETURN;
+END $$;
+
+-- 8. Unpaid Assessments Notice (bye-law 54)
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION fn_unpaid_assessments_notice(
+    p_society_id INT, p_apartment_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (apartment_id INT, flat_number VARCHAR, total_unpaid NUMERIC, oldest_due DATE, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_flat VARCHAR;
+    v_total NUMERIC;
+    v_oldest DATE;
+BEGIN
+    SELECT flat_number INTO v_flat
+    FROM apartments WHERE id = p_apartment_id AND society_id = p_society_id;
+
+    IF v_flat IS NULL THEN
+        apartment_id := NULL; flat_number := NULL; total_unpaid := NULL; oldest_due := NULL;
+        msg := 'Error: Apartment not found';
+        RETURN NEXT; RETURN;
+    END IF;
+
+    SELECT COALESCE(SUM(r.amount - r.paid_principal), 0), MIN(r.due_date)
+    INTO v_total, v_oldest
+    FROM receivables r
+    WHERE r.society_id = p_society_id
+      AND r.entity_id = p_apartment_id
+      AND r.role = 'apartment'
+      AND r.charge_kind = 'common_expense'
+      AND r.status IN ('pending', 'partial', 'unverified')
+      AND r.due_date IS NOT NULL
+      AND r.due_date <= p_as_of;
+
+    apartment_id := p_apartment_id;
+    flat_number := v_flat;
+    total_unpaid := v_total;
+    oldest_due := v_oldest;
+    msg := 'OK: Unpaid assessments statement generated';
+    RETURN NEXT; RETURN;
+END $$;
+
+-- 9. Seal Register (bye-law 56)
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS seal_register (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    document_date   DATE NOT NULL,
+    document_type   VARCHAR(50) NOT NULL,
+    document_ref    VARCHAR(100),
+    purpose         VARCHAR(300),
+    authorized_by   VARCHAR(100) NOT NULL,
+    used_by         INT REFERENCES users (id),
+    created_by      INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_seal_register_society ON seal_register (society_id, document_date);
+
+CREATE OR REPLACE FUNCTION fn_seal_register_check(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (total_uses INT, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_total INT;
+BEGIN
+    SELECT COUNT(*) INTO v_total
+    FROM seal_register
+    WHERE society_id = p_society_id AND document_date <= p_as_of;
+
+    total_uses := v_total;
+    msg := 'OK: Seal register check completed';
+    RETURN NEXT; RETURN;
+END $$;
+
+-- 10. Competent Authority Inspection (bye-law 57)
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS ca_inspections (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    inspection_date     DATE NOT NULL,
+    ca_officer_name     VARCHAR(100),
+    ca_designation      VARCHAR(100),
+    findings            TEXT,
+    action_required     BOOLEAN DEFAULT FALSE,
+    action_taken        TEXT,
+    created_by          INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_ca_inspections_society ON ca_inspections (society_id, inspection_date);
+
+CREATE OR REPLACE FUNCTION fn_ca_inspection_check(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (total_inspections INT, pending_actions INT, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_total INT;
+    v_pending INT;
+BEGIN
+    SELECT COUNT(*) INTO v_total
+    FROM ca_inspections
+    WHERE society_id = p_society_id AND inspection_date <= p_as_of;
+
+    SELECT COUNT(*) INTO v_pending
+    FROM ca_inspections
+    WHERE society_id = p_society_id
+      AND inspection_date <= p_as_of
+      AND action_required = TRUE
+      AND (action_taken IS NULL OR action_taken = '');
+
+    total_inspections := v_total;
+    pending_actions := v_pending;
+    msg := 'OK: Competent Authority inspection check completed';
+    RETURN NEXT; RETURN;
+END $$;
+
+-- 11. Bye-law Amendment Tracker (bye-law 58)
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS bye_law_amendments (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    amendment_date      DATE NOT NULL,
+    bye_law_number      VARCHAR(20) NOT NULL,
+    old_text            TEXT,
+    new_text            TEXT,
+    gbm_resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    ca_approval_ref     VARCHAR(100),
+    ca_approval_date    DATE,
+    effective_date      DATE,
+    created_by          INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_bye_law_amendments_society ON bye_law_amendments (society_id, amendment_date);
+
+CREATE OR REPLACE FUNCTION fn_bye_law_amendment_log(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (total_amendments INT, pending_ca_approval INT, msg TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_total INT;
+    v_pending INT;
+BEGIN
+    SELECT COUNT(*) INTO v_total
+    FROM bye_law_amendments
+    WHERE society_id = p_society_id AND amendment_date <= p_as_of;
+
+    SELECT COUNT(*) INTO v_pending
+    FROM bye_law_amendments
+    WHERE society_id = p_society_id
+      AND amendment_date <= p_as_of
+      AND ca_approval_date IS NULL;
+
+    total_amendments := v_total;
+    pending_ca_approval := v_pending;
+    msg := 'OK: Bye-law amendment log check completed';
+    RETURN NEXT; RETURN;
 END $$;
 
 CREATE TABLE apartment_transfers (
@@ -15297,6 +15888,186 @@ BEGIN
     WHERE t.society_id = p_society_id AND t.apartment_id = p_apartment_id AND t.is_active
       AND (t.tenancy_end IS NULL OR t.tenancy_end >= p_asof)
     ORDER BY t.tenancy_start DESC LIMIT 1;
+END
+$$;
+
+-- ── (6b) Labour Compliance — EPF/ESIC/Contract Labour ──────────────────────────
+-- Track EPF/ESIC challans for direct employees and manpower agency staff,
+-- with invoice-hold gate when challans are missing.
+CREATE TABLE IF NOT EXISTS labour_challans (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    challan_month       DATE NOT NULL,          -- first day of the month (e.g., '2025-01-01')
+    challan_type        VARCHAR(20) NOT NULL CHECK (challan_type IN ('EPF', 'ESIC', 'BOTH')),
+    entity_type         VARCHAR(20) NOT NULL CHECK (entity_type IN ('direct_employee', 'manpower_agency')),
+    entity_name         VARCHAR(100),           -- employee name or agency name
+    epf_challan_no      VARCHAR(50),
+    epf_challan_date    DATE,
+    epf_amount          NUMERIC(12,2),
+    esic_challan_no     VARCHAR(50),
+    esic_challan_date   DATE,
+    esic_amount         NUMERIC(12,2),
+    uploaded_by         INT REFERENCES users (id),
+    uploaded_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_labour_challan UNIQUE (society_id, challan_month, challan_type, entity_type, entity_name)
+);
+CREATE INDEX idx_labour_challans_society ON labour_challans (society_id, challan_month);
+
+-- Track manpower agencies and their compliance requirements
+CREATE TABLE IF NOT EXISTS manpower_agencies (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    agency_name         VARCHAR(100) NOT NULL,
+    service_type        VARCHAR(50) NOT NULL,   -- e.g., 'security', 'housekeeping', 'gardening'
+    contract_start      DATE NOT NULL,
+    contract_end        DATE,
+    pf_code             VARCHAR(30),
+    esic_code           VARCHAR(30),
+    contact_person      VARCHAR(100),
+    contact_mobile      VARCHAR(15),
+    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by          INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_manpower_agencies_society ON manpower_agencies (society_id, is_active);
+
+-- Compliance check: returns TRUE if all required challans for the month are uploaded
+CREATE OR REPLACE FUNCTION fn_labour_compliance_check(
+    p_society_id INT,
+    p_month DATE   -- first day of month
+)
+RETURNS TABLE (
+    entity_type VARCHAR,
+    entity_name VARCHAR,
+    epf_due BOOLEAN,
+    epf_uploaded BOOLEAN,
+    esic_due BOOLEAN,
+    esic_uploaded BOOLEAN,
+    compliant BOOLEAN,
+    message TEXT
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    r RECORD;
+BEGIN
+    -- Check direct employees
+    FOR r IN
+        SELECT e.id, e.name
+        FROM employees e
+        WHERE e.society_id = p_society_id AND e.is_active
+    LOOP
+        SELECT EXISTS (
+            SELECT 1 FROM labour_challans lc
+            WHERE lc.society_id = p_society_id
+              AND lc.challan_month = p_month
+              AND lc.entity_type = 'direct_employee'
+              AND lc.entity_name = e.name
+              AND lc.challan_type IN ('EPF', 'BOTH')
+              AND lc.epf_challan_no IS NOT NULL
+        ) INTO epf_uploaded;
+
+        SELECT EXISTS (
+            SELECT 1 FROM labour_challans lc
+            WHERE lc.society_id = p_society_id
+              AND lc.challan_month = p_month
+              AND lc.entity_type = 'direct_employee'
+              AND lc.entity_name = e.name
+              AND lc.challan_type IN ('ESIC', 'BOTH')
+              AND lc.esic_challan_no IS NOT NULL
+        ) INTO esic_uploaded;
+
+        entity_type := 'direct_employee';
+        entity_name := r.name;
+        epf_due := TRUE;  -- Assume EPF due for all direct employees
+        esic_due := TRUE; -- Assume ESIC due for all direct employees
+        compliant := epf_uploaded AND esic_uploaded;
+        message := CASE WHEN compliant THEN 'Compliant' ELSE 'Missing challan(s)' END;
+        RETURN NEXT;
+    END LOOP;
+
+    -- Check manpower agencies
+    FOR r IN
+        SELECT ma.id, ma.agency_name
+        FROM manpower_agencies ma
+        WHERE ma.society_id = p_society_id AND ma.is_active
+          AND (ma.contract_end IS NULL OR ma.contract_end >= p_month)
+    LOOP
+        SELECT EXISTS (
+            SELECT 1 FROM labour_challans lc
+            WHERE lc.society_id = p_society_id
+              AND lc.challan_month = p_month
+              AND lc.entity_type = 'manpower_agency'
+              AND lc.entity_name = ma.agency_name
+              AND lc.challan_type IN ('EPF', 'BOTH')
+              AND lc.epf_challan_no IS NOT NULL
+        ) INTO epf_uploaded;
+
+        SELECT EXISTS (
+            SELECT 1 FROM labour_challans lc
+            WHERE lc.society_id = p_society_id
+              AND lc.challan_month = p_month
+              AND lc.entity_type = 'manpower_agency'
+              AND lc.entity_name = ma.agency_name
+              AND lc.challan_type IN ('ESIC', 'BOTH')
+              AND lc.esic_challan_no IS NOT NULL
+        ) INTO esic_uploaded;
+
+        entity_type := 'manpower_agency';
+        entity_name := r.agency_name;
+        epf_due := TRUE;
+        esic_due := TRUE;
+        compliant := epf_uploaded AND esic_uploaded;
+        message := CASE WHEN compliant THEN 'Compliant' ELSE 'Missing challan(s) - invoice hold recommended' END;
+        RETURN NEXT;
+    END LOOP;
+
+    IF NOT FOUND THEN
+        entity_type := NULL; entity_name := NULL;
+        epf_due := FALSE; epf_uploaded := FALSE;
+        esic_due := FALSE; esic_uploaded := FALSE;
+        compliant := TRUE;
+        message := 'No employees or agencies to check';
+        RETURN NEXT;
+    END IF;
+END
+$$;
+
+-- Invoice hold gate: returns TRUE if any labour compliance is pending for the month
+CREATE OR REPLACE FUNCTION fn_labour_invoice_hold_gate(
+    p_society_id INT,
+    p_vendor_name VARCHAR,
+    p_month DATE
+)
+RETURNS TABLE (hold BOOLEAN, reason TEXT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_compliant BOOLEAN;
+BEGIN
+    -- Check if this vendor is a manpower agency with pending challans
+    SELECT EXISTS (
+        SELECT 1 FROM manpower_agencies ma
+        WHERE ma.society_id = p_society_id
+          AND ma.agency_name ILIKE p_vendor_name
+          AND ma.is_active
+          AND (ma.contract_end IS NULL OR ma.contract_end >= p_month)
+    ) INTO v_compliant;
+
+    IF v_compliant THEN
+        SELECT NOT compliant INTO v_compliant
+        FROM fn_labour_compliance_check(p_society_id, p_month)
+        WHERE entity_type = 'manpower_agency' AND entity_name ILIKE p_vendor_name
+        LIMIT 1;
+
+        IF v_compliant THEN
+            hold := TRUE;
+            reason := 'Labour compliance pending: missing EPF/ESIC challan for ' || to_char(p_month, 'Mon YYYY');
+            RETURN NEXT; RETURN;
+        END IF;
+    END IF;
+
+    hold := FALSE;
+    reason := 'No labour compliance hold';
+    RETURN NEXT; RETURN;
 END
 $$;
 

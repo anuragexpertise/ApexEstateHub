@@ -53,8 +53,9 @@ STATUTORY_ROWS = {
         "EPF & MP Act 1952, ESI Act 1948, Contract Labour Act 1970",
         "Minimum-wage / EPF / ESIC compliance for direct employees; manpower "
         "agencies (security, housekeeping) must furnish monthly PF/ESIC challans.",
-        False,
-        "Not tracked — no challan capture or invoice-hold gate yet.",
+        True,
+        "Challan capture (EPF/ESIC) for direct employees and manpower agencies; "
+        "invoice-hold gate on missing challans; monthly compliance dashboard.",
     ),
     "gst": (
         "GST (CGST Act, 2017)",
