@@ -283,26 +283,19 @@ def record_admission(society_id: int, user_id: int, apartment_id: int, admission
     if not _owns("apartments", apartment_id, society_id):
         return False, "Choose a flat."
 
-    fee = db._execute("SELECT fn_regime_param_num(%s, 'entrance_fee', %s) AS v", (society_id, d), fetch_one=True)
-    face = db._execute("SELECT fn_regime_param_num(%s, 'share_face_value', %s) AS v", (society_id, d), fetch_one=True)
-    fee_val = float(fee["v"]) if fee and fee.get("v") is not None else 0
-    face_val = float(face["v"]) if face and face.get("v") is not None else 0
-
-    db._execute(
-        """INSERT INTO owner_admissions (society_id, apartment_id, admission_date, owner_name,
-           entrance_fee, entrance_fee_paid, share_count, share_face_value, share_paid, created_by)
-           VALUES (%s, %s, %s, %s, %s, %s, 1, %s, %s, %s)
-           ON CONFLICT (society_id, apartment_id) DO UPDATE SET
-           admission_date = EXCLUDED.admission_date,
-           owner_name = EXCLUDED.owner_name,
-           entrance_fee = EXCLUDED.entrance_fee,
-           entrance_fee_paid = EXCLUDED.entrance_fee_paid,
-           share_count = EXCLUDED.share_count,
-           share_face_value = EXCLUDED.share_face_value,
-           share_paid = EXCLUDED.share_paid""",
+    # Byelaws 4/5 enforcement: go through fn_record_admission so the entrance fee is
+    # not merely SWITCHED OFF in a register row — when unpaid it creates the actual
+    # pending receivable and its Sundry Debtors / income accrual (bye-law 4), the
+    # same posting path every other charge uses. The old inline upsert left the fee
+    # as a number on a table row with nothing in the dues ledger behind it.
+    row = db._execute(
+        "SELECT * FROM fn_record_admission(%s, %s, %s, %s, %s, %s, %s)",
         (society_id, int(apartment_id), d, (owner_name or "").strip() or None,
-         fee_val, entrance_fee_paid, face_val, share_paid, user_id))
-    return True, f"Admission recorded for {owner_name or 'the owner'}."
+         bool(entrance_fee_paid), bool(share_paid), user_id), fetch_one=True) or {}
+    msg = str(row.get("msg") or "")
+    if not row.get("admission_id"):
+        return False, msg.replace("Error: ", "") or "Could not record the admission."
+    return True, msg or f"Admission recorded for {owner_name or 'the owner'}." 
 
 
 def pay_admission_fee(society_id: int, user_id: int, apartment_id: int,
@@ -360,34 +353,64 @@ def record_investment(society_id: int, user_id: int, institution_type: str, amou
     return True, f"Investment of ₹{p:,.2f} in {institution_type} recorded."
 
 
-# ── borrowing (bye-law 44(d)) ──────────────────────────────────────────────────────
 def record_borrowing(society_id: int, user_id: int, principal: float, loan_source: str, purpose: str,
-                     resolution_id: int | None = None):
-    """Record a borrowing; flagged if it needs CA approval."""
+                     resolution_id: int | None = None, ca_approval_ref: str | None = None,
+                     ca_approved_on: str | None = None):
+    """Record a borrowing under bye-law 44(d).
+
+    The Competent Authority approval gate is enforced here, not just reported:
+      * If the regime requires CA approval and no approved borrowing_approvals row
+        exists (ca_approval_ref + ca_approved_on populated), the call returns
+        False and does NOT insert anything.
+      * Approval is recorded through the resolution that authorised the borrowing
+        plus the CA reference and CA approval date. A borrowing is not "approved"
+        just because one exists with the same principal and source — fn_borrowing_check
+        matches principal + source, so the genuine approval (resolution + CA ref +
+        CA date) is the row the check will find.
+      * On success the function also confirms the approval row exists so the next
+        bill run / reporting can treat this borrowing as lawful under bye-law 44(d).
+    """
     p = _num(principal)
     if not p or p <= 0:
         return False, "Enter a positive borrowing amount."
-    chk = db._execute("SELECT * FROM fn_borrowing_check(%s, %s, %s)", (society_id, p, loan_source or ""), fetch_one=True) or {}
-    if not chk.get("has_approval") and chk.get("needs_approval"):
-        # Record it anyway with compliance_flags so the Board can follow up
-        db._execute(
-            """INSERT INTO borrowing_approvals (society_id, loan_source, principal, purpose, resolution_id, created_by)
-               VALUES (%s, %s, %s, %s, %s, %s)
-               ON CONFLICT (society_id, loan_source, principal) DO UPDATE SET purpose = EXCLUDED.purpose""",
-            (society_id, loan_source or "", p, (purpose or "").strip() or None, resolution_id, user_id))
-        db._execute(
-            """INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
-               SELECT %s, 'BORROWING_CA_APPROVAL', 'borrowing_approvals',
-                      (SELECT id FROM borrowing_approvals WHERE society_id=%s AND loan_source=%s AND principal=%s),
-                      format('Borrowing of ₹%s needs Competent Authority approval', %s)
-               ON CONFLICT (source_table, source_id, rule_code) DO NOTHING""",
-            (society_id, society_id, loan_source or "", p, p))
-        return False, (chk.get("message") or "Needs CA approval") + ". Recorded for follow-up."
-    db._execute(
-        "INSERT INTO borrowing_approvals (society_id, loan_source, principal, purpose, resolution_id, created_by) VALUES (%s, %s, %s, %s, %s, %s)",
-        (society_id, loan_source or "", p, (purpose or "").strip() or None, resolution_id, user_id))
-    return True, f"Borrowing of ₹{p:,.2f} recorded."
+    src = (loan_source or "").strip() or None
+    chk = db._execute("SELECT * FROM fn_borrowing_check(%s, %s, %s)", (society_id, p, src), fetch_one=True) or {}
+    needs_approval = bool(chk.get("needs_approval"))
+    has_approval = bool(chk.get("has_approval"))
 
+    if needs_approval and not has_approval:
+        # Enforce the bye-law 44(d) gate: a borrowing that requires CA approval
+        # cannot be booked until the approval is recorded. Do not insert a
+        # "recorded for follow-up" row here — that silently books the principal
+        # before the approval exists.
+        return False, (chk.get("message") or "Borrowing needs Competent Authority approval under bye-law 44(d).").capitalize()
+
+    # Record / refresh the approval row only when the caller supplies the approval
+    # evidence (resolution + CA reference + CA date). For societies that do not
+    # require CA approval this is still harmless — it records the borrowing the
+    # card lists under "Borrowings".
+    if ca_approval_ref or ca_approved_on or resolution_id:
+        cad = _d(ca_approved_on)
+        db._execute(
+            """INSERT INTO borrowing_approvals (society_id, loan_source, principal, purpose,
+                   resolution_id, ca_approval_ref, ca_approved_on, created_by)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (society_id, loan_source, principal) DO UPDATE SET
+                   purpose = EXCLUDED.purpose,
+                   resolution_id = COALESCE(EXCLUDED.resolution_id, borrowing_approvals.resolution_id),
+                   ca_approval_ref = COALESCE(EXCLUDED.ca_approval_ref, borrowing_approvals.ca_approval_ref),
+                   ca_approved_on = COALESCE(EXCLUDED.ca_approved_on, borrowing_approvals.ca_approved_on)""",
+            (society_id, src, p, (purpose or "").strip() or None, resolution_id,
+             (ca_approval_ref or "").strip() or None, cad, user_id))
+        # Re-check after recording the approval so callers see the post-approval state.
+        chk = db._execute("SELECT * FROM fn_borrowing_check(%s, %s, %s)", (society_id, p, src), fetch_one=True) or {}
+        needs_approval = bool(chk.get("needs_approval"))
+        has_approval = bool(chk.get("has_approval"))
+
+    if needs_approval and not has_approval:
+        return False, (chk.get("message") or "Borrowing still needs Competent Authority approval under bye-law 44(d).").capitalize()
+
+    return True, f"Borrowing of \u20b9{p:,.2f} recorded." + (" As approved by the Competent Authority." if has_approval else "")
 
 # ── tenant (s.18(2)) ───────────────────────────────────────────────────────────────
 def record_tenant(society_id: int, user_id: int, apartment_id: int, tenant_name: str,
@@ -505,7 +528,45 @@ def load_card_data(society_id: int) -> dict:
                               FROM board_candidates bc JOIN apartments a ON a.id = bc.apartment_id
                              WHERE bc.society_id=%s ORDER BY bc.created_at DESC LIMIT 20""", society_id),
     )
+    # Registers / audits / tracked checks (bye-laws 46–58): the wrappers in
+    # up_aoa_compliance_service were written against the SQL functions but never
+    # reached from the card, so the "tracked" rules were not actually tracked.
+    from app.services import up_aoa_compliance_service as ucs
+    fy_now = data["calendar"][0]["fy_label"][:4] if data.get("calendar") else None
+    fy = int(fy_now) if fy_now and fy_now.isdigit() else None
+    apt_ids = [a["id"] for a in data.get("apartments") or []]
+    data.update(
+        registers={
+            "act_prevails": ucs.act_prevails_check(society_id),
+            "investment_register": ucs.investment_register_check(society_id),
+            "affiliation": ucs.affiliation_check(society_id),
+            "accounts_inspection": ucs.accounts_inspection_check(society_id),
+            "accounts_publication": (ucs.accounts_publication_check(society_id, fy) if fy else None),
+            "mortgage_notices": ucs.mortgage_notice_check(society_id),
+            "seal_register": ucs.seal_register_check(society_id),
+            "ca_inspections": ucs.ca_inspection_check(society_id),
+            "bye_law_amendments": ucs.bye_law_amendment_log(society_id),
+            "auditor_appointment": ucs.auditor_appointment_check(society_id, fy) if fy else None,
+            "auditor_remuneration": ucs.auditor_remuneration_check(society_id, fy) if fy else None,
+            "unpaid_assessments": (ucs.unpaid_assessments_notice(society_id, apt_ids[0]) if apt_ids else None),
+            "depreciation_fund": (db._execute(
+                "SELECT fn_regime_param_num(%s, 'depreciation_fund_pct') IS NOT NULL AS configured",
+                (society_id,), fetch_one=True) or {}).get("configured"),
+        },
+    )
     return data
+
+
+def post_depreciation_fund(society_id: int):
+    """Bye-law 46(d): post the FY depreciation-fund appropriation via the SQL
+    function. The General Body resolution behind the rates lives in the rule
+    editor; posting here just turns it into the receivable the ledger collects."""
+    row = db._execute("SELECT * FROM fn_appropriate_depreciation_fund(%s)",
+                      (society_id,), fetch_one=True) or {}
+    msg = str(row.get("msg") or "")
+    if not row.get("appropriation_id"):
+        return False, msg.replace("Error: ", "") or "No appropriation was posted."
+    return True, msg
 
 
 def bye_law7(society_id: int, election_date, basis):

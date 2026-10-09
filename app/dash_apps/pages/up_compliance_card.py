@@ -318,6 +318,53 @@ def render_up_compliance_card(data: dict) -> html.Div:
                empty="No compliance flags raised."),
     ))
 
+    # ── 8. Registers, audits and the depreciation fund (bye-laws 46–58) ──────
+    regs = (data.get("registers") or {})
+
+    def _reg_row(label, r):
+        v = r or {}
+        msg = str(v.get("msg") or "") or "Rule disabled for this society."
+        if "Warning" in msg or "not" in msg.lower()[:40]:
+            badge = "overdue"
+        elif msg.startswith("OK"):
+            badge = "done"
+        else:
+            badge = "due_soon"
+        return [label, _badge(badge), msg]
+
+    reg_rows = [
+        _reg_row("Bye-law 55 - Act prevails over bye-laws", regs.get("act_prevails")),
+        _reg_row("Bye-law 47 - Investment register", regs.get("investment_register")),
+        _reg_row("Bye-law 48 - Affiliation register", regs.get("affiliation")),
+        _reg_row("Bye-law 48 - Accounts open for inspection", regs.get("accounts_inspection")),
+        _reg_row("Bye-law 50 - Publication of accounts", regs.get("accounts_publication")),
+        _reg_row("Bye-law 51 - Auditor appointed (GBM)", regs.get("auditor_appointment")),
+        _reg_row("Bye-law 52 - Auditor remuneration fixed", regs.get("auditor_remuneration")),
+        _reg_row("Bye-law 53 - Mortgage notices", regs.get("mortgage_notices")),
+        _reg_row("Bye-law 54 - Unpaid-assessments notice (first flat)", regs.get("unpaid_assessments")),
+        _reg_row("Bye-law 56 - Common seal register", regs.get("seal_register")),
+        _reg_row("Bye-law 57 - CA inspections", regs.get("ca_inspections")),
+        _reg_row("Bye-law 58 - Bye-law amendment log", regs.get("bye_law_amendments")),
+    ]
+    dep_ok = bool(regs.get("depreciation_fund"))
+    secs.append(_section(
+        "Registers, audits and the depreciation fund (bye-laws 46(d), 47-58)",
+        "Tracked registers and the gated checks behind the rule table, evaluated as of today. A warning here means the "
+        "register is empty or an approval is outstanding - record the human act (resolutions, inspection, seal use) "
+        "in the relevant register and the check clears. The depreciation fund (bye-law 46(d)) bills the FY "
+        "appropriation as a receivable once the General Body fixes the basis, percentage and rate in the AOA Rule "
+        "Editor; the button below posts it idempotently for the current financial year.",
+        _table(["Rule", "State", "Message"],
+               reg_rows, empty="Checks not available."),
+        html.Div([_badge("done" if dep_ok else "overdue"),
+                  html.Span("  Depreciation fund: General Body rate "
+                            + ("is set - post the FY appropriation below." if dep_ok
+                               else "is NOT set. Record the resolution in the AOA Rule Editor first."),
+                            style={"fontSize": "12px", "marginLeft": "6px"})]),
+        _btn("Post FY depreciation-fund appropriation (46(d))", "upc-dep-run", "fa-building-columns"),
+        html.Div(id="upc-dep-result", style={"marginTop": "8px"}),
+    ))
+
     return html.Div([header, toast, html.Div(secs, id="upc-body")], style={"padding": "12px"})
 
 

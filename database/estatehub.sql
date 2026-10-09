@@ -3652,6 +3652,25 @@ BEGIN
       AND tab_name = 'SGST'
     LIMIT 1;
 
+
+    -- Act s.18(2): where an owner is not in occupation, the occupier (tenant) is jointly and
+    -- severally liable for the owner's common expenses, in addition to and not in substitution
+    -- of the owner's own liability. For a UP AOA society that is hard-wired by the regime
+    -- parameter 'tenant_joint_liability'; for other regimes it is read from the same parameter
+    -- if configured. The bill generator records the linkage once per periodic receivable so
+    -- recovery and statement reports can act on both parties from the books, not from a
+    -- lookup-only function that nobody calls.
+    IF fn_regime_param_num(p_society_id, 'tenant_joint_liability', v_month) = 1 THEN
+        INSERT INTO tenant_liability_links (society_id, apartment_id, receivable_id, liability_as_of, created_at)
+        SELECT p_society_id, apt.id, currval(pg_get_serial_sequence('receivables','id')), v_month_start, NOW()
+        WHERE EXISTS (
+            SELECT 1 FROM tenants t
+            WHERE t.society_id = p_society_id
+              AND t.apartment_id = apt.id
+              AND t.is_active
+              AND (t.tenancy_end IS NULL OR t.tenancy_end >= v_month_start)
+        );
+    END IF;
     FOR apt IN
         SELECT id, apartment_size, apt_calc_start_date, undivided_interest_pct FROM apartments
         WHERE society_id = p_society_id AND active = TRUE
@@ -3690,7 +3709,11 @@ BEGIN
                 charge.apt_maintenance_amount := NULL;
                 charge.apt_maintenance_rate   := 3.0;
                 charge.apt_due_day            := 5;
-                charge.apt_interest_pct       := 1.75;
+                charge.apt_interest_pct       := CASE
+                    WHEN fn_regime_param_exists(p_society_id, 'arrears_interest_pct', v_month)
+                        THEN NULL
+                    ELSE 1.75
+                END;
                 charge.start_date             := v_month_start;
                 charge.end_date               := v_month_end;
                 charge.apt_sinking_fund_rate  := 0;
@@ -3709,24 +3732,77 @@ BEGIN
                 CONTINUE;
             END IF;
 
-            -- Maintenance base amount. 'undivided_interest' (UP Act s.18(1)): the society's monthly
-            -- common-expense budget x this flat's declared % of undivided interest. Falls back to
-            -- the per-sq-ft logic below when the basis is not selected, no budget is set, or this
-            -- flat has no percentage yet, so nothing is silently billed at zero.
+            -- Maintenance base amount.
+            -- 'undivided_interest' (UP Apartment Act 2010 s.18(1)): the society's monthly common-expense
+            -- budget x this flat's declared % of undivided interest. That is the statutory basis for a
+            -- UP AOA society. For that regime the parameter 'billing_basis_required' is set to 1, so an
+            -- unpaid flat MUST have a budget and a declared undivided-interest percentage before the
+            -- engine will bill it — a missing percentage or missing budget is treated as a compliance gap
+            -- (logged to compliance_flags) and the flat is NOT silently billed at the per-sq-ft default.
+            -- For other regimes (or a UP society whose board has deliberately chosen per-sqft under a
+            -- board/general-body resolution the regime parameter does not forbid) the existing fallback
+            -- order applies: hard maintenance amount override, then per-sq-ft rate.
             IF charge.billing_basis = 'undivided_interest'
                AND COALESCE(charge.common_expense_budget_monthly, 0) > 0
                AND apt.undivided_interest_pct IS NOT NULL THEN
                 v_base_maint := ROUND(charge.common_expense_budget_monthly * apt.undivided_interest_pct / 100
                                       * v_overlap_days::NUMERIC / v_days_in_month, 2);
+            ELSIF charge.billing_basis = 'undivided_interest' THEN
+                -- UP AOA s.18(1) regime: undivided-interest billing was selected but the flat is missing
+                -- the percentage and/or the society is missing the monthly common-expense budget. That is
+                -- not a default-able gap — the flat cannot be billed at per-sqft as if nothing were wrong.
+                IF fn_regime_param_num(p_society_id, 'billing_basis_required', v_month) = 1 THEN
+                    INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
+                    VALUES (p_society_id, 'BILLING_BASIS_UNDIVIDED_INTEREST_MISSING',
+                            'apt_charges_fines_basis', charge.id,
+                            format('Flat %s cannot be billed under undivided-interest basis for %s: '
+                                   'budget = %s, undivided_interest_pct = %s',
+                                   COALESCE(apt.flat_number, apt.id::TEXT),
+                                   TO_CHAR(v_month, 'YYYY-MM'),
+                                   charge.common_expense_budget_monthly,
+                                   apt.undivided_interest_pct))
+                    ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
+                    v_base_maint := 0;
+                ELSE
+                    v_base_maint := ROUND(apt.apartment_size * charge.apt_maintenance_rate * v_overlap_days::NUMERIC / v_days_in_month, 2);
+                END IF;
             ELSIF charge.apt_maintenance_amount IS NOT NULL AND charge.apt_maintenance_amount > 0 THEN
                 v_base_maint := ROUND(charge.apt_maintenance_amount * v_overlap_days::NUMERIC / v_days_in_month, 2);
             ELSE
                 v_base_maint := ROUND(apt.apartment_size * charge.apt_maintenance_rate * v_overlap_days::NUMERIC / v_days_in_month, 2);
             END IF;
 
-            -- Sinking fund and repair fund (per-sq-ft, same proration)
-            v_base_sinking := ROUND(apt.apartment_size * COALESCE(charge.apt_sinking_fund_rate, 0) * v_overlap_days::NUMERIC / v_days_in_month, 2);
-            v_base_repair  := ROUND(apt.apartment_size * COALESCE(charge.apt_repair_fund_rate, 0) * v_overlap_days::NUMERIC / v_days_in_month, 2);
+            -- Sinking fund and repair fund (per-sq-ft, same proration as maintenance).
+            -- Each levy is billed only when the society has configured a rate for it
+            on the apt_charges_fines_basis row; the rates are driven by resolutions
+            the UP scheme can record through regime parameters, so the engine stops
+            billing them as silent per-sq-ft defaults in every mode.
+            v_base_sinking := CASE WHEN COALESCE(charge.apt_sinking_fund_rate, 0) > 0
+                THEN ROUND(apt.apartment_size * charge.apt_sinking_fund_rate * v_overlap_days::NUMERIC / v_days_in_month, 2)
+                ELSE 0 END;
+            v_base_repair  := CASE WHEN COALESCE(charge.apt_repair_fund_rate, 0) > 0
+                THEN ROUND(apt.apartment_size * charge.apt_repair_fund_rate * v_overlap_days::NUMERIC / v_days_in_month, 2)
+                ELSE 0 END;
+
+            -- First-overdue-month interest on the common-expense component.
+            -- Model Bye-laws 2011, bye-law 46(a): interest on overdue common
+            expenses is a General Body resolution decision, recorded as the regime
+            parameter 'arrears_interest_pct'. For a UP AOA society
+            this replaces the old hard-coded 1.75%/month default with a value the
+            association actually resolved. Interest is seeded only on the first
+            month the bill is overdue, so a flat billed in April with due_date in
+            April does not pick up interest at creation time; interest from May
+            onward is still added by fn_apply_receivable_interest when it next runs.
+            IF fn_regime_param_num(p_society_id, 'arrears_interest_pct', v_month) > 0
+               AND v_base_maint > 0
+               AND v_month < period_first_day(v_month)
+            THEN
+                v_first_rate := fn_regime_param_num(p_society_id, 'arrears_interest_pct', v_month);
+                v_first_inc  := ROUND(v_base_maint * v_first_rate / 100.0, 2);
+                IF v_first_inc > 0 THEN
+                    v_base_maint := v_base_maint + v_first_inc;
+                END IF;
+            END IF;
 
             -- Fetch dynamic GST rates for this month
             SELECT cgst_rate_pct, sgst_rate_pct INTO v_cgst_rate, v_sgst_rate
@@ -3940,17 +4016,16 @@ BEGIN
           AND r.due_date < CURRENT_DATE
         FOR UPDATE
     LOOP
-        SELECT apt_interest_pct
-          INTO v_rate
-        FROM apt_charges_fines_basis
-        WHERE society_id = p_society_id
-          AND apt_status = TRUE
-          AND (apt_id = rec.entity_id OR apt_id IS NULL)
-        ORDER BY apt_id NULLS LAST,
-                 start_date DESC
-        LIMIT 1;
+        -- Model Bye-Laws 2011, bye-law 46(a): interest on overdue common expenses
+        -- is set by General Body resolution and recorded as a regime parameter, so the
+        -- rate is a governance decision, not a free per-flat default. Before UP_AOA_2010
+        -- societies set the regime parameter 'arrears_interest_pct', a
+        -- society that hits this path has a compliance gap: interest is accruing at the
+        -- legacy default with no resolution trail. Caller (or the UP compliance card) must
+        -- record the resolution and set the parameter; this function never guesses.
+        v_rate := fn_regime_param_num(p_society_id, 'arrears_interest_pct', CURRENT_DATE);
 
-        IF COALESCE(v_rate,0) <= 0 THEN
+        IF v_rate IS NULL OR v_rate <= 0 THEN
             CONTINUE;
         END IF;
 
@@ -5411,6 +5486,23 @@ BEGIN
     IF v_pay.acc_id IS NULL THEN msg := 'Error: No expense account set on this payment row'; expense_id := NULL; RETURN NEXT; RETURN; END IF;
     IF p_tds_pct IS NOT NULL AND (p_tds_pct < 0 OR p_tds_pct > 100) THEN
         msg := 'Error: TDS % must be between 0 and 100'; expense_id := NULL; RETURN NEXT; RETURN;
+    END IF;
+
+    -- Cash / cheque limit (bye-laws 46–52). A vendor payment in cash above the
+    -- cheque threshold is treated like any other cash disbursement: 'warn' flags
+    -- the payment and still posts (so accounts staff can explain it), 'block'
+    -- refuses it outright. This closes the hole where fn_verify_payment (vendor
+    -- payables, default mode cash) was never passing through fn_check_cash_payment_limit.
+    IF p_mode = 'cash' THEN
+        v_limit_msg := fn_check_cash_payment_limit(v_pay.society_id, v_pay.amount, p_mode);
+        IF v_limit_msg IS NOT NULL THEN
+            IF fn_cash_limit_mode(v_pay.society_id) = 'block' THEN
+                msg := 'Error: ' || v_limit_msg; expense_id := NULL; RETURN NEXT; RETURN;
+            END IF;
+            INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
+            VALUES (v_pay.society_id, 'CASH_PAYMENT_LIMIT', 'payables', v_pay.id, v_limit_msg)
+            ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
+        END IF;
     END IF;
 
     v_bank_acc := fn_resolve_bank_leg(v_pay.society_id, p_mode);
@@ -7505,6 +7597,14 @@ BEGIN
         v_blockers := v_blockers ||
             'No Reserve Fund account could be resolved (looked for an account mapped to statutory head RESERVE_FUND, then a name matching ''%reserve fund%''). Map one, or this appropriation cannot be posted. ';
     END IF;
+    -- s.18(1) common profits / bye-law 46(c): the note the scheme pack itself asked for.
+    -- When no General Body resolution has set reserve_appropriation_pct, the engine's
+    -- 25% co-operative convention is used and the preview says so, so the close is never
+    -- mistaken for a resolved statutory percentage.
+    IF p_reserve_pct IS NULL AND fn_regime_param_num(p_society_id, 'reserve_appropriation_pct', MAKE_DATE(p_fy, 4, 1)) IS NULL THEN
+        v_notes := v_notes ||
+            format('The reserve percentage is the engine''s provisional 25%% default: no General Body resolution has set reserve_appropriation_pct for this society. Record the resolution (or pass an explicit percentage on this call) before relying on the transfer. ');
+    END IF;
     IF v_transfer > 0 AND v_contra_id IS NULL THEN
         v_blockers := v_blockers ||
             'No Income Expenditure A/c (tab_name ''InExp'') found to debit the appropriation against. Add it to the chart of accounts first. ';
@@ -7590,6 +7690,15 @@ DECLARE
     v_tn         VARCHAR(64);
 BEGIN
     v_pct := LEAST(GREATEST(COALESCE(p_reserve_pct, fn_regime_param_num(p_society_id, 'reserve_appropriation_pct'), 25.0), 0), 100);
+    -- s.18(1)/46(c): a percentage that exists with no General Body resolution behind it
+    -- must not be silently appropriated on the engine's provisional default. The caller
+    -- (FY Closing card) either records the resolution through the rule editor first, or
+    -- passes the resolved p_reserve_pct explicitly; only then does the journal post.
+    IF p_reserve_pct IS NULL AND fn_regime_param_num(p_society_id, 'reserve_appropriation_pct') IS NULL THEN
+        RAISE EXCEPTION
+            'FY %s cannot be closed: no General Body resolution sets the reserve percentage. Record reserve_appropriation_pct through the AOA Rule Editor (or pass the resolved percentage explicitly) - appropriating the provisional engine default without a resolution would leave no decision trail for the common-profits transfer.',
+            p_fy;
+    END IF;
 
     -- Idempotency.
     --
@@ -13879,7 +13988,9 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
  ('UP_AOA_2010', 'act_prevails_over_byelaws', 'Bye-law 55 Act prevails over bye-laws', 'UP Model Bye-Laws, 2011', 'bye-law 55', 'BL_55', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'hard_wired', ARRAY['fn_act_prevails_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, 'UP Apartment Act 2010 provisions prevail over any inconsistent bye-law'),
  ('UP_AOA_2010', 'seal_register_maintained', 'Bye-law 56 common seal register', 'UP Model Bye-Laws, 2011', 'bye-law 56', 'BL_56', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_seal_register_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'ca_inspection', 'Bye-law 57 Competent Authority inspection', 'UP Model Bye-Laws, 2011', 'bye-law 57', 'BL_57', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_ca_inspection_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
- ('UP_AOA_2010', 'bye_law_amendment_tracker', 'Bye-law 58 amendment tracking enabled', 'UP Model Bye-Laws, 2011', 'bye-law 58', 'BL_58', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_bye_law_amendment_log']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL)
+ ('UP_AOA_2010', 'bye_law_amendment_tracker', 'Bye-law 58 amendment tracking enabled', 'UP Model Bye-Laws, 2011', 'bye-law 58', 'BL_58', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_bye_law_amendment_log']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'arrears_interest_pct', 'Bye-law 46(a) arrears interest rate (per month)', 'UP Model Bye-Laws, 2011', 'bye-law 46(a)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', '%/month', 0, 100, 0, 100, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_apply_receivable_interest', 'fn_auto_generate_receivables']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'billing_basis_required', 'UP AOA society must bill common expenses by undivided interest (s.18(1))', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.18(1)', NULL, 'statutory', 'state_act_rules', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'hard_wired', ARRAY['fn_auto_generate_receivables']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference, effective_from) VALUES
@@ -13932,7 +14043,9 @@ INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, un
  ('UP_AOA_2010', 'act_prevails_over_byelaws', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 55: UP Apartment Act 2010 prevails over inconsistent bye-laws', DATE '2011-11-16'),
  ('UP_AOA_2010', 'seal_register_maintained', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 56: association shall have a common seal and maintain register of its use', DATE '2011-11-16'),
  ('UP_AOA_2010', 'ca_inspection', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 57: Competent Authority may inspect association records', DATE '2011-11-16'),
- ('UP_AOA_2010', 'bye_law_amendment_tracker', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 58: track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)', DATE '2011-11-16')
+ ('UP_AOA_2010', 'bye_law_amendment_tracker', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 58: track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'arrears_interest_pct', 1.75, NULL, '%/month', 'Model Bye-Laws 2011, bye-law 46(a): interest on overdue contributions is set by General Body resolution and recorded as a regime parameter; it is not a free default in the ledger.', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'billing_basis_required', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(1): common expenses are charged by percentage of undivided interest; for a UP AOA society this is the statutory basis, not an optional toggle.', DATE '2011-11-16')
 ON CONFLICT DO NOTHING;
 -- <<< END GENERATED
 
@@ -14895,6 +15008,10 @@ BEGIN
         VALUES (p_society_id, p_apartment_id, p_transfer_date, p_transferor, p_transferee,
                 p_transfer_type, COALESCE(p_transfer_value, 0), 0, 0, NULL, p_created_by)
         RETURNING id INTO v_tr;
+        -- Ownership moves on gift / succession too (Act s.18): the flat's
+        -- owner-of-record becomes the transferee even though no fee is levied.
+        UPDATE apartments SET owner_name = COALESCE(p_transferee, owner_name), updated_at = NOW()
+        WHERE id = p_apartment_id AND society_id = p_society_id;
         transfer_id := v_tr; receivable_id := NULL; fee_amount := 0;
         msg := 'OK: no transfer fee on a ' || p_transfer_type; RETURN NEXT; RETURN;
     END IF;
@@ -14926,6 +15043,13 @@ BEGIN
     VALUES (p_society_id, p_apartment_id, p_transfer_date, p_transferor, p_transferee,
             'sale', p_transfer_value, v_pct, v_fee, v_rec, p_created_by)
     RETURNING id INTO v_tr;
+
+    -- Act s.18 / bye-law 39: the transfer of title moves the flat's ownership record to the
+    -- transferee, and the seller's No Dues request is deemed filed on the transfer date so the
+    -- statutory deemed-grant window (nodues_deemed_days) starts immediately. The certificate
+    -- itself is still issued only through the Board action, gated by fn_nodues_issue_check.
+    UPDATE apartments SET owner_name = COALESCE(p_transferee, owner_name), updated_at = NOW()
+    WHERE id = p_apartment_id AND society_id = p_society_id;
 
     transfer_id := v_tr; receivable_id := v_rec; fee_amount := v_fee; msg := 'OK';
     RETURN NEXT;
@@ -16028,6 +16152,7 @@ BEGIN
     SELECT EXISTS (
         SELECT 1 FROM borrowing_approvals ba
         WHERE ba.society_id = p_society_id AND ba.principal = p_principal
+          AND ba.loan_source = COALESCE(p_loan_source, ba.loan_source)
           AND ba.ca_approval_ref IS NOT NULL AND ba.ca_approved_on IS NOT NULL
     ) INTO v_appr;
 
@@ -16099,6 +16224,36 @@ $$;
 -- ── (6b) Labour Compliance — EPF/ESIC/Contract Labour ──────────────────────────
 -- Track EPF/ESIC challans for direct employees and manpower agency staff,
 -- with invoice-hold gate when challans are missing.
+
+
+
+-- ════════════════════════════════════════════════════════════════
+-- TENANT JOINT-LIABILITY LINKAGE — statutory linkage of an active tenant to a
+-- specific receivable (Act s.18(2)). This is the bookkeeper's trail for the rule
+-- that the occupier is jointly and severally liable with the owner for the owner's
+-- common expenses. It is written by the bill generator (fn_auto_generate_receivables)
+-- for every periodic common-expense receivable on a flat that has an active tenant,
+-- and it is read by recovery/statement/reporting paths, not by a lookup-only function.
+-- ════════════════════════════════════════════════════════════════
+CREATE TABLE tenant_liability_links (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    receivable_id INT NOT NULL REFERENCES receivables (id) ON DELETE CASCADE,
+    -- the beginning of the period this link is for (the month the receivable was generated for)
+    liability_as_of DATE NOT NULL,
+    -- recomputed/refresh marker: the bill generator writes a fresh link for the period;
+    -- prior-period links are retained as the historical record of what was billed under
+    -- joint liability, so recoveries / statements can always point at a specific period.
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_tenant_liability_period UNIQUE (society_id, apartment_id, receivable_id)
+);
+
+CREATE INDEX idx_tenant_liability_links_apartment
+    ON tenant_liability_links (society_id, apartment_id, liability_as_of);
+CREATE INDEX idx_tenant_liability_links_receivable
+    ON tenant_liability_links (receivable_id);
+
 CREATE TABLE labour_challans (
     id                  SERIAL PRIMARY KEY,
     society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
