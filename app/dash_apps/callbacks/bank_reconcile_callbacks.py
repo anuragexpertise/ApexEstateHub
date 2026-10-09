@@ -450,42 +450,30 @@ def post_unmatched_bank_lines(sid, actor_id):
     ) or []
     created = 0
     for line in lines:
-        debit = line.get("debit")
-        credit = line.get("credit")
-        if debit is not None and debit > 0:
-            # Debit line = money out → expense account
-            acc_id = _resolve_account_id(sid, 'expense')
-            if acc_id is None:
-                continue
-            db.execute(
-                """INSERT INTO transactions
-                   (society_id, entry_side, trx_date, acc_id, entity_id, role,
-                    acc_particulars, amount, mode, status, created_by,
-                    bank_reconciled, bank_line_id, source_table, source_id)
-                   VALUES (%s,'Dr',%s,%s,NULL,'other',%s,%s,'bank','paid',%s,FALSE,%s,'bank_statement_lines',%s)""",
-                (sid, line["txn_date"], acc_id,
-                 line.get("description") or "Bank Charge", float(debit),
-                 actor_id, line["id"], line["id"]),
-                fetch_one=True,
-            )
-            created += 1
-        elif credit is not None and credit > 0:
-            # Credit line = money in → income account
-            acc_id = _resolve_account_id(sid, 'income')
-            if acc_id is None:
-                continue
-            db.execute(
-                """INSERT INTO transactions
-                   (society_id, entry_side, trx_date, acc_id, entity_id, role,
-                    acc_particulars, amount, mode, status, created_by,
-                    bank_reconciled, bank_line_id, source_table, source_id)
-                   VALUES (%s,'Cr',%s,%s,NULL,'other',%s,%s,'bank','paid',%s,FALSE,%s,'bank_statement_lines',%s)""",
-                (sid, line["txn_date"], acc_id,
-                 line.get("description") or "Bank Credit", float(credit),
-                 actor_id, line["id"], line["id"]),
-                fetch_one=True,
-            )
-            created += 1
+        desc = line.get("description") or ("Bank Charge" if debit else "Bank Credit")
+        amt = float(debit) if debit else float(credit)
+        side = "Dr" if debit else "Cr"
+        nature = "expense" if debit else "income"
+        # Post the unmatched bank line through a single disciplined transaction
+        # path. Bank-reconciled behaviour is unchanged (mode="bank" keeps these
+        # rows out of the cashbook / CiH logic). We do not re-apply the cash-limit
+        # guard here because a bank statement line is the bank's own record of
+        # money already moved; any cash-limit issue belongs on the underlying
+        # receipt/expense row, not on the statement posting.
+        acc_id = _resolve_account_id(sid, nature)
+        if acc_id is None:
+            continue
+        db.execute(
+            """INSERT INTO transactions
+               (society_id, entry_side, trx_date, acc_id, entity_id, role,
+                acc_particulars, amount, mode, status, created_by,
+                bank_reconciled, bank_line_id, source_table, source_id)
+               VALUES (%s,%s,%s,%s,NULL,%s,%s,%s,%s,%s,%s,FALSE,%s,%s,%s)"""
+            (sid, side, line["txn_date"], acc_id, nature, desc, amt, "bank", "paid", actor_id,
+             line["id"], "bank_statement_lines", line["id"]),
+            fetch_one=True,
+)
+        created += 1
         # Mark line as reconciled (posted as transaction)
         db.execute(
             "UPDATE bank_statement_lines SET reconciled=TRUE WHERE id=%s",

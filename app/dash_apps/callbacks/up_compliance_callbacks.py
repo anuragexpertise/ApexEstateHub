@@ -109,6 +109,22 @@ def register_up_compliance_callbacks(app):
             raise PreventUpdate
         return _run(lambda sid, uid: act.issue_statement(sid, uid, transfer))
 
+    @app.callback(Output("upc-dep-result", "children"), _BODY, Input("upc-dep-run", "n_clicks"),
+                  prevent_initial_call=True)
+    @require_session
+    def run_depreciation_fund(n):
+        if not n:
+            raise PreventUpdate
+        ctx, err = _ctx()
+        if err:
+            return err, no_update
+        try:
+            ok, msg = act.post_depreciation_fund(ctx[0])
+        except Exception as exc:
+            return _alert(f"Could not post: {exc}", "danger"), no_update
+        body = render_up_compliance_body(act.load_card_data(ctx[0])) if ok else no_update
+        return _alert(msg, "success" if ok else "danger"), body
+
     @app.callback(Output("upc-b7-result", "children"), Input("upc-b7-run", "n_clicks"),
                   State("upc-b7-date", "date"), State("upc-b7-basis", "value"), prevent_initial_call=True)
     @require_session

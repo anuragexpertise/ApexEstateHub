@@ -768,6 +768,9 @@
     },
     "route:web.py::index": {
       "classification": "unclassified"
+    },
+    "callback:up_compliance_callbacks.py::run_depreciation_fund": {
+      "classification": "legacy-gated"
     }
   }
 }

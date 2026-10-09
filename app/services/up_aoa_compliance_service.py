@@ -131,3 +131,102 @@ def purchaser_dues_statement(transfer_id: int, as_of: date | None = None) -> dic
     """Act s.23: statement of unpaid common-expense assessment for the purchaser."""
     rows = _rows("SELECT * FROM fn_purchaser_dues_statement(%s, %s)", (transfer_id, as_of))
     return rows[0] if rows else None
+
+
+# ── Registers, audits and tracked checks (bye-laws 47–58) ────────────────────
+# These were written into the SQL layer with "gated"/"tracked" feeds and never
+# reached from the app. Each wrapper is one read; the UP compliance card renders
+# them all so a "tracked" rule is actually tracked, and a "gated" one shows what
+# its gate produces.
+
+def auditor_appointment_check(society_id: int, fy: int) -> dict | None:
+    """Bye-law 51: auditor appointment recorded at the AGM for this financial year."""
+    rows = _rows("SELECT * FROM fn_auditor_appointment_check(%s, %s)", (society_id, fy))
+    return rows[0] if rows else None
+
+
+def auditor_remuneration_check(society_id: int, fy: int) -> dict | None:
+    """Bye-law 52: auditor remuneration fixed by the General Body for this financial year."""
+    rows = _rows("SELECT * FROM fn_auditor_remuneration_check(%s, %s)", (society_id, fy))
+    return rows[0] if rows else None
+
+
+def investment_register_check(society_id: int, as_of: date | None = None) -> dict | None:
+    """Bye-law 47: investment register totals and compliance with allowed types."""
+    rows = _rows("SELECT * FROM fn_investment_register_check(%s, COALESCE(%s, CURRENT_DATE))",
+                 (society_id, as_of))
+    return rows[0] if rows else None
+
+
+def affiliation_check(society_id: int, as_of: date | None = None) -> dict | None:
+    """Bye-law 48: affiliation register."""
+    rows = _rows("SELECT * FROM fn_affiliation_check(%s, COALESCE(%s, CURRENT_DATE))",
+                 (society_id, as_of))
+    return rows[0] if rows else None
+
+
+def accounts_inspection_check(society_id: int, as_of: date | None = None) -> dict | None:
+    """Bye-law 48: accounts available for member inspection."""
+    rows = _rows("SELECT * FROM fn_accounts_inspection_check(%s, COALESCE(%s, CURRENT_DATE))",
+                 (society_id, as_of))
+    return rows[0] if rows else None
+
+
+def accounts_publication_check(society_id: int, fy: int) -> dict | None:
+    """Bye-law 50: publication of accounts."""
+    rows = _rows("SELECT * FROM fn_accounts_publication_check(%s, %s)", (society_id, fy))
+    return rows[0] if rows else None
+
+
+def mortgage_notice_check(society_id: int, as_of: date | None = None) -> dict | None:
+    """Bye-law 53: mortgage notices received and pending Board acknowledgement."""
+    rows = _rows("SELECT * FROM fn_mortgage_notice_check(%s, COALESCE(%s, CURRENT_DATE))",
+                 (society_id, as_of))
+    return rows[0] if rows else None
+
+
+def unpaid_assessments_notice(society_id: int, apartment_id: int, as_of: date | None = None) -> dict | None:
+    """Bye-law 54: statement of unpaid assessments for a flat (transfer context)."""
+    rows = _rows("SELECT * FROM fn_unpaid_assessments_notice(%s, %s, COALESCE(%s, CURRENT_DATE))",
+                 (society_id, apartment_id, as_of))
+    return rows[0] if rows else None
+
+
+def seal_register_check(society_id: int, as_of: date | None = None) -> dict | None:
+    """Bye-law 56: common-seal register."""
+    rows = _rows("SELECT * FROM fn_seal_register_check(%s, COALESCE(%s, CURRENT_DATE))",
+                 (society_id, as_of))
+    return rows[0] if rows else None
+
+
+def ca_inspection_check(society_id: int, as_of: date | None = None) -> dict | None:
+    """Bye-law 57: Competent Authority inspections and pending actions."""
+    rows = _rows("SELECT * FROM fn_ca_inspection_check(%s, COALESCE(%s, CURRENT_DATE))",
+                 (society_id, as_of))
+    return rows[0] if rows else None
+
+
+def bye_law_amendment_log(society_id: int, as_of: date | None = None) -> dict | None:
+    """Bye-law 58: amendments recorded and still awaiting CA approval."""
+    rows = _rows("SELECT * FROM fn_bye_law_amendment_log(%s, COALESCE(%s, CURRENT_DATE))",
+                 (society_id, as_of))
+    return rows[0] if rows else None
+
+
+def act_prevails_check(society_id: int, as_of: date | None = None) -> dict | None:
+    """Bye-law 55: the Act prevails over inconsistent bye-laws."""
+    rows = _rows("SELECT * FROM fn_act_prevails_check(%s, COALESCE(%s, CURRENT_DATE))",
+                 (society_id, as_of))
+    return rows[0] if rows else None
+
+
+def appropriate_depreciation_fund(society_id: int, as_of: date | None = None) -> dict | None:
+    """Bye-law 46(d): create the FY depreciation-fund appropriation receivable.
+
+    This is the posting wrapper for fn_appropriate_depreciation_fund; the rates
+    behind it are regime parameters (depreciation_fund_pct / basis / rate) that the
+    Board or master records through the AOA Rule Editor with a resolution trail.
+    """
+    rows = _rows("SELECT * FROM fn_appropriate_depreciation_fund(%s, COALESCE(%s, CURRENT_DATE))",
+                 (society_id, as_of))
+    return rows[0] if rows else None

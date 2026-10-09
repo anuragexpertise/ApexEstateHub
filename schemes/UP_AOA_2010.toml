@@ -1018,3 +1018,44 @@ verification = "checked"
 verified_on = 2026-10-07
 source = """Model Bye-Laws 2011, bye-law 58: track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)"""
 
+
+[[parameter]]
+key = "arrears_interest_pct"
+label = "Bye-law 46(a) arrears interest rate (per month)"
+instrument = "UP Model Bye-Laws, 2011"
+provision = "bye-law 46(a)"
+clause = "BL_46"
+nature = "non_statutory"
+base_source = "model_bye_law"
+type = "num"
+unit = "%/month"
+value = 1.75
+min = 0
+max = 100
+layers = [2]
+tighten = "none"
+enforcement = "gated"
+feeds = ["fn_apply_receivable_interest", "fn_auto_generate_receivables"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """Model Bye-Laws 2011, bye-law 46(a): interest on overdue contributions is set by General Body resolution and recorded as a regime parameter; it is not a free default in the ledger."""
+
+[[parameter]]
+key = "billing_basis_required"
+label = "UP AOA society must bill common expenses by undivided interest (s.18(1))"
+instrument = "UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010"
+provision = "s.18(1)"
+nature = "statutory"
+base_source = "state_act_rules"
+type = "int"
+unit = "0/1"
+value = 1
+min = 0
+max = 1
+layers = []
+tighten = "none"
+enforcement = "hard_wired"
+feeds = ["fn_auto_generate_receivables"]
+verification = "checked"
+verified_on = 2026-10-07
+source = """UP Apartment Act 2010 s.18(1): common expenses are charged by percentage of undivided interest; for a UP AOA society this is the statutory basis, not an optional toggle."""
