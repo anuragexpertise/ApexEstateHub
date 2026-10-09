@@ -3607,6 +3607,8 @@ DECLARE
     v_sgst_rate           NUMERIC(5,2);
     v_total_taxable       NUMERIC(10,2);
     v_fund_gst_exempt     BOOLEAN;
+    v_first_rate          NUMERIC(5,2);
+    v_first_inc           NUMERIC(10,2);
 BEGIN
     SELECT calc_start_date INTO v_society_calc_start FROM societies WHERE id = p_society_id;
     IF NOT FOUND THEN RETURN; END IF;
@@ -3774,9 +3776,9 @@ BEGIN
 
             -- Sinking fund and repair fund (per-sq-ft, same proration as maintenance).
             -- Each levy is billed only when the society has configured a rate for it
-            on the apt_charges_fines_basis row; the rates are driven by resolutions
-            the UP scheme can record through regime parameters, so the engine stops
-            billing them as silent per-sq-ft defaults in every mode.
+            -- on the apt_charges_fines_basis row; the rates are driven by resolutions
+            -- the UP scheme can record through regime parameters, so the engine stops
+            -- billing them as silent per-sq-ft defaults in every mode.
             v_base_sinking := CASE WHEN COALESCE(charge.apt_sinking_fund_rate, 0) > 0
                 THEN ROUND(apt.apartment_size * charge.apt_sinking_fund_rate * v_overlap_days::NUMERIC / v_days_in_month, 2)
                 ELSE 0 END;
@@ -3786,13 +3788,13 @@ BEGIN
 
             -- First-overdue-month interest on the common-expense component.
             -- Model Bye-laws 2011, bye-law 46(a): interest on overdue common
-            expenses is a General Body resolution decision, recorded as the regime
-            parameter 'arrears_interest_pct'. For a UP AOA society
-            this replaces the old hard-coded 1.75%/month default with a value the
-            association actually resolved. Interest is seeded only on the first
-            month the bill is overdue, so a flat billed in April with due_date in
-            April does not pick up interest at creation time; interest from May
-            onward is still added by fn_apply_receivable_interest when it next runs.
+            -- expenses is a General Body resolution decision, recorded as the regime
+            -- parameter 'arrears_interest_pct'. For a UP AOA society
+            -- this replaces the old hard-coded 1.75%/month default with a value the
+            -- association actually resolved. Interest is seeded only on the first
+            -- month the bill is overdue, so a flat billed in April with due_date in
+            -- April does not pick up interest at creation time; interest from May
+            -- onward is still added by fn_apply_receivable_interest when it next runs.
             IF fn_regime_param_num(p_society_id, 'arrears_interest_pct', v_month) > 0
                AND v_base_maint > 0
                AND v_month < period_first_day(v_month)
@@ -5479,6 +5481,7 @@ DECLARE
     v_tds_amt    NUMERIC(15,2) := 0;
     v_net_amt    NUMERIC(15,2);
     v_expense_id INT;
+    v_limit_msg  TEXT;
 BEGIN
     SELECT * INTO v_pay FROM payables WHERE id = p_payment_id FOR UPDATE;
     IF NOT FOUND THEN msg := 'Error: Payment not found'; expense_id := NULL; RETURN NEXT; RETURN; END IF;
@@ -15072,6 +15075,14 @@ BEGIN
     ELSE status := 'pending'; END IF;
     RETURN NEXT;
 END $$;
+
+-- ───────────────────────────────────────────────────────────────────────────────
+-- Utility: first day of period (month) for a given date
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION period_first_day(p_date DATE)
+RETURNS DATE LANGUAGE sql STABLE AS $$
+    SELECT date_trunc('month', p_date)::DATE;
+$$;
 
 -- ───────────────────────────────────────────────────────────────────────────────
 -- 3. Bye-law 7: arrears > 60 days bar voting / standing for the Board
