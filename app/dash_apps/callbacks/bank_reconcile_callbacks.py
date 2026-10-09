@@ -468,11 +468,11 @@ def post_unmatched_bank_lines(sid, actor_id):
                (society_id, entry_side, trx_date, acc_id, entity_id, role,
                 acc_particulars, amount, mode, status, created_by,
                 bank_reconciled, bank_line_id, source_table, source_id)
-               VALUES (%s,%s,%s,%s,NULL,%s,%s,%s,%s,%s,%s,FALSE,%s,%s,%s)"""
+               VALUES (%s,%s,%s,%s,NULL,%s,%s,%s,%s,%s,%s,FALSE,%s,%s,%s)""",
             (sid, side, line["txn_date"], acc_id, nature, desc, amt, "bank", "paid", actor_id,
              line["id"], "bank_statement_lines", line["id"]),
             fetch_one=True,
-)
+        )
         created += 1
         # Mark line as reconciled (posted as transaction)
         db.execute(
