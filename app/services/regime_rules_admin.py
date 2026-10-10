@@ -413,6 +413,24 @@ POLICY_SPECS: dict[str, tuple] = {
                         (("margin_60_days", "Only a loan over 60 days past its due date (default)"),
                          ("any_overdue", "Any loan past its due date"))),
 }
+# Fund policies. Where a regime does not prescribe a fund (UP_AOA_2010: no statutory sinking / repair rate), the
+# Setup Wizard no longer asks for the fund's rate or basis; the society opts in HERE (General Body resolution under
+# bye-law 36 / 46) and only then do the rate fields appear on Apartment Charges. See statutory_rules.fund_rules_for_state.
+_BASIS = (("per_sq_ft", "Per sq ft of apartment area (default)"), ("construction_cost", "% of construction cost"))
+POLICY_SPECS.update({
+    "levy_sinking_fund":    ("Levy a Sinking Fund on members", "BL_46",
+                              (("no", "No - not levied (default)"), ("yes", "Yes - by General Body resolution"))),
+    "sinking_fund_basis":   ("Sinking Fund rate basis (if levied)", "BL_46", _BASIS),
+    "levy_repair_fund":     ("Levy a Repair & Maintenance Fund", "BL_36",
+                              (("no", "No - not levied (default)"), ("yes", "Yes - by General Body resolution"))),
+    "repair_fund_basis":    ("Repair Fund rate basis (if levied)", "BL_36", _BASIS),
+    "fund_arrears_interest": ("Late-payment interest also applies to fund dues", "BL_46",
+                              (("yes", "Yes (default)"), ("no", "No"))),
+})
+FUND_POLICY_KEYS = ("levy_sinking_fund", "sinking_fund_basis", "levy_repair_fund", "repair_fund_basis",
+                    "fund_arrears_interest")
+del _BASIS
+
 for _bl in STATUTE_BACKED_CLAUSES:
     POLICY_SPECS[f"droppable_{_bl}"] = (
         f"{_bl} may be recorded as 'not adopted'", _bl,
@@ -436,6 +454,17 @@ def society_policy(society_id, policy_key: str) -> str:
     except Exception:
         pass
     return policy_default(policy_key)
+
+
+def policy_intent(society_id, policy_key: str) -> str:
+    """What the admin has chosen for a policy: a pending (provisional) choice if there is one, else the active
+    resolution-backed value, else the default. The Setup Wizard gates its inputs on this; the engine itself still
+    reads only the resolution-backed value (society_policy). Never raises."""
+    try:
+        st = list_society_policies(int(society_id))[policy_key]
+        return st["proposed"] or st["value"]
+    except Exception:
+        return policy_default(policy_key)
 
 
 def clause_is_locked(society_id, clause_id: str) -> bool:

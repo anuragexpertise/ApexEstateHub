@@ -245,10 +245,10 @@ def load_conversation_data():
 CONVERSATION_DATA = load_conversation_data()
 WIZARD_GROUPS = {
     "Organization Details": ["Instructions", "Society Details", "Administrator"],
-    "Central Acts": ["Society Compliance", "TAN & TDS Rates", "GSTIN & GST Rate"],
     "UP_AOA Acts": ["UP AOA Compliance"],
     "UPAOA Rules": ["UP AOA Compliance"],
     "UP By-Laws": ["Bye-Laws Adoption"],
+    "Central Acts": ["Society Compliance", "TAN & TDS Rates", "GSTIN & GST Rate"],
     "Society Policy": ["Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward"],
     "Finalization": ["Agreement"]
 }
@@ -256,11 +256,11 @@ CATEGORIES = [
     'Instructions',
     'Society Details',
     'Administrator',
+    'UP AOA Compliance',
+    'Bye-Laws Adoption',
     'Society Compliance',
     'TAN & TDS Rates',
     'GSTIN & GST Rate',
-    'UP AOA Compliance',
-    'Bye-Laws Adoption',
     'Apartment Charges',
     'Vendor Charges',
     'Accounts',
@@ -415,6 +415,81 @@ def _render_banner(title, text):
         ], className="p-3")
     ], className="mb-4 shadow-sm border-0 bg-light")
 
+def _society_state(society_id):
+    if not society_id:
+        return None
+    try:
+        row = db._execute("SELECT state FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+        return (row or {}).get("state") or None
+    except Exception:
+        return None
+
+
+def fund_flags(society_id=None, state=None):
+    """Which fund inputs the wizard should ask for.
+
+    A fund is asked for only if the state PRESCRIBES it (statutory) or the
+    admin opted in on the Bye-Laws Adoption step (levy_*_fund = 'yes'). Under
+    UP_AOA_2010 neither Sinking nor Repair has a statutory rate, so by default
+    neither is asked for. The Corpus Fund is never a setup input.
+    """
+    from app.services.statutory_rules import fund_rules_for_state
+    from app.services import regime_rules_admin as rra
+    rules = fund_rules_for_state(state if state else _society_state(society_id))
+
+    def levied(fund):
+        if rules[fund]["mode"] == "statutory":
+            return True
+        return bool(society_id) and rra.policy_intent(society_id, f"levy_{fund}_fund") == "yes"
+
+    return {"rules": rules, "sinking": levied("sinking"), "repair": levied("repair")}
+
+
+def fund_note(flags, regime):
+    """One-line explanation shown above the fund fields."""
+    r = flags["rules"]
+    if r["sinking"]["mode"] == "statutory" or r["repair"]["mode"] == "statutory":
+        return (f"{regime} prescribes minimum Sinking / Repair fund rates "
+                f"(sinking {r['sinking']['min_pct']}% , repair {r['repair']['min_pct']}% of construction cost per year).")
+    if flags["sinking"] or flags["repair"]:
+        return f"{regime} sets no statutory rate; these funds are levied by your General Body resolution (Bye-Laws Adoption step)."
+    return (f"{regime} does not prescribe a Sinking or Repair fund. None is being levied. To levy one, opt in on the "
+            "Bye-Laws Adoption step (Funds & assessments).")
+
+
+def regime_badge(state_code):
+    """Society Details: which legal regime the picked State puts the society under."""
+    from app.services.statutory_rules import (regime_for_society, state_has_own_regime, regime_profile)
+    if not state_code:
+        return html.Small("Select a State to see the governing legal regime.", className="text-muted")
+    regime = regime_for_society(None, state_code)
+    name, status = regime_profile(regime)
+    own = state_has_own_regime(state_code)
+    parts = [dbc.Badge(regime, color="primary" if own else "secondary", className="me-2"), html.Span(name, className="small")]
+    if status == "draft":
+        parts.append(dbc.Badge("draft", color="warning", text_color="dark", className="ms-2"))
+    if not own:
+        parts.append(html.Div("No dedicated regime is seeded for this state yet. UP_AOA_2010 is shown as a reference only; "
+                              "confirm applicable law with an advocate.", className="small text-warning mt-1"))
+    return html.Div(parts)
+
+
+def state_thresholds_rows(state_code):
+    """Society Compliance: thresholds for ALL-India plus only the picked state (was: every state's)."""
+    from database.seed import STATE_COMPLIANCE_THRESHOLDS
+    from app.services.statutory_rules import normalize_state
+    st = normalize_state(state_code)
+    rows = []
+    for (state, key, val, val_text, unit, eff_from, eff_to, notes) in STATE_COMPLIANCE_THRESHOLDS:
+        if state not in ("ALL", st) or eff_to is not None:
+            continue
+        rows.append(dbc.Row([dbc.Col(html.B(state), width=1), dbc.Col(html.Span(key, className="small text-muted"), width=3),
+                             dbc.Col(html.Span(val if val is not None else (val_text or "no floor"), className="small fw-bold"), width=2),
+                             dbc.Col(html.Span(unit or "", className="small text-muted"), width=1),
+                             dbc.Col(html.Span(notes or "", className="small text-muted"), width=5)], className="mb-2"))
+    return rows
+
+
 def render_category_content(category, society_id=None, state=None):
     """
     Step body for one wizard category.
@@ -499,6 +574,7 @@ def render_category_content(category, society_id=None, state=None):
             _field_feedback("sw-society-address-feedback"),
             _label("State", html_for="sw-society-state"),
             dbc.Select(id="sw-society-state", options=state_options, value=s_state, className="mb-1"),
+            html.Div(id="sw-regime-badge", children=regime_badge(s_state), className="mb-2"),
             html.P(
                 "Drives GST inter-state (IGST) vs intra-state (CGST+SGST) determination on RCM, and which "
                 "state's statutory Balance Sheet head-mapping / fund-rate defaults apply.",
@@ -661,14 +737,15 @@ def render_category_content(category, society_id=None, state=None):
             dbc.Col([_label("Registered for GST?"), dbc.RadioItems(id="sw-gst-registered", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=c_gst_reg, inline=True, className="mb-3")], width=6),
             dbc.Col([_label("Deducts TDS?"), dbc.RadioItems(id="sw-deducts-tds", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3")], width=6),
         ]))
-        inputs.append(dbc.Row([
-            dbc.Col([_label("Sinking Fund Basis"), dbc.Select(id="sw-comp-sink", options=[{"label": "Per Sq Ft", "value": "per_sq_ft"}, {"label": "Construction Cost", "value": "construction_cost"}], value=c_sink_basis, className="mb-3")], width=6),
-            dbc.Col([_label("Repair Fund Basis"), dbc.Select(id="sw-comp-repair", options=[{"label": "Per Sq Ft", "value": "per_sq_ft"}, {"label": "Construction Cost", "value": "construction_cost"}], value=c_repair_basis, className="mb-3")], width=6)
-        ]))
-        inputs.append(dbc.Row([
-            dbc.Col([_label("Fund GST Exempt"), dbc.Switch(id="sw-comp-gst-exempt", value=c_gst_exempt, className="mb-3")], width=6),
-            dbc.Col([_label("Fund Charges Interest"), dbc.Switch(id="sw-comp-charges-int", value=c_charges_int, className="mb-3")], width=6)
-        ]))
+        # Sinking / Repair basis and fund late-payment interest are society-by-law
+        # choices: they live on the Bye-Laws Adoption step (Funds & assessments)
+        # and are written from there on submit. "Fund GST Exempt" is a tax
+        # treatment (CBIC Circular 109/28/2019-GST), so it stays here, but is
+        # shown only when a fund is actually levied.
+        _ff = fund_flags(society_id, state)
+        inputs.append(html.Div(
+            dbc.Row([dbc.Col([_label("Fund GST Exempt"), dbc.Switch(id="sw-comp-gst-exempt", value=c_gst_exempt, className="mb-3")], width=6)]),
+            id="sw-comp-fund-box", style={} if (_ff["sinking"] or _ff["repair"]) else {"display": "none"}))
         inputs.append(dbc.Row([
             dbc.Col([_label("GST Filing Cadence"), dbc.Select(id="sw-comp-gst-cadence", options=[{"label": "Monthly", "value": "monthly"}, {"label": "QRMP", "value": "qrmp"}], value=c_gst_cadence, className="mb-3")], width=6),
             dbc.Col([_label("TDS No PAN Action"), dbc.Select(id="sw-comp-tds-action", options=[{"label": "Warn", "value": "warn"}, {"label": "Block", "value": "block"}], value=c_tds_action, className="mb-3")], width=6),
@@ -678,9 +755,7 @@ def render_category_content(category, society_id=None, state=None):
         ]))
         inputs.append(html.Hr())
         inputs.append(html.H6("State Compliance Thresholds", className="mt-4 mb-2 text-primary"))
-        for item in STATE_COMPLIANCE_THRESHOLDS:
-            state, key, val, val_text, unit, eff_from, eff_to, notes = item
-            inputs.append(dbc.Row([dbc.Col(html.B(state), width=1), dbc.Col(html.Span(key, className="small text-muted"), width=3), dbc.Col(html.Span(val if val is not None else "", className="small fw-bold"), width=2), dbc.Col(html.Span(unit, className="small text-muted"), width=1), dbc.Col(html.Span(notes, className="small text-muted"), width=5)], className="mb-2"))
+        inputs.append(html.Div(state_thresholds_rows(state or _society_state(society_id)), id="sw-state-thresholds"))
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Bye-Laws Adoption":
         # The society's bye-law register: for each Model Bye-Law 2011 clause the admin notes the intended outcome
@@ -690,6 +765,7 @@ def render_category_content(category, society_id=None, state=None):
         # A clause nobody touches is governed by the Model
         # Bye-Laws / Act as-is. Persistence is immediate, by callback (sw-bl-*), not on wizard submit.
         from app.services import regime_rules_admin as rra
+        from app.services.statutory_rules import regime_for_society
         existing = {}
         try:
             for r in rra.list_society_bye_laws(society_id) if society_id else []:
@@ -723,11 +799,17 @@ def render_category_content(category, society_id=None, state=None):
             pol = rra.list_society_policies(society_id) if society_id else {}
         except Exception:
             pol = {}
-        pol_rows = []
+        pol_rows, fund_pol_rows = [], []
+        _ff = fund_flags(society_id, state)
         for key, (label, clause, choices) in rra.POLICY_SPECS.items():
+            if key in rra.FUND_POLICY_KEYS:
+                fund = "sinking" if "sinking" in key else "repair" if "repair" in key else None
+                # a prescribed fund is not a choice: no opt-in row, and its basis is fixed by the state rule
+                if fund and _ff["rules"][fund]["mode"] == "statutory":
+                    continue
             st = pol.get(key) or {"value": choices[0][0], "active": False, "proposed": None}
             shown = st["proposed"] or st["value"]
-            pol_rows.append(html.Tr([
+            (fund_pol_rows if key in rra.FUND_POLICY_KEYS else pol_rows).append(html.Tr([
                 html.Td([html.Strong(label, style={"fontSize": "12px"}), html.Br(),
                          html.Small(f"Resolution on {clause}", className="text-muted")], style={"maxWidth": "260px"}),
                 html.Td(dbc.Select(id={"type": "sw-pol-choice", "key": key}, size="sm",
@@ -744,6 +826,11 @@ def render_category_content(category, society_id=None, state=None):
                        "which clauses are truly non-droppable is a legal call - confirm with an advocate.", className="text-muted d-block mb-2"),
             dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in ("Setting", "Choice", "Status")])),
                        html.Tbody(pol_rows)], bordered=True, size="sm"),
+            html.H6("Funds & assessments", className="mt-3 mb-1"),
+            html.Small(fund_note(_ff, regime_for_society(society_id, state)),
+                       className="text-muted d-block mb-2", id="sw-fund-note"),
+            dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in ("Setting", "Choice", "Status")])),
+                       html.Tbody(fund_pol_rows)], bordered=True, size="sm") if fund_pol_rows else html.Div(),
         ]) if society_id else html.Div()
         return elements + [
             dbc.Alert([html.I(className="fas fa-scale-balanced me-2"),
@@ -896,19 +983,27 @@ def render_category_content(category, society_id=None, state=None):
         return elements + out
     elif category == "Apartment Charges":
         s_amt, s_rate, s_due = 0.0, 0.0, 1
-        s_sink, s_repair, s_int = DEFAULT_SINKING_FUND_RATE, DEFAULT_REPAIR_FUND_RATE, MAX_INTEREST_RATE_PCT
+        _ff = fund_flags(society_id, state)
+        # The 0.25 / 0.75 defaults are Maharashtra's statutory minimum percentages, so they are only a
+        # sensible pre-fill where the state prescribes the fund; elsewhere the fund starts at 0 (not levied).
+        s_sink = DEFAULT_SINKING_FUND_RATE if _ff["rules"]["sinking"]["mode"] == "statutory" else 0.0
+        s_repair = DEFAULT_REPAIR_FUND_RATE if _ff["rules"]["repair"]["mode"] == "statutory" else 0.0
+        s_int = MAX_INTEREST_RATE_PCT
         if society_id:
             row = db._execute("SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
                 s_amt, s_rate, s_due = row.get("apt_maintenance_amount", 0.0) or 0.0, row.get("apt_maintenance_rate", 0.0) or 0.0, row.get("apt_due_day", 1) or 1
                 # a stored 0 means "never set" on first-time setup, so fall back to the defaults
-                s_sink = row.get("apt_sinking_fund_rate") or DEFAULT_SINKING_FUND_RATE
-                s_repair = row.get("apt_repair_fund_rate") or DEFAULT_REPAIR_FUND_RATE
+                s_sink = row.get("apt_sinking_fund_rate") or s_sink
+                s_repair = row.get("apt_repair_fund_rate") or s_repair
                 s_int = min(row.get("apt_interest_pct") or MAX_INTEREST_RATE_PCT, MAX_INTEREST_RATE_PCT)
         return elements + [
-            _render_banner("Apartment Charges", f"Set default charges, billing cycle day, sinking fund, and repair fund rates for all apartments. Defaults are pre-filled: Sinking Fund {DEFAULT_SINKING_FUND_RATE}, Repair Fund {DEFAULT_REPAIR_FUND_RATE}, interest capped at {MAX_INTEREST_RATE_PCT}%."),
+            _render_banner("Apartment Charges", "Set default charges, billing cycle day and late-payment interest (capped at " + str(MAX_INTEREST_RATE_PCT) + "%). "
+                           "Sinking / Repair fund rates appear only where your state prescribes them or you opted in on the Bye-Laws Adoption step."),
             dbc.Row([dbc.Col([_label("Base Maintenance Amount"), dbc.Input(id="sw-apt-amt", type="number", value=s_amt, step=1, className="mb-3")], width=6), dbc.Col([_label("Maintenance Rate/SqFt"), dbc.Input(id="sw-apt-rate", type="number", value=s_rate, step=0.01, className="mb-3")], width=6)]),
-            dbc.Row([dbc.Col([_label("Billing Due Day"), dbc.Input(id="sw-apt-due", type="number", value=s_due, min=1, max=31, step=1, className="mb-3")], width=4), dbc.Col([_label("Sinking Fund Rate"), dbc.Input(id="sw-apt-sink", type="number", value=s_sink, step=0.01, className="mb-3")], width=4), dbc.Col([_label("Repair Fund Rate"), dbc.Input(id="sw-apt-repair", type="number", value=s_repair, step=0.01, className="mb-3")], width=4)]),
+            dbc.Row([dbc.Col([_label("Billing Due Day"), dbc.Input(id="sw-apt-due", type="number", value=s_due, min=1, max=31, step=1, className="mb-3")], width=4),
+                     dbc.Col([_label("Sinking Fund Rate"), dbc.Input(id="sw-apt-sink", type="number", value=s_sink, step=0.01, className="mb-3")], id="sw-apt-sink-col", width=4, style={} if _ff["sinking"] else {"display": "none"}),
+                     dbc.Col([_label("Repair Fund Rate"), dbc.Input(id="sw-apt-repair", type="number", value=s_repair, step=0.01, className="mb-3")], id="sw-apt-repair-col", width=4, style={} if _ff["repair"] else {"display": "none"})]),
             dbc.Row([dbc.Col([_label("Charges Interest Rate (%)"), dbc.Input(id="sw-apt-interest", type="number", value=s_int, min=0, max=MAX_INTEREST_RATE_PCT, step=0.01, className="mb-1"), html.Small(f"Maximum {MAX_INTEREST_RATE_PCT}%", className="text-muted d-block mb-3")], width=4)])
         ]
     elif category == "Vendor Charges":

@@ -15863,6 +15863,9 @@ RETURNS TEXT LANGUAGE sql STABLE AS $$
         CASE p_key WHEN 'nodues_blocks_on'         THEN 'loans_only'
                    WHEN 'vote_ineligibility_basis' THEN 'any_overdue'
                    WHEN 'vote_loan_basis'          THEN 'margin_60_days'
+                   WHEN 'levy_sinking_fund' THEN 'no' WHEN 'levy_repair_fund' THEN 'no'
+                   WHEN 'sinking_fund_basis' THEN 'per_sq_ft' WHEN 'repair_fund_basis' THEN 'per_sq_ft'
+                   WHEN 'fund_arrears_interest' THEN 'yes'
                    WHEN 'droppable_BL_07' THEN 'locked' WHEN 'droppable_BL_39' THEN 'locked'
                    WHEN 'droppable_BL_49' THEN 'locked' WHEN 'droppable_BL_55' THEN 'locked'
                    ELSE NULL END)

@@ -7,6 +7,7 @@ from database.seed import TDS_SECTION_RATE_SEED
 from app.dash_apps.pages.setup_wizard import (
     get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS,
     build_rules_panel, rules_subtitle, MAX_INTEREST_RATE_PCT,
+    fund_flags, fund_note, regime_badge, state_thresholds_rows,
 )
 from app.utils.ux_toasts import error_toast
 from app.security.guards import require_session
@@ -18,6 +19,7 @@ from app.security.audit_context import get_current_society_id, get_current_user_
 # on the State picked in Society Details. Step containers are keyed by that
 # index, so the refresh callback has to target a concrete one.
 UP_AOA_STEP = CATEGORIES.index("UP AOA Compliance") if "UP AOA Compliance" in CATEGORIES else None
+BYE_LAWS_STEP = CATEGORIES.index("Bye-Laws Adoption") if "Bye-Laws Adoption" in CATEGORIES else None
 
 
 def _setup_validation_result(value, label, base_class="mb-3", kind="text"):
@@ -174,11 +176,12 @@ def register_setup_wizard_callbacks(app):
         State("sw-society-email", "value"),
         State("sw-society-phone", "value"),
         State("sw-society-reg", "value"),
+        State("sw-society-state", "value"),
         prevent_initial_call=True
     )
     @require_session
     def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id, gst_reg, deducts_tds, qr_secret, qr_confirm,
-                                 s_address, s_email_v, s_phone_v, s_reg_v):
+                                 s_address, s_email_v, s_phone_v, s_reg_v, s_state_v):
         triggered_id = ctx.triggered_id
         
         error_msg = ""
@@ -229,8 +232,8 @@ def register_setup_wizard_callbacks(app):
         step_styles = [{"display": "block"} if i == new_step else {"display": "none"} for i in range(len(CATEGORIES))]
         
         # Acts & Rules: framework rows + official links for THIS step (see build_rules_panel)
-        rules_html = build_rules_panel(cat_name, society_id)
-        rules_sub = rules_subtitle(cat_name, society_id)
+        rules_html = build_rules_panel(cat_name, society_id, s_state_v)
+        rules_sub = rules_subtitle(cat_name, society_id, s_state_v)
 
         nav_active = [i == new_step for i in range(len(CATEGORIES))]
         nav_children = []
@@ -309,23 +312,61 @@ def register_setup_wizard_callbacks(app):
     # matter what the admin had just selected. Re-render it, and the Acts &
     # Rules column, off the dropdown instead. Both rules-panel outputs are
     # allow_duplicate because handle_wizard_navigation also writes them.
-    if UP_AOA_STEP is not None:
+    if UP_AOA_STEP is not None and BYE_LAWS_STEP is not None:
         @app.callback(
             Output({"type": "sw-step-container", "index": UP_AOA_STEP}, "children"),
+            Output({"type": "sw-step-container", "index": BYE_LAWS_STEP}, "children"),
             Output("sw-compliance-rules-panel", "children", allow_duplicate=True),
             Output("sw-rules-subtitle", "children", allow_duplicate=True),
+            Output("sw-regime-badge", "children"),
+            Output("sw-state-thresholds", "children"),
             Input("sw-society-state", "value"),
+            State("sw-society-id", "data"),
+            State("sw-current-step", "data"),
+            prevent_initial_call=True,
+        )
+        @require_session
+        def refresh_state_dependent_steps(picked_state, society_id, current_step):
+            # Statutes and Bye-Laws (fund opt-ins per regime) both depend on the State dropdown, which is only
+            # persisted on submit. The Acts & Rules column is rewritten for the step the admin is ON; it used
+            # to be overwritten with the UP AOA statutes whichever step was open.
+            here = CATEGORIES[current_step] if isinstance(current_step, int) and 0 <= current_step < len(CATEGORIES) else CATEGORIES[0]
+            return (
+                render_category_content("UP AOA Compliance", society_id, picked_state),
+                render_category_content("Bye-Laws Adoption", society_id, picked_state),
+                build_rules_panel(here, society_id, picked_state),
+                rules_subtitle(here, society_id, picked_state),
+                regime_badge(picked_state),
+                state_thresholds_rows(picked_state),
+            )
+
+        # Fund inputs follow the regime + the by-law opt-ins: Sinking / Repair rate fields on Apartment Charges and
+        # "Fund GST Exempt" on Society Compliance are shown only for a fund the state prescribes or the society levies.
+        @app.callback(
+            Output("sw-apt-sink-col", "style"),
+            Output("sw-apt-repair-col", "style"),
+            Output("sw-comp-fund-box", "style"),
+            Output("sw-fund-note", "children"),
+            Input({"type": "sw-pol-choice", "key": ALL}, "value"),
+            Input("sw-society-state", "value"),
+            State({"type": "sw-pol-choice", "key": ALL}, "id"),
             State("sw-society-id", "data"),
             prevent_initial_call=True,
         )
         @require_session
-        def refresh_up_aoa_step_content(picked_state, society_id):
-            step = "UP AOA Compliance"
-            return (
-                render_category_content(step, society_id, picked_state),
-                build_rules_panel(step, society_id, picked_state),
-                rules_subtitle(step, society_id, picked_state),
-            )
+        def toggle_fund_fields(values, picked_state, ids, society_id):
+            from app.services.statutory_rules import fund_rules_for_state, regime_for_society
+            rules = fund_rules_for_state(picked_state)
+            chosen = {i["key"]: v for i, v in zip(ids or [], values or [])}
+
+            def levied(fund):
+                return rules[fund]["mode"] == "statutory" or chosen.get(f"levy_{fund}_fund") == "yes"
+
+            flags = {"rules": rules, "sinking": levied("sinking"), "repair": levied("repair")}
+            show = lambda on: {} if on else {"display": "none"}
+            return (show(flags["sinking"]), show(flags["repair"]),
+                    show(flags["sinking"] or flags["repair"]),
+                    fund_note(flags, regime_for_society(society_id, picked_state)))
 
 
 
@@ -369,10 +410,7 @@ def register_setup_wizard_callbacks(app):
         State({"type": "tds-agg-bill", "index": ALL}, "value"),
         State("sw-cgst", "value"),
         State("sw-sgst", "value"),
-        State("sw-comp-sink", "value"),
-        State("sw-comp-repair", "value"),
         State("sw-comp-gst-exempt", "value"),
-        State("sw-comp-charges-int", "value"),
         State("sw-comp-gst-cadence", "value"),
         # The old, separate "sw-comp-gst-reg" switch was removed from the
         # Society Compliance page (setup_wizard.py) — it silently
@@ -412,7 +450,7 @@ def register_setup_wizard_callbacks(app):
                             qr_secret, qr_confirm, i_agree, admin_pass, qr_confirm_final,
                             tds_natures, tds_rates, tds_rates_no_pan, tds_single_bills, tds_agg_bills,
                             cgst, sgst,
-                            c_sink, c_repair, c_gst_exempt, c_charges_int, c_gst_cad, c_gst_reg, c_tds_act, c_exp_fmt,
+                            c_gst_exempt, c_gst_cad, c_gst_reg, c_tds_act, c_exp_fmt,
                             apt_amt, apt_rate, apt_due_day, apt_sinking, apt_repair, apt_interest,
                             ven_1day, ven_7day, ven_1mth,
                             bf_fy, bf_ids, bf_amts, bf_remarks, tds_effective_date, auth):
@@ -563,6 +601,18 @@ def register_setup_wizard_callbacks(app):
             # too, so a failed submit no longer leaves a half-initialised society.
             from database.seed import seed_accounts
             from database.db_manager import _to_pyformat
+            from app.services import regime_rules_admin as _rra
+            from app.dash_apps.pages.setup_wizard import fund_flags as _fund_flags
+
+            # Fund settings come from the Bye-Laws Adoption step, not from separate Compliance inputs.
+            # A fund the state does not prescribe and the society did not opt into is stored as 0 (not levied),
+            # so monthly billing (fn_generate_monthly_charges bills a fund only when its rate > 0) skips it.
+            _flags = _fund_flags(society_id, s_state)
+            apt_sinking = (apt_sinking or 0) if _flags["sinking"] else 0
+            apt_repair = (apt_repair or 0) if _flags["repair"] else 0
+            c_sink = _rra.policy_intent(society_id, "sinking_fund_basis")
+            c_repair = _rra.policy_intent(society_id, "repair_fund_basis")
+            c_charges_int = _rra.policy_intent(society_id, "fund_arrears_interest") == "yes"
 
             class _SetupRejected(Exception):
                 pass
