@@ -245,10 +245,10 @@ def load_conversation_data():
 CONVERSATION_DATA = load_conversation_data()
 WIZARD_GROUPS = {
     "Organization Details": ["Instructions", "Society Details", "Administrator"],
-    "Central Acts": ["TAN & TDS Rates", "GSTIN & GST Rates"],
-    "UP_AOA Acts": ["Compliance (UP_AOA)"],
-    "UPAOA Rules": ["Compliance (UP_AOA)"],
-    "UP By-Laws": ["By-Laws Adoption"],
+    "Central Acts": ["Society Compliance", "TAN & TDS Rates", "GSTIN & GST Rate"],
+    "UP_AOA Acts": ["UP AOA Compliance"],
+    "UPAOA Rules": ["UP AOA Compliance"],
+    "UP By-Laws": ["Bye-Laws Adoption"],
     "Society Policy": ["Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward"],
     "Finalization": ["Agreement"]
 }
@@ -256,10 +256,11 @@ CATEGORIES = [
     'Instructions',
     'Society Details',
     'Administrator',
+    'Society Compliance',
     'TAN & TDS Rates',
-    'GSTIN & GST Rates',
-    'Compliance (UP_AOA)',
-    'By-Laws Adoption',
+    'GSTIN & GST Rate',
+    'UP AOA Compliance',
+    'Bye-Laws Adoption',
     'Apartment Charges',
     'Vendor Charges',
     'Accounts',
