@@ -1,6 +1,62 @@
 import dash_bootstrap_components as dbc
 from dash import html, dcc
 
+from app.security.audit_context import get_current_society_id
+
+
+def _fmt_date(value):
+    """'12 Aug 2026' for a date/datetime, the raw text for anything else, '—' when empty."""
+    if not value:
+        return "—"
+    try:
+        return value.strftime("%d %b %Y")
+    except AttributeError:
+        return str(value)
+
+
+def render_governance_summary(role=None, sid=None):
+    """Summary strip at the top of Settings; points the user at the governance tabs below it.
+
+    The society comes from the server session, never from the `sid` the page was
+    called with, so a forged id can't read another society's counts. Returns None
+    when there is no society (nothing to summarise). Never raises: the snapshot
+    already falls back to zeros when the governance tables are missing.
+    """
+    society_id = get_current_society_id()
+    if not society_id:
+        return None
+
+    from app.services import regime_rules_admin as rra
+    snap = rra.governance_snapshot(society_id) or {}
+
+    hint = (
+        "Open the Society governance tabs below to record meetings and resolutions."
+        if role == "admin"
+        else "Open the Society governance tabs below to view your society's bye-laws, meetings and resolutions."
+    )
+
+    def _stat(label, value):
+        return dbc.Col(html.Div([
+            html.Small(label, className="text-muted d-block"),
+            html.Span(str(value), style={"fontWeight": 700, "fontSize": "18px"}),
+        ]), sm=4)
+
+    stats = [
+        _stat("Choices awaiting a resolution", snap.get("pending_choices", 0)),
+        _stat("Last meeting", _fmt_date(snap.get("last_meeting"))),
+    ]
+    if snap.get("pending_enactments"):
+        stats.append(_stat("Resolutions awaiting enactment", snap["pending_enactments"]))
+
+    return dbc.Card([
+        dbc.CardBody([
+            html.Div("Society governance", style={"fontWeight": 700, "fontSize": "16px"}),
+            dbc.Row(stats, className="mt-2"),
+            html.Small(hint, className="text-muted d-block mt-2"),
+        ])
+    ], className="mb-3 shadow-sm")
+
+
 def society_governance_kpi():
     return dbc.Card([
         dbc.CardBody([
