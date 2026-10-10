@@ -1178,3 +1178,238 @@ def execute_enactment(actor_id, actor_role, effect_id: int, actor_society_id=Non
     except Exception as e:
         db._execute("""UPDATE resolution_effects SET status = 'failed', error_message = %s WHERE id = %s""", (str(e), effect_id))
         return False, f"Execution failed: {e}"
+
+
+    def rwa_compliance_view(self, society_id: int):
+        links = {}
+        if hasattr(self, 'kpi_rule_links'):
+            try:
+                links = self.kpi_rule_links(society_id)
+            except Exception:
+                links = {}
+        return {
+            "central_acts": [],
+            "up_aoa_acts": [],
+            "upaoa_rules": [],
+            "up_model_bylaws": [],
+            "links": links
+        }
+
+    def list_bylaw_provisional(self, society_id: int):
+        sql = """
+        SELECT bp.clause_no, bp.clause_title, bp.layer, bp.option AS variation,
+               bp.effective_date, bp.state, bp.resolution_id,
+               bp.clause_definition, bp.source_link, bp.option, bp.variation_text,
+               bp.reason, bp.id
+        FROM society_bylaw_provisional bp
+        WHERE bp.society_id=%s
+        ORDER BY bp.clause_no
+        """
+        try:
+            return self.db.fetchall(sql, (society_id,))
+        except Exception:
+            return []
+
+    def get_clause_master(self, clause_no: str):
+        try:
+            return self.db.fetchone("SELECT clause_no,title,definition,source_link FROM byelaws WHERE clause_no=%s LIMIT 1", (clause_no,))
+        except Exception:
+            return None
+
+    def upsert_provisional_choice(self, payload: dict, user_id: int):
+        society_id = payload.get('society_id')
+        clause_no = payload.get('clause_no')
+        if not society_id or not clause_no:
+            return False, "Missing society_id/clause_no"
+        try:
+            exists = self.db.fetchone("SELECT id FROM society_bylaw_provisional WHERE society_id=%s AND clause_no=%s", (society_id, clause_no))
+            if exists:
+                sql = """
+                UPDATE society_bylaw_provisional
+                SET layer=%s, `option`=%s, variation_text=%s, effective_date=%s, reason=%s, updated_at=NOW()
+                WHERE society_id=%s AND clause_no=%s
+                """
+                self.db.execute(sql, (
+                    payload.get('layer'), payload.get('option'), payload.get('variation_text'),
+                    payload.get('effective_date') or None, payload.get('reason'),
+                    society_id, clause_no
+                ))
+                return True, "Updated provisional by-law choice"
+            else:
+                sql = """
+                INSERT INTO society_bylaw_provisional
+                (society_id, clause_no, clause_title, clause_definition, source_link, layer, `option`, variation_text, effective_date, reason, state, created_by)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Draft',%s)
+                """
+                self.db.execute(sql, (
+                    society_id, clause_no, payload.get('clause_title'), payload.get('clause_definition'),
+                    payload.get('source_link'), payload.get('layer'), payload.get('option'),
+                    payload.get('variation_text'), payload.get('effective_date') or None,
+                    payload.get('reason'), user_id
+                ))
+                return True, "Saved provisional by-law choice"
+        except Exception as e:
+            return False, str(e)
+
+    def record_policy_choice(self, payload: dict, user_id: int):
+        society_id = payload.get('society_id')
+        policy_key = payload.get('policy_key')
+        if not society_id or not policy_key:
+            return False, "Missing society_id/policy_key"
+        try:
+            val_text = payload.get('value_text') or None
+            val_json = payload.get('value_json')
+            if val_json is not None and not isinstance(val_json, str):
+                val_json = json.dumps(val_json)
+            exists = self.db.fetchone("SELECT id FROM society_policy_choice WHERE society_id=%s AND policy_key=%s", (society_id, policy_key))
+            if exists:
+                sql = """
+                UPDATE society_policy_choice
+                SET value_text=%s, value_json=%s, reason=%s, effective_date=%s, updated_at=NOW()
+                WHERE society_id=%s AND policy_key=%s
+                """
+                self.db.execute(sql, (val_text, val_json, payload.get('reason'), payload.get('effective_date') or None, society_id, policy_key))
+                return True, "Updated policy choice"
+            else:
+                sql = """
+                INSERT INTO society_policy_choice
+                (society_id, policy_key, value_text, value_json, reason, effective_date, created_by)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+                """
+                self.db.execute(sql, (society_id, policy_key, val_text, val_json, payload.get('reason'), payload.get('effective_date') or None, user_id))
+                return True, "Saved policy choice"
+        except Exception as e:
+            return False, str(e)
+
+    def list_meetings(self, society_id: int):
+        try:
+            sql = "SELECT id, meeting_type, held_on, quorum_met, minutes_pdf, created_by, venue, meeting_no FROM society_meetings WHERE society_id=%s ORDER BY held_on DESC, id DESC"
+            return self.db.fetchall(sql, (society_id,))
+        except Exception:
+            return []
+
+    def create_meeting(self, m: dict, user_id: int):
+        try:
+            sql = """
+            INSERT INTO society_meetings
+            (society_id, meeting_type, meeting_no, held_on, venue, quorum_met, chaired_by, minutes_pdf, notes, created_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """
+            self.db.execute(sql, (
+                m.get('society_id'), m.get('meeting_type'), m.get('meeting_no'),
+                m.get('held_on') or None, m.get('venue'), 1 if m.get('quorum_met') else 0,
+                m.get('chaired_by') or None, m.get('minutes_pdf'), m.get('notes'), user_id
+            ))
+            return True, "Meeting recorded"
+        except Exception as e:
+            return False, str(e)
+
+    def list_resolutions(self, society_id: int):
+        try:
+            sql = "SELECT id, meeting_id, clause_no, decision_type, majority_pct, passed, passed_date, affects_bylaw, affects_policy, subject, text FROM society_resolutions WHERE society_id=%s ORDER BY id DESC"
+            return self.db.fetchall(sql, (society_id,))
+        except Exception:
+            return []
+
+    def create_resolution(self, r: dict, user_id: int):
+        try:
+            sql = """
+            INSERT INTO society_resolutions
+            (society_id, meeting_id, clause_no, subject, decision_type, text, majority_pct, passed, passed_date, mover, seconder, affects_bylaw, affects_policy, policy_keys, created_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """
+            pk = r.get('policy_keys')
+            if pk is not None and not isinstance(pk, str):
+                pk = json.dumps(pk)
+            rid = self.db.insert(sql, (
+                r.get('society_id'), r.get('meeting_id') or None, r.get('clause_no'),
+                r.get('subject'), r.get('decision_type'), r.get('text'),
+                r.get('majority_pct') or 0, 1 if r.get('passed') else 0,
+                r.get('passed_date') or None, r.get('mover') or None, r.get('seconder') or None,
+                1 if r.get('affects_bylaw') else 0, 1 if r.get('affects_policy') else 0,
+                pk, user_id
+            ))
+            if r.get('passed') and (r.get('affects_bylaw') or r.get('affects_policy')):
+                self._create_effects(r.get('society_id'), rid, r)
+            return rid, "Resolution recorded"
+        except Exception as e:
+            return None, str(e)
+
+    def _create_effects(self, society_id, res_id, r):
+        try:
+            if r.get('affects_bylaw') and r.get('clause_no'):
+                payload = {"clause_no": r.get('clause_no'), "decision_type": r.get('decision_type'), "text": r.get('text'), "passed_date": r.get('passed_date')}
+                self.db.execute("""
+                INSERT IGNORE INTO resolution_effects (society_id, resolution_id, effect_type, target_key, payload_json)
+                VALUES (%s,%s,'BYLAW_PROVISIONAL',%s,%s)
+                """, (society_id, res_id, r.get('clause_no'), json.dumps(payload)))
+            if r.get('affects_policy'):
+                keys = r.get('policy_keys') or []
+                if isinstance(keys, str):
+                    try: keys = json.loads(keys)
+                    except: keys = []
+                for k in keys:
+                    payload = {"policy_key": k, "decision_type": r.get('decision_type'), "text": r.get('text')}
+                    self.db.execute("""
+                    INSERT IGNORE INTO resolution_effects (society_id, resolution_id, effect_type, target_key, payload_json)
+                    VALUES (%s,%s,'POLICY_CHOICE',%s,%s)
+                    """, (society_id, res_id, k, json.dumps(payload)))
+        except Exception:
+            pass
+
+    def list_enacted_pending(self, society_id: int):
+        try:
+            sql = "SELECT id, resolution_id, effect_type, target_key, payload_json, status, created_at FROM resolution_effects WHERE society_id=%s AND status='PENDING' ORDER BY id"
+            return self.db.fetchall(sql, (society_id,))
+        except Exception:
+            return []
+
+    def execute_enactment(self, effect_id: int, user_id: int):
+        try:
+            eff = self.db.fetchone("SELECT * FROM resolution_effects WHERE id=%s", (effect_id,))
+            if not eff: return False, "Effect not found"
+            if eff.get('status') != 'PENDING': return False, "Already processed"
+            if eff.get('effect_type') == 'BYLAW_PROVISIONAL':
+                p = json.loads(eff.get('payload_json') or '{}')
+                cno = p.get('clause_no') or eff.get('target_key')
+                self.db.execute("""
+                UPDATE society_bylaw_provisional SET state='Enacted', resolution_id=%s, updated_at=NOW() WHERE society_id=%s AND clause_no=%s
+                """, (eff.get('resolution_id'), eff.get('society_id'), cno))
+            elif eff.get('effect_type') == 'POLICY_CHOICE':
+                p = json.loads(eff.get('payload_json') or '{}')
+                pkey = p.get('policy_key') or eff.get('target_key')
+                ex = self.db.fetchone("SELECT id FROM society_policy_choice WHERE society_id=%s AND policy_key=%s", (eff.get('society_id'), pkey))
+                if not ex:
+                    self.db.execute("""
+                    INSERT INTO society_policy_choice (society_id, policy_key, value_text, reason, created_by)
+                    VALUES (%s,%s,'ENACTED','From resolution enactment',%s)
+                    """, (eff.get('society_id'), pkey, user_id))
+            self.db.execute("UPDATE resolution_effects SET status='EXECUTED', executed_at=NOW(), executed_by=%s WHERE id=%s", (user_id, effect_id))
+            return True, "Enactment executed"
+        except Exception as e:
+            try:
+                self.db.execute("UPDATE resolution_effects SET status='ERROR', error_text=%s WHERE id=%s", (str(e), effect_id))
+            except Exception:
+                pass
+            return False, str(e)
+
+    def set_cash_limit_mode(self, society_id: int, mode: str, user_id: int = 0):
+        if mode not in ('warn','block','regime default'):
+            return False, "Invalid mode"
+        try:
+            self.db.execute("UPDATE societies SET cash_limit_mode=%s WHERE id=%s", (mode, society_id))
+            return True, "Cash limit mode updated"
+        except Exception as e:
+            return False, str(e)
+
+    def audit_log_last25(self, society_id: int):
+        if hasattr(self, 'recent_audit'):
+            try:
+                return self.recent_audit(limit=25, society_id=society_id)
+            except Exception:
+                pass
+        try:
+            sql = "SELECT * FROM regime_rule_audit WHERE society_id=%s ORDER BY created_at DESC LIMIT 25"
+            return self.db.fetchall(sql, (society_id,))
+        except Exception:
+            return []

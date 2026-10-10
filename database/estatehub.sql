@@ -17125,3 +17125,106 @@ BEGIN
         (rec.overdue_s22_months = 0 AND (v_counts_s22 = 0 OR ln.overdue_s22 = 0)) AS s22_blocked
     FROM rec, ln;
 END $$;
+
+-- SOCIETY GOVERNANCE: Provisional By-Law Choices, Policy Choices, Meetings, Resolutions, Enactments
+CREATE TABLE IF NOT EXISTS `society_bylaw_provisional` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `society_id` BIGINT NOT NULL,
+  `clause_no` VARCHAR(20) NOT NULL,
+  `clause_title` VARCHAR(255) NULL,
+  `clause_definition` TEXT NULL,
+  `source_link` VARCHAR(512) NULL,
+  `layer` ENUM('Layer 1','Layer 2','Layer 3') NOT NULL DEFAULT 'Layer 2',
+  `option` ENUM('Adopted as-is','Adopted with variation','Not adopted') NOT NULL,
+  `variation_text` TEXT NULL,
+  `effective_date` DATE NULL,
+  `reason` TEXT NULL,
+  `state` ENUM('Draft','Pending Approval','Approved','Rejected','Enacted') NOT NULL DEFAULT 'Draft',
+  `resolution_id` BIGINT NULL,
+  `created_by` BIGINT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_society_clause` (`society_id`, `clause_no`),
+  KEY `idx_soc_state` (`society_id`, `state`),
+  KEY `idx_res_id` (`resolution_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `society_policy_choice` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `society_id` BIGINT NOT NULL,
+  `policy_key` VARCHAR(64) NOT NULL,
+  `value_json` JSON NULL,
+  `value_text` VARCHAR(255) NULL,
+  `reason` TEXT NULL,
+  `effective_date` DATE NULL,
+  `resolution_id` BIGINT NULL,
+  `created_by` BIGINT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_soc_policy` (`society_id`, `policy_key`),
+  KEY `idx_soc_pol` (`society_id`, `policy_key`),
+  KEY `idx_res_pol` (`resolution_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `society_meetings` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `society_id` BIGINT NOT NULL,
+  `meeting_type` ENUM('GBM','EGM','MC') NOT NULL,
+  `meeting_no` VARCHAR(30) NULL,
+  `held_on` DATE NULL,
+  `venue` VARCHAR(255) NULL,
+  `quorum_met` TINYINT(1) NOT NULL DEFAULT 0,
+  `chaired_by` BIGINT NULL,
+  `minutes_pdf` VARCHAR(512) NULL,
+  `notes` TEXT NULL,
+  `created_by` BIGINT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_soc_held` (`society_id`, `held_on`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `society_resolutions` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `society_id` BIGINT NOT NULL,
+  `meeting_id` BIGINT NULL,
+  `clause_no` VARCHAR(20) NULL,
+  `subject` VARCHAR(150) NULL,
+  `decision_type` ENUM('Adopt','Amend','Reject','Delegate') NOT NULL,
+  `text` TEXT NOT NULL,
+  `majority_pct` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  `passed` TINYINT(1) NOT NULL DEFAULT 0,
+  `passed_date` DATE NULL,
+  `mover` BIGINT NULL,
+  `seconder` BIGINT NULL,
+  `affects_bylaw` TINYINT(1) NOT NULL DEFAULT 0,
+  `affects_policy` TINYINT(1) NOT NULL DEFAULT 0,
+  `policy_keys` JSON NULL,
+  `created_by` BIGINT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_soc_passed` (`society_id`, `passed`, `passed_date`),
+  KEY `idx_meet` (`meeting_id`),
+  KEY `idx_clause` (`society_id`, `clause_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `resolution_effects` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `society_id` BIGINT NOT NULL,
+  `resolution_id` BIGINT NOT NULL,
+  `effect_type` ENUM('BYLAW_PROVISIONAL','POLICY_CHOICE') NOT NULL,
+  `target_key` VARCHAR(50) NOT NULL,
+  `payload_json` JSON NOT NULL,
+  `status` ENUM('PENDING','EXECUTED','SKIPPED','ERROR') NOT NULL DEFAULT 'PENDING',
+  `executed_at` DATETIME NULL,
+  `executed_by` BIGINT NULL,
+  `error_text` TEXT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_res_effect` (`resolution_id`, `target_key`, `effect_type`),
+  KEY `idx_soc_status` (`society_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE `societies`
+  ADD COLUMN IF NOT EXISTS `cash_limit_mode` ENUM('warn','block','regime default') NOT NULL DEFAULT 'regime default';
