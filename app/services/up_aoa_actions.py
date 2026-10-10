@@ -510,9 +510,13 @@ def load_card_data(society_id: int) -> dict:
                          FROM owner_admissions oa JOIN apartments a ON a.id = oa.apartment_id
                         WHERE oa.society_id=%s ORDER BY oa.admission_date DESC LIMIT 10""", society_id),
         # Cashbook signatures
-        cashbook_unsignged=q("""SELECT generate_series(current_date - 6, current_date, '1 day')::DATE AS day
-                                WHERE NOT EXISTS (SELECT 1 FROM cashbook_signatures WHERE society_id=%s AND day = generate_series(current_date - 6, current_date, '1 day')::DATE)
-                                ORDER BY day DESC""", society_id),
+        # Last 7 days with no signature row. (generate_series is a set-returning function:
+        # it can't sit in WHERE, so the days come from FROM and are anti-joined.)
+        cashbook_unsignged=q("""SELECT d::DATE AS day
+                                  FROM generate_series(current_date - 6, current_date, '1 day') AS d
+                                 WHERE NOT EXISTS (SELECT 1 FROM cashbook_signatures cs
+                                                    WHERE cs.society_id=%s AND cs.day = d::DATE)
+                                 ORDER BY day DESC""", society_id),
         # Investments
         investments=q("""SELECT id, institution_type, deposit_name, purchase_value, purchase_date FROM deposits
                          WHERE society_id=%s AND disposed=FALSE ORDER BY purchase_date DESC LIMIT 10""", society_id),
@@ -524,7 +528,7 @@ def load_card_data(society_id: int) -> dict:
                      FROM tenants t JOIN apartments a ON a.id = t.apartment_id
                     WHERE t.society_id=%s AND t.is_active ORDER BY t.tenancy_start DESC LIMIT 10""", society_id),
         # Board election candidates
-        board_candidates=q("""SELECT id, a.flat_number, candidate_name, position, vote_basis, vote_weight
+        board_candidates=q("""SELECT bc.id, a.flat_number, bc.candidate_name, bc.position, bc.vote_basis, bc.votes_weight AS vote_weight
                               FROM board_candidates bc JOIN apartments a ON a.id = bc.apartment_id
                              WHERE bc.society_id=%s ORDER BY bc.created_at DESC LIMIT 20""", society_id),
     )
