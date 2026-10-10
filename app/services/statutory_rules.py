@@ -144,12 +144,13 @@ STATUTORY_ROWS = {
 # (Administrator, Instructions, Agreement) fall back to the full framework.
 STEP_ROWS = {
     "Society Details":    ["it_mutuality", "it_return", "labour"],
-    "Society Compliance": ["gst", "tds", "sinking", "repair", "reserve", "corpus"],
+    "Society Compliance": ["gst", "tds"],
+    "Bye-Laws Adoption":  ["sinking", "repair", "reserve", "corpus"],
     "UP AOA Compliance":  ["up_aoa_act", "up_aoa_rules", "legal_instruments",
                            "reserve", "corpus", "sinking", "repair"],
     "TAN & TDS Rates":    ["tds"],
     "GSTIN & GST Rate":   ["gst"],
-    "Apartment Charges":  ["sinking", "repair", "reserve", "corpus", "gst"],
+    "Apartment Charges":  ["sinking", "repair", "gst"],
     "Vendor Charges":     ["tds", "gst", "labour"],
     "Accounts":           ["it_mutuality", "it_80p", "reserve", "corpus"],
     "Brought Forward":    ["corpus", "reserve", "sinking", "repair"],
@@ -159,7 +160,8 @@ STEP_ROWS = {
 STEP_LINK_CATEGORIES = {
     "Society Details":    ["apartment_act", "cooperative_act", "rera"],
     "Administrator":      ["apartment_act"],
-    "Society Compliance": ["sinking_fund", "fund_gst", "gst_registered", "tds_no_pan"],
+    "Society Compliance": ["fund_gst", "gst_registered", "tds_no_pan"],
+    "Bye-Laws Adoption":  ["apartment_act", "sinking_fund"],
     "UP AOA Compliance":  ["apartment_act", "cooperative_act", "rera",
                            "sinking_fund", "income_tax_mutuality"],
     "TAN & TDS Rates":    ["tds_no_pan", "income_tax_mutuality"],
@@ -174,7 +176,7 @@ STEP_LINK_CATEGORIES = {
 # Steps whose "Acts & Rules" column also lists the tabulated Act / Rules /
 # Bye-laws for the society's regime (legal_instrument_catalog). Steps without
 # an entry render the framework rows and official links only.
-STEP_INSTRUMENTS = {"Society Details", "Society Compliance", "UP AOA Compliance",
+STEP_INSTRUMENTS = {"Society Details", "Society Compliance", "UP AOA Compliance", "Bye-Laws Adoption",
                     "Apartment Charges", "Accounts", "Agreement"}
 
 
@@ -334,3 +336,70 @@ def rows_for_step(step: str):
     """Framework rows for a wizard step; full framework if none map."""
     keys = STEP_ROWS.get(step) or list(STATUTORY_ROWS.keys())
     return [STATUTORY_ROWS[k] for k in keys]
+
+
+# ── Fund applicability (Sinking / Repair / Corpus) ──────────────────────────
+# A fund is only a Setup Wizard question when the society's state PRESCRIBES it
+# (state_compliance_thresholds holds a numeric minimum, e.g. MH 0.25% / 0.75%
+# of construction cost). Where the threshold is NULL (UP: "no statutory floor",
+# database/seed.py NULL_NO_FLOOR) the fund is a society choice made by General
+# Body resolution under the Model Bye-Laws, so the wizard asks for it on the
+# Bye-Laws Adoption step and shows rate fields only if the society opts in.
+# The Corpus Fund is a one-time builder-handover receipt: it is never a setup
+# rate, so it only ever appears as an opening balance (Brought Forward).
+FUND_THRESHOLD_KEYS = {
+    "sinking": "sinking_fund_pct_construction_cost",
+    "repair": "repair_fund_pct_construction_cost",
+}
+
+
+def fund_rules_for_state(state_code=None):
+    """{'sinking'|'repair'|'corpus': {'mode': 'statutory'|'optional',
+    'min_pct': float|None, 'note': str}} for a state (blank -> UP)."""
+    state = normalize_state(state_code)
+    out = {f: {"mode": "optional", "min_pct": None, "note": ""} for f in FUND_THRESHOLD_KEYS}
+    out["corpus"] = {"mode": "optional", "min_pct": None,
+                     "note": "Builder-handover receipt; recorded when received, not a setup rate."}
+    rows = []
+    try:
+        from database.db_manager import db
+        rows = db._execute(
+            """SELECT threshold_key, value, notes FROM state_compliance_thresholds
+               WHERE state = %s AND threshold_key IN (%s, %s) AND effective_to IS NULL""",
+            (state, *FUND_THRESHOLD_KEYS.values()), fetch_all=True,
+        ) or []
+    except Exception:
+        rows = []
+    if not rows:                      # table missing / not integrated: use the seed list
+        try:
+            from database.seed import STATE_COMPLIANCE_THRESHOLDS
+            rows = [{"threshold_key": k, "value": v, "notes": n}
+                    for (st, k, v, _vt, _u, _ef, et, n) in STATE_COMPLIANCE_THRESHOLDS
+                    if st == state and k in FUND_THRESHOLD_KEYS.values() and et is None]
+        except Exception:
+            rows = []
+    by_key = {v: k for k, v in FUND_THRESHOLD_KEYS.items()}
+    for r in rows:
+        fund = by_key.get(r["threshold_key"])
+        if fund and r.get("value") not in (None, 0):
+            out[fund] = {"mode": "statutory", "min_pct": float(r["value"]), "note": r.get("notes") or ""}
+    return out
+
+
+def state_has_own_regime(state_code=None):
+    """False when the state has no legal_regime_profiles row of its own and
+    regime_for_society() is only falling back to UP_AOA_2010."""
+    return bool(state_code) and normalize_state(state_code) in STATE_REGIME
+
+
+def regime_profile(regime_code):
+    """(name, status) of a regime from legal_regime_profiles; (code, None) if unavailable."""
+    try:
+        from database.db_manager import db
+        row = db._execute("SELECT name, status FROM legal_regime_profiles WHERE code=%s",
+                          (regime_code,), fetch_one=True)
+        if row:
+            return row["name"], row["status"]
+    except Exception:
+        pass
+    return regime_code, None
