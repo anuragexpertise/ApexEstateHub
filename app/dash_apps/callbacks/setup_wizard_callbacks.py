@@ -18,8 +18,9 @@ from app.security.audit_context import get_current_society_id, get_current_user_
 # Index of the statutes step in CATEGORIES — the only step whose body depends
 # on the State picked in Society Details. Step containers are keyed by that
 # index, so the refresh callback has to target a concrete one.
-UP_AOA_STEP = CATEGORIES.index("UP AOA Compliance") if "UP AOA Compliance" in CATEGORIES else None
-BYE_LAWS_STEP = CATEGORIES.index("Bye-Laws Adoption") if "Bye-Laws Adoption" in CATEGORIES else None
+STATE_ACT_STEP = CATEGORIES.index("State Act & Rules") if "State Act & Rules" in CATEGORIES else None
+MODEL_BYE_LAWS_STEP = CATEGORIES.index("Model Bye-Laws Adoption") if "Model Bye-Laws Adoption" in CATEGORIES else None
+APARTMENT_CHARGES_STEP = CATEGORIES.index("Apartment Charges") if "Apartment Charges" in CATEGORIES else None
 
 
 def _setup_validation_result(value, label, base_class="mb-3", kind="text"):
@@ -168,8 +169,10 @@ def register_setup_wizard_callbacks(app):
         Input({"type": "sw-nav-item", "index": ALL}, "n_clicks"),
         State("sw-current-step", "data"),
         State("sw-society-id", "data"),
-        State("sw-gst-registered", "value"),
-        State("sw-deducts-tds", "value"),
+        State("sw-central-it-tan", "value"),
+        State("sw-central-tds", "value"),
+        State("sw-central-gst", "value"),
+        State("sw-central-rera", "value"),
         State("sw-qr-secret", "value"),
         State("sw-qr-secret-confirm", "value"),
         State("sw-society-address", "value"),
@@ -180,7 +183,7 @@ def register_setup_wizard_callbacks(app):
         prevent_initial_call=True
     )
     @require_session
-    def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id, gst_reg, deducts_tds, qr_secret, qr_confirm,
+    def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id, central_it_tan, central_tds, central_gst, central_rera, qr_secret, qr_confirm,
                                  s_address, s_email_v, s_phone_v, s_reg_v, s_state_v):
         triggered_id = ctx.triggered_id
         
@@ -189,9 +192,12 @@ def register_setup_wizard_callbacks(app):
         
         def get_next_valid_step(step, direction):
             while 0 <= step < len(CATEGORIES):
-                if CATEGORIES[step] == "GSTIN & GST Rate" and not gst_reg:
+                cat = CATEGORIES[step]
+                # Skip GSTIN & GST Rate if not GST registered (from Legal Regime Selection)
+                if cat == "GSTIN & GST Rate" and not central_gst:
                     step += direction
-                elif CATEGORIES[step] == "TAN & TDS Rates" and not deducts_tds:
+                # Skip TAN & TDS Rates if not deducting TDS (from Legal Regime Selection)
+                elif cat == "TAN & TDS Rates" and not central_tds:
                     step += direction
                 else:
                     break
@@ -240,7 +246,7 @@ def register_setup_wizard_callbacks(app):
         for i, cat in enumerate(CATEGORIES):
             cat_icon_cls = CATEGORY_ICONS.get(cat, 'fas fa-circle')
             cat_icon = html.I(className=f"{cat_icon_cls} me-2")
-            if (cat == "GSTIN & GST Rate" and not gst_reg) or (cat == "TAN & TDS Rates" and not deducts_tds):
+            if (cat == "GSTIN & GST Rate" and not central_gst) or (cat == "TAN & TDS Rates" and not central_tds):
                 nav_children.append(html.Span([cat_icon, cat], style={"textDecoration": "line-through", "opacity": "0.5"}))
             elif i < new_step:
                 nav_children.append(html.Span([cat_icon, cat, html.I(className="fas fa-check-circle text-success float-end", style={"marginTop": "4px"})]))
@@ -312,10 +318,10 @@ def register_setup_wizard_callbacks(app):
     # matter what the admin had just selected. Re-render it, and the Acts &
     # Rules column, off the dropdown instead. Both rules-panel outputs are
     # allow_duplicate because handle_wizard_navigation also writes them.
-    if UP_AOA_STEP is not None and BYE_LAWS_STEP is not None:
+    if STATE_ACT_STEP is not None and MODEL_BYE_LAWS_STEP is not None:
         @app.callback(
-            Output({"type": "sw-step-container", "index": UP_AOA_STEP}, "children"),
-            Output({"type": "sw-step-container", "index": BYE_LAWS_STEP}, "children"),
+            Output({"type": "sw-step-container", "index": STATE_ACT_STEP}, "children"),
+            Output({"type": "sw-step-container", "index": MODEL_BYE_LAWS_STEP}, "children"),
             Output("sw-compliance-rules-panel", "children", allow_duplicate=True),
             Output("sw-rules-subtitle", "children", allow_duplicate=True),
             Output("sw-regime-badge", "children"),
@@ -332,8 +338,8 @@ def register_setup_wizard_callbacks(app):
             # to be overwritten with the UP AOA statutes whichever step was open.
             here = CATEGORIES[current_step] if isinstance(current_step, int) and 0 <= current_step < len(CATEGORIES) else CATEGORIES[0]
             return (
-                render_category_content("UP AOA Compliance", society_id, picked_state),
-                render_category_content("Bye-Laws Adoption", society_id, picked_state),
+                render_category_content("State Act & Rules", society_id, picked_state),
+                render_category_content("Model Bye-Laws Adoption", society_id, picked_state),
                 build_rules_panel(here, society_id, picked_state),
                 rules_subtitle(here, society_id, picked_state),
                 regime_badge(picked_state),
@@ -384,6 +390,7 @@ def register_setup_wizard_callbacks(app):
         State({"type": "form-field-hidden", "entity": "society", "field": "logo"}, "value"),
         State("sw-society-address", "value"),
         State("sw-society-state", "value"),
+        State("sw-society-constitution", "value"),
         State("sw-society-email", "value"),
         State("sw-society-phone", "value"),
         State({"type": "form-field-hidden", "entity": "society", "field": "bg"}, "value"),
@@ -412,21 +419,11 @@ def register_setup_wizard_callbacks(app):
         State("sw-sgst", "value"),
         State("sw-comp-gst-exempt", "value"),
         State("sw-comp-gst-cadence", "value"),
-        # The old, separate "sw-comp-gst-reg" switch was removed from the
-        # Society Compliance page (setup_wizard.py) — it silently
-        # duplicated "Registered for GST?" (sw-gst-registered) without
-        # being linked to it, so a value entered on one could contradict
-        # whichever step/DB write actually used the other. This State now
-        # reuses sw-gst-registered — the same control the wizard's step
-        # navigation already treats as the single source of truth for
-        # this setting (see get_next_valid_step) — so the saved
-        # gst_registered value can never disagree with whether the
-        # GSTIN & GST Rate step was shown.
-        State("sw-gst-registered", "value"),
         State("sw-comp-tds-action", "value"),
         State("sw-comp-export-fmt", "value"),
         State("sw-apt-amt", "value"),
         State("sw-apt-rate", "value"),
+        State("sw-apt-billing-basis", "value"),
         State("sw-apt-due", "value"),
         State("sw-apt-sink", "value"),
         State("sw-apt-repair", "value"),
@@ -439,23 +436,35 @@ def register_setup_wizard_callbacks(app):
         State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
         State({"type": "sw-bf-remarks", "acc_id": ALL}, "value"),
         State("sw-tds-effective-date", "date"),
+        State("sw-central-it-tan", "value"),
+        State("sw-central-tds", "value"),
+        State("sw-central-gst", "value"),
+        State("sw-central-rera", "value"),
         State("auth-store", "data"),
+        running=[(Output("sw-btn-submit", "disabled"), True, False)],
         prevent_initial_call=True
     )
     @require_session
     def submit_setup_wizard(n_submit, n_close, 
-                            logo_data, address, s_state, s_email, phone, bg_data, 
+                            logo_data, address, s_state, s_constitution, s_email, phone, bg_data, 
                             tan, gstin, reg_num, gate_logic, duty_hrs, pay_qr_data, calc_start, 
                             sec_name, sec_phone, sec_email, sec_sign_data, 
                             qr_secret, qr_confirm, i_agree, admin_pass, qr_confirm_final,
                             tds_natures, tds_rates, tds_rates_no_pan, tds_single_bills, tds_agg_bills,
                             cgst, sgst,
-                            c_gst_exempt, c_gst_cad, c_gst_reg, c_tds_act, c_exp_fmt,
-                            apt_amt, apt_rate, apt_due_day, apt_sinking, apt_repair, apt_interest,
+                            c_gst_exempt, c_gst_cad, c_tds_act, c_exp_fmt,
+                            apt_amt, apt_rate, apt_billing_basis, apt_due_day, apt_sinking, apt_repair, apt_interest,
                             ven_1day, ven_7day, ven_1mth,
-                            bf_fy, bf_ids, bf_amts, bf_remarks, tds_effective_date, auth):
+                            bf_fy, bf_ids, bf_amts, bf_remarks, tds_effective_date,
+                            central_it_tan, central_tds, central_gst, central_rera, auth):
         triggered = ctx.triggered_id
         _noop = (no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update)
+        
+        # Default compliance settings (no longer in wizard, set defaults)
+        c_gst_exempt = True
+        c_gst_cad = "monthly"
+        c_tds_act = "warn"
+        c_exp_fmt = "structured"
 
         if triggered == "sw-close-btn":
             if not n_close:
@@ -620,11 +629,11 @@ def register_setup_wizard_callbacks(app):
             _setup_sql = """SELECT fn_complete_society_setup(
                         :sid, :secret_enc, :logo, :addr, :phone, :bg, :tan, :gstin, :pay_qr, :calc_start, :sec_name, :sec_phone, :sec_email, :sec_sign,
                         CAST(:tds_json AS jsonb), :cgst, :sgst,
-                        :apt_amt, :apt_rate, :apt_due, :apt_sink, :apt_repair,
+                        :apt_amt, :apt_rate, :apt_billing_basis, :apt_due, :apt_sink, :apt_repair,
                         :ven_1, :ven_7, :ven_30,
                         :bf_fy, CAST(:bf_json AS jsonb), :created_by,
                         :s_email, :reg_num, :apt_interest,
-                        :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt, :gate_logic, :duty_hrs, :tds_effective_date, :s_state
+                        :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt, :gate_logic, :duty_hrs, :tds_effective_date, :s_state, :s_constitution
                     ) AS result"""
             _setup_params = {
                         "sid": society_id,
@@ -645,7 +654,7 @@ def register_setup_wizard_callbacks(app):
                         "sec_sign": sign_path,
                         "tds_json": json.dumps(tds_pairs),
                         "cgst": cgst, "sgst": sgst,
-                        "apt_amt": apt_amt, "apt_rate": apt_rate, "apt_due": apt_due_day,
+                        "apt_amt": apt_amt, "apt_rate": apt_rate, "apt_billing_basis": apt_billing_basis, "apt_due": apt_due_day,
                         "apt_sink": apt_sinking, "apt_repair": apt_repair,
                         "ven_1": ven_1day, "ven_7": ven_7day, "ven_30": ven_1mth,
                         "bf_fy": bf_fy, "bf_json": json.dumps(bf_json),
@@ -658,11 +667,12 @@ def register_setup_wizard_callbacks(app):
                         "c_gst_exempt": c_gst_exempt,
                         "c_charges_int": c_charges_int,
                         "c_gst_cad": c_gst_cad,
-                        "c_gst_reg": c_gst_reg,
+                        "c_gst_reg": central_gst,
                         "c_tds_act": c_tds_act,
                         "c_exp_fmt": c_exp_fmt,
                         "tds_effective_date": tds_effective_date or str(fy_start_date()),
                         "s_state": (s_state or "").strip()[:50] or None,
+                        "s_constitution": (s_constitution or "AOA").strip()[:20] or "AOA",
                     }
             _sql, _prm = _to_pyformat(_setup_sql, _setup_params)
             try:

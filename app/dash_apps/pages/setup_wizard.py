@@ -12,6 +12,17 @@ DEFAULT_REPAIR_FUND_RATE  = 0.75    # ₹ per sq ft / month
 MAX_INTEREST_RATE_PCT     = 1.75    # hard cap on the late-payment interest rate
 DEFAULT_VENDOR_1DAY, DEFAULT_VENDOR_7DAY, DEFAULT_VENDOR_1MTH = 100, 500, 2000
 
+# Legal hierarchy labels for the regime selection step
+LEGAL_HIERARCHY = [
+    ("Central Act", "Income Tax Act, 1961; GST Act, 2017; RERA Act, 2016", "locked"),
+    ("State Act", "UP Apartment Act, 2010 (or applicable state act)", "locked"),
+    ("AOA Rules", "UP Apartment Rules, 2011 (or applicable state rules)", "locked"),
+    ("Model Bye-laws", "UP Model Bye-Laws, 2011 (notified 16 Nov 2011)", "provisional"),
+    ("Society Adopted Bye-laws", "Clauses adopted / varied by General Body resolution", "provisional"),
+    ("Resolutions (Passed/Enacted)", "General Body / EGM resolutions activating choices", "provisional"),
+    ("Board Meetings", "Management Committee operational decisions", "provisional"),
+]
+
 _Label = dbc.Label
 
 FIELD_TIPS = {
@@ -245,26 +256,29 @@ def load_conversation_data():
 CONVERSATION_DATA = load_conversation_data()
 WIZARD_GROUPS = {
     "Organization Details": ["Instructions", "Society Details", "Administrator"],
-    "UP_AOA Acts": ["UP AOA Compliance"],
-    "UPAOA Rules": ["UP AOA Compliance"],
-    "UP By-Laws": ["Bye-Laws Adoption"],
-    "Central Acts": ["Society Compliance", "TAN & TDS Rates", "GSTIN & GST Rate"],
-    "Society Policy": ["Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward"],
-    "Finalization": ["Agreement"]
+    "Legal Regime": ["Legal Regime Selection"],
+    "Central Acts": ["Central Acts Compliance", "TAN & TDS Rates", "GSTIN & GST Rate"],
+    "State Act & Rules": ["State Act & Rules", "Model Bye-Laws Adoption"],
+    "Society Policy": ["Apartment Charges", "Vendor Charges", "Society Operations"],
+    "Accounts": ["Accounts Heads", "Brought Forward"],
+    "Finalization": ["Review", "Agreement"]
 }
 CATEGORIES = [
     'Instructions',
     'Society Details',
     'Administrator',
-    'UP AOA Compliance',
-    'Bye-Laws Adoption',
-    'Society Compliance',
+    'Legal Regime Selection',
+    'Central Acts Compliance',
     'TAN & TDS Rates',
     'GSTIN & GST Rate',
+    'State Act & Rules',
+    'Model Bye-Laws Adoption',
     'Apartment Charges',
     'Vendor Charges',
-    'Accounts',
+    'Society Operations',
+    'Accounts Heads',
     'Brought Forward',
+    'Review',
     'Agreement'
 ]
 
@@ -272,15 +286,18 @@ CATEGORY_ICONS = {
     "Society Details": "fas fa-building",
     "Administrator": "fas fa-user-shield",
     "Instructions": "fas fa-info-circle",
-    "Society Compliance": "fas fa-gavel",
-    "UP AOA Compliance": "fas fa-book-open",
-    "Bye-Laws Adoption": "fas fa-scale-balanced",
+    "Legal Regime Selection": "fas fa-sitemap",
+    "Central Acts Compliance": "fas fa-landmark",
+    "State Act & Rules": "fas fa-university",
+    "Model Bye-Laws Adoption": "fas fa-scale-balanced",
     "TAN & TDS Rates": "fas fa-percent",
     "GSTIN & GST Rate": "fas fa-file-invoice-dollar",
     "Apartment Charges": "fas fa-home",
     "Vendor Charges": "fas fa-truck",
-    "Accounts": "fas fa-book",
+    "Society Operations": "fas fa-cogs",
+    "Accounts Heads": "fas fa-book",
     "Brought Forward": "fas fa-arrow-right",
+    "Review": "fas fa-clipboard-check",
     "Agreement": "fas fa-handshake"
 }
 
@@ -415,6 +432,35 @@ def _render_banner(title, text):
         ], className="p-3")
     ], className="mb-4 shadow-sm border-0 bg-light")
 
+
+def _render_tds_rates_table():
+    """Render the TDS rates table for Central Acts Compliance and TAN & TDS Rates steps."""
+    from database.seed import TDS_SECTION_RATE_SEED
+    header = html.Div([
+        _th("Section", "Income Tax Act section the TDS is deducted under (e.g. 194C contractors, 194J professionals)."),
+        _th("Discriminator", "Sub-category inside a section (for example payee type). Fixed by the seed data."),
+        _th("Nature of Income", "Description of the payment this row covers. Editable."),
+        _th("Rate (%)", "TDS rate when the payee has a PAN."),
+        _th("No Pan (%)", "Higher rate when the payee has no PAN (Sec. 206AA, typically 20%)."),
+        _th("Single Bill (₹)", "A single bill above this amount attracts TDS."),
+        _th("Aggregate (₹)", "TDS applies once total payments to a payee in the financial year exceed this."),
+    ], className="sw-grid-row sw-tds-grid sw-grid-head")
+
+    rows = []
+    for idx, item in enumerate(TDS_SECTION_RATE_SEED):
+        section, discriminator, nature, rate, rate_no_pan, single_bill, agg_bill = item
+        rows.append(html.Div([
+            html.Div(dbc.Input(id={"type": "tds-section", "index": idx}, value=section, readonly=True, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-discriminator", "index": idx}, value=discriminator or "", readonly=True, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-nature", "index": idx}, value=nature, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-rate", "index": idx}, type="number", value=rate, step=0.1, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-rate-no-pan", "index": idx}, type="number", value=rate_no_pan, step=0.1, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-single-bill", "index": idx}, type="number", value=single_bill, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-agg-bill", "index": idx}, type="number", value=agg_bill, size="sm")),
+        ], className="sw-grid-row sw-tds-grid"))
+    return html.Div([header] + rows, className="sw-hscroll")
+
+
 def _society_state(society_id):
     if not society_id:
         return None
@@ -524,7 +570,7 @@ def render_category_content(category, society_id=None, state=None):
             )
         
     # Add Print Button for specific categories
-    if category in ["Society Compliance", "UP AOA Compliance", "Bye-Laws Adoption", "TAN & TDS Rates", "Accounts"]:
+    if category in ["Central Acts Compliance", "State Act & Rules", "Model Bye-Laws Adoption", "TAN & TDS Rates", "Accounts Heads"]:
         elements.append(
             html.Div([
                 dbc.Button([html.I(className="fas fa-print me-2"), "Print / Open in New Window"], 
@@ -534,9 +580,9 @@ def render_category_content(category, society_id=None, state=None):
         )
 
     if category == "Society Details":
-        s_name, s_addr, s_pan, s_reg, s_phone, s_email, s_gate_logic, s_duty_hrs, s_state = "", "", "", "", "", "", "both", "8", ""
+        s_name, s_addr, s_pan, s_reg, s_phone, s_email, s_gate_logic, s_duty_hrs, s_state, s_constitution = "", "", "", "", "", "", "both", "8", "", "AOA"
         if society_id:
-            row = db._execute("SELECT name, address, phone, email, PAN_number, registration_number, gate_logic, duty_hrs, state FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            row = db._execute("SELECT name, address, phone, email, PAN_number, registration_number, gate_logic, duty_hrs, state, constitution FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row:
                 s_name = row.get("name", "") or ""
                 s_addr = row.get("address", "") or ""
@@ -547,6 +593,7 @@ def render_category_content(category, society_id=None, state=None):
                 s_gate_logic = row.get("gate_logic", "both") or "both"
                 s_duty_hrs = row.get("duty_hrs", "8") or "8"
                 s_state = row.get("state", "") or ""
+                s_constitution = row.get("constitution", "AOA") or "AOA"
         from app.services.kpi_rule_links_service import get_states
         # Jurisdiction-aware statutory rules (fn_balance_sheet_fy statutory
         # head mapping, state_compliance_thresholds sinking/repair-fund
@@ -563,8 +610,14 @@ def render_category_content(category, society_id=None, state=None):
             {"label": f"{name}{' (jurisdiction-aware rules active)' if code == 'UP' else ''}", "value": code}
             for code, name in _state_choices.items() if code != "ALL"
         ]
+        constitution_options = [
+            {"label": "Apartment Owners' Association (AOA)", "value": "AOA"},
+            {"label": "Registered Society (REG_SOCIETY)", "value": "REG_SOCIETY"},
+            {"label": "Co-operative Housing Society (COOP)", "value": "COOP"},
+            {"label": "Generic / Other", "value": "GENERIC"},
+        ]
         return elements + [
-            _render_banner("Society Details", "Enter society details. Registration Number, Email, and Phone will be updated if provided. Logo and Background images are optional."),
+            _render_banner("Society Details", "Enter society identity details. State + Constitution together select the legal regime. Registration Number, Email, and Phone will be updated if provided. Logo and Background images are optional."),
             _label("Society Name"),
             dbc.Input(id="sw-society-name", type="text", required=True, className="mb-3", value=s_name, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
             _label("Society Logo (Image)"),
@@ -574,8 +627,11 @@ def render_category_content(category, society_id=None, state=None):
             _field_feedback("sw-society-address-feedback"),
             _label("State", html_for="sw-society-state"),
             dbc.Select(id="sw-society-state", options=state_options, value=s_state, className="mb-1"),
+            _label("Constitution", html_for="sw-society-constitution"),
+            dbc.Select(id="sw-society-constitution", options=constitution_options, value=s_constitution, className="mb-3"),
             html.Div(id="sw-regime-badge", children=regime_badge(s_state), className="mb-2"),
             html.P(
+                "State + Constitution together select the legal regime (Central Act → State Act → Rules → Model Bye-laws). "
                 "Drives GST inter-state (IGST) vs intra-state (CGST+SGST) determination on RCM, and which "
                 "state's statutory Balance Sheet head-mapping / fund-rate defaults apply.",
                 className="text-muted small mb-3",
@@ -591,29 +647,251 @@ def render_category_content(category, society_id=None, state=None):
             _label("Registration Number"),
             dbc.Input(id="sw-society-reg", type="text", required=True, className="mb-3", value=s_reg),
             _field_feedback("sw-society-reg-feedback"),
-            _label("Gate Pass Enforcement"),
-            dbc.Select(
-                id="sw-gate-logic",
-                options=[
-                    {"label": "Deny Both Entry and Exit", "value": "both"},
-                    {"label": "Deny Entry Only", "value": "entry"},
-                    {"label": "Deny Exit Only", "value": "exit"},
-                ],
-                value=s_gate_logic,
-                className="mb-3"
-            ),
-            _label("Security Duty Hours"),
-            dbc.Select(
-                id="sw-duty-hrs",
-                options=[
-                    {"label": "8 Hours (morning, evening, night)", "value": "8"},
-                    {"label": "12 Hours (day, night)", "value": "12"},
-                ],
-                value=s_duty_hrs,
-                className="mb-3"
-            ),
             _label("Login Background (Image)"),
             _render_image_capture_control("society", "bg", _imgs.get("bg"), society_id),
+        ]
+    elif category == "Legal Regime Selection":
+        from app.services.statutory_rules import regime_for_society, regime_profile, state_has_own_regime, normalize_state
+        picked_state = state or _society_state(society_id)
+        picked_constitution = ""
+        if society_id:
+            row = db._execute("SELECT constitution FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            if row:
+                picked_constitution = row.get("constitution", "AOA") or "AOA"
+        regime = regime_for_society(society_id, picked_state)
+        name, status = regime_profile(regime)
+        own = state_has_own_regime(picked_state)
+        
+        hierarchy_rows = []
+        for label, desc, badge_type in LEGAL_HIERARCHY:
+            if badge_type == "locked":
+                badge = dbc.Badge(label, color="primary", className="me-2", pill=True, style={"fontSize": "10px"})
+            else:
+                badge = dbc.Badge(label, color="warning", className="me-2", pill=True, style={"fontSize": "10px"})
+            hierarchy_rows.append(html.Tr([
+                html.Td(badge),
+                html.Td(desc, style={"fontSize": "12px"}),
+                html.Td(dbc.Badge(badge_type.capitalize(), color="secondary" if badge_type == "locked" else "info", pill=True, style={"fontSize": "9px"})),
+            ]))
+        
+        return elements + [
+            _render_banner("Legal Regime Selection", "Your State and Constitution together determine the legal regime. The hierarchy below shows how rules flow — a lower layer can never loosen a higher one."),
+            html.Div([
+                html.H6([html.I(className="fas fa-sitemap me-2"), f"Active Regime: {regime}"], className="text-primary mb-3"),
+                html.Div([
+                    dbc.Badge(regime, color="primary" if own else "secondary", className="me-2"),
+                    html.Span(name, className="small"),
+                ], className="mb-2"),
+                html.Small(f"This regime is {'active' if own else 'a fallback (UP reference)'} — confirm applicable law with an advocate if not a dedicated regime." if not own else "", className="text-muted d-block mb-3"),
+                html.H6("Legal Hierarchy (Precedence Order)", className="text-primary mt-3 mb-2"),
+                dbc.Table([
+                    html.Thead(html.Tr([
+                        html.Th("Layer", style={"fontSize": "11px", "width": "150px"}),
+                        html.Th("Instrument", style={"fontSize": "11px"}),
+                        html.Th("Status", style={"fontSize": "11px", "width": "120px"}),
+                    ])),
+                    html.Tbody(hierarchy_rows),
+                ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
+            ]),
+            html.Hr(),
+            html.H6("Central Act Settings", className="text-primary mt-3 mb-2"),
+            html.P("The following Central Acts apply to all societies. Configure the rates and applicability for your society:", className="text-muted small mb-3"),
+            dbc.Row([
+                dbc.Col([
+                    _label("Income Tax — TAN Required?"),
+                    dbc.RadioItems(id="sw-central-it-tan", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3"),
+                ], width=6),
+                dbc.Col([
+                    _label("TDS Applicable?"),
+                    dbc.RadioItems(id="sw-central-tds", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3"),
+                ], width=6),
+            ]),
+            dbc.Row([
+                dbc.Col([
+                    _label("GST Applicable?"),
+                    dbc.RadioItems(id="sw-central-gst", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=False, inline=True, className="mb-3"),
+                ], width=6),
+                dbc.Col([
+                    _label("RERA Applicable?"),
+                    dbc.RadioItems(id="sw-central-rera", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=False, inline=True, className="mb-3"),
+                ], width=6),
+            ]),
+        ]
+    elif category == "Central Acts Compliance":
+        from app.services.statutory_rules import regime_for_society
+        regime = regime_for_society(society_id, state)
+        
+        s_tan = ""
+        if society_id:
+            row = db._execute("SELECT tan_number FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            if row:
+                s_tan = row.get("tan_number") or ""
+        
+        return elements + [
+            _render_banner("Central Acts Compliance", f"Configure Income Tax, GST, and RERA settings for {regime}. These Central Acts apply uniformly across India."),
+            html.H6("Income Tax Act, 1961 — TAN & TDS", className="text-primary mb-3"),
+            _label("TAN Number"),
+            dbc.Input(id="sw-society-tan", type="text", placeholder="Enter TAN (e.g. ABCD12345E)...", value=s_tan, className="mb-4"),
+            _label("TDS Effective Date"),
+            html.Div(dcc.DatePickerSingle(
+                id="sw-tds-effective-date",
+                date=str(fy_start_date()),
+                display_format="YYYY-MM-DD"
+            ), className="mb-4"),
+            html.Hr(),
+            html.H6("TDS Section Rates", className="text-primary mb-3"),
+            html.P("Standard rates are pre-filled. Modify only if your CA advises.", className="text-muted small mb-3"),
+            _render_tds_rates_table(),
+        ]
+    elif category == "State Act & Rules":
+        from app.services.statutory_rules import regime_for_society, instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR, fund_rules_for_state
+        from app.services import regime_rules_admin as rra
+        regime, instruments = instruments_for_society(society_id, state)
+        _ff = fund_flags(society_id, state)
+        fund_rules = fund_rules_for_state(state)
+        
+        # Show the State Act instruments
+        instrument_rows = []
+        for itype, items in grouped_instruments(instruments).items():
+            instrument_rows.append(html.Tr([
+                html.Td(dbc.Badge(itype, color=INSTRUMENT_BADGE_COLOR.get(itype, "light"), pill=True, style={"fontSize": "10px"})),
+                html.Td(items[0]["title"] + (f" ({items[0]['enactment_year']})" if items[0].get("enactment_year") else ""), style={"fontSize": "11px", "fontWeight": "600"}),
+            ]))
+            for r in items[1:]:
+                instrument_rows.append(html.Tr([
+                    html.Td(""),
+                    html.Td(html.Small("· " + r["title"] + (f" ({r['enactment_year']})" if r.get("enactment_year") else ""), className="text-muted", style={"fontSize": "10px"})),
+                ]))
+        
+        # Fund prescriptions
+        fund_rows = []
+        for fund_key in ["sinking", "repair"]:
+            rule = fund_rules[fund_key]
+            if rule["mode"] == "statutory":
+                fund_rows.append(html.Tr([
+                    html.Td(f"{fund_key.capitalize()} Fund", style={"fontWeight": "600"}),
+                    html.Td(f"Statutory minimum: {rule['min_pct']}% of construction cost per year"),
+                    html.Td(dbc.Badge("Mandatory", color="danger", pill=True, style={"fontSize": "9px"})),
+                ]))
+            elif _ff[fund_key]:
+                fund_rows.append(html.Tr([
+                    html.Td(f"{fund_key.capitalize()} Fund", style={"fontWeight": "600"}),
+                    html.Td("Opted in via Bye-Laws Adoption step"),
+                    html.Td(dbc.Badge("Optional (levied)", color="warning", pill=True, style={"fontSize": "9px"})),
+                ]))
+            else:
+                fund_rows.append(html.Tr([
+                    html.Td(f"{fund_key.capitalize()} Fund", style={"fontWeight": "600"}),
+                    html.Td("Not prescribed by state; not opted in"),
+                    html.Td(dbc.Badge("Not levied", color="secondary", pill=True, style={"fontSize": "9px"})),
+                ]))
+        
+        return elements + [
+            _render_banner("State Act & Rules", f"Review the State Act and Rules governing this society ({regime}). These are read-only — maintained by Master. The statutory fund rates prescribed by your state are shown below."),
+            html.H6("State Instruments", className="text-primary mt-3 mb-2"),
+            dbc.Table([
+                html.Thead(html.Tr([html.Th("Type", style={"fontSize": "11px"}), html.Th("Instrument", style={"fontSize": "11px"})])),
+                html.Tbody(instrument_rows),
+            ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
+            html.H6("Fund Prescriptions", className="text-primary mt-3 mb-2"),
+            html.Small(fund_note(_ff, regime), className="text-muted d-block mb-2"),
+            dbc.Table([
+                html.Thead(html.Tr([html.Th("Fund", style={"fontSize": "11px"}), html.Th("Rule", style={"fontSize": "11px"}), html.Th("Status", style={"fontSize": "11px"})])),
+                html.Tbody(fund_rows),
+            ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
+        ]
+    elif category == "Model Bye-Laws Adoption":
+        from app.services import regime_rules_admin as rra
+        from app.services.statutory_rules import regime_for_society
+        existing = {}
+        try:
+            for r in rra.list_society_bye_laws(society_id) if society_id else []:
+                if r["layer"] == 1:
+                    existing[r["clause_id"]] = r
+        except Exception:
+            existing = {}
+        labels = {"adopted_as_is": "Adopt as-is", "adopted_with_variation": "Adopt with variation", "not_adopted": "Not adopted"}
+        rows = []
+        for clause_id, title in rra.MODEL_BYE_LAW_CLAUSES:
+            locked = rra.clause_is_locked(society_id, clause_id) if society_id else clause_id in rra.STATUTE_BACKED_CLAUSES
+            cur = existing.get(clause_id) or {}
+            current = cur.get("proposed_status") if cur.get("status") == "provisional" else cur.get("status")
+            opts = [{"label": labels[c], "value": c} for c in rra.ADOPTION_CHOICES
+                    if not (locked and c == "not_adopted")]
+            active = bool(cur.get("resolution_id")) and cur.get("status") != "provisional"
+            rows.append(html.Tr([
+                html.Td([html.Strong(clause_id, style={"fontSize": "11px"}), html.Br(),
+                         html.Small(title + (" · enforced by the engine" if locked else ""), className="text-muted")],
+                        style={"maxWidth": "260px"}),
+                html.Td(dbc.RadioItems(id={"type": "sw-bl-choice", "clause": clause_id}, options=opts, value=current,
+                                       inline=True, className="small", inputClassName="me-1", labelClassName="me-3",
+                                       persistence=False)
+                        if not active else dbc.Badge("Active (resolution on file)", color="success")),
+                html.Td(dbc.Input(id={"type": "sw-bl-var", "clause": clause_id}, type="text", debounce=True, size="sm",
+                                  value=cur.get("variation_text") or "", placeholder="Variation text",
+                                  disabled=active, style={"fontSize": "11px"})),
+                html.Td(html.Small(id={"type": "sw-bl-msg", "clause": clause_id}, className="text-muted")),
+            ]))
+        try:
+            pol = rra.list_society_policies(society_id) if society_id else {}
+        except Exception:
+            pol = {}
+        pol_rows, fund_pol_rows = [], []
+        _ff = fund_flags(society_id, state)
+        for key, (label, clause, choices) in rra.POLICY_SPECS.items():
+            if key in rra.FUND_POLICY_KEYS:
+                fund = "sinking" if "sinking" in key else "repair" if "repair" in key else None
+                if fund and _ff["rules"][fund]["mode"] == "statutory":
+                    continue
+            st = pol.get(key) or {"value": choices[0][0], "active": False, "proposed": None}
+            shown = st["proposed"] or st["value"]
+            (fund_pol_rows if key in rra.FUND_POLICY_KEYS else pol_rows).append(html.Tr([
+                html.Td([html.Strong(label, style={"fontSize": "12px"}), html.Br(),
+                         html.Small(f"Resolution on {clause}", className="text-muted")], style={"maxWidth": "260px"}),
+                html.Td(dbc.Select(id={"type": "sw-pol-choice", "key": key}, size="sm",
+                                   options=[{"label": lbl, "value": v} for v, lbl in choices], value=shown)),
+                html.Td([dbc.Badge("Active (resolution on file)", color="success") if st["active"] and not st["proposed"]
+                         else dbc.Badge("Provisional", color="warning", text_color="dark"),
+                         html.Small(id={"type": "sw-pol-msg", "key": key}, className="text-muted ms-2")]),
+            ]))
+        policy_panel = html.Div([
+            html.H6("Society resolution settings", className="mt-3 mb-1"),
+            html.Small("Choices the engine used to hard-code. Provisional until you record the passed resolution "
+                       "(Settings → Society governance → Meetings & Resolutions). "
+                       "Clauses 7, 39, 49 and 55 are 'enforced by the engine' unless you allow them to be dropped; "
+                       "which clauses are truly non-droppable is a legal call - confirm with an advocate.", className="text-muted d-block mb-2"),
+            dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in ("Setting", "Choice", "Status")])),
+                       html.Tbody(pol_rows)], bordered=True, size="sm"),
+            html.H6("Funds & assessments", className="mt-3 mb-1"),
+            html.Small(fund_note(_ff, regime_for_society(society_id, state)),
+                       className="text-muted d-block mb-2", id="sw-fund-note"),
+            dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in ("Setting", "Choice", "Status")])),
+                       html.Tbody(fund_pol_rows)], bordered=True, size="sm") if fund_pol_rows else html.Div(),
+        ]) if society_id else html.Div()
+        return elements + [
+            dbc.Alert([html.I(className="fas fa-scale-balanced me-2"),
+                       "Record which Model Bye-Laws 2011 clauses your Association is adopting. These are ",
+                       html.Strong("provisional"), " — nothing changes in how EstateHub treats dues, voting, NOC or filings "
+                       "until you record the General Body meeting and its passed resolution. Clauses you leave alone follow the "
+                       "Model Bye-Laws and the Act as written."], color="info", className="mb-3", style={"fontSize": "13px"}),
+            html.Div([
+                html.Div([html.Strong("Who can change what"), html.Br(),
+                          html.Small("Act & Rules (locked) → Model Bye-Laws (this step; GBM resolution, 2/3) → Society Policy "
+                                     "(GBM; may only tighten a clause) → Board Decision (MC; operational limits). "
+                                     "A lower layer can never loosen a higher one.", className="text-muted")],
+                         className="mb-2")]),
+            html.Div(dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in
+                                ("Clause", "Intended outcome", "Variation (if any)", "")])),
+                                html.Tbody(rows)], bordered=True, size="sm", hover=True),
+                     style={"maxHeight": "420px", "overflowY": "auto"}),
+            policy_panel,
+            dbc.Alert([html.I(className="fas fa-arrow-right me-2"), html.Strong("Next: "),
+                       "after the General Body meets, record the meeting and then the passed resolution under ",
+                       html.Strong("Settings → Society governance → Meetings & Resolutions"),
+                       ". That activates the choices above automatically. ",
+                       html.Strong("Order matters: save the choice first, then record the resolution. "
+                                   "An older resolution can't activate a newer choice.")],
+                      color="warning", className="mt-3", style={"fontSize": "13px"}),
         ]
     elif category == "TAN & TDS Rates":
         from database.seed import TDS_SECTION_RATE_SEED
@@ -702,62 +980,7 @@ def render_category_content(category, society_id=None, state=None):
             _label("Monthly Exemption Limit (₹ per member)"),
             dbc.Input(type="number", value=exempt_val, className="mb-3", readonly=True, style=readonly_style),
         ]
-    elif category == "Society Compliance":
-        from database.seed import STATE_COMPLIANCE_THRESHOLDS, KPI_RULE_LINKS
-        c_sink_basis, c_repair_basis, c_gst_exempt, c_charges_int = "per_sq_ft", "per_sq_ft", True, True
-        c_gst_cadence, c_gst_reg, c_tds_action, c_export_fmt = "monthly", False, "warn", "structured"
-        if society_id:
-            row = db._execute("SELECT * FROM society_compliance_settings WHERE society_id = :id", {"id": society_id}, fetch_one=True)
-            if row:
-                c_sink_basis = row.get("sinking_fund_rate_basis", c_sink_basis)
-                c_repair_basis = row.get("repair_fund_rate_basis", c_repair_basis)
-                c_gst_exempt = row.get("fund_gst_exempt", c_gst_exempt)
-                c_charges_int = row.get("fund_charges_interest", c_charges_int)
-                c_gst_cadence = row.get("gst_filing_cadence", c_gst_cadence)
-                c_gst_reg = row.get("gst_registered", c_gst_reg)
-                c_tds_action = row.get("tds_no_pan_action", c_tds_action)
-                c_export_fmt = row.get("default_export_format", c_export_fmt)
-        inputs = [_render_banner("Compliance Settings", "Configure compliance parameters specific to this society. Reference rule links and thresholds are shown below.")]
-        inputs.append(html.H6("Society Compliance Settings", className="mt-2 mb-3 text-primary"))
-        # NOTE: "Registered for GST?" is the single source of truth for
-        # whether this society is GST-registered — it both decides
-        # whether the "GSTIN & GST Rate" step is shown at all (see
-        # get_next_valid_step in setup_wizard_callbacks.py) and is what
-        # gets saved to society_compliance_settings.gst_registered.
-        # There used to be a *second*, unrelated "GST Registered" switch
-        # further down this same page that also claimed to represent this
-        # setting but was never linked to this one or to the step-skip
-        # logic — an admin could answer "Yes" here (showing the GSTIN
-        # step) while that switch still silently said "No" (or vice
-        # versa), and whichever one was touched last is what actually got
-        # written to the database. That duplicate switch has been
-        # removed; this radio now both drives navigation and is the value
-        # persisted on submit.
-        inputs.append(dbc.Row([
-            dbc.Col([_label("Registered for GST?"), dbc.RadioItems(id="sw-gst-registered", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=c_gst_reg, inline=True, className="mb-3")], width=6),
-            dbc.Col([_label("Deducts TDS?"), dbc.RadioItems(id="sw-deducts-tds", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3")], width=6),
-        ]))
-        # Sinking / Repair basis and fund late-payment interest are society-by-law
-        # choices: they live on the Bye-Laws Adoption step (Funds & assessments)
-        # and are written from there on submit. "Fund GST Exempt" is a tax
-        # treatment (CBIC Circular 109/28/2019-GST), so it stays here, but is
-        # shown only when a fund is actually levied.
-        _ff = fund_flags(society_id, state)
-        inputs.append(html.Div(
-            dbc.Row([dbc.Col([_label("Fund GST Exempt"), dbc.Switch(id="sw-comp-gst-exempt", value=c_gst_exempt, className="mb-3")], width=6)]),
-            id="sw-comp-fund-box", style={} if (_ff["sinking"] or _ff["repair"]) else {"display": "none"}))
-        inputs.append(dbc.Row([
-            dbc.Col([_label("GST Filing Cadence"), dbc.Select(id="sw-comp-gst-cadence", options=[{"label": "Monthly", "value": "monthly"}, {"label": "QRMP", "value": "qrmp"}], value=c_gst_cadence, className="mb-3")], width=6),
-            dbc.Col([_label("TDS No PAN Action"), dbc.Select(id="sw-comp-tds-action", options=[{"label": "Warn", "value": "warn"}, {"label": "Block", "value": "block"}], value=c_tds_action, className="mb-3")], width=6),
-        ]))
-        inputs.append(dbc.Row([
-            dbc.Col([_label("Export Format"), dbc.Select(id="sw-comp-export-fmt", options=[{"label": "Structured", "value": "structured"}, {"label": "GSTN Offline", "value": "gstn_offline"}, {"label": "TRACES 26Q", "value": "traces_26q"}], value=c_export_fmt, className="mb-3")], width=6)
-        ]))
-        inputs.append(html.Hr())
-        inputs.append(html.H6("State Compliance Thresholds", className="mt-4 mb-2 text-primary"))
-        inputs.append(html.Div(state_thresholds_rows(state or _society_state(society_id)), id="sw-state-thresholds"))
-        return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
-    elif category == "Bye-Laws Adoption":
+    elif category == "Model Bye-Laws Adoption":
         # The society's bye-law register: for each Model Bye-Law 2011 clause the admin notes the intended outcome
         # (adopt as-is / adopt with variation / not adopted). Every choice is PROVISIONAL: it is stored with
         # proposed_status and changes nothing in the engine until the passed GBM resolution is recorded
@@ -854,135 +1077,12 @@ def render_category_content(category, society_id=None, state=None):
                        html.Strong("Settings → Society governance → Meetings & Resolutions"),
                        ". That activates the choices above automatically. ",
                        html.Strong("Order matters: save the choice first, then record the resolution. "
-                                   "An older resolution can't activate a newer choice.")],
+"An older resolution can't activate a newer choice.")],
                       color="warning", className="mt-3", style={"fontSize": "13px"}),
         ]
-    elif category == "UP AOA Compliance":
-        # Read-only reference step: the tabulated Acts, Rules, Bye-laws and
-        # Notifications governing this society's regime, from
-        # legal_instrument_catalog — the same rows the Master Portal's
-        # "RWA Compliance (UP)" tab renders (portal_pages.py), so the admin
-        # can read the provisions behind the fund rates / bases they set on
-        # the Society Compliance and Apartment Charges steps. Maintained by
-        # Master (LEGAL_INSTRUMENTS_UP_AOA in database/seed.py); nothing on
-        # this step is editable, so it takes no State in submit_setup_wizard.
-        from app.services.statutory_rules import (
-            instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR,
-            normalize_state,
-        )
-        regime, instruments = instruments_for_society(society_id, state)
-
-        profile = {}
-        try:
-            profile = db._execute(
-                """SELECT name, primary_law, rules_version, model_bye_laws_version,
-                          effective_from, status
-                   FROM legal_regime_profiles WHERE code = :code""",
-                {"code": regime}, fetch_one=True,
-            ) or {}
-        except Exception:
-            profile = {}
-
-        picked = normalize_state(state) if state else None
-        out = [
-            _render_banner(
-                "UP AOA Compliance — Act / Rules / Bye-laws",
-                f"The statutes governing this Apartment Owners' Association ({regime}"
-                + (f", the State selected under Society Details" if picked else "")
-                + "). This reference is maintained by Master and cannot be edited here — review it "
-                "before submitting, and raise anything out of date through Master Portal → "
-                "RWA Compliance (UP).",
-            ),
-        ]
-
-        if profile:
-            out.append(dbc.Card([
-                dbc.CardBody([
-                    html.H6([html.I(className="fas fa-scale-balanced me-2"),
-                             profile.get("name") or regime],
-                            className="text-primary mb-2", style={"fontWeight": "700", "fontSize": "13px"}),
-                    html.Div([
-                        html.Div([html.Small("Primary law", className="text-muted d-block"),
-                                  html.Small(profile.get("primary_law") or "—")], className="sw-rule-sec"),
-                        html.Div([html.Small("Rules", className="text-muted d-block"),
-                                  html.Small(profile.get("rules_version") or "—")], className="sw-rule-sec"),
-                        html.Div([html.Small("Model bye-laws", className="text-muted d-block"),
-                                  html.Small(profile.get("model_bye_laws_version") or "—")], className="sw-rule-sec"),
-                        html.Div([html.Small("Effective from", className="text-muted d-block"),
-                                  html.Small(str(profile.get("effective_from") or "—"))], className="sw-rule-sec"),
-                        html.Div([html.Small("Regime", className="text-muted d-block"),
-                                  html.Small(regime),
-                                  dbc.Badge(profile.get("status") or "active",
-                                            color="success" if (profile.get("status") or "active") == "active" else "secondary",
-                                            pill=True, style={"fontSize": "10px"})], className="sw-rule-sec"),
-                    ], style={"display": "grid", "gridTemplateColumns": "repeat(auto-fit, minmax(190px, 1fr))", "gap": "10px"}),
-                ])
-            ], className="mb-3 shadow-sm border-0"))
-
-        if not instruments:
-            fallback = ("" if regime == "UP_AOA_2010" else
-                        " Until Master seeds them, this society falls back to the generic "
-                        "(Union-law) framework shown in the Acts & Rules column.")
-            out.append(dbc.Alert(
-                [html.H6([html.I(className="fas fa-database me-2"), f"No statutes on file for {regime}"],
-                         className="alert-heading", style={"fontWeight": "700"}),
-                 html.P(f"The {regime} regime has no Act / Rules / Bye-laws rows in "
-                        f"legal_instrument_catalog yet.{fallback} Master can integrate them from "
-                        "Master Portal → Settings → KPI Inspector → \"Integrate to DB\" — the SQL "
-                        "is on Master Portal → RWA Compliance (UP).",
-                        style={"fontSize": "13px", "marginBottom": "0"})],
-                color="warning", className="mb-3 shadow-sm",
-            ))
-            return elements + out
-
-        out.append(html.H6(
-            f"{len(instruments)} statutory instrument{'s' if len(instruments) != 1 else ''} — {regime}",
-            style={"fontWeight": "700", "color": "#15304f", "marginTop": "14px", "marginBottom": "8px", "fontSize": "13px"},
-        ))
-
-        for itype, items in grouped_instruments(instruments).items():
-            out.append(html.H6(
-                [dbc.Badge(itype, color=INSTRUMENT_BADGE_COLOR.get(itype, "light"), className="me-2"),
-                 f"{len(items)} instrument{'s' if len(items) != 1 else ''}"],
-                style={"marginTop": "14px", "marginBottom": "6px", "fontWeight": "700",
-                       "color": "#15304f", "fontSize": "12.5px"},
-            ))
-            body_rows = []
-            for r in items:
-                year = f" ({r['enactment_year']})" if r.get("enactment_year") else ""
-                body_rows.append(html.Tr([
-                    html.Td([html.Strong(r["title"] + year, style={"fontSize": "11.5px"}),
-                             html.Br(),
-                             html.Small(r.get("issuing_authority") or "", className="text-muted")],
-                            style={"maxWidth": "240px"}),
-                    html.Td(html.Small(r.get("applicability") or "—"), style={"fontSize": "11px", "maxWidth": "200px"}),
-                    html.Td(html.Small(r.get("key_provisions") or "—"), style={"fontSize": "11px", "maxWidth": "340px"}),
-                    html.Td(dbc.Badge(r.get("status") or "active",
-                                      color="success" if (r.get("status") or "active") == "active" else "secondary",
-                                      pill=True), style={"fontSize": "10px"}),
-                    html.Td(html.Small(r.get("source_reference") or "—", className="text-muted"),
-                            style={"fontSize": "10px", "maxWidth": "200px"}),
-                ]))
-            out.append(dbc.Table([
-                html.Thead(html.Tr([
-                    html.Th("Instrument", style={"fontSize": "11px"}),
-                    html.Th("Applicability", style={"fontSize": "11px"}),
-                    html.Th("Key Provisions", style={"fontSize": "11px"}),
-                    html.Th("Status", style={"fontSize": "11px"}),
-                    html.Th("Source", style={"fontSize": "11px"}),
-                ])),
-                html.Tbody(body_rows),
-            ], bordered=True, hover=True, responsive=True, size="sm", style={"fontSize": "12px"}))
-
-        out.append(html.Small(
-            "Superseded instruments are retained as history — check the Status column before relying on "
-            "a provision. Last verified: "
-            + str(max((r.get("last_verified_on") for r in instruments if r.get("last_verified_on")), default="not recorded")) + ".",
-            className="text-muted d-block mt-2",
-        ))
-        return elements + out
     elif category == "Apartment Charges":
         s_amt, s_rate, s_due = 0.0, 0.0, 1
+        s_billing_basis = "per_sqft"
         _ff = fund_flags(society_id, state)
         # The 0.25 / 0.75 defaults are Maharashtra's statutory minimum percentages, so they are only a
         # sensible pre-fill where the state prescribes the fund; elsewhere the fund starts at 0 (not levied).
@@ -990,9 +1090,10 @@ def render_category_content(category, society_id=None, state=None):
         s_repair = DEFAULT_REPAIR_FUND_RATE if _ff["rules"]["repair"]["mode"] == "statutory" else 0.0
         s_int = MAX_INTEREST_RATE_PCT
         if society_id:
-            row = db._execute("SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
+            row = db._execute("SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct, billing_basis FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
                 s_amt, s_rate, s_due = row.get("apt_maintenance_amount", 0.0) or 0.0, row.get("apt_maintenance_rate", 0.0) or 0.0, row.get("apt_due_day", 1) or 1
+                s_billing_basis = row.get("billing_basis", "per_sqft") or "per_sqft"
                 # a stored 0 means "never set" on first-time setup, so fall back to the defaults
                 s_sink = row.get("apt_sinking_fund_rate") or s_sink
                 s_repair = row.get("apt_repair_fund_rate") or s_repair
@@ -1000,10 +1101,20 @@ def render_category_content(category, society_id=None, state=None):
         return elements + [
             _render_banner("Apartment Charges", "Set default charges, billing cycle day and late-payment interest (capped at " + str(MAX_INTEREST_RATE_PCT) + "%). "
                            "Sinking / Repair fund rates appear only where your state prescribes them or you opted in on the Bye-Laws Adoption step."),
-            dbc.Row([dbc.Col([_label("Base Maintenance Amount"), dbc.Input(id="sw-apt-amt", type="number", value=s_amt, step=1, className="mb-3")], width=6), dbc.Col([_label("Maintenance Rate/SqFt"), dbc.Input(id="sw-apt-rate", type="number", value=s_rate, step=0.01, className="mb-3")], width=6)]),
-            dbc.Row([dbc.Col([_label("Billing Due Day"), dbc.Input(id="sw-apt-due", type="number", value=s_due, min=1, max=31, step=1, className="mb-3")], width=4),
-                     dbc.Col([_label("Sinking Fund Rate"), dbc.Input(id="sw-apt-sink", type="number", value=s_sink, step=0.01, className="mb-3")], id="sw-apt-sink-col", width=4, style={} if _ff["sinking"] else {"display": "none"}),
-                     dbc.Col([_label("Repair Fund Rate"), dbc.Input(id="sw-apt-repair", type="number", value=s_repair, step=0.01, className="mb-3")], id="sw-apt-repair-col", width=4, style={} if _ff["repair"] else {"display": "none"})]),
+            dbc.Row([
+                dbc.Col([_label("Base Maintenance Amount"), dbc.Input(id="sw-apt-amt", type="number", value=s_amt, step=1, className="mb-3")], width=4),
+                dbc.Col([_label("Maintenance Rate/SqFt"), dbc.Input(id="sw-apt-rate", type="number", value=s_rate, step=0.01, className="mb-3")], width=4),
+                dbc.Col([_label("Maintenance Billing Basis"), dbc.Select(id="sw-apt-billing-basis", options=[
+                    {"label": "Per Sq Ft", "value": "per_sqft"},
+                    {"label": "Undivided Interest (Construction Cost)", "value": "undivided_interest"},
+                    {"label": "Fixed Amount per Apartment", "value": "fixed"},
+                ], value=s_billing_basis, className="mb-3")], width=4),
+            ]),
+            dbc.Row([
+                dbc.Col([_label("Billing Due Day"), dbc.Input(id="sw-apt-due", type="number", value=s_due, min=1, max=31, step=1, className="mb-3")], width=4),
+                dbc.Col([_label("Sinking Fund Rate"), dbc.Input(id="sw-apt-sink", type="number", value=s_sink, step=0.01, className="mb-3")], id="sw-apt-sink-col", width=4, style={} if _ff["sinking"] else {"display": "none"}),
+                dbc.Col([_label("Repair Fund Rate"), dbc.Input(id="sw-apt-repair", type="number", value=s_repair, step=0.01, className="mb-3")], id="sw-apt-repair-col", width=4, style={} if _ff["repair"] else {"display": "none"}),
+            ]),
             dbc.Row([dbc.Col([_label("Charges Interest Rate (%)"), dbc.Input(id="sw-apt-interest", type="number", value=s_int, min=0, max=MAX_INTEREST_RATE_PCT, step=0.01, className="mb-1"), html.Small(f"Maximum {MAX_INTEREST_RATE_PCT}%", className="text-muted d-block mb-3")], width=4)])
         ]
     elif category == "Vendor Charges":
@@ -1018,7 +1129,46 @@ def render_category_content(category, society_id=None, state=None):
             _render_banner("Vendor Charges", f"Set default vendor pass charges. Pre-filled: 1 Day ₹{DEFAULT_VENDOR_1DAY}, 7 Days ₹{DEFAULT_VENDOR_7DAY}, 1 Month ₹{DEFAULT_VENDOR_1MTH}."),
             dbc.Row([dbc.Col([_label("Vendor Pass (1 Day) ₹"), dbc.Input(id="sw-ven-1day", type="number", value=s_v1, step=1, className="mb-3")]), dbc.Col([_label("Vendor Pass (7 Days) ₹"), dbc.Input(id="sw-ven-7day", type="number", value=s_v7, step=1, className="mb-3")]), dbc.Col([_label("Vendor Pass (1 Month) ₹"), dbc.Input(id="sw-ven-1mth", type="number", value=s_v30, step=1, className="mb-3")])])
         ]
-    elif category == "Accounts":
+    elif category == "Society Operations":
+        s_gate_logic, s_duty_hrs = "both", "8"
+        if society_id:
+            row = db._execute("SELECT gate_logic, duty_hrs FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            if row:
+                s_gate_logic = row.get("gate_logic", "both") or "both"
+                s_duty_hrs = row.get("duty_hrs", "8") or "8"
+        return elements + [
+            _render_banner("Society Operations", "Configure gate pass enforcement, security duty hours, and vendor pass charges."),
+            html.H6("Gate Pass & Security", className="text-primary mb-3"),
+            _label("Gate Pass Enforcement"),
+            dbc.Select(
+                id="sw-gate-logic",
+                options=[
+                    {"label": "Deny Both Entry and Exit", "value": "both"},
+                    {"label": "Deny Entry Only", "value": "entry"},
+                    {"label": "Deny Exit Only", "value": "exit"},
+                ],
+                value=s_gate_logic,
+                className="mb-3"
+            ),
+            _label("Security Duty Hours"),
+            dbc.Select(
+                id="sw-duty-hrs",
+                options=[
+                    {"label": "8 Hours (morning, evening, night)", "value": "8"},
+                    {"label": "12 Hours (day, night)", "value": "12"},
+                ],
+                value=s_duty_hrs,
+                className="mb-3"
+            ),
+            html.Hr(),
+            html.H6("Vendor Pass Charges", className="text-primary mb-3"),
+            dbc.Row([
+                dbc.Col([_label("Vendor Pass (1 Day) ₹"), dbc.Input(id="sw-ven-1day", type="number", value=DEFAULT_VENDOR_1DAY, step=1, className="mb-3")], width=4),
+                dbc.Col([_label("Vendor Pass (7 Days) ₹"), dbc.Input(id="sw-ven-7day", type="number", value=DEFAULT_VENDOR_7DAY, step=1, className="mb-3")], width=4),
+                dbc.Col([_label("Vendor Pass (1 Month) ₹"), dbc.Input(id="sw-ven-1mth", type="number", value=DEFAULT_VENDOR_1MTH, step=1, className="mb-3")], width=4),
+            ]),
+        ]
+    elif category == "Accounts Heads":
         s_calc = str(fy_start_date())
         if society_id:
             row = db._execute("SELECT calc_start_date FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
@@ -1174,9 +1324,113 @@ def render_category_content(category, society_id=None, state=None):
             )
         ]
     elif category == "Review":
+        # Fetch existing data from DB for review
+        society_data = {}
+        compliance_data = {}
+        apt_charges = {}
+        vendor_charges = {}
+        bf_data = {}
+        if society_id:
+            society_data = db._execute("SELECT * FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True) or {}
+            compliance_data = db._execute("SELECT * FROM society_compliance_settings WHERE society_id = :id", {"id": society_id}, fetch_one=True) or {}
+            apt_charges = db._execute("SELECT * FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True) or {}
+            vendor_charges = db._execute("SELECT * FROM ven_charges_fines_basis WHERE society_id = :id AND ven_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True) or {}
+            bf_data = db._execute("SELECT * FROM brought_forward WHERE society_id = :id", {"id": society_id}, fetch_all=True) or []
+        
+        # Get bye-law adoption status
+        bye_law_status = []
+        policy_status = []
+        if society_id:
+            from app.services import regime_rules_admin as rra
+            try:
+                for r in rra.list_society_bye_laws(society_id):
+                    if r["layer"] == 1 and r["status"] == "provisional":
+                        bye_law_status.append(f"{r['clause_id']}: {r['proposed_status'].replace('_', ' ').title()}")
+                for k, v in rra.list_society_policies(society_id).items():
+                    if v["proposed"]:
+                        policy_status.append(f"{k}: {v['proposed']} (awaiting resolution)")
+            except Exception:
+                pass
+        
+        review_sections = [
+            ("Society Identity", [
+                ("Society Name", society_data.get("name", "—")),
+                ("State", society_data.get("state", "—")),
+                ("Constitution", society_data.get("constitution", "—")),
+                ("PAN", society_data.get("pan_number", "—")),
+                ("Registration No.", society_data.get("registration_number", "—")),
+                ("Email", society_data.get("email", "—")),
+                ("Phone", society_data.get("phone", "—")),
+            ]),
+            ("Central Acts Configuration", [
+                ("Income Tax - TAN Required", "Yes" if society_data.get("tan_number") else "No"),
+                ("TDS Applicable", "Yes" if compliance_data.get("gst_registered") else "No"),  # placeholder
+                ("GST Registered", "Yes" if compliance_data.get("gst_registered") else "No"),
+                ("RERA Applicable", "No"),  # placeholder
+            ]),
+            ("State Act & Funds", [
+                ("Sinking Fund", "Levied" if apt_charges.get("apt_sinking_fund_rate") else "Not levied"),
+                ("Repair Fund", "Levied" if apt_charges.get("apt_repair_fund_rate") else "Not levied"),
+                ("Maintenance Billing Basis", apt_charges.get("billing_basis", "per_sqft")),
+            ]),
+            ("Apartment Charges", [
+                ("Base Maintenance Amount", f"₹{apt_charges.get('apt_maintenance_amount', 0):,.2f}"),
+                ("Maintenance Rate/SqFt", f"₹{apt_charges.get('apt_maintenance_rate', 0):,.2f}"),
+                ("Billing Due Day", apt_charges.get("apt_due_day", 1)),
+                ("Interest Rate", f"{apt_charges.get('apt_interest_pct', 1.75)}%"),
+            ]),
+            ("Vendor Charges", [
+                ("1 Day Pass", f"₹{vendor_charges.get('vendor_1day', 100):,.0f}"),
+                ("7 Day Pass", f"₹{vendor_charges.get('vendor_7day', 500):,.0f}"),
+                ("1 Month Pass", f"₹{vendor_charges.get('vendor_1mth', 2000):,.0f}"),
+            ]),
+            ("Society Operations", [
+                ("Gate Pass Enforcement", society_data.get("gate_logic", "both").title()),
+                ("Security Duty Hours", f"{society_data.get('duty_hrs', '8')} hours"),
+            ]),
+            ("Administrator", [
+                ("Secretary Name", society_data.get("secretary_name", "—")),
+                ("Secretary Email", society_data.get("secretary_email", "—")),
+                ("Secretary Phone", society_data.get("secretary_phone", "—")),
+            ]),
+        ]
+        
+        def _section_card(title, items):
+            rows = []
+            for label, value in items:
+                rows.append(html.Tr([
+                    html.Td(html.Strong(label), style={"width": "30%", "fontSize": "12px"}),
+                    html.Td(str(value), style={"fontSize": "12px"}),
+                ]))
+            return dbc.Card([
+                dbc.CardHeader(html.H6(title, className="mb-0", style={"fontSize": "13px"})),
+                dbc.CardBody([
+                    dbc.Table([
+                        html.Tbody(rows)
+                    ], bordered=False, size="sm", style={"fontSize": "12px", "marginBottom": "0"}),
+                ], className="py-2"),
+            ], className="mb-3 shadow-sm")
+        
+        # Pending ratification checklist
+        ratification_items = []
+        if bye_law_status:
+            ratification_items.append(html.Li([html.Strong("Bye-Law Adoptions: "), html.Br(), html.Ul([html.Li(item, style={"fontSize": "11px"}) for item in bye_law_status])]))
+        if policy_status:
+            ratification_items.append(html.Li([html.Strong("Society Policies: "), html.Br(), html.Ul([html.Li(item, style={"fontSize": "11px"}) for item in policy_status])]))
+        if not ratification_items:
+            ratification_items = [html.Li("No pending ratifications — all choices are either not set or already backed by resolutions.", className="text-muted", style={"fontSize": "12px"})]
+        
         return elements + [
-            _render_banner("Review & Confirm", "Please review the key settings below before finalizing the setup."),
-            html.Div(id="sw-review-content", style={"padding": "10px", "background": "#f8f9fa", "borderRadius": "8px"})
+            _render_banner("Review & Confirm", "Review all settings below. Items marked 'awaiting resolution' require a General Body meeting and passed resolution to take effect in the engine."),
+            html.Div([_section_card(title, items) for title, items in review_sections]),
+            html.H6("Pending Ratification Checklist", className="text-primary mt-3 mb-2"),
+            html.P("The following provisional choices need a General Body resolution to become active:", className="text-muted small mb-2"),
+            html.Ul(ratification_items, style={"fontSize": "12px"}),
+            html.Hr(),
+            dbc.Alert([
+                html.I(className="fas fa-info-circle me-2"),
+                "After reviewing, proceed to the Agreement step to accept the terms and submit the setup."
+            ], color="info", className="mt-3"),
         ]
     elif category == "Agreement":
         here = os.path.dirname(os.path.abspath(__file__))
