@@ -13706,6 +13706,7 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_sgst              NUMERIC,
     p_apt_amt           NUMERIC,
     p_apt_rate          NUMERIC,
+    p_apt_billing_basis VARCHAR(20) DEFAULT 'per_sqft',
     p_apt_due_day       INT,
     p_apt_sinking       NUMERIC,
     p_apt_repair        NUMERIC,
@@ -13714,7 +13715,7 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_ven_1mth          NUMERIC,
     p_bf_fy             INT,
     p_bf_json           JSONB,
-    p_created_by        INT,  -- kept for signature compat; no longer stored (apt/ven charge basis and brought_forward are admin-only, so created_by/updated_by were removed from those tables)
+    p_created_by        INT,
     p_email             VARCHAR(100) DEFAULT NULL,
     p_reg_num           VARCHAR(100) DEFAULT NULL,
     p_apt_interest      NUMERIC DEFAULT 0,
@@ -13729,7 +13730,8 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_gate_logic        VARCHAR(10) DEFAULT 'both',
     p_duty_hrs           VARCHAR(2) DEFAULT '8',
     p_tds_effective_date DATE DEFAULT NULL,
-    p_state              VARCHAR(50) DEFAULT NULL
+    p_state              VARCHAR(50) DEFAULT NULL,
+    p_constitution       VARCHAR(20) DEFAULT 'AOA'
 ) RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
     v_item   JSONB;
