@@ -2681,6 +2681,114 @@ CREATE SEQUENCE seq_receipt_number;
 
 CREATE SEQUENCE seq_transaction_number;
 
+
+-- ============================================================
+-- SECTION 1.1: SOCIETY GOVERNANCE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS society_bylaw_provisional (
+  id BIGSERIAL PRIMARY KEY,
+  society_id BIGINT NOT NULL,
+  clause_no VARCHAR(20) NOT NULL,
+  clause_title VARCHAR(255) NULL,
+  clause_definition TEXT NULL,
+  source_link VARCHAR(512) NULL,
+  layer VARCHAR(20) NOT NULL DEFAULT 'Layer 2' CHECK (layer IN ('Layer 1','Layer 2','Layer 3')),
+  option VARCHAR(30) NOT NULL CHECK (option IN ('Adopted as-is','Adopted with variation','Not adopted')),
+  variation_text TEXT NULL,
+  effective_date DATE NULL,
+  reason TEXT NULL,
+  state VARCHAR(20) NOT NULL DEFAULT 'Draft' CHECK (state IN ('Draft','Pending Approval','Approved','Rejected','Enacted')),
+  resolution_id BIGINT NULL,
+  created_by BIGINT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_society_clause UNIQUE (society_id, clause_no)
+);
+
+CREATE INDEX IF NOT EXISTS idx_soc_state ON society_bylaw_provisional (society_id, state);
+CREATE INDEX IF NOT EXISTS idx_res_id ON society_bylaw_provisional (resolution_id);
+
+CREATE TABLE IF NOT EXISTS society_policy_choice (
+  id BIGSERIAL PRIMARY KEY,
+  society_id BIGINT NOT NULL,
+  policy_key VARCHAR(64) NOT NULL,
+  value_json JSONB NULL,
+  value_text VARCHAR(255) NULL,
+  reason TEXT NULL,
+  effective_date DATE NULL,
+  resolution_id BIGINT NULL,
+  created_by BIGINT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_soc_policy UNIQUE (society_id, policy_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_soc_pol ON society_policy_choice (society_id, policy_key);
+CREATE INDEX IF NOT EXISTS idx_res_pol ON society_policy_choice (resolution_id);
+
+CREATE TABLE IF NOT EXISTS society_meetings (
+  id BIGSERIAL PRIMARY KEY,
+  society_id BIGINT NOT NULL,
+  meeting_type VARCHAR(10) NOT NULL CHECK (meeting_type IN ('GBM','EGM','MC')),
+  meeting_no VARCHAR(30) NULL,
+  held_on DATE NULL,
+  venue VARCHAR(255) NULL,
+  quorum_met BOOLEAN NOT NULL DEFAULT FALSE,
+  chaired_by BIGINT NULL,
+  minutes_pdf VARCHAR(512) NULL,
+  notes TEXT NULL,
+  created_by BIGINT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_soc_held ON society_meetings (society_id, held_on);
+
+CREATE TABLE IF NOT EXISTS society_resolutions (
+  id BIGSERIAL PRIMARY KEY,
+  society_id BIGINT NOT NULL,
+  meeting_id BIGINT NULL,
+  clause_no VARCHAR(20) NULL,
+  subject VARCHAR(150) NULL,
+  decision_type VARCHAR(20) NOT NULL CHECK (decision_type IN ('Adopt','Amend','Reject','Delegate')),
+  text TEXT NOT NULL,
+  majority_pct NUMERIC(5,2) NOT NULL DEFAULT 0.00,
+  passed BOOLEAN NOT NULL DEFAULT FALSE,
+  passed_date DATE NULL,
+  mover BIGINT NULL,
+  seconder BIGINT NULL,
+  affects_bylaw BOOLEAN NOT NULL DEFAULT FALSE,
+  affects_policy BOOLEAN NOT NULL DEFAULT FALSE,
+  policy_keys JSONB NULL,
+  created_by BIGINT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_soc_passed ON society_resolutions (society_id, passed, passed_date);
+CREATE INDEX IF NOT EXISTS idx_meet ON society_resolutions (meeting_id);
+CREATE INDEX IF NOT EXISTS idx_clause ON society_resolutions (society_id, clause_no);
+
+CREATE TABLE IF NOT EXISTS resolution_effects (
+  id BIGSERIAL PRIMARY KEY,
+  society_id BIGINT NOT NULL,
+  resolution_id BIGINT NOT NULL,
+  effect_type VARCHAR(30) NOT NULL CHECK (effect_type IN ('BYLAW_PROVISIONAL','POLICY_CHOICE')),
+  target_key VARCHAR(50) NOT NULL,
+  payload_json JSONB NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','EXECUTED','SKIPPED','ERROR')),
+  executed_at TIMESTAMP NULL,
+  executed_by BIGINT NULL,
+  error_text TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_res_effect UNIQUE (resolution_id, target_key, effect_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_soc_status ON resolution_effects (society_id, status);
+
+ALTER TABLE societies
+  ADD COLUMN IF NOT EXISTS cash_limit_mode VARCHAR(20) NOT NULL DEFAULT 'regime default' CHECK (cash_limit_mode IN ('warn','block','regime default'));
+
+
 -- SECTION 2: INDEXES
 -- ════════════════════════════════════════════════════════════════
 
@@ -16718,19 +16826,6 @@ ALTER TABLE borrowing_approvals
     ADD CONSTRAINT borrowing_approvals_resolution_id_fkey
     FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
 
--- 4. resolution_effects — Enactment queue (whitelisted handlers only)
-CREATE TABLE resolution_effects (
-    id                  SERIAL PRIMARY KEY,
-    resolution_id       INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
-    handler_name        VARCHAR(60) NOT NULL CHECK (handler_name IN ('set_regime_param', 'set_society_policy', 'set_board_param')),
-    payload_json        JSONB NOT NULL,
-    executed_at         TIMESTAMP,
-    status              VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'executed', 'failed')),
-    error_message       TEXT,
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
-);
-CREATE INDEX idx_resolution_effects_resolution ON resolution_effects (resolution_id);
-
 -- 5. society_bye_laws — Clause-level bye-law register (4-layer hierarchy)
 --    Layer 0: Statute (UP Apartment Act 2010) — LOCKED, not stored here
 --    Layer 1: Model Bye-Laws 2011 — per clause: Adopt as-is | Adopt with variation | Not adopted
@@ -17126,105 +17221,3 @@ BEGIN
     FROM rec, ln;
 END $$;
 
--- SOCIETY GOVERNANCE: Provisional By-Law Choices, Policy Choices, Meetings, Resolutions, Enactments
-CREATE TABLE IF NOT EXISTS `society_bylaw_provisional` (
-  `id` BIGINT NOT NULL AUTO_INCREMENT,
-  `society_id` BIGINT NOT NULL,
-  `clause_no` VARCHAR(20) NOT NULL,
-  `clause_title` VARCHAR(255) NULL,
-  `clause_definition` TEXT NULL,
-  `source_link` VARCHAR(512) NULL,
-  `layer` ENUM('Layer 1','Layer 2','Layer 3') NOT NULL DEFAULT 'Layer 2',
-  `option` ENUM('Adopted as-is','Adopted with variation','Not adopted') NOT NULL,
-  `variation_text` TEXT NULL,
-  `effective_date` DATE NULL,
-  `reason` TEXT NULL,
-  `state` ENUM('Draft','Pending Approval','Approved','Rejected','Enacted') NOT NULL DEFAULT 'Draft',
-  `resolution_id` BIGINT NULL,
-  `created_by` BIGINT NULL,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_society_clause` (`society_id`, `clause_no`),
-  KEY `idx_soc_state` (`society_id`, `state`),
-  KEY `idx_res_id` (`resolution_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS `society_policy_choice` (
-  `id` BIGINT NOT NULL AUTO_INCREMENT,
-  `society_id` BIGINT NOT NULL,
-  `policy_key` VARCHAR(64) NOT NULL,
-  `value_json` JSON NULL,
-  `value_text` VARCHAR(255) NULL,
-  `reason` TEXT NULL,
-  `effective_date` DATE NULL,
-  `resolution_id` BIGINT NULL,
-  `created_by` BIGINT NULL,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_soc_policy` (`society_id`, `policy_key`),
-  KEY `idx_soc_pol` (`society_id`, `policy_key`),
-  KEY `idx_res_pol` (`resolution_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS `society_meetings` (
-  `id` BIGINT NOT NULL AUTO_INCREMENT,
-  `society_id` BIGINT NOT NULL,
-  `meeting_type` ENUM('GBM','EGM','MC') NOT NULL,
-  `meeting_no` VARCHAR(30) NULL,
-  `held_on` DATE NULL,
-  `venue` VARCHAR(255) NULL,
-  `quorum_met` TINYINT(1) NOT NULL DEFAULT 0,
-  `chaired_by` BIGINT NULL,
-  `minutes_pdf` VARCHAR(512) NULL,
-  `notes` TEXT NULL,
-  `created_by` BIGINT NULL,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_soc_held` (`society_id`, `held_on`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS `society_resolutions` (
-  `id` BIGINT NOT NULL AUTO_INCREMENT,
-  `society_id` BIGINT NOT NULL,
-  `meeting_id` BIGINT NULL,
-  `clause_no` VARCHAR(20) NULL,
-  `subject` VARCHAR(150) NULL,
-  `decision_type` ENUM('Adopt','Amend','Reject','Delegate') NOT NULL,
-  `text` TEXT NOT NULL,
-  `majority_pct` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
-  `passed` TINYINT(1) NOT NULL DEFAULT 0,
-  `passed_date` DATE NULL,
-  `mover` BIGINT NULL,
-  `seconder` BIGINT NULL,
-  `affects_bylaw` TINYINT(1) NOT NULL DEFAULT 0,
-  `affects_policy` TINYINT(1) NOT NULL DEFAULT 0,
-  `policy_keys` JSON NULL,
-  `created_by` BIGINT NULL,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_soc_passed` (`society_id`, `passed`, `passed_date`),
-  KEY `idx_meet` (`meeting_id`),
-  KEY `idx_clause` (`society_id`, `clause_no`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS `resolution_effects` (
-  `id` BIGINT NOT NULL AUTO_INCREMENT,
-  `society_id` BIGINT NOT NULL,
-  `resolution_id` BIGINT NOT NULL,
-  `effect_type` ENUM('BYLAW_PROVISIONAL','POLICY_CHOICE') NOT NULL,
-  `target_key` VARCHAR(50) NOT NULL,
-  `payload_json` JSON NOT NULL,
-  `status` ENUM('PENDING','EXECUTED','SKIPPED','ERROR') NOT NULL DEFAULT 'PENDING',
-  `executed_at` DATETIME NULL,
-  `executed_by` BIGINT NULL,
-  `error_text` TEXT NULL,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_res_effect` (`resolution_id`, `target_key`, `effect_type`),
-  KEY `idx_soc_status` (`society_id`, `status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-ALTER TABLE `societies`
-  ADD COLUMN IF NOT EXISTS `cash_limit_mode` ENUM('warn','block','regime default') NOT NULL DEFAULT 'regime default';
