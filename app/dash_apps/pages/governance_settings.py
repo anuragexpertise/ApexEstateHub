@@ -1,234 +1,207 @@
-# app/dash_apps/pages/governance_settings.py
-"""
-Settings -> governance tabs for the Admin and Owner portals.
-
-    RWA Compliance (UP) | Rules | Society By-laws | Meetings & Resolutions
-
-Everything here is scoped to the signed-in user's own society, resolved from the SERVER-side session
-(never the browser's auth-store). Owners get a read-only view. Admins additionally get the forms that the
-service layer (app.services.regime_rules_admin._require_writer) lets a society admin submit for their own
-society: cash-limit mode, provisional bye-law choice, record meeting, record resolution.
-
-Master-only and therefore never rendered here: Edit a catalog entry and Change a rule (a rule value is
-regime-wide). Bye-law adoption, meetings and resolutions are edited by the society's ADMIN only (master has no
-such tabs). A provisional bye-law choice is activated automatically when a matching passed resolution is
-recorded, so there is no separate "link" step.
-
-Component ids are prefixed `gov-` so Master's `mrl-` callbacks (platform-gated) never see them.
-"""
-from __future__ import annotations
-
-from dash import dcc, html
 import dash_bootstrap_components as dbc
+from dash import html, dcc
 
-from app.dash_apps.pages import master_rules_page as mrp
-from app.security.audit_context import get_current_society_id
-from app.services import regime_rules_admin as rra
+def society_governance_kpi():
+    return dbc.Card([
+        dbc.CardBody([
+            html.Div([
+                html.Span("Society Governance", style={"fontWeight": 700, "fontSize": "16px"}),
+            ]),
+            dbc.Row([
+                dbc.Col(html.Small("KPI: Society Governance • RWA Compliance (UP) • Rules • Society By-Laws • Meetings & Resolution"), sm=12)
+            ])
+        ])
+    ], className="mb-3 shadow-sm")
 
-P = "gov"
+def rwa_content():
+    return dbc.Card([
+        dbc.CardBody([
+            html.H6("RWA Compliance (UP)", className="fw-bold"),
+            html.P("Informative only – cannot be edited.", className="text-muted mb-2"),
+            dbc.Table([
+                html.Thead(html.Tr([html.Th("Framework"), html.Th("Reference"), html.Th("Status")])),
+                html.Tbody([
+                    html.Tr([html.Th("Central Acts"), html.Td("Central Acts"), html.Td(html.Span("Informative", className="badge bg-secondary"))]),
+                    html.Tr([html.Th("UP AOA Acts"), html.Td("UP_AOA Acts"), html.Td(html.Span("Informative", className="badge bg-secondary"))]),
+                    html.Tr([html.Th("UPAOA Rules"), html.Td("UPAOA Rules"), html.Td(html.Span("Informative", className="badge bg-secondary"))]),
+                    html.Tr([html.Th("UP Model By-Laws"), html.Td("UP Model By-Laws"), html.Td(html.Span("Informative", className="badge bg-secondary"))]),
+                    html.Tr([html.Th("Society Policy"), html.Td("Society Policy"), html.Td(html.Span("Informative", className="badge bg-secondary"))]),
+                ])
+            ], bordered=True, hover=True, size="sm", striped=True)
+        ])
+    ], className="shadow-sm")
 
+def rules_content():
+    return dbc.Card([
+        dbc.CardBody([
+            html.H6("Rule Parameters", className="fw-bold"),
+            html.Div(id="rules-table", className="mb-3"),
+            html.H6("Scheduled changes", className="fw-bold mt-2"),
+            html.Div(id="rules-scheduled", className="mb-3"),
+            html.H6("Audit log (last 25)", className="fw-bold mt-2"),
+            html.Div(id="rules-audit", className="mb-3"),
+            html.H6("Cash-limit enforcement", className="fw-bold mt-2"),
+            dbc.Row([
+                dbc.Col(dcc.Dropdown(id="cash-limit-mode", options=[
+                    {"label": "warn", "value": "warn"},
+                    {"label": "block", "value": "block"},
+                    {"label": "regime default", "value": "regime default"},
+                ], clearable=False), sm=4, md=3),
+                dbc.Col(dbc.Button("Save", id="cash-limit-save", color="primary", size="sm"), sm=2, md=2, className="align-self-end")
+            ]),
+            html.Div(id="cash-limit-msg", className="mt-2")
+        ])
+    ], className="shadow-sm")
 
-def _note(text: str):
-    return html.Div(text, style={"fontSize": "12px", "color": "#666", "padding": "10px 12px", "marginTop": "16px",
-                                 "background": "#f6f8fb", "border": "1px solid #e1e7ef", "borderRadius": "8px"})
-
-
-ORDER_NOTE = ("Order matters: save the choice first, then record the resolution. "
-              "An older resolution can't activate a newer choice.")
-
-
-def _order_note():
-    return html.Div([html.I(className="fas fa-info-circle me-2"), html.Strong(ORDER_NOTE)],
-                    style={"fontSize": "12px", "padding": "10px 12px", "marginTop": "16px", "background": "#fff8e1",
-                           "border": "1px solid #ffe08a", "borderRadius": "8px"})
-
-
-def _no_society():
-    return html.Div("No society is linked to your account.", className="text-muted p-3")
-
-
-def rules_body(society_id) -> list:
-    return mrp.render_rules_sections(society_id)
-
-
-def bye_body(society_id) -> list:
-    return mrp.render_bye_laws_sections(society_id) + mrp.render_policy_section(society_id)
-
-
-def mtg_body(society_id, can_execute: bool = False) -> list:
-    # Only the society's admin gets Execute buttons; owners see the pending list read-only.
-    return (mrp.render_meetings_sections(society_id)
-            + mrp.render_enactment_section(society_id, P, can_execute=can_execute))
-
-
-def policy_choice_ui(society_id, policy_key):
-    """(options, value, info) for the Record Policy Choice form: choices of that setting, the current/pending
-    one pre-selected, and a note on which clause's resolution activates it."""
-    spec = rra.POLICY_SPECS.get(policy_key)
-    if not spec:
-        return [{"label": "Select a setting first", "value": "", "disabled": True}], None, None
-    label, clause, choices = spec
-    try:
-        st = rra.list_society_policies(society_id).get(policy_key, {})
-    except Exception:
-        st = {}
-    names = dict(choices)
-    now = names.get(st.get("value"), st.get("value"))
-    pend = names.get(st.get("proposed")) if st.get("proposed") else None
-    lines = [html.Div([html.Strong(label, style={"fontSize": "12px"})]),
-             html.Div(f"Controlled by bye-law {clause} — {rra.clause_title(clause)}. It becomes active when you record a "
-                      f"passed 'Set Society Policy' resolution naming {clause}.", style={"fontSize": "12px"}),
-             html.Div(f"In force now: {now or 'default'}" + (f"  ·  pending: {pend}" if pend else ""),
-                      style={"fontSize": "12px", "color": "#666"})]
-    if policy_key.startswith("droppable_"):
-        lines.append(html.Div("Which clauses can legally be dropped is a legal call - confirm with an advocate.",
-                              style={"fontSize": "11px", "color": "#b26a00"}))
-    info = html.Div(lines, style={"padding": "10px 12px", "background": "#f6f8fb", "border": "1px solid #e1e7ef",
-                                  "borderRadius": "8px"})
-    return [{"label": text, "value": val} for val, text in choices], (st.get("proposed") or st.get("value")), info
-
-
-def bye_choice_ui(society_id, clause_id, layer):
-    """(options, value) for the guided bye-law form. Only choices the rules allow are enabled."""
-    if not clause_id:
-        return [{"label": "Select a clause first", "value": "", "disabled": True}], None
-    info = rra.clause_rules(society_id, clause_id)
-    layer = int(layer or 1)
-    if layer != 1:
-        return [{"label": "Adopt with variation  (a society policy / board decision is always a variation of an adopted clause)",
-                 "value": "adopted_with_variation"}], "adopted_with_variation"
-    opts = [
-        {"label": "Adopt as-is  (the clause applies exactly as notified)", "value": "adopted_as_is"},
-        {"label": "Adopt with variation  (you write the wording)", "value": "adopted_with_variation",
-         "disabled": info["fixed"]},
-        {"label": ("Not adopted  — not allowed: the Act/Rules enforce this clause" if info["locked"]
-                   else "Not adopted  (non-statutory clauses only)"),
-         "value": "not_adopted", "disabled": info["locked"]},
-    ]
-    if info["fixed"]:
-        opts[1]["label"] = "Adopt with variation  — not allowed: this clause says the Act prevails"
-    return opts, "adopted_as_is"
-
-
-def bye_choice_panel(clause_id, layer, status):
-    """(info children, show_variation_box) for the current selection."""
-    if not clause_id or not status:
-        return None, False
-    title = rra.clause_title(clause_id)
-    src = rra.model_bye_laws_source()
-    link = (html.A("Read the notified Model Bye-Laws", href=src["url"], target="_blank", rel="noopener noreferrer")
-            if src["url"] else html.Span("Refer to the notified Model Bye-Laws"))
-    ref = html.Div([link, html.Span(f" — {src['reference']}", className="text-muted")], style={"fontSize": "11px"})
-    head = html.Div([html.Strong(f"{clause_id} — {title}", style={"fontSize": "12px"})])
-    if status == "adopted_as_is":
-        body = html.Div("The society adopts this clause exactly as notified. Nothing to type.", style={"fontSize": "12px"})
-    elif status == "adopted_with_variation":
-        body = html.Div("Write your wording below. It must be a tightening; it cannot loosen the Model Bye-Law."
-                        if int(layer or 1) != 1 else
-                        "Write the wording the society adopts in place of the model clause (below).", style={"fontSize": "12px"})
-    else:
-        body = html.Div("The society does not adopt this clause. Needs a simple-majority GBM resolution.",
-                        style={"fontSize": "12px"})
-    box = html.Div([head, body, ref], style={"padding": "10px 12px", "background": "#f6f8fb",
-                                              "border": "1px solid #e1e7ef", "borderRadius": "8px"})
-    return box, status == "adopted_with_variation"
-
-
-def render_governance_summary(role: str, sid):
-    """Strip shown at the TOP of Settings so the governance section (further down) is easy to find."""
-    society_id = get_current_society_id() or sid
-    try:
-        society_id = int(society_id) if society_id else None
-    except (TypeError, ValueError):
-        society_id = None
-    if not society_id:
-        return None
-    snap = rra.governance_snapshot(society_id)
-    last = snap["last_meeting"]
-    last_txt = last.strftime("%d %b %Y") if hasattr(last, "strftime") else (str(last) if last else "none recorded")
-    pend = snap["pending_choices"]
-
-    def _stat(label, value, warn=False):
-        return html.Div([html.Div(label, style={"fontSize": "11px", "color": "#666"}),
-                         html.Div(value, style={"fontSize": "15px", "fontWeight": "700",
-                                                "color": "#b26a00" if warn else "inherit"})],
-                        style={"marginRight": "28px"})
-
-    verb = "record meetings and resolutions, and adopt bye-laws" if role == "admin" else "view your society's bye-laws, meetings and resolutions"
+def bylaws_content():
     return html.Div([
-        html.Div([html.I(className="fas fa-gavel me-2"), html.Strong("Society governance")], style={"marginBottom": "6px"}),
-        html.Div([_stat("Last meeting", last_txt),
-                  _stat("Choices awaiting a resolution", str(pend), warn=pend > 0),
-                  _stat("Pending enactments", str(snap["pending_enactments"]), warn=snap["pending_enactments"] > 0)],
-                 style={"display": "flex", "flexWrap": "wrap", "marginBottom": "6px"}),
-        html.Small(f"Scroll down past the cards below to the Society governance tabs, where you can {verb}.",
-                   className="text-muted"),
-    ], style={"padding": "12px 14px", "margin": "8px 0 14px", "background": "#f6f8fb",
-              "border": "1px solid #e1e7ef", "borderRadius": "8px"})
-
-
-def render_governance_tabs(role: str, sid, color: str = "#1859b8"):
-    """role: 'admin' (own-society forms) or 'apartment' (read-only). sid is only a fallback: the society
-    comes from the server session."""
-    from app.dash_apps.pages.portal_pages import _rwa_compliance_up_page
-
-    is_admin = role == "admin"
-    society_id = get_current_society_id() or sid
-    try:
-        society_id = int(society_id) if society_id else None
-    except (TypeError, ValueError):
-        society_id = None
-
-    compliance = _rwa_compliance_up_page(color, role=role, embedded=True)
-    if not society_id:
-        scoped = [_no_society()]
-        return _wrap(role, compliance, scoped, scoped, scoped)
-
-    # ── Rules ───────────────────────────────────────────────────────────────
-    try:
-        cur_mode = rra.society_cash_mode(society_id)
-    except Exception:
-        cur_mode = None
-    rules = [html.Div(rules_body(society_id), id=f"{P}-body")]
-    if is_admin:
-        rules.append(mrp.cash_limit_form(P, current_mode=cur_mode))
-        rules.append(_note("Statute figures and platform policies apply to every society on the regime, so Master changes "
-                           "them centrally. You will see a new value here once it takes effect."))
-    else:
-        rules.append(mrp._section("Cash-limit enforcement", "How cash payments above the limit are handled in your society.",
-                                  html.Div(cur_mode or "regime default", style={"fontSize": "13px", "fontWeight": "600"})))
-
-    # ── Society By-laws ─────────────────────────────────────────────────────
-    bye = [html.Div(bye_body(society_id), id=f"{P}-bye-body")]
-    if is_admin:
-        bye.append(_order_note())
-        bye.append(mrp.render_bye_laws_form(society_id, P))
-        bye.append(mrp.render_policy_form(society_id, P))
-
-    # ── Meetings & Resolutions ──────────────────────────────────────────────
-    mtg = [html.Div(mtg_body(society_id, can_execute=is_admin), id=f"{P}-mtg-body")]
-    if is_admin:
-        mtg.append(mrp.render_meeting_form(society_id, P))
-        mtg.append(mrp.render_resolution_form(society_id, P))
-        mtg.append(_order_note())
-        mtg.append(_note("When you record a PASSED resolution naming a clause, the matching provisional bye-law choice is "
-                         "activated automatically (decision type, quorum and meeting body are checked). Record the "
-                         "meeting first, then the resolution."))
-
-    return _wrap(role, compliance, rules, bye, mtg)
-
-
-def _wrap(role, compliance, rules, bye, mtg):
-    head = [html.H5("Society governance", id="society-governance", style={"fontWeight": "700", "marginTop": "8px"})]
-    if role != "admin":
-        head.append(html.Small("Read-only view for your society.", className="text-muted"))
-    return html.Div([
-        *head,
-        html.Div(id=f"{P}-toast"),
-        dcc.Tabs(id=f"{P}-tabs", value="tab-rwa", children=[
-            dcc.Tab(label="RWA Compliance (UP)", value="tab-rwa", children=html.Div(compliance)),
-            dcc.Tab(label="Rules", value="tab-rules", children=html.Div(rules)),
-            dcc.Tab(label="Society By-laws", value="tab-bye", children=html.Div(bye)),
-            dcc.Tab(label="Meetings & Resolutions", value="tab-mtg", children=html.Div(mtg)),
-        ]),
+        dbc.Card([
+            dbc.CardBody([
+                html.H6("Society By-Laws", className="fw-bold"),
+                html.Div(id="bylaws-list")
+            ])
+        ], className="shadow-sm mb-3"),
+        dbc.Card([
+            dbc.CardBody([
+                html.H6("Record Policy Choice", className="fw-bold"),
+                html.Small("For 'Society Policy settings'", className="text-muted"),
+                dbc.Row([
+                    dbc.Col(dbc.Input(id="pol-key", placeholder="Policy key (e.g. nodues_blocks_on)", size="sm"), sm=6),
+                    dbc.Col(dbc.Input(id="pol-value", placeholder="Value (text)", size="sm"), sm=6)
+                ], className="mt-2"),
+                dbc.Row([
+                    dbc.Col(dbc.Textarea(id="pol-reason", placeholder="Reason", rows=2, size="sm"), sm=12)
+                ], className="mt-2"),
+                dbc.Row([
+                    dbc.Col(dcc.DatePickerSingle(id="pol-eff", display_format="DD-MM-YYYY", placeholder="Effective date"), sm=4),
+                    dbc.Col(dbc.Button("Save Policy Choice", id="pol-save", color="primary", size="sm"), sm=4, className="align-self-end")
+                ], className="mt-2"),
+                html.Div(id="pol-msg", className="mt-2")
+            ])
+        ], className="shadow-sm")
     ])
+
+def meetings_content():
+    return dbc.Card([
+        dbc.CardBody([
+            dcc.Tabs([
+                dcc.Tab(label="Meetings", children=html.Div([
+                    dbc.Button("+ New Meeting", id="mtg-new", color="primary", size="sm", className="mb-2"),
+                    html.Div(id="mtgs-list")
+                ])),
+                dcc.Tab(label="Resolutions", children=html.Div([
+                    dbc.Button("+ New Resolution", id="res-new", color="primary", size="sm", className="mb-2"),
+                    html.Div(id="ress-list")
+                ])),
+                dcc.Tab(label="Resolution - Enacted", children=html.Div(id="enacted-list", className="mt-2"))
+            ])
+        ])
+    ], className="shadow-sm")
+
+def render_tab_content(tab, rra=None, sid=None):
+    if tab == "tab-rwa": return rwa_content()
+    if tab == "tab-rules": return rules_content()
+    if tab == "tab-bye": return bylaws_content()
+    if tab == "tab-mtg": return meetings_content()
+    return rwa_content()
+
+def render_governance_tabs(role=None, sid=None, color="#1859b8"):
+    tabs = dcc.Tabs(id="gov-tabs", value="tab-rwa", children=[
+        dcc.Tab(label="RWA Compliance (UP)", value="tab-rwa"),
+        dcc.Tab(label="Rules", value="tab-rules"),
+        dcc.Tab(label="Society By-Laws", value="tab-bye"),
+        dcc.Tab(label="Meetings & Resolution", value="tab-mtg"),
+    ])
+    gov_content = html.Div(id="gov-tab-content", className="mt-3")
+
+    pbc_modal = dbc.Modal([
+        dbc.ModalHeader("Provisional Bye-Law Choice"),
+        dbc.ModalBody([
+            dbc.Row([
+                dbc.Col(dbc.Label("Clause No"), width=4),
+                dbc.Col(dbc.Input(id="pbc-clause-no", readOnly=True, size="sm"), width=8)
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col(dbc.Label("Title"), width=4),
+                dbc.Col(dbc.Input(id="pbc-title", readOnly=True, size="sm"), width=8)
+            ], className="mb-2"),
+            dbc.Label("Definition"),
+            dbc.Textarea(id="pbc-def", readOnly=True, rows=2, size="sm", className="mb-2"),
+            dbc.Label("Source Link"),
+            dbc.Input(id="pbc-link", readOnly=True, size="sm", className="mb-2"),
+            dbc.Row([
+                dbc.Col([dbc.Label("Layer"), dcc.Dropdown(id="pbc-layer", options=[{"label":x,"value":x} for x in ["Layer 1","Layer 2","Layer 3"]], clearable=False, value="Layer 2")], sm=6),
+                dbc.Col([dbc.Label("Option"), dcc.Dropdown(id="pbc-option", options=[{"label":x,"value":x} for x in ["Adopted as-is","Adopted with variation","Not adopted"]], clearable=False, value="Adopted as-is")], sm=6)
+            ], className="mb-2"),
+            dbc.Label("Variation Text (if 'Adopted with variation')"),
+            dbc.Textarea(id="pbc-variation", rows=2, size="sm", className="mb-2"),
+            dbc.Row([
+                dbc.Col([dbc.Label("Effective Date"), dcc.DatePickerSingle(id="pbc-eff", display_format="DD-MM-YYYY")], sm=6),
+            ], className="mb-2"),
+            dbc.Label("Reason"),
+            dbc.Textarea(id="pbc-reason", rows=2, size="sm"),
+            html.Div(id="pbc-save-msg", className="mt-2")
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("Save", id="pbc-save", color="primary", size="sm"),
+            dbc.Button("Close", id="pbc-close", color="secondary", size="sm")
+        ])
+    ], id="pbc-modal", is_open=False, size="lg")
+
+    mtg_modal = dbc.Modal([
+        dbc.ModalHeader("Record Meetings"),
+        dbc.ModalBody([
+            dbc.Row([
+                dbc.Col([dbc.Label("Type"), dcc.Dropdown(id="mtg-type", options=[{"label":x,"value":x} for x in ["GBM","EGM","MC"]], clearable=False, value="GBM")], sm=6),
+                dbc.Col([dbc.Label("Meeting No"), dbc.Input(id="mtg-no", size="sm")], sm=6)
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col([dbc.Label("Held On"), dcc.DatePickerSingle(id="mtg-held", display_format="DD-MM-YYYY")], sm=6),
+                dbc.Col([dbc.Label("Venue"), dbc.Input(id="mtg-venue", size="sm")], sm=6)
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col([dbc.Label("Quorum Met"), dcc.Dropdown(id="mtg-quorum", options=[{"label":"Yes","value":"yes"},{"label":"No","value":"no"}], clearable=False, value="yes")], sm=6),
+                dbc.Col([dbc.Label("Minutes PDF (path/link)"), dbc.Input(id="mtg-minutes", size="sm")], sm=6)
+            ], className="mb-2"),
+            dbc.Label("Notes"),
+            dbc.Textarea(id="mtg-notes", rows=2, size="sm"),
+            html.Div(id="mtg-save-msg", className="mt-2")
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("Save", id="mtg-save", color="primary", size="sm"),
+            dbc.Button("Close", id="mtg-close", color="secondary", size="sm")
+        ])
+    ], id="mtg-modal", is_open=False, size="lg")
+
+    res_modal = dbc.Modal([
+        dbc.ModalHeader("Record Resolutions"),
+        dbc.ModalBody([
+            dbc.Row([
+                dbc.Col([dbc.Label("Meeting ID"), dbc.Input(id="res-meet", type="number", size="sm")], sm=4),
+                dbc.Col([dbc.Label("Clause No"), dbc.Input(id="res-clause", size="sm")], sm=4),
+                dbc.Col([dbc.Label("Subject"), dbc.Input(id="res-subj", size="sm")], sm=4)
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col([dbc.Label("Decision Type"), dcc.Dropdown(id="res-decision", options=[{"label":x,"value":x} for x in ["Adopt","Amend","Reject","Delegate"]], clearable=False, value="Adopt")], sm=4),
+                dbc.Col([dbc.Label("Majority %"), dbc.Input(id="res-major", type="number", step="0.01", size="sm")], sm=4),
+                dbc.Col([dbc.Label("Passed"), dcc.Dropdown(id="res-passed", options=[{"label":"Yes","value":"yes"},{"label":"No","value":"no"}], clearable=False, value="yes")], sm=4)
+            ], className="mb-2"),
+            dbc.Row([
+                dbc.Col([dbc.Label("Passed Date"), dcc.DatePickerSingle(id="res-pdate", display_format="DD-MM-YYYY")], sm=4),
+                dbc.Col([dbc.Label("Affects By-Law"), dcc.Dropdown(id="res-aff-bylaw", options=[{"label":"Yes","value":"yes"},{"label":"No","value":"no"}], clearable=False, value="no")], sm=4),
+                dbc.Col([dbc.Label("Affects Policy"), dcc.Dropdown(id="res-aff-pol", options=[{"label":"Yes","value":"yes"},{"label":"No","value":"no"}], clearable=False, value="no")], sm=4)
+            ], className="mb-2"),
+            dbc.Label("Policy Keys (comma separated)"),
+            dbc.Input(id="res-polkeys", size="sm", className="mb-2"),
+            dbc.Label("Resolution Text"),
+            dbc.Textarea(id="res-text", rows=3, size="sm"),
+            html.Div(id="res-save-msg", className="mt-2"),
+            html.Div(id="exec-msg", className="mt-2")
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("Save", id="res-save", color="primary", size="sm"),
+            dbc.Button("Close", id="res-close", color="secondary", size="sm")
+        ])
+    ], id="res-modal", is_open=False, size="lg")
+
+    return html.Div([society_governance_kpi(), tabs, gov_content, pbc_modal, mtg_modal, res_modal])

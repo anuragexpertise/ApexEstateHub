@@ -245,11 +245,27 @@ def load_conversation_data():
 CONVERSATION_DATA = load_conversation_data()
 WIZARD_GROUPS = {
     "Organization Details": ["Instructions", "Society Details", "Administrator"],
-    "Tax & Compliance": ["Society Compliance", "UP AOA Compliance", "Bye-Laws Adoption", "TAN & TDS Rates", "GSTIN & GST Rate"],
-    "Billing & Accounts": ["Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward"],
+    "Central Acts": ["TAN & TDS Rates", "GSTIN & GST Rates"],
+    "UP_AOA Acts": ["Compliance (UP_AOA)"],
+    "UPAOA Rules": ["Compliance (UP_AOA)"],
+    "UP By-Laws": ["By-Laws Adoption"],
+    "Society Policy": ["Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward"],
     "Finalization": ["Agreement"]
 }
-CATEGORIES = [step for group in WIZARD_GROUPS.values() for step in group]
+CATEGORIES = [
+    'Instructions',
+    'Society Details',
+    'Administrator',
+    'TAN & TDS Rates',
+    'GSTIN & GST Rates',
+    'Compliance (UP_AOA)',
+    'By-Laws Adoption',
+    'Apartment Charges',
+    'Vendor Charges',
+    'Accounts',
+    'Brought Forward',
+    'Agreement'
+]
 
 CATEGORY_ICONS = {
     "Society Details": "fas fa-building",
