@@ -2682,113 +2682,6 @@ CREATE SEQUENCE seq_receipt_number;
 CREATE SEQUENCE seq_transaction_number;
 
 
--- ============================================================
--- SECTION 1.1: SOCIETY GOVERNANCE
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS society_bylaw_provisional (
-  id BIGSERIAL PRIMARY KEY,
-  society_id BIGINT NOT NULL,
-  clause_no VARCHAR(20) NOT NULL,
-  clause_title VARCHAR(255) NULL,
-  clause_definition TEXT NULL,
-  source_link VARCHAR(512) NULL,
-  layer VARCHAR(20) NOT NULL DEFAULT 'Layer 2' CHECK (layer IN ('Layer 1','Layer 2','Layer 3')),
-  option VARCHAR(30) NOT NULL CHECK (option IN ('Adopted as-is','Adopted with variation','Not adopted')),
-  variation_text TEXT NULL,
-  effective_date DATE NULL,
-  reason TEXT NULL,
-  state VARCHAR(20) NOT NULL DEFAULT 'Draft' CHECK (state IN ('Draft','Pending Approval','Approved','Rejected','Enacted')),
-  resolution_id BIGINT NULL,
-  created_by BIGINT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT uq_society_clause UNIQUE (society_id, clause_no)
-);
-
-CREATE INDEX IF NOT EXISTS idx_soc_state ON society_bylaw_provisional (society_id, state);
-CREATE INDEX IF NOT EXISTS idx_res_id ON society_bylaw_provisional (resolution_id);
-
-CREATE TABLE IF NOT EXISTS society_policy_choice (
-  id BIGSERIAL PRIMARY KEY,
-  society_id BIGINT NOT NULL,
-  policy_key VARCHAR(64) NOT NULL,
-  value_json JSONB NULL,
-  value_text VARCHAR(255) NULL,
-  reason TEXT NULL,
-  effective_date DATE NULL,
-  resolution_id BIGINT NULL,
-  created_by BIGINT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT uq_soc_policy UNIQUE (society_id, policy_key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_soc_pol ON society_policy_choice (society_id, policy_key);
-CREATE INDEX IF NOT EXISTS idx_res_pol ON society_policy_choice (resolution_id);
-
-CREATE TABLE IF NOT EXISTS society_meetings (
-  id BIGSERIAL PRIMARY KEY,
-  society_id BIGINT NOT NULL,
-  meeting_type VARCHAR(10) NOT NULL CHECK (meeting_type IN ('GBM','EGM','MC')),
-  meeting_no VARCHAR(30) NULL,
-  held_on DATE NULL,
-  venue VARCHAR(255) NULL,
-  quorum_met BOOLEAN NOT NULL DEFAULT FALSE,
-  chaired_by BIGINT NULL,
-  minutes_pdf VARCHAR(512) NULL,
-  notes TEXT NULL,
-  created_by BIGINT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_soc_held ON society_meetings (society_id, held_on);
-
-CREATE TABLE IF NOT EXISTS society_resolutions (
-  id BIGSERIAL PRIMARY KEY,
-  society_id BIGINT NOT NULL,
-  meeting_id BIGINT NULL,
-  clause_no VARCHAR(20) NULL,
-  subject VARCHAR(150) NULL,
-  decision_type VARCHAR(20) NOT NULL CHECK (decision_type IN ('Adopt','Amend','Reject','Delegate')),
-  text TEXT NOT NULL,
-  majority_pct NUMERIC(5,2) NOT NULL DEFAULT 0.00,
-  passed BOOLEAN NOT NULL DEFAULT FALSE,
-  passed_date DATE NULL,
-  mover BIGINT NULL,
-  seconder BIGINT NULL,
-  affects_bylaw BOOLEAN NOT NULL DEFAULT FALSE,
-  affects_policy BOOLEAN NOT NULL DEFAULT FALSE,
-  policy_keys JSONB NULL,
-  created_by BIGINT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_soc_passed ON society_resolutions (society_id, passed, passed_date);
-CREATE INDEX IF NOT EXISTS idx_meet ON society_resolutions (meeting_id);
-CREATE INDEX IF NOT EXISTS idx_clause ON society_resolutions (society_id, clause_no);
-
-CREATE TABLE IF NOT EXISTS resolution_effects (
-  id BIGSERIAL PRIMARY KEY,
-  society_id BIGINT NOT NULL,
-  resolution_id BIGINT NOT NULL,
-  effect_type VARCHAR(30) NOT NULL CHECK (effect_type IN ('BYLAW_PROVISIONAL','POLICY_CHOICE')),
-  target_key VARCHAR(50) NOT NULL,
-  payload_json JSONB NOT NULL,
-  status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','EXECUTED','SKIPPED','ERROR')),
-  executed_at TIMESTAMP NULL,
-  executed_by BIGINT NULL,
-  error_text TEXT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT uq_res_effect UNIQUE (resolution_id, target_key, effect_type)
-);
-
-CREATE INDEX IF NOT EXISTS idx_soc_status ON resolution_effects (society_id, status);
-
-ALTER TABLE societies
-  ADD COLUMN IF NOT EXISTS cash_limit_mode VARCHAR(20) NOT NULL DEFAULT 'regime default' CHECK (cash_limit_mode IN ('warn','block','regime default'));
-
-
 -- SECTION 2: INDEXES
 -- ════════════════════════════════════════════════════════════════
 
@@ -3782,7 +3675,7 @@ BEGIN
         );
     END IF;
     FOR apt IN
-        SELECT id, apartment_size, apt_calc_start_date, undivided_interest_pct FROM apartments
+        SELECT id, flat_number, apartment_size, apt_calc_start_date, undivided_interest_pct FROM apartments
         WHERE society_id = p_society_id AND active = TRUE
     LOOP
         v_calc_start := COALESCE(apt.apt_calc_start_date, v_society_calc_start);
@@ -3802,7 +3695,7 @@ BEGIN
             v_month_end     := (v_month + INTERVAL '1 month - 1 day')::DATE;
             v_days_in_month := (v_month_end - v_month_start + 1);
 
-            SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day,
+            SELECT id, apt_maintenance_amount, apt_maintenance_rate, apt_due_day,
                    apt_interest_pct, start_date, end_date,
                    apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest,
                    billing_basis, common_expense_budget_monthly
@@ -13706,7 +13599,7 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_sgst              NUMERIC,
     p_apt_amt           NUMERIC,
     p_apt_rate          NUMERIC,
-    p_apt_billing_basis VARCHAR(20) DEFAULT 'per_sqft',
+    p_apt_billing_basis VARCHAR(20),
     p_apt_due_day       INT,
     p_apt_sinking       NUMERIC,
     p_apt_repair        NUMERIC,
@@ -13903,15 +13796,18 @@ BEGIN
         SET apt_maintenance_amount = p_apt_amt, apt_maintenance_rate = p_apt_rate,
             apt_due_day = p_apt_due_day, apt_sinking_fund_rate = p_apt_sinking,
             apt_repair_fund_rate = p_apt_repair, apt_interest_pct = p_apt_interest,
+            -- the wizard also offers 'fixed'; the table only knows per_sqft / undivided_interest (fixed = per_sqft + amount)
+            billing_basis = CASE WHEN p_apt_billing_basis = 'undivided_interest' THEN 'undivided_interest' ELSE 'per_sqft' END,
             updated_at = NOW()
         WHERE id = v_apt_id;
     ELSE
         INSERT INTO apt_charges_fines_basis
             (society_id, apt_id, start_date, apt_maintenance_amount, apt_maintenance_rate,
-             apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct)
+             apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct, billing_basis)
         VALUES
             (p_society_id, NULL, CURRENT_DATE, p_apt_amt, p_apt_rate,
-             p_apt_due_day, p_apt_sinking, p_apt_repair, p_apt_interest);
+             p_apt_due_day, p_apt_sinking, p_apt_repair, p_apt_interest,
+             CASE WHEN p_apt_billing_basis = 'undivided_interest' THEN 'undivided_interest' ELSE 'per_sqft' END);
     END IF;
 
     -- 4.5) Society compliance settings
@@ -16831,6 +16727,19 @@ ALTER TABLE borrowing_approvals
     ADD CONSTRAINT borrowing_approvals_resolution_id_fkey
     FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
 
+-- 4. resolution_effects — Enactment queue (whitelisted handlers only)
+CREATE TABLE resolution_effects (
+    id                  SERIAL PRIMARY KEY,
+    resolution_id       INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
+    handler_name        VARCHAR(60) NOT NULL CHECK (handler_name IN ('set_regime_param', 'set_society_policy', 'set_board_param')),
+    payload_json        JSONB NOT NULL,
+    executed_at         TIMESTAMP,
+    status              VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'executed', 'failed')),
+    error_message       TEXT,
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_resolution_effects_resolution ON resolution_effects (resolution_id);
+
 -- 5. society_bye_laws — Clause-level bye-law register (4-layer hierarchy)
 --    Layer 0: Statute (UP Apartment Act 2010) — LOCKED, not stored here
 --    Layer 1: Model Bye-Laws 2011 — per clause: Adopt as-is | Adopt with variation | Not adopted
@@ -17225,4 +17134,3 @@ BEGIN
         (rec.overdue_s22_months = 0 AND (v_counts_s22 = 0 OR ln.overdue_s22 = 0)) AS s22_blocked
     FROM rec, ln;
 END $$;
-

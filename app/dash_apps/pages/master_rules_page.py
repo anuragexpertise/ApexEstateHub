@@ -334,6 +334,7 @@ def render_resolution_form(society_id: int | None, p: str = "mrl") -> html.Div:
     except Exception:
         clauses = []
     clause_opts = [{"label": f"{c[0]} — {c[1]}", "value": c[0]} for c in clauses]
+    clause_opts += [{"label": f"Rule: {o['label']}", "value": o["value"]} for o in editable_rule_options()]
     clause_opts.insert(0, {"label": "General (no clause)", "value": ""})
     
     return _section(
@@ -395,10 +396,11 @@ def render_enactment_section(society_id: int | None, p: str = "mrl", can_execute
     ]
 
 
-def render_rules_sections(society_id: int | None = None) -> list:
+def render_rules_sections(society_id: int | None = None, can_edit: bool = False) -> list:
     """The three live tables: rules in force, scheduled changes, recent audit.
     With society_id, the regime is the society's own and the audit log is that society's (plus regime-wide
-    rule changes that apply to it)."""
+    rule changes that apply to it). can_edit (the society's own admin only) adds an Action column: 'Edit' on a
+    non-statute (Policy) rule opens the society-decision form; a statute figure shows who changes it instead."""
     regime = (rra.society_regime(society_id) if society_id else None) or REGIME
     rules = {r["rule_key"]: r for r in rra.effective_rules(regime)}
     rule_rows = []
@@ -410,7 +412,8 @@ def render_rules_sections(society_id: int | None = None) -> list:
                                     html.Small(spec.label, className="text-muted")]),
                           _val(r), r.get("unit") or "", f"{r['effective_from']:%d %b %Y}",
                           html.Small(r.get("source_reference") or "", className="text-muted"),
-                          _kind_badge(spec.statutory)])
+                          _kind_badge(spec.statutory)]
+                         + ([_rule_action(key, spec)] if can_edit else []))
     sched = [[s["rule_key"], _val(s), f"{s['effective_from']:%d %b %Y}", html.Small(s["source_reference"], className="text-muted")]
              for s in rra.scheduled_rules(regime)]
     audit = [[f"{a['changed_at']:%d %b %Y %H:%M}", a["target_table"].replace("regime_rule_parameters", "rule")
@@ -422,13 +425,60 @@ def render_rules_sections(society_id: int | None = None) -> list:
              f"{n} society(ies) are on {regime}. A change here applies to all of them from its effective date.")
     return [
         _section("Rules in force today", blurb, KIND_LEGEND,
-                 _table(["Rule", "Value", "Unit", "In force since", "Source", "Kind"], rule_rows,
+                 _table(["Rule", "Value", "Unit", "In force since", "Source", "Kind"] + (["Action"] if can_edit else []), rule_rows,
                         "No rules found. Is estatehub.sql's UP AOA compliance layer loaded?")),
         _section("Scheduled changes", "Already queued; they take over automatically on their date.",
                  _table(["Rule", "New value", "Starts", "Source"], sched, "Nothing scheduled.")),
         _section("Audit log (last 25)", "Append-only: the database refuses edits and deletes of these rows.",
                  _table(["When", "Area", "Item", "Change", "Reason", "By"], audit, "No changes recorded yet.")),
     ]
+
+
+def _rule_action(key: str, spec) -> html.Div:
+    """Action cell of the Rules list. Only a non-statute (Policy) rule can be edited by the society; the figure a
+    statute lays down is changed centrally by Master, so no button is offered for it."""
+    if spec.statutory:
+        return html.Small("Statute - Master", className="text-muted")
+    return dbc.Button("Edit", id={"type": "gov-rule-edit", "key": key}, size="sm", color="secondary", outline=True,
+                      style={"fontSize": "11px"})
+
+
+def editable_rule_options() -> list[dict]:
+    """Rules a society may record its own decision on: the non-statute (Policy) ones."""
+    return [{"label": f"{k} - {sp.label}" if sp.label else k, "value": k}
+            for k, sp in rra.RULE_SPECS.items() if not sp.statutory]
+
+
+def render_rule_decision_form(society_id: int | None, p: str = "gov") -> html.Div:
+    """'Edit' on a non-statute rule: the society's own decision on its value. Saved provisional (the engine ignores it)
+    until a passed resolution naming the rule is recorded under Meetings & Resolutions, which activates it."""
+    if not society_id:
+        return html.Div()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    layer_opts = [{"label": f"Layer {l} - {LAYER_HELP[l][0]}", "value": l} for l in (1, 2, 3)]
+    return _section(
+        "Edit a Policy rule (your society)",
+        "Use Edit in the list above, or pick a rule here. Only non-statute rules can be changed; a statute figure is "
+        "changed centrally by Master. The decision stays provisional until you record the matching passed resolution "
+        "(name the rule in the resolution's Clause field) under Meetings & Resolutions.",
+        dbc.Row([
+            dbc.Col([_label("Rule"), dcc.Dropdown(id=f"{p}-rule-key", options=editable_rule_options(), clearable=False,
+                                                  style={"fontSize": "12px"})], md=7),
+            dbc.Col([_label("Who decides (layer)"), dcc.Dropdown(id=f"{p}-rule-layer", options=layer_opts, value=2,
+                                                                 clearable=False, style={"fontSize": "12px"})], md=5),
+        ], className="mb-2"),
+        dbc.Row([
+            dbc.Col([_label("Your choice"), dcc.Dropdown(
+                id=f"{p}-rule-choice", value="adopted_with_variation", clearable=False, style={"fontSize": "12px"},
+                options=[{"label": CHOICE_LABELS[c], "value": c} for c in
+                         ("adopted_as_is", "adopted_with_variation", "not_adopted")])], md=5),
+            dbc.Col([_label("New value (only for 'with variation')"), dbc.Input(id=f"{p}-rule-value", type="text", size="sm")], md=3),
+            dbc.Col([_label("Takes effect on"), dbc.Input(id=f"{p}-rule-eff", type="date", size="sm", value=tomorrow, min=tomorrow)], md=4),
+        ], className="mb-2"),
+        _label("Reason for the change (min. 10 characters)"),
+        dbc.Input(id=f"{p}-rule-reason", type="text", size="sm", className="mb-2"),
+        dbc.Button("Save provisional decision", id=f"{p}-rule-save", color="warning", size="sm"),
+    )
 
 
 def cash_limit_form(p: str, current_mode=None) -> html.Div:

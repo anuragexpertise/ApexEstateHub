@@ -47,6 +47,8 @@ WHO_EDITS = [
      "Master edits status, provisions, source link and verified date."),
     ("rules", "Statute & Policy rule values (Rules)", EDIT, VIEW, VIEW,
      "Master uses Change a rule; each change is dated and audited."),
+    ("ruledec", "Society decision on a Policy rule (Rules, Edit)", NONE, EDIT, VIEW,
+     "Saved as provisional until the resolution is recorded."),
     ("audit", "Scheduled changes & audit log", VIEW, VIEW, VIEW,
      "Master sees all societies; admin and owner see their own society."),
     ("cash", "Cash-limit enforcement", NONE, EDIT, VIEW, "Specific to each society."),

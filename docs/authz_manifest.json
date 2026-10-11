@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "unclassified_baseline": 133,
+  "unclassified_baseline": 132,
   "endpoints": {
     "callback:account_callbacks.py::handle_change_password": {
       "classification": "unclassified"
@@ -356,6 +356,9 @@
     "callback:governance_callbacks.py::gov_prefill_majority": {
       "classification": "legacy-gated"
     },
+    "callback:governance_callbacks.py::gov_rule_edit_prefill": {
+      "classification": "legacy-gated"
+    },
     "callback:governance_callbacks.py::gov_save_bye_law": {
       "classification": "legacy-gated"
     },
@@ -369,6 +372,9 @@
       "classification": "legacy-gated"
     },
     "callback:governance_callbacks.py::gov_save_resolution": {
+      "classification": "legacy-gated"
+    },
+    "callback:governance_callbacks.py::gov_save_rule_decision": {
       "classification": "legacy-gated"
     },
     "callback:invite_to_callbacks.py::clear_invite_selections": {
@@ -562,8 +568,9 @@
     "callback:setup_wizard_callbacks.py::handle_wizard_navigation": {
       "classification": "unclassified"
     },
-    "callback:setup_wizard_callbacks.py::refresh_up_aoa_step_content": {
-      "classification": "unclassified"
+    "callback:setup_wizard_callbacks.py::refresh_state_dependent_steps": {
+      "classification": "exempt",
+      "reason": "Session-guarded (@require_session). Read-only: re-renders the Setup Wizard's State-dependent step bodies from the State dropdown; the society is taken from the server session (get_current_society_id), not the browser-side sw-society-id store. Writes nothing."
     },
     "callback:setup_wizard_callbacks.py::save_wizard_bye_law_choice": {
       "classification": "unclassified"
@@ -573,6 +580,10 @@
     },
     "callback:setup_wizard_callbacks.py::submit_setup_wizard": {
       "classification": "unclassified"
+    },
+    "callback:setup_wizard_callbacks.py::toggle_fund_fields": {
+      "classification": "exempt",
+      "reason": "Session-guarded (@require_session). Read-only: shows/hides the Sinking/Repair fund inputs from the State dropdown and the bye-law opt-ins; the society is taken from the server session, not the browser store. Writes nothing."
     },
     "callback:setup_wizard_callbacks.py::trigger_setup_wizard": {
       "classification": "unclassified"
@@ -676,6 +687,9 @@
     "callback:up_compliance_callbacks.py::run_bye_law7": {
       "classification": "unclassified"
     },
+    "callback:up_compliance_callbacks.py::run_depreciation_fund": {
+      "classification": "legacy-gated"
+    },
     "callback:up_compliance_callbacks.py::save_basis": {
       "classification": "unclassified"
     },
@@ -768,9 +782,6 @@
     },
     "route:web.py::index": {
       "classification": "unclassified"
-    },
-    "callback:up_compliance_callbacks.py::run_depreciation_fund": {
-      "classification": "legacy-gated"
     }
   }
 }

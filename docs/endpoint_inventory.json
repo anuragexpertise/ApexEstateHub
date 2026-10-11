@@ -247,7 +247,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bank_reconcile_callbacks.py",
     "function": "close_bank_reconcile_modal",
-    "line": 566,
+    "line": 554,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -266,7 +266,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bank_reconcile_callbacks.py",
     "function": "close_reconcile_picker",
-    "line": 737,
+    "line": 725,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -285,7 +285,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bank_reconcile_callbacks.py",
     "function": "confirm_reconcile",
-    "line": 846,
+    "line": 834,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -306,7 +306,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bank_reconcile_callbacks.py",
     "function": "delete_unreconciled",
-    "line": 912,
+    "line": 900,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -325,7 +325,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bank_reconcile_callbacks.py",
     "function": "download_bank_template",
-    "line": 577,
+    "line": 565,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -344,7 +344,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bank_reconcile_callbacks.py",
     "function": "open_bank_reconcile_modal",
-    "line": 534,
+    "line": 522,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -365,7 +365,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bank_reconcile_callbacks.py",
     "function": "open_reconcile_picker",
-    "line": 701,
+    "line": 689,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -385,7 +385,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bank_reconcile_callbacks.py",
     "function": "populate_reconcile_picker",
-    "line": 749,
+    "line": 737,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -404,7 +404,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bank_reconcile_callbacks.py",
     "function": "post_unmatched",
-    "line": 885,
+    "line": 873,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -423,7 +423,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bank_reconcile_callbacks.py",
     "function": "process_bank_statement_upload",
-    "line": 607,
+    "line": 595,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1826,7 +1826,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_bye_choices",
-    "line": 89,
+    "line": 120,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1847,7 +1847,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_bye_panel",
-    "line": 101,
+    "line": 132,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1867,7 +1867,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_execute_enactment",
-    "line": 165,
+    "line": 196,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1887,7 +1887,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_policy_choices",
-    "line": 110,
+    "line": 141,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1908,7 +1908,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_prefill_majority",
-    "line": 140,
+    "line": 171,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1923,11 +1923,30 @@
     "public": false
   },
   {
+    "id": "callback:governance_callbacks.py::gov_rule_edit_prefill",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/governance_callbacks.py",
+    "function": "gov_rule_edit_prefill",
+    "line": 75,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "gov-rule-key"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:governance_callbacks.py::gov_save_bye_law",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_save_bye_law",
-    "line": 75,
+    "line": 106,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1946,7 +1965,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_save_cash_mode",
-    "line": 64,
+    "line": 66,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1965,7 +1984,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_save_meeting",
-    "line": 131,
+    "line": 162,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1985,7 +2004,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_save_policy",
-    "line": 119,
+    "line": 150,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2004,7 +2023,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/governance_callbacks.py",
     "function": "gov_save_resolution",
-    "line": 152,
+    "line": 183,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2012,6 +2031,25 @@
     "outputs": [
       "gov-mtg-body",
       "gov-bye-body"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:governance_callbacks.py::gov_save_rule_decision",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/governance_callbacks.py",
+    "function": "gov_save_rule_decision",
+    "line": 89,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "gov-body"
     ],
     "guards": [
       "require_session"
@@ -3020,7 +3058,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/setup_wizard_callbacks.py",
     "function": "handle_wizard_navigation",
-    "line": 180,
+    "line": 186,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3037,18 +3075,19 @@
     "public": false
   },
   {
-    "id": "callback:setup_wizard_callbacks.py::refresh_up_aoa_step_content",
+    "id": "callback:setup_wizard_callbacks.py::refresh_state_dependent_steps",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/setup_wizard_callbacks.py",
-    "function": "refresh_up_aoa_step_content",
-    "line": 322,
+    "function": "refresh_state_dependent_steps",
+    "line": 335,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
     ],
     "outputs": [
       "sw-compliance-rules-panel",
-      "sw-rules-subtitle"
+      "sw-rules-subtitle",
+      "sw-regime-badge"
     ],
     "guards": [
       "require_session"
@@ -3061,7 +3100,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/setup_wizard_callbacks.py",
     "function": "save_wizard_bye_law_choice",
-    "line": 266,
+    "line": 275,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3078,7 +3117,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/setup_wizard_callbacks.py",
     "function": "save_wizard_policy_choice",
-    "line": 290,
+    "line": 299,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3095,7 +3134,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/setup_wizard_callbacks.py",
     "function": "submit_setup_wizard",
-    "line": 408,
+    "line": 452,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3112,11 +3151,32 @@
     "public": false
   },
   {
+    "id": "callback:setup_wizard_callbacks.py::toggle_fund_fields",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/setup_wizard_callbacks.py",
+    "function": "toggle_fund_fields",
+    "line": 366,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "sw-apt-sink-col",
+      "sw-apt-repair-col",
+      "sw-comp-fund-box"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:setup_wizard_callbacks.py::trigger_setup_wizard",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/setup_wizard_callbacks.py",
     "function": "trigger_setup_wizard",
-    "line": 122,
+    "line": 125,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3135,7 +3195,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/setup_wizard_callbacks.py",
     "function": "validate_setup_fields",
-    "line": 91,
+    "line": 94,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3630,7 +3690,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/up_compliance_callbacks.py",
     "function": "record_s22",
-    "line": 149,
+    "line": 165,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3647,13 +3707,32 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/up_compliance_callbacks.py",
     "function": "run_bye_law7",
-    "line": 115,
+    "line": 131,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
     ],
     "outputs": [
       "upc-b7-result"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:up_compliance_callbacks.py::run_depreciation_fund",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/up_compliance_callbacks.py",
+    "function": "run_depreciation_fund",
+    "line": 115,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "upc-dep-result"
     ],
     "guards": [
       "require_session"
@@ -3700,7 +3779,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/up_compliance_callbacks.py",
     "function": "save_loan",
-    "line": 160,
+    "line": 176,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3717,7 +3796,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/up_compliance_callbacks.py",
     "function": "save_loan_due",
-    "line": 168,
+    "line": 184,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3751,7 +3830,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/up_compliance_callbacks.py",
     "function": "save_repayment",
-    "line": 177,
+    "line": 193,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3785,7 +3864,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/up_compliance_callbacks.py",
     "function": "start_s22",
-    "line": 140,
+    "line": 156,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"

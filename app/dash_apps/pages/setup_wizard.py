@@ -181,7 +181,7 @@ def build_rules_panel(step, society_id=None, state=None):
         ))
         instruments_html.append(html.Small(
             f"{regime} · {len(instruments)} instrument{'s' if len(instruments) != 1 else ''} — full table on the "
-            "'UP AOA Compliance' step.",
+            "'State Act & Rules' step.",
             className="text-muted", style={"display": "block", "marginBottom": "6px"},
         ))
         for itype, items in grouped_instruments(instruments).items():
@@ -475,7 +475,7 @@ def fund_flags(society_id=None, state=None):
     """Which fund inputs the wizard should ask for.
 
     A fund is asked for only if the state PRESCRIBES it (statutory) or the
-    admin opted in on the Bye-Laws Adoption step (levy_*_fund = 'yes'). Under
+    admin opted in on the Model Bye-Laws Adoption step (levy_*_fund = 'yes'). Under
     UP_AOA_2010 neither Sinking nor Repair has a statutory rate, so by default
     neither is asked for. The Corpus Fund is never a setup input.
     """
@@ -498,9 +498,9 @@ def fund_note(flags, regime):
         return (f"{regime} prescribes minimum Sinking / Repair fund rates "
                 f"(sinking {r['sinking']['min_pct']}% , repair {r['repair']['min_pct']}% of construction cost per year).")
     if flags["sinking"] or flags["repair"]:
-        return f"{regime} sets no statutory rate; these funds are levied by your General Body resolution (Bye-Laws Adoption step)."
+        return f"{regime} sets no statutory rate; these funds are levied by your General Body resolution (Model Bye-Laws Adoption step)."
     return (f"{regime} does not prescribe a Sinking or Repair fund. None is being levied. To levy one, opt in on the "
-            "Bye-Laws Adoption step (Funds & assessments).")
+            "Model Bye-Laws Adoption step (Funds & assessments).")
 
 
 def regime_badge(state_code):
@@ -776,7 +776,7 @@ def render_category_content(category, society_id=None, state=None):
             elif _ff[fund_key]:
                 fund_rows.append(html.Tr([
                     html.Td(f"{fund_key.capitalize()} Fund", style={"fontWeight": "600"}),
-                    html.Td("Opted in via Bye-Laws Adoption step"),
+                    html.Td("Opted in via Model Bye-Laws Adoption step"),
                     html.Td(dbc.Badge("Optional (levied)", color="warning", pill=True, style={"fontSize": "9px"})),
                 ]))
             else:
@@ -980,106 +980,6 @@ def render_category_content(category, society_id=None, state=None):
             _label("Monthly Exemption Limit (₹ per member)"),
             dbc.Input(type="number", value=exempt_val, className="mb-3", readonly=True, style=readonly_style),
         ]
-    elif category == "Model Bye-Laws Adoption":
-        # The society's bye-law register: for each Model Bye-Law 2011 clause the admin notes the intended outcome
-        # (adopt as-is / adopt with variation / not adopted). Every choice is PROVISIONAL: it is stored with
-        # proposed_status and changes nothing in the engine until the passed GBM resolution is recorded
-        # (Admin → Settings → Society governance → Meetings & Resolutions), which activates it automatically.
-        # A clause nobody touches is governed by the Model
-        # Bye-Laws / Act as-is. Persistence is immediate, by callback (sw-bl-*), not on wizard submit.
-        from app.services import regime_rules_admin as rra
-        from app.services.statutory_rules import regime_for_society
-        existing = {}
-        try:
-            for r in rra.list_society_bye_laws(society_id) if society_id else []:
-                if r["layer"] == 1:
-                    existing[r["clause_id"]] = r
-        except Exception:
-            existing = {}
-        labels = {"adopted_as_is": "Adopt as-is", "adopted_with_variation": "Adopt with variation", "not_adopted": "Not adopted"}
-        rows = []
-        for clause_id, title in rra.MODEL_BYE_LAW_CLAUSES:
-            locked = rra.clause_is_locked(society_id, clause_id) if society_id else clause_id in rra.STATUTE_BACKED_CLAUSES
-            cur = existing.get(clause_id) or {}
-            current = cur.get("proposed_status") if cur.get("status") == "provisional" else cur.get("status")
-            opts = [{"label": labels[c], "value": c} for c in rra.ADOPTION_CHOICES
-                    if not (locked and c == "not_adopted")]
-            active = bool(cur.get("resolution_id")) and cur.get("status") != "provisional"
-            rows.append(html.Tr([
-                html.Td([html.Strong(clause_id, style={"fontSize": "11px"}), html.Br(),
-                         html.Small(title + (" · enforced by the engine" if locked else ""), className="text-muted")],
-                        style={"maxWidth": "260px"}),
-                html.Td(dbc.RadioItems(id={"type": "sw-bl-choice", "clause": clause_id}, options=opts, value=current,
-                                       inline=True, className="small", inputClassName="me-1", labelClassName="me-3",
-                                       persistence=False)
-                        if not active else dbc.Badge("Active (resolution on file)", color="success")),
-                html.Td(dbc.Input(id={"type": "sw-bl-var", "clause": clause_id}, type="text", debounce=True, size="sm",
-                                  value=cur.get("variation_text") or "", placeholder="Variation text",
-                                  disabled=active, style={"fontSize": "11px"})),
-                html.Td(html.Small(id={"type": "sw-bl-msg", "clause": clause_id}, className="text-muted")),
-            ]))
-        try:
-            pol = rra.list_society_policies(society_id) if society_id else {}
-        except Exception:
-            pol = {}
-        pol_rows, fund_pol_rows = [], []
-        _ff = fund_flags(society_id, state)
-        for key, (label, clause, choices) in rra.POLICY_SPECS.items():
-            if key in rra.FUND_POLICY_KEYS:
-                fund = "sinking" if "sinking" in key else "repair" if "repair" in key else None
-                # a prescribed fund is not a choice: no opt-in row, and its basis is fixed by the state rule
-                if fund and _ff["rules"][fund]["mode"] == "statutory":
-                    continue
-            st = pol.get(key) or {"value": choices[0][0], "active": False, "proposed": None}
-            shown = st["proposed"] or st["value"]
-            (fund_pol_rows if key in rra.FUND_POLICY_KEYS else pol_rows).append(html.Tr([
-                html.Td([html.Strong(label, style={"fontSize": "12px"}), html.Br(),
-                         html.Small(f"Resolution on {clause}", className="text-muted")], style={"maxWidth": "260px"}),
-                html.Td(dbc.Select(id={"type": "sw-pol-choice", "key": key}, size="sm",
-                                   options=[{"label": lbl, "value": v} for v, lbl in choices], value=shown)),
-                html.Td([dbc.Badge("Active (resolution on file)", color="success") if st["active"] and not st["proposed"]
-                         else dbc.Badge("Provisional", color="warning", text_color="dark"),
-                         html.Small(id={"type": "sw-pol-msg", "key": key}, className="text-muted ms-2")]),
-            ]))
-        policy_panel = html.Div([
-            html.H6("Society resolution settings", className="mt-3 mb-1"),
-            html.Small("Choices the engine used to hard-code. Provisional until you record the passed resolution "
-                       "(Settings → Society governance → Meetings & Resolutions). "
-                       "Clauses 7, 39, 49 and 55 are 'enforced by the engine' unless you allow them to be dropped; "
-                       "which clauses are truly non-droppable is a legal call - confirm with an advocate.", className="text-muted d-block mb-2"),
-            dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in ("Setting", "Choice", "Status")])),
-                       html.Tbody(pol_rows)], bordered=True, size="sm"),
-            html.H6("Funds & assessments", className="mt-3 mb-1"),
-            html.Small(fund_note(_ff, regime_for_society(society_id, state)),
-                       className="text-muted d-block mb-2", id="sw-fund-note"),
-            dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in ("Setting", "Choice", "Status")])),
-                       html.Tbody(fund_pol_rows)], bordered=True, size="sm") if fund_pol_rows else html.Div(),
-        ]) if society_id else html.Div()
-        return elements + [
-            dbc.Alert([html.I(className="fas fa-scale-balanced me-2"),
-                       "Record which Model Bye-Laws 2011 clauses your Association is adopting. These are ",
-                       html.Strong("provisional"), " — nothing changes in how EstateHub treats dues, voting, NOC or filings "
-                       "until you record the General Body meeting and its passed resolution. Clauses you leave alone follow the "
-                       "Model Bye-Laws and the Act as written."], color="info", className="mb-3", style={"fontSize": "13px"}),
-            html.Div([
-                html.Div([html.Strong("Who can change what"), html.Br(),
-                          html.Small("Act & Rules (locked) → Model Bye-Laws (this step; GBM resolution, 2/3) → Society Policy "
-                                     "(GBM; may only tighten a clause) → Board Decision (MC; operational limits). "
-                                     "A lower layer can never loosen a higher one.", className="text-muted")],
-                         className="mb-2")]),
-            html.Div(dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in
-                                ("Clause", "Intended outcome", "Variation (if any)", "")])),
-                                html.Tbody(rows)], bordered=True, size="sm", hover=True),
-                     style={"maxHeight": "420px", "overflowY": "auto"}),
-            policy_panel,
-            dbc.Alert([html.I(className="fas fa-arrow-right me-2"), html.Strong("Next: "),
-                       "after the General Body meets, record the meeting and then the passed resolution under ",
-                       html.Strong("Settings → Society governance → Meetings & Resolutions"),
-                       ". That activates the choices above automatically. ",
-                       html.Strong("Order matters: save the choice first, then record the resolution. "
-"An older resolution can't activate a newer choice.")],
-                      color="warning", className="mt-3", style={"fontSize": "13px"}),
-        ]
     elif category == "Apartment Charges":
         s_amt, s_rate, s_due = 0.0, 0.0, 1
         s_billing_basis = "per_sqft"
@@ -1100,7 +1000,7 @@ def render_category_content(category, society_id=None, state=None):
                 s_int = min(row.get("apt_interest_pct") or MAX_INTEREST_RATE_PCT, MAX_INTEREST_RATE_PCT)
         return elements + [
             _render_banner("Apartment Charges", "Set default charges, billing cycle day and late-payment interest (capped at " + str(MAX_INTEREST_RATE_PCT) + "%). "
-                           "Sinking / Repair fund rates appear only where your state prescribes them or you opted in on the Bye-Laws Adoption step."),
+                           "Sinking / Repair fund rates appear only where your state prescribes them or you opted in on the Model Bye-Laws Adoption step."),
             dbc.Row([
                 dbc.Col([_label("Base Maintenance Amount"), dbc.Input(id="sw-apt-amt", type="number", value=s_amt, step=1, className="mb-3")], width=4),
                 dbc.Col([_label("Maintenance Rate/SqFt"), dbc.Input(id="sw-apt-rate", type="number", value=s_rate, step=0.01, className="mb-3")], width=4),

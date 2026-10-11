@@ -332,7 +332,10 @@ def register_setup_wizard_callbacks(app):
             prevent_initial_call=True,
         )
         @require_session
-        def refresh_state_dependent_steps(picked_state, society_id, current_step):
+        def refresh_state_dependent_steps(picked_state, _client_society_id, current_step):
+            # The society comes from the server session; the browser-side sw-society-id store is never trusted
+            # for what data to render.
+            society_id = get_current_society_id()
             # Statutes and Bye-Laws (fund opt-ins per regime) both depend on the State dropdown, which is only
             # persisted on submit. The Acts & Rules column is rewritten for the step the admin is ON; it used
             # to be overwritten with the UP AOA statutes whichever step was open.
@@ -360,7 +363,8 @@ def register_setup_wizard_callbacks(app):
             prevent_initial_call=True,
         )
         @require_session
-        def toggle_fund_fields(values, picked_state, ids, society_id):
+        def toggle_fund_fields(values, picked_state, ids, _client_society_id):
+            society_id = get_current_society_id()  # server session, not the browser-side store
             from app.services.statutory_rules import fund_rules_for_state, regime_for_society
             rules = fund_rules_for_state(picked_state)
             chosen = {i["key"]: v for i, v in zip(ids or [], values or [])}

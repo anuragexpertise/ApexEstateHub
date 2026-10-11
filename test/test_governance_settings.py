@@ -417,7 +417,7 @@ def test_admin_has_the_four_tabs_and_the_governance_forms(stub):
     assert _labels(tree) == TABS
     ids = _ids(tree)
     assert {"gov-cash-save", "gov-bye-save", "gov-bye-clause", "gov-bye-status", "gov-bye-var-wrap",
-            "gov-mtg-save", "gov-res-save"} <= ids
+            "gov-mtg-save", "gov-res-save", "gov-rule-save", "gov-rule-key"} <= ids
     assert not {i for i in ids if "link" in i}                     # no manual link step any more
     assert "Order matters: save the choice first, then record the resolution." in str(tree)
     assert "An older resolution can't activate a newer choice." in str(tree)
@@ -522,7 +522,7 @@ def test_guide_edit_claims_match_forms_that_really_exist(stub):
     from app.dash_apps.pages import master_rules_page as mrp
     admin_ids = _ids(stub.render_governance_tabs("admin", 5))
     owner_ids = _ids(stub.render_governance_tabs("apartment", 5))
-    admin_controls = {"cash": ["gov-cash-save"], "bye": ["gov-bye-save"], "policy": ["gov-pol-save"],
+    admin_controls = {"cash": ["gov-cash-save"], "ruledec": ["gov-rule-save"], "bye": ["gov-bye-save"], "policy": ["gov-pol-save"],
                       "meetings": ["gov-mtg-save", "gov-res-save"]}
     master_controls = {"catalog": ["mrl-cat-save"], "rules": ["mrl-save"]}
     cat_ids = _ids(mrp.catalog_edit_form())
@@ -539,3 +539,41 @@ def test_guide_edit_claims_match_forms_that_really_exist(stub):
         for ctl in master_controls.get(key, []):
             assert (ctl in master_ids) == (master == gg.EDIT), (key, ctl)
             assert ctl not in admin_ids
+
+
+# ── Rules -> Edit (non-statute rules only) ───────────────────────────────────
+def _rule_rows(monkeypatch):
+    import datetime
+    key_stat = next(k for k, v in rra.RULE_SPECS.items() if v.statutory)
+    key_pol = next(k for k, v in rra.RULE_SPECS.items() if not v.statutory)
+    rows = [{"rule_key": k, "value": 1, "value_text": None, "unit": "", "source_reference": "",
+             "effective_from": datetime.date(2026, 1, 1)} for k in (key_stat, key_pol)]
+    monkeypatch.setattr(rra, "society_regime", lambda s: "UP_AOA_2010")
+    monkeypatch.setattr(rra, "effective_rules", lambda r, on=None: rows)
+    monkeypatch.setattr(rra, "scheduled_rules", lambda r: [])
+    monkeypatch.setattr(rra, "recent_audit", lambda n=25, society_id=None: [])
+    monkeypatch.setattr(rra, "societies_on_regime", lambda r: 1)
+    return key_stat, key_pol
+
+
+def test_edit_button_only_on_non_statute_rules_and_only_for_the_admin(monkeypatch):
+    from app.dash_apps.pages import master_rules_page as mrp
+    key_stat, key_pol = _rule_rows(monkeypatch)
+    editable = str(mrp.render_rules_sections(5, can_edit=True))
+    assert "gov-rule-edit" in editable and f"'key': '{key_pol}'" in editable
+    assert f"'key': '{key_stat}'" not in editable            # a statute figure has no Edit button
+    assert "gov-rule-edit" not in str(mrp.render_rules_sections(5))          # read-only view (owner / master)
+
+
+def test_decision_form_offers_only_non_statute_rules():
+    from app.dash_apps.pages import master_rules_page as mrp
+    offered = {o["value"] for o in mrp.editable_rule_options()}
+    assert offered == {k for k, v in rra.RULE_SPECS.items() if not v.statutory}
+    assert mrp.render_rule_decision_form(None) is not None and not _ids(mrp.render_rule_decision_form(None))
+
+
+def test_admin_rules_tab_has_edit_form_and_owner_does_not(stub, monkeypatch):
+    _rule_rows(monkeypatch)
+    assert {"gov-rule-save", "gov-rule-edit"} <= _ids(stub.render_governance_tabs("admin", 5))
+    owner = _ids(stub.render_governance_tabs("apartment", 5))
+    assert not ({"gov-rule-save", "gov-rule-key", "gov-rule-edit"} & owner)
