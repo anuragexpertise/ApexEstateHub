@@ -3752,8 +3752,8 @@ BEGIN
                                       * v_overlap_days::NUMERIC / v_days_in_month, 2);
             ELSIF charge.billing_basis = 'undivided_interest' THEN
                 -- UP AOA s.18(1) regime: undivided-interest billing was selected but the flat is missing
-                -- the percentage and/or the society is missing the monthly common-expense budget. That is
-                -- not a default-able gap — the flat cannot be billed at per-sqft as if nothing were wrong.
+                -- the percentage and/or the society is missing the monthly common-expense budget.
+                -- Log a compliance flag, but fall back to per-sqft so the flat is not left unbilled.
                 IF fn_regime_param_num(p_society_id, 'billing_basis_required', v_month) = 1 THEN
                     INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
                     VALUES (p_society_id, 'BILLING_BASIS_UNDIVIDED_INTEREST_MISSING',
@@ -3765,10 +3765,8 @@ BEGIN
                                    charge.common_expense_budget_monthly,
                                    apt.undivided_interest_pct))
                     ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
-                    v_base_maint := 0;
-                ELSE
-                    v_base_maint := ROUND(apt.apartment_size * charge.apt_maintenance_rate * v_overlap_days::NUMERIC / v_days_in_month, 2);
                 END IF;
+                v_base_maint := ROUND(apt.apartment_size * charge.apt_maintenance_rate * v_overlap_days::NUMERIC / v_days_in_month, 2);
             ELSIF charge.apt_maintenance_amount IS NOT NULL AND charge.apt_maintenance_amount > 0 THEN
                 v_base_maint := ROUND(charge.apt_maintenance_amount * v_overlap_days::NUMERIC / v_days_in_month, 2);
             ELSE

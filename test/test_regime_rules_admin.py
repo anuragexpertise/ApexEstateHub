@@ -134,7 +134,8 @@ def test_rejects_backdating_duplicates_and_unconfirmed_statutory(pg):
     src, why = "Amendment notification dated 2026-10-01", "Because the law changed"
     tomorrow = date.today() + timedelta(days=1)
     assert not rra.save_rule_version(7, "master", UP, "arrears_disqualify_days", 90, date.today() - timedelta(days=1), src, why, True)[0]
-    assert not rra.save_rule_version(7, "master", UP, "arrears_disqualify_days", 90, tomorrow, src, why, False)[0]
+    # Use a statutory rule (s22_notice_days) for the unconfirmed statutory check
+    assert not rra.save_rule_version(7, "master", UP, "s22_notice_days", 3, tomorrow, src, why, False)[0]
     assert not rra.save_rule_version(7, "master", UP, "arrears_disqualify_days", 60, tomorrow, src, why, True)[0]   # unchanged
     assert not rra.save_rule_version(7, "master", UP, "arrears_disqualify_days", 90, tomorrow, "short", why, True)[0]
     assert rra.save_rule_version(7, "master", UP, "arrears_disqualify_days", 90, tomorrow, src, why, True)[0]
