@@ -415,8 +415,16 @@ def test_s20_recovery_candidates_off_without_regime(cur):
 # ── entrance fee + share capital (bye-laws 4, 5) ─────────────────────────────────
 def test_entrance_fee_due_shows_fee_and_paid_status(cur):
     apt_id, _ = first_apartment(cur)
-    cur.execute("INSERT INTO owner_admissions (society_id, apartment_id, admission_date, owner_name, entrance_fee, entrance_fee_paid, share_count, share_face_value, share_paid) "
-                "VALUES (%s, %s, %s, %s, 1000, TRUE, 1, 100, TRUE)",
+    cur.execute("""INSERT INTO owner_admissions (society_id, apartment_id, admission_date, owner_name, entrance_fee, entrance_fee_paid, share_count, share_face_value, share_paid)
+                VALUES (%s, %s, %s, %s, 1000, TRUE, 1, 100, TRUE)
+                ON CONFLICT (society_id, apartment_id) DO UPDATE SET
+                    admission_date = EXCLUDED.admission_date,
+                    owner_name = EXCLUDED.owner_name,
+                    entrance_fee = EXCLUDED.entrance_fee,
+                    entrance_fee_paid = EXCLUDED.entrance_fee_paid,
+                    share_count = EXCLUDED.share_count,
+                    share_face_value = EXCLUDED.share_face_value,
+                    share_paid = EXCLUDED.share_paid""",
                 (SOC, apt_id, date(2026, 1, 1), 'Test Owner'))
     row = one(cur, "SELECT * FROM fn_entrance_fee_due(%s, %s)", (SOC, apt_id))
     assert float(row[0]) == 1000.0 and row[1] is True
@@ -424,8 +432,16 @@ def test_entrance_fee_due_shows_fee_and_paid_status(cur):
 
 def test_share_capital_due_shows_count_and_paid_status(cur):
     apt_id, _ = first_apartment(cur)
-    cur.execute("INSERT INTO owner_admissions (society_id, apartment_id, admission_date, owner_name, entrance_fee, entrance_fee_paid, share_count, share_face_value, share_paid) "
-                "VALUES (%s, %s, %s, %s, 1000, TRUE, 1, 100, FALSE)",
+    cur.execute("""INSERT INTO owner_admissions (society_id, apartment_id, admission_date, owner_name, entrance_fee, entrance_fee_paid, share_count, share_face_value, share_paid)
+                VALUES (%s, %s, %s, %s, 1000, TRUE, 1, 100, FALSE)
+                ON CONFLICT (society_id, apartment_id) DO UPDATE SET
+                    admission_date = EXCLUDED.admission_date,
+                    owner_name = EXCLUDED.owner_name,
+                    entrance_fee = EXCLUDED.entrance_fee,
+                    entrance_fee_paid = EXCLUDED.entrance_fee_paid,
+                    share_count = EXCLUDED.share_count,
+                    share_face_value = EXCLUDED.share_face_value,
+                    share_paid = EXCLUDED.share_paid""",
                 (SOC, apt_id, date(2026, 1, 1), 'Test Owner'))
     row = one(cur, "SELECT * FROM fn_share_capital_due(%s, %s)", (SOC, apt_id))
     assert int(row[0]) == 1 and float(row[1]) == 100.0 and row[2] is False
@@ -518,7 +534,11 @@ def test_board_election_eligibility_off_without_regime(cur):
 # ── purchaser statement (s.23) ───────────────────────────────────────────────────
 def test_purchaser_dues_statement_shows_unpaid_amount(cur):
     apt_id, _ = first_apartment(cur)
+    # Mark old receivables as paid with payment date BEFORE the transfer date,
+    # so they don't count as unpaid as of the transfer date (s.23).
+    cur.execute("SET LOCAL app.payment_date = '2026-08-01'")
     cur.execute("UPDATE receivables SET status='paid', paid_amount=amount WHERE entity_id=%s AND role='apartment'", (apt_id,))
+    cur.execute("SET LOCAL app.payment_date = ''")
     add_receivable(cur, apt_id, date(2026, 8, 1), 3000)
     tr = one(cur, "SELECT transfer_id FROM fn_record_apartment_transfer(%s,%s,%s,1000000,'a','b',NULL)",
              (SOC, apt_id, date(2026, 8, 15)))[0]
@@ -531,6 +551,7 @@ def test_purchaser_dues_statement_shows_unpaid_amount(cur):
 def _make_layer3_decision(cur, rule_key="petty_cash_limit", value=15000):
     """Insert a Layer 3 decision backed by an MC resolution, returning the decision id."""
     apt_id, _ = first_apartment(cur)
+    admin_id = one(cur, "SELECT id FROM users WHERE role='admin' LIMIT 1")[0]
     cur.execute("INSERT INTO meetings (society_id,type,held_on,quorum_met,minutes_pdf) VALUES (%s,'MC',%s,TRUE,'m.pdf') RETURNING id", (SOC, date.today()))
     m_id = cur.fetchone()[0]
     cur.execute("SELECT id, majority_pct FROM decision_types WHERE code='SET_BOARD_PARAM'")
@@ -542,8 +563,8 @@ def _make_layer3_decision(cur, rule_key="petty_cash_limit", value=15000):
                 (SOC, rule_key, value, r_id, date.today()))
     did = cur.fetchone()[0]
     # Manually create the ratification entry (simulating what save_decision does)
-    cur.execute("INSERT INTO loa_ratification (society_id,decision_id,rule_key,board_layer,decision_effective,ratify_by,created_by) VALUES (%s,%s,%s,3,%s,%s,1)",
-                 (SOC, did, rule_key, date.today(), date.today() + timedelta(days=180)))
+    cur.execute("INSERT INTO loa_ratification (society_id,decision_id,rule_key,board_layer,decision_effective,ratify_by,created_by) VALUES (%s,%s,%s,3,%s,%s,%s)",
+                 (SOC, did, rule_key, date.today(), date.today() + timedelta(days=180), admin_id))
     return did, r_id
 
 
