@@ -239,6 +239,62 @@ def normalize_state(value):
     return "UP"
 
 
+# How each regime collects a Sinking / Repair fund. Mirrors the regime parameters fund_collection_mode and
+# fund_allocation_basis (schemes/*.toml); used only to explain the rule on screen if the database is unreachable.
+# The billing engine itself reads the parameters through fn_fund_rule.
+FUND_COLLECTION_FALLBACK = {"UP_AOA_2010": ("fy_close", "undivided_interest")}
+FUND_COLLECTION_DEFAULT = ("on_bill", "per_sq_ft")
+
+
+def fund_collection_for_regime(regime_code):
+    """(fund_collection_mode, fund_allocation_basis) the regime sets for Sinking / Repair funds."""
+    mode, basis = FUND_COLLECTION_FALLBACK.get(regime_code, FUND_COLLECTION_DEFAULT)
+    try:
+        rows = db._execute(
+            """SELECT rule_key, value_text FROM regime_rule_parameters
+               WHERE regime_code = %s AND rule_key IN ('fund_collection_mode', 'fund_allocation_basis')
+                 AND effective_to IS NULL""",
+            (regime_code,), fetch_all=True,
+        ) or []
+        found = {r["rule_key"]: r["value_text"] for r in rows if r.get("value_text")}
+        mode, basis = found.get("fund_collection_mode", mode), found.get("fund_allocation_basis", basis)
+    except Exception:
+        pass
+    return mode, basis
+
+
+def scheme_for(state_code=None, constitution=None):
+    """The scheme (regime pack) the BILLING ENGINE will assign: mirrors fn_sync_society_regime. A researched scheme
+    exists for a state x constitution pair (UP + AOA today); every other society gets GENERIC. Not the same as
+    regime_for_society(), which picks the statutes to DISPLAY and falls back to UP for an unknown state."""
+    code = normalize_state(state_code) if state_code else None
+    const = (constitution or "AOA").upper()
+    try:
+        row = db._execute(
+            """SELECT code FROM legal_regime_profiles
+               WHERE state_code = %s AND constitution = %s AND status = 'active'
+               ORDER BY effective_from DESC LIMIT 1""", (code, const), fetch_one=True)
+        if row and row.get("code"):
+            return row["code"]
+        return "GENERIC"
+    except Exception:
+        return "UP_AOA_2010" if (code, const) == ("UP", "AOA") else "GENERIC"
+
+
+def regime_reserve_pct(regime_code):
+    """Share of net surplus moved to the Reserve Fund at FY close (regime parameter reserve_appropriation_pct)."""
+    try:
+        row = db._execute(
+            """SELECT value FROM regime_rule_parameters
+               WHERE regime_code = %s AND rule_key = 'reserve_appropriation_pct' AND effective_to IS NULL
+               ORDER BY effective_from DESC LIMIT 1""", (regime_code,), fetch_one=True)
+        if row and row.get("value") is not None:
+            return float(row["value"])
+    except Exception:
+        pass
+    return 25.0
+
+
 def regime_for_society(society_id=None, state_code=None):
     """
     Legal regime governing this society.

@@ -845,7 +845,7 @@ def seed_compliance_settings(cur, conn, society_id: int):
            (society_id, sinking_fund_rate_basis, repair_fund_rate_basis,
             fund_gst_exempt, fund_charges_interest, gst_filing_cadence,
             gst_registered, gstin, tds_no_pan_action, default_export_format)
-           VALUES (%s,'undivided_interest_surplus','undivided_interest_surplus',TRUE,TRUE,'monthly',TRUE,%s,'warn','structured')""",
+           VALUES (%s,'per_sq_ft','per_sq_ft',TRUE,TRUE,'monthly',TRUE,%s,'warn','structured')""",
         (society_id, SOCIETY["gstin"]),
     )
     conn.commit()

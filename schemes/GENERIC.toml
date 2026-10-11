@@ -50,3 +50,40 @@ feeds = ["fn_fy_close_preview", "fn_fy_close_reserve_appropriation"]
 verification = "provisional"
 needs_decision = true
 source = """Engine policy: share of net surplus moved to the Reserve Fund at FY close. No state statute is loaded for this scheme; the society sets it by resolution"""
+
+
+[[parameter]]
+key = "fund_collection_mode"
+label = "Sinking / Repair fund: when it is collected"
+instrument = "Engine policy (no statutory source)"
+provision = "-"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "text"
+value_text = "on_bill"
+choices = ["on_bill", "fy_close", "none"]
+layers = [1, 2]
+tighten = "none"
+enforcement = "policy"
+feeds = ["fn_fund_rule", "fn_auto_generate_receivables"]
+verification = "provisional"
+needs_decision = true
+source = """Engine policy: no state statute is loaded for this scheme, so a fund with a rate is added to the monthly bill (the behaviour before the regime parameter existed). Set fy_close or none by resolution, or load the state's scheme pack."""
+
+[[parameter]]
+key = "fund_allocation_basis"
+label = "Sinking / Repair fund: how it is shared between flats"
+instrument = "Engine policy (no statutory source)"
+provision = "-"
+nature = "non_statutory"
+base_source = "engine_default"
+type = "text"
+value_text = "per_sq_ft"
+choices = ["per_sq_ft", "construction_cost", "undivided_interest", "none"]
+layers = [1, 2]
+tighten = "none"
+enforcement = "policy"
+feeds = ["fn_fund_rule", "fn_fund_levy_amount"]
+verification = "provisional"
+needs_decision = true
+source = """Engine policy: per sq ft of apartment area, as before. A state with a prescribed basis (for example % of construction cost) should say so in its own scheme pack."""

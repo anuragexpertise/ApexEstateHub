@@ -7,6 +7,7 @@ from database.seed import TDS_SECTION_RATE_SEED
 from app.dash_apps.pages.setup_wizard import (
     get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS,
     build_rules_panel, rules_subtitle, apt_charges_error, basis_hint, render_review,
+    fund_plan, funds_error, fund_rate_label, fund_hint, FUND_BASIS_LABELS,
     fund_flags, fund_note, regime_badge, state_thresholds_rows,
 )
 from app.utils.ux_toasts import error_toast
@@ -21,6 +22,7 @@ from app.security.audit_context import get_current_society_id, get_current_user_
 STATE_ACT_STEP = CATEGORIES.index("State Act & Rules") if "State Act & Rules" in CATEGORIES else None
 MODEL_BYE_LAWS_STEP = CATEGORIES.index("Model Bye-Laws Adoption") if "Model Bye-Laws Adoption" in CATEGORIES else None
 APARTMENT_CHARGES_STEP = CATEGORIES.index("Apartment Charges") if "Apartment Charges" in CATEGORIES else None
+FUNDS_STEP = CATEGORIES.index("Funds") if "Funds" in CATEGORIES else None
 
 
 def _setup_validation_result(value, label, base_class="mb-3", kind="text"):
@@ -187,12 +189,18 @@ def register_setup_wizard_callbacks(app):
         State("sw-apt-budget", "value"),
         State("sw-apt-rate", "value"),
         State("sw-apt-amt", "value"),
+        State("sw-apt-sink", "value"),
+        State("sw-apt-repair", "value"),
+        State("sw-apt-cost", "value"),
+        State({"type": "sw-pol-choice", "key": ALL}, "value"),
+        State({"type": "sw-pol-choice", "key": ALL}, "id"),
         prevent_initial_call=True
     )
     @require_session
     def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id, central_it_tan, central_tds, central_gst, central_rera, qr_secret, qr_confirm,
                                  s_address, s_email_v, s_phone_v, s_reg_v, s_state_v,
-                                 apt_basis_v, apt_budget_v, apt_rate_v, apt_amt_v):
+                                 apt_basis_v, apt_budget_v, apt_rate_v, apt_amt_v,
+                                 apt_sink_v, apt_repair_v, apt_cost_v, pol_values, pol_ids):
         triggered_id = ctx.triggered_id
         
         error_msg = ""
@@ -202,8 +210,13 @@ def register_setup_wizard_callbacks(app):
         _forward = (triggered_id == "sw-btn-next" and n_next) or (
             isinstance(triggered_id, dict) and triggered_id.get("type") == "sw-nav-item"
             and any(nav_clicks or []) and triggered_id["index"] > current_step)
-        gate_err = (apt_charges_error(apt_basis_v, apt_budget_v, apt_rate_v, apt_amt_v)
-                    if _forward and CATEGORIES[current_step] == "Apartment Charges" else None)
+        gate_err = None
+        if _forward and CATEGORIES[current_step] == "Apartment Charges":
+            gate_err = apt_charges_error(apt_basis_v, apt_budget_v, apt_rate_v, apt_amt_v)
+        elif _forward and CATEGORIES[current_step] == "Funds":
+            # the live drop-down values, not the saved ones: the admin may not have left the field yet
+            _chosen = {i["key"]: v for i, v in zip(pol_ids or [], pol_values or [])}
+            gate_err = funds_error(fund_plan(get_current_society_id(), s_state_v, _chosen)["plan"], apt_sink_v, apt_repair_v, apt_cost_v)
         
         def get_next_valid_step(step, direction):
             while 0 <= step < len(CATEGORIES):
@@ -333,6 +346,8 @@ def register_setup_wizard_callbacks(app):
             State("sw-bf-fy", "value"),
             State({"type": "sw-bf-amt", "acc_id": ALL}, "id"),
             State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
+            State({"type": "sw-pol-choice", "key": ALL}, "value"),
+            State({"type": "sw-pol-choice", "key": ALL}, "id"),
             prevent_initial_call=True,
         )
         @require_session
@@ -340,7 +355,7 @@ def register_setup_wizard_callbacks(app):
                            central_it_tan, central_tds, central_gst, central_rera, tds_rates,
                            apt_cost, apt_budget, apt_rate, apt_amt, apt_basis, apt_due, apt_sink, apt_repair, apt_interest,
                            ven1, ven7, ven30, gate, duty, sec_name, sec_phone, sec_email, calc_start,
-                           bf_fy, bf_ids, bf_amts):
+                           bf_fy, bf_ids, bf_amts, pol_values, pol_ids):
             if step != REVIEW_STEP:
                 return no_update
             values = {
@@ -354,6 +369,7 @@ def register_setup_wizard_callbacks(app):
                 "gate": gate, "duty": duty, "sec_name": sec_name, "sec_phone": sec_phone, "sec_email": sec_email,
                 "calc_start": calc_start, "bf_fy": bf_fy,
                 "bf_ids": [d.get("acc_id") for d in (bf_ids or [])], "bf_amts": bf_amts or [],
+                "pol": {i["key"]: v for i, v in zip(pol_ids or [], pol_values or [])},
             }
             return render_review(values, get_current_society_id())
 
@@ -414,10 +430,11 @@ def register_setup_wizard_callbacks(app):
     # matter what the admin had just selected. Re-render it, and the Acts &
     # Rules column, off the dropdown instead. Both rules-panel outputs are
     # allow_duplicate because handle_wizard_navigation also writes them.
-    if STATE_ACT_STEP is not None and MODEL_BYE_LAWS_STEP is not None:
+    if STATE_ACT_STEP is not None and MODEL_BYE_LAWS_STEP is not None and FUNDS_STEP is not None:
         @app.callback(
             Output({"type": "sw-step-container", "index": STATE_ACT_STEP}, "children"),
             Output({"type": "sw-step-container", "index": MODEL_BYE_LAWS_STEP}, "children"),
+            Output({"type": "sw-step-container", "index": FUNDS_STEP}, "children"),
             Output("sw-compliance-rules-panel", "children", allow_duplicate=True),
             Output("sw-rules-subtitle", "children", allow_duplicate=True),
             Output("sw-regime-badge", "children"),
@@ -439,19 +456,23 @@ def register_setup_wizard_callbacks(app):
             return (
                 render_category_content("State Act & Rules", society_id, picked_state),
                 render_category_content("Model Bye-Laws Adoption", society_id, picked_state),
+                render_category_content("Funds", society_id, picked_state),
                 build_rules_panel(here, society_id, picked_state),
                 rules_subtitle(here, society_id, picked_state),
                 regime_badge(picked_state),
                 state_thresholds_rows(picked_state),
             )
 
-        # Fund inputs follow the regime + the by-law opt-ins: Sinking / Repair rate fields on Apartment Charges and
-        # "Fund GST Exempt" on Society Compliance are shown only for a fund the state prescribes or the society levies.
+        # The Funds step follows the admin's clicks: which questions are shown, what the rate field means, and the
+        # sentence under it. fund_plan() applies the same rules as the SQL function fn_fund_rule.
+        _FUND_OUTS = []
+        for _f in ("sinking", "repair"):
+            _FUND_OUTS += [Output(f"sw-fund-{_f}-collect-wrap", "style"), Output(f"sw-fund-{_f}-basis-wrap", "style"),
+                           Output(f"sw-fund-{_f}-rate-wrap", "style"), Output(f"sw-fund-{_f}-rate-label", "children"),
+                           Output(f"sw-fund-{_f}-hint", "children")]
+
         @app.callback(
-            Output("sw-apt-sink-col", "style"),
-            Output("sw-apt-repair-col", "style"),
-            Output("sw-comp-fund-box", "style"),
-            Output("sw-fund-note", "children"),
+            *_FUND_OUTS,
             Input({"type": "sw-pol-choice", "key": ALL}, "value"),
             Input("sw-society-state", "value"),
             State({"type": "sw-pol-choice", "key": ALL}, "id"),
@@ -461,20 +482,39 @@ def register_setup_wizard_callbacks(app):
         @require_session
         def toggle_fund_fields(values, picked_state, ids, _client_society_id):
             society_id = get_current_society_id()  # server session, not the browser-side store
-            from app.services.statutory_rules import fund_rules_for_state, regime_for_society
-            rules = fund_rules_for_state(picked_state)
             chosen = {i["key"]: v for i, v in zip(ids or [], values or [])}
-
-            def levied(fund):
-                return rules[fund]["mode"] == "statutory" or chosen.get(f"levy_{fund}_fund") == "yes"
-
-            flags = {"rules": rules, "sinking": levied("sinking"), "repair": levied("repair")}
+            fp = fund_plan(society_id, picked_state, chosen)
             show = lambda on: {} if on else {"display": "none"}
-            return (show(flags["sinking"]), show(flags["repair"]),
-                    show(flags["sinking"] or flags["repair"]),
-                    fund_note(flags, regime_for_society(society_id, picked_state)))
+            out = []
+            for fund in ("sinking", "repair"):
+                f = fp["plan"][fund]
+                out += [show(not f["statutory"] and (f["levy"] == "yes" or f["mode"] != "none")),   # collection question
+                        show(not f["statutory"] and f["mode"] == "on_bill"),                          # basis question
+                        show(f["mode"] == "on_bill"),                                                 # rate field
+                        dbc.Label(fund_rate_label(f["basis"]), className="fw-semibold small"),
+                        fund_hint(f, fp["regime"])]
+            return tuple(out)
+
+        # Answering "No" to "collect this fund?" also records "Not collected"; "Yes" lifts that back to the regime default.
+        for _f in ("sinking", "repair"):
+            @app.callback(
+                Output({"type": "sw-pol-choice", "key": f"{_f}_fund_collection"}, "value"),
+                Input({"type": "sw-pol-choice", "key": f"levy_{_f}_fund"}, "value"),
+                State({"type": "sw-pol-choice", "key": f"{_f}_fund_collection"}, "value"),
+                prevent_initial_call=True,
+            )
+            def sync_collection_with_levy(levy, current):
+                if levy == "no":
+                    return "none" if current != "none" else no_update
+                if levy == "yes" and current == "none":
+                    return "regime_default"
+                return no_update
 
 
+
+    # Defined BEFORE the decorator below: its running= list reads it while the callback is being registered
+    # (it used to be defined inside the function body, so registration raised NameError).
+    _hidden_spinner = {"display": "none", "marginLeft": "8px"}
 
     @app.callback(
         Output("setup-wizard-modal", "is_open"),
@@ -566,7 +606,6 @@ def register_setup_wizard_callbacks(app):
                             central_it_tan, central_tds, central_gst, central_rera, auth):
         triggered = ctx.triggered_id
         _noop = (no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update)
-        _hidden_spinner = {"display": "none"}
         
         # Default compliance settings (no longer in wizard, set defaults)
         c_gst_exempt = True
@@ -621,7 +660,9 @@ def register_setup_wizard_callbacks(app):
             if _details_err:
                 return True, no_update, no_update, no_update, no_update, _details_err, _hidden_spinner, no_update, no_update
 
-            _apt_err = apt_charges_error(apt_billing_basis, apt_budget, apt_rate, apt_amt)
+            from app.dash_apps.pages.setup_wizard import fund_flags as _ff_submit
+            _apt_err = (apt_charges_error(apt_billing_basis, apt_budget, apt_rate, apt_amt)
+                        or funds_error(_ff_submit(society_id, s_state)["plan"], apt_sinking, apt_repair, apt_cost))
             if _apt_err:
                 return True, no_update, no_update, no_update, no_update, _apt_err, _hidden_spinner, no_update, no_update
 
@@ -733,8 +774,10 @@ def register_setup_wizard_callbacks(app):
             _flags = _fund_flags(society_id, s_state)
             apt_sinking = (apt_sinking or 0) if _flags["sinking"] else 0
             apt_repair = (apt_repair or 0) if _flags["repair"] else 0
-            c_sink = _rra.policy_intent(society_id, "sinking_fund_basis")
-            c_repair = _rra.policy_intent(society_id, "repair_fund_basis")
+            # society_compliance_settings keeps the allocation basis of a fund billed on the bill (the CHECK allows
+            # only the three concrete bases); a fund not billed on the bill stores the neutral per_sq_ft.
+            c_sink = _flags["plan"]["sinking"]["basis"] if _flags["plan"]["sinking"]["mode"] == "on_bill" else "per_sq_ft"
+            c_repair = _flags["plan"]["repair"]["basis"] if _flags["plan"]["repair"]["mode"] == "on_bill" else "per_sq_ft"
             c_charges_int = _rra.policy_intent(society_id, "fund_arrears_interest") == "yes"
 
             class _SetupRejected(Exception):

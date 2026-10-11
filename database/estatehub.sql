@@ -2006,21 +2006,24 @@ CREATE TABLE Dashboard_settings (
 CREATE TABLE society_compliance_settings (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    -- 'undivided_interest_surplus' (default): the fund is a % of the year's net
-    -- surplus, shared by each flat's undivided-interest %. It is appropriated at
-    -- year end, so the monthly bill run does NOT bill it per sq ft.
-    sinking_fund_rate_basis VARCHAR(30) DEFAULT 'undivided_interest_surplus' CHECK (
+    -- Allocation basis the society chose for a fund it levies ON THE BILL (the meaning of the rate):
+    --   per_sq_ft          : rate = INR per sq ft per month
+    --   construction_cost  : rate = % of project construction cost per YEAR, shared by undivided-interest %
+    --   undivided_interest : rate = the society's monthly fund amount (INR), shared by undivided-interest %
+    -- WHETHER a fund is billed at all is decided by the regime parameters fund_collection_mode /
+    -- fund_allocation_basis (see fn_fund_rule), not by this column.
+    sinking_fund_rate_basis VARCHAR(30) DEFAULT 'per_sq_ft' CHECK (
         sinking_fund_rate_basis IN (
-            'undivided_interest_surplus',
             'per_sq_ft',
-            'construction_cost'
+            'construction_cost',
+            'undivided_interest'
         )
     ),
-    repair_fund_rate_basis VARCHAR(30) DEFAULT 'undivided_interest_surplus' CHECK (
+    repair_fund_rate_basis VARCHAR(30) DEFAULT 'per_sq_ft' CHECK (
         repair_fund_rate_basis IN (
-            'undivided_interest_surplus',
             'per_sq_ft',
-            'construction_cost'
+            'construction_cost',
+            'undivided_interest'
         )
     ),
     fund_gst_exempt BOOLEAN DEFAULT TRUE,
@@ -2728,7 +2731,9 @@ CREATE INDEX idx_state_compliance_active ON state_compliance_thresholds (is_acti
 -- ════════════════════════════════════════════════════════════════
 CREATE UNIQUE INDEX idx_assets_qr ON assets (qr_payload);
 
-CREATE UNIQUE INDEX uq_receivable_entity_month ON receivables (entity_id, role, period_month);
+-- One receivable per flat, per month, PER LEDGER HEAD. The index used to omit acc_id, so the Sinking Fund and
+-- Repair Fund lines (same flat, same month as Maintenance) hit ON CONFLICT DO NOTHING and were never billed.
+CREATE UNIQUE INDEX uq_receivable_entity_month ON receivables (entity_id, role, period_month, COALESCE(acc_id, 0));
 
 CREATE INDEX idx_transactions_journal ON transactions (journal_id);
 
@@ -3588,6 +3593,100 @@ BEGIN
 END;
 $$;
 
+-- ───────────────────────────────────────────────────────────────────────────────
+-- Sinking / Repair fund: is it collected, WHEN, and shared HOW.
+--   1. PRESCRIBED: the state sets a minimum % of construction cost (state_compliance_thresholds,
+--      <fund>_fund_pct_construction_cost > 0). Always on the bill, shared by construction cost; no resolution needed.
+--   2. Otherwise the regime parameters give the defaults:
+--        fund_collection_mode  : 'on_bill' | 'fy_close' | 'none'
+--        fund_allocation_basis : 'per_sq_ft' | 'construction_cost' | 'undivided_interest' | 'none'
+--      and the society's PASSED resolutions (society policies) refine them:
+--        <fund>_fund_collection / <fund>_fund_basis : a concrete value overrides the regime default
+--                                                     ('regime_default' = keep it)
+--        levy_<fund>_fund = 'yes' : the society opts in. 'no' (the default) leaves the fund uncollected, EXCEPT where
+--                                   the regime itself collects on the bill (GENERIC), which keeps billing any fund that has a rate.
+--   'fy_close' means nothing is added to the monthly bill: the reserve is built from surplus at FY close
+--   (fn_fy_close_reserve_appropriation) as one collective pool.
+-- ───────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION fn_state_code(p_state TEXT)
+RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
+    SELECT m.code
+      FROM (VALUES ('UP','UTTAR PRADESH'), ('MH','MAHARASHTRA'), ('KA','KARNATAKA'), ('TN','TAMIL NADU'),
+                   ('DL','DELHI'), ('RJ','RAJASTHAN'), ('MP','MADHYA PRADESH'), ('WB','WEST BENGAL'),
+                   ('GJ','GUJARAT'), ('TS','TELANGANA'), ('AP','ANDHRA PRADESH'), ('BR','BIHAR'),
+                   ('HR','HARYANA'), ('PB','PUNJAB'), ('KL','KERALA')) AS m(code, name)
+     WHERE m.code = upper(btrim(p_state)) OR m.name = upper(btrim(p_state))
+     LIMIT 1
+$$;
+
+CREATE OR REPLACE FUNCTION fn_fund_rule(p_society_id INT, p_fund TEXT, p_on DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (mode TEXT, basis TEXT) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_code  TEXT;
+    v_min   NUMERIC;
+    v_mode  TEXT;
+    v_basis TEXT;
+    v_levy  TEXT;
+    v_cm    TEXT;
+    v_bp    TEXT;
+BEGIN
+    IF p_fund NOT IN ('sinking', 'repair') THEN
+        RAISE EXCEPTION 'fn_fund_rule: fund must be sinking or repair, got %', p_fund;
+    END IF;
+
+    -- 1. Prescribed by the state: a minimum % of construction cost, billed every month.
+    SELECT fn_state_code(state) INTO v_code FROM societies WHERE id = p_society_id;
+    SELECT t.value INTO v_min FROM state_compliance_thresholds t
+     WHERE t.state = COALESCE(v_code, 'UP')
+       AND t.threshold_key = p_fund || '_fund_pct_construction_cost'
+       AND t.is_active = TRUE AND t.value IS NOT NULL AND t.value > 0
+       AND t.effective_from <= p_on AND (t.effective_to IS NULL OR t.effective_to >= p_on)
+     ORDER BY t.effective_from DESC LIMIT 1;
+    IF v_min IS NOT NULL THEN
+        RETURN QUERY SELECT 'on_bill'::TEXT, 'construction_cost'::TEXT;
+        RETURN;
+    END IF;
+
+    -- 2. Regime defaults, refined by the society's passed resolutions.
+    v_mode  := COALESCE(fn_regime_param_text(p_society_id, 'fund_collection_mode', p_on), 'none');
+    v_basis := COALESCE(fn_regime_param_text(p_society_id, 'fund_allocation_basis', p_on), 'none');
+    v_levy  := COALESCE(fn_society_policy(p_society_id, 'levy_' || p_fund || '_fund', p_on), 'no');
+    v_cm    := COALESCE(fn_society_policy(p_society_id, p_fund || '_fund_collection', p_on), 'regime_default');
+    v_bp    := COALESCE(fn_society_policy(p_society_id, p_fund || '_fund_basis', p_on), 'regime_default');
+
+    IF v_cm IN ('on_bill', 'fy_close', 'none') THEN
+        v_mode := v_cm;                                   -- an explicit resolution wins
+    ELSIF v_levy = 'yes' THEN
+        IF v_mode = 'none' THEN v_mode := 'on_bill'; END IF;   -- opted in where the regime collects nothing
+    ELSIF v_mode <> 'on_bill' THEN
+        v_mode := 'none';                                 -- not prescribed, not opted in, regime does not bill it
+    END IF;
+
+    IF v_bp IN ('per_sq_ft', 'construction_cost', 'undivided_interest') THEN
+        v_basis := v_bp;
+    END IF;
+    IF v_mode = 'on_bill' AND v_basis NOT IN ('per_sq_ft', 'construction_cost', 'undivided_interest') THEN
+        v_basis := 'per_sq_ft';                           -- a fund billed on the bill needs a concrete basis
+    END IF;
+    RETURN QUERY SELECT v_mode, v_basis;
+END;
+$$;
+
+-- One flat's monthly fund levy for an on-bill fund (prorated by p_prorate = days billed / days in month).
+--   per_sq_ft          : size x rate
+--   construction_cost  : project cost x rate% / 12 x flat's undivided-interest %   (rate is % of cost per YEAR)
+--   undivided_interest : rate (society's monthly fund amount, INR) x flat's undivided-interest %
+-- A basis that needs the flat's undivided-interest % and has none yields 0 (the caller logs a compliance flag).
+CREATE OR REPLACE FUNCTION fn_fund_levy_amount(p_basis TEXT, p_rate NUMERIC, p_size NUMERIC, p_project_cost NUMERIC,
+                                               p_undiv_pct NUMERIC, p_prorate NUMERIC)
+RETURNS NUMERIC LANGUAGE sql IMMUTABLE AS $$
+    SELECT ROUND(COALESCE(CASE p_basis
+        WHEN 'per_sq_ft'          THEN COALESCE(p_size, 0) * p_rate * p_prorate
+        WHEN 'construction_cost'  THEN COALESCE(p_project_cost, 0) * p_rate / 100.0 / 12.0 * COALESCE(p_undiv_pct, 0) / 100.0 * p_prorate
+        WHEN 'undivided_interest' THEN p_rate * COALESCE(p_undiv_pct, 0) / 100.0 * p_prorate
+        ELSE 0 END, 0), 2)
+$$;
+
 CREATE OR REPLACE FUNCTION fn_auto_generate_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE
@@ -3626,8 +3725,12 @@ DECLARE
     v_sgst_rate           NUMERIC(5,2);
     v_total_taxable       NUMERIC(10,2);
     v_fund_gst_exempt     BOOLEAN;
-    v_sink_basis          VARCHAR(30);
-    v_repair_basis        VARCHAR(30);
+    v_sink_mode           TEXT;      -- fn_fund_rule: 'on_bill' | 'fy_close' | 'none'
+    v_sink_basis          TEXT;      -- fn_fund_rule: 'per_sq_ft' | 'construction_cost' | 'undivided_interest' | 'none'
+    v_repair_mode         TEXT;
+    v_repair_basis        TEXT;
+    v_project_cost        NUMERIC(14,2);
+    v_prorate             NUMERIC;
     v_first_rate          NUMERIC(5,2);
     v_first_inc           NUMERIC(10,2);
 BEGIN
@@ -3635,12 +3738,13 @@ BEGIN
     IF NOT FOUND THEN RETURN; END IF;
 
     -- Read fund_gst_exempt setting (default TRUE = exempt)
-    SELECT fund_gst_exempt, sinking_fund_rate_basis, repair_fund_rate_basis
-      INTO v_fund_gst_exempt, v_sink_basis, v_repair_basis
-      FROM society_compliance_settings WHERE society_id = p_society_id;
+    SELECT fund_gst_exempt INTO v_fund_gst_exempt FROM society_compliance_settings WHERE society_id = p_society_id;
     v_fund_gst_exempt := COALESCE(v_fund_gst_exempt, TRUE);
-    v_sink_basis      := COALESCE(v_sink_basis, 'undivided_interest_surplus');
-    v_repair_basis    := COALESCE(v_repair_basis, 'undivided_interest_surplus');
+
+    -- Project construction cost (society-default row): base of a 'construction_cost' fund levy.
+    SELECT project_construction_cost INTO v_project_cost FROM apt_charges_fines_basis
+     WHERE society_id = p_society_id AND apt_id IS NULL AND project_construction_cost IS NOT NULL
+     ORDER BY start_date DESC LIMIT 1;
 
     -- Resolve fallback accounts once per society
     SELECT id INTO v_fallback_maint_acc FROM accounts
@@ -3803,16 +3907,55 @@ BEGIN
             -- on the apt_charges_fines_basis row; the rates are driven by resolutions
             -- the UP scheme can record through regime parameters, so the engine stops
             -- billing them as silent per-sq-ft defaults in every mode.
-            -- A fund on the 'undivided_interest_surplus' basis is appropriated from the year's surplus
-            -- at close; it is not a monthly per-sq-ft levy, so the bill run skips it.
-            v_base_sinking := CASE WHEN COALESCE(charge.apt_sinking_fund_rate, 0) > 0
-                AND v_sink_basis <> 'undivided_interest_surplus'
-                THEN ROUND(apt.apartment_size * charge.apt_sinking_fund_rate * v_overlap_days::NUMERIC / v_days_in_month, 2)
-                ELSE 0 END;
-            v_base_repair  := CASE WHEN COALESCE(charge.apt_repair_fund_rate, 0) > 0
-                AND v_repair_basis <> 'undivided_interest_surplus'
-                THEN ROUND(apt.apartment_size * charge.apt_repair_fund_rate * v_overlap_days::NUMERIC / v_days_in_month, 2)
-                ELSE 0 END;
+            -- WHETHER and HOW each fund is billed follows the legal regime (fn_fund_rule, from the regime
+            -- parameters fund_collection_mode / fund_allocation_basis, plus any General Body resolution to levy):
+            --   on_bill  : added to this bill, amount by fn_fund_levy_amount for the allocation basis;
+            --   fy_close : NOT billed. The reserve is built from the year's surplus at FY close
+            --              (fn_fy_close_reserve_appropriation), so nothing is added here;
+            --   none     : no fund.
+            v_prorate := v_overlap_days::NUMERIC / v_days_in_month;
+            v_base_sinking := 0;
+            v_base_repair  := 0;
+            IF COALESCE(charge.apt_sinking_fund_rate, 0) > 0 THEN
+                SELECT r.mode, r.basis INTO v_sink_mode, v_sink_basis FROM fn_fund_rule(p_society_id, 'sinking', v_month) r;
+                IF v_sink_mode = 'on_bill' THEN
+                    v_base_sinking := fn_fund_levy_amount(v_sink_basis, charge.apt_sinking_fund_rate, apt.apartment_size,
+                                                          v_project_cost, apt.undivided_interest_pct, v_prorate);
+                    IF v_sink_basis = 'construction_cost' AND v_project_cost IS NULL THEN
+                        INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
+                        VALUES (p_society_id, 'FUND_BASIS_CONSTRUCTION_COST_MISSING', 'apt_charges_fines_basis', charge.id,
+                                'Sinking fund is shared by construction cost but the project construction cost is not recorded (Setup Wizard > Apartment Charges), so it was not billed')
+                        ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
+                    END IF;
+                    IF v_sink_basis IN ('construction_cost', 'undivided_interest') AND apt.undivided_interest_pct IS NULL THEN
+                        INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
+                        VALUES (p_society_id, 'FUND_BASIS_UNDIVIDED_INTEREST_MISSING', 'apt_charges_fines_basis', charge.id,
+                                format('Sinking fund by %s needs undivided_interest_pct; flat %s has none, so it was not billed', v_sink_basis,
+                                       COALESCE(apt.flat_number, apt.id::TEXT)))
+                        ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
+                    END IF;
+                END IF;
+            END IF;
+            IF COALESCE(charge.apt_repair_fund_rate, 0) > 0 THEN
+                SELECT r.mode, r.basis INTO v_repair_mode, v_repair_basis FROM fn_fund_rule(p_society_id, 'repair', v_month) r;
+                IF v_repair_mode = 'on_bill' THEN
+                    v_base_repair := fn_fund_levy_amount(v_repair_basis, charge.apt_repair_fund_rate, apt.apartment_size,
+                                                         v_project_cost, apt.undivided_interest_pct, v_prorate);
+                    IF v_repair_basis = 'construction_cost' AND v_project_cost IS NULL THEN
+                        INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
+                        VALUES (p_society_id, 'FUND_BASIS_CONSTRUCTION_COST_MISSING', 'apt_charges_fines_basis', charge.id,
+                                'Repair fund is shared by construction cost but the project construction cost is not recorded (Setup Wizard > Apartment Charges), so it was not billed')
+                        ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
+                    END IF;
+                    IF v_repair_basis IN ('construction_cost', 'undivided_interest') AND apt.undivided_interest_pct IS NULL THEN
+                        INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
+                        VALUES (p_society_id, 'FUND_BASIS_UNDIVIDED_INTEREST_MISSING', 'apt_charges_fines_basis', charge.id,
+                                format('Repair fund by %s needs undivided_interest_pct; flat %s has none, so it was not billed', v_repair_basis,
+                                       COALESCE(apt.flat_number, apt.id::TEXT)))
+                        ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
+                    END IF;
+                END IF;
+            END IF;
 
             -- First-overdue-month interest on the common-expense component.
             -- Model Bye-laws 2011, bye-law 46(a): interest on overdue common
@@ -13647,8 +13790,8 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_email             VARCHAR(100) DEFAULT NULL,
     p_reg_num           VARCHAR(100) DEFAULT NULL,
     p_apt_interest      NUMERIC DEFAULT 0,
-    p_sinking_fund_basis VARCHAR(30) DEFAULT 'undivided_interest_surplus',
-    p_repair_fund_basis VARCHAR(30) DEFAULT 'undivided_interest_surplus',
+    p_sinking_fund_basis VARCHAR(30) DEFAULT 'per_sq_ft',
+    p_repair_fund_basis VARCHAR(30) DEFAULT 'per_sq_ft',
     p_fund_gst_exempt   BOOLEAN DEFAULT TRUE,
     p_fund_charges_int  BOOLEAN DEFAULT TRUE,
     p_gst_cadence       VARCHAR(20) DEFAULT 'monthly',
@@ -13990,6 +14133,8 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
     droppable, enforcement, feeds, verification, verified_on, needs_decision, implemented, description) VALUES
  ('GENERIC', 'cash_limit_default_mode', 'Cash-limit enforcement default (engine policy)', 'Engine policy (no statutory source)', '-', NULL, 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['warn', 'block']::TEXT[], ARRAY[1, 2, 3]::INT[], 'higher', FALSE, 'policy', ARRAY['fn_cash_limit_mode']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
  ('GENERIC', 'reserve_appropriation_pct', 'Reserve Fund share of net surplus at FY close (%)', 'Engine policy (no statutory source)', '-', NULL, 'non_statutory', 'engine_default', 'num', '%', 0, 100, 0, 100, ARRAY[]::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_fy_close_preview', 'fn_fy_close_reserve_appropriation']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
+ ('GENERIC', 'fund_collection_mode', 'Sinking / Repair fund: when it is collected', 'Engine policy (no statutory source)', '-', NULL, 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['on_bill', 'fy_close', 'none']::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_fund_rule', 'fn_auto_generate_receivables']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
+ ('GENERIC', 'fund_allocation_basis', 'Sinking / Repair fund: how it is shared between flats', 'Engine policy (no statutory source)', '-', NULL, 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['per_sq_ft', 'construction_cost', 'undivided_interest', 'none']::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_fund_rule', 'fn_fund_levy_amount']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
  ('UP_AOA_2010', 's22_default_months', 's.22 default must exceed (months)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.22(1)', NULL, 'statutory', 'state_act_rules', 'int', 'months', 1, 60, 1, 60, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_service_cutoff_check', 'fn_get_standing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 's22_notice_days', 's.22 notice to defaulter (days)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.22(1)', NULL, 'statutory', 'state_act_rules', 'int', 'days', 1, 90, 1, 90, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_service_cutoff_check', 'fn_get_standing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 's22_wait_months', 's.22 wait after certified copy (months)', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.22(1) proviso', NULL, 'statutory', 'state_act_rules', 'int', 'months', 1, 12, 1, 12, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_service_cutoff_check', 'fn_get_standing']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
@@ -14038,13 +14183,17 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
  ('UP_AOA_2010', 'seal_register_maintained', 'Bye-law 56 common seal register', 'UP Model Bye-Laws, 2011', 'bye-law 56', 'BL_56', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_seal_register_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'ca_inspection', 'Bye-law 57 Competent Authority inspection', 'UP Model Bye-Laws, 2011', 'bye-law 57', 'BL_57', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_ca_inspection_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'bye_law_amendment_tracker', 'Bye-law 58 amendment tracking enabled', 'UP Model Bye-Laws, 2011', 'bye-law 58', 'BL_58', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_bye_law_amendment_log']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
- ('UP_AOA_2010', 'arrears_interest_pct', 'Bye-law 46(a) arrears interest rate (per month)', 'UP Model Bye-Laws, 2011', 'bye-law 46(a)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', '%/month', 0, 100, 0, 100, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_apply_receivable_interest', 'fn_auto_generate_receivables']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
- ('UP_AOA_2010', 'billing_basis_required', 'UP AOA society must bill common expenses by undivided interest (s.18(1))', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.18(1)', NULL, 'statutory', 'state_act_rules', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'hard_wired', ARRAY['fn_auto_generate_receivables']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL)
+ ('UP_AOA_2010', 'arrears_interest_pct', 'Bye-law 46(a) arrears interest rate (per month)', 'UP Model Bye-Laws, 2011', 'bye-law 46(a)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', '%/month', 0, 100, 0, 100, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY[]::TEXT[], 'checked', DATE '2026-10-07', FALSE, FALSE, NULL),
+ ('UP_AOA_2010', 'billing_basis_required', 'UP AOA society must bill common expenses by undivided interest (s.18(1))', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.18(1)', NULL, 'statutory', 'state_act_rules', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'hard_wired', ARRAY['fn_auto_generate_receivables']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'fund_collection_mode', 'Sinking / Repair fund: when it is collected', 'UP Model Bye-Laws, 2011', 'bye-law 46; bye-law 3(1)(d)', 'BL_46', 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['on_bill', 'fy_close', 'none']::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_fund_rule', 'fn_auto_generate_receivables']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
+ ('UP_AOA_2010', 'fund_allocation_basis', 'Sinking / Repair fund: how it is shared between flats', 'UP Model Bye-Laws, 2011', 'bye-law 46; Act s.18', 'BL_46', 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['per_sq_ft', 'construction_cost', 'undivided_interest', 'none']::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_fund_rule', 'fn_fund_levy_amount']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference, effective_from) VALUES
  ('GENERIC', 'cash_limit_default_mode', NULL, 'warn', NULL, 'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting', DATE '2000-01-01'),
  ('GENERIC', 'reserve_appropriation_pct', 25, NULL, '%', 'Engine policy: share of net surplus moved to the Reserve Fund at FY close. No state statute is loaded for this scheme; the society sets it by resolution', DATE '2000-01-01'),
+ ('GENERIC', 'fund_collection_mode', NULL, 'on_bill', NULL, 'Engine policy: no state statute is loaded for this scheme, so a fund with a rate is added to the monthly bill (the behaviour before the regime parameter existed). Set fy_close or none by resolution, or load the state''s scheme pack.', DATE '2000-01-01'),
+ ('GENERIC', 'fund_allocation_basis', NULL, 'per_sq_ft', NULL, 'Engine policy: per sq ft of apartment area, as before. A state with a prescribed basis (for example % of construction cost) should say so in its own scheme pack.', DATE '2000-01-01'),
  ('UP_AOA_2010', 's22_default_months', 6, NULL, 'months', 'UP Apartment Act 2010 s.22: service cut-off only after MORE than 6 months of default', DATE '2011-11-16'),
  ('UP_AOA_2010', 's22_notice_days', 7, NULL, 'days', 'UP Apartment Act 2010 s.22: 7 days notice to the defaulter', DATE '2011-11-16'),
  ('UP_AOA_2010', 's22_wait_months', 1, NULL, 'months', 'UP Apartment Act 2010 s.22: one-month wait after the certified copy is sent to the competent authority and the owner', DATE '2011-11-16'),
@@ -14093,8 +14242,10 @@ INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, un
  ('UP_AOA_2010', 'seal_register_maintained', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 56: association shall have a common seal and maintain register of its use', DATE '2011-11-16'),
  ('UP_AOA_2010', 'ca_inspection', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 57: Competent Authority may inspect association records', DATE '2011-11-16'),
  ('UP_AOA_2010', 'bye_law_amendment_tracker', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 58: track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)', DATE '2011-11-16'),
- ('UP_AOA_2010', 'arrears_interest_pct', 1.75, NULL, '%/month', 'Model Bye-Laws 2011, bye-law 46(a): interest on overdue contributions is set by General Body resolution and recorded as a regime parameter; it is not a free default in the ledger.', DATE '2011-11-16'),
- ('UP_AOA_2010', 'billing_basis_required', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(1): common expenses are charged by percentage of undivided interest; for a UP AOA society this is the statutory basis, not an optional toggle.', DATE '2011-11-16')
+ ('UP_AOA_2010', 'arrears_interest_pct', 1.75, NULL, '%/month', 'SUPERSEDED (Oct 2026): the interest engine now reads apt_charges_fines_basis.apt_interest_pct, the rate the admin records on Apartment Charges, which is the General Body resolved rate under bye-law 46(a). This row is kept for reference only and is no longer read by any function.', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'billing_basis_required', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(1): common expenses are charged by percentage of undivided interest; for a UP AOA society this is the statutory basis, not an optional toggle.', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'fund_collection_mode', NULL, 'fy_close', NULL, 'Engine default for UP, not a statutory rate. Bye-law 46 lists the ways funds MAY be raised (shares, contributions and donations, common profits forming the nucleus of the reserve funds, loans); bye-law 3(1)(d) sends rent from common areas to a reserve for major repairs. No fixed sinking-fund rate was found, so by default no fund is added to the monthly bill and the reserve is built from surplus at FY close. A General Body resolution to levy a fund switches that fund to on_bill. Provisional: have an advocate confirm against the full Act, Rules and bye-laws.', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'fund_allocation_basis', NULL, 'undivided_interest', NULL, 'Engine default: owners share common expenses by their undivided interest (Act s.18(1), as used for maintenance billing), so a fund is shared the same way. Applies when a fund is billed on_bill; at FY close the reserve is one collective pool (fy_close does not allocate to flats).', DATE '2011-11-16')
 ON CONFLICT DO NOTHING;
 -- <<< END GENERATED
 
@@ -15802,7 +15953,8 @@ RETURNS TEXT LANGUAGE sql STABLE AS $$
                    WHEN 'vote_ineligibility_basis' THEN 'any_overdue'
                    WHEN 'vote_loan_basis'          THEN 'margin_60_days'
                    WHEN 'levy_sinking_fund' THEN 'no' WHEN 'levy_repair_fund' THEN 'no'
-                   WHEN 'sinking_fund_basis' THEN 'undivided_interest_surplus' WHEN 'repair_fund_basis' THEN 'undivided_interest_surplus'
+                   WHEN 'sinking_fund_basis' THEN 'regime_default' WHEN 'repair_fund_basis' THEN 'regime_default'
+                   WHEN 'sinking_fund_collection' THEN 'regime_default' WHEN 'repair_fund_collection' THEN 'regime_default'
                    WHEN 'fund_arrears_interest' THEN 'yes'
                    WHEN 'droppable_BL_07' THEN 'locked' WHEN 'droppable_BL_39' THEN 'locked'
                    WHEN 'droppable_BL_49' THEN 'locked' WHEN 'droppable_BL_55' THEN 'locked'
