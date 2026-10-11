@@ -71,8 +71,8 @@ def _rbac_state() -> tuple[bool, str | None]:
     except Exception as exc:
         return False, f"RBAC tables unavailable ({exc.__class__.__name__}) — denying"
     if not row:
-        return False, ("no role_definitions seeded — run seed.py / "
-                       "database/migrations/006_rbac_foundation.sql")
+        return False, ("no role_definitions seeded — run database/seed.py "
+                       "(role_definitions is created by estatehub.sql)")
     return True, None
 
 
