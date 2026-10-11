@@ -1605,7 +1605,7 @@ def get_setup_wizard_layout(society_id=None):
                                         type="border",
                                         size="sm",
                                         color="success",
-                                        style={"display": "none", "marginLeft": "8px"},
+                                        spinner_class_name={"display": "none", "marginLeft": "8px"},
                                     ),
                                 ],
                                 style={"textAlign": "right", "display": "flex", "justifyContent": "flex-end", "alignItems": "center"}

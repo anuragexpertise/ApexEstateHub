@@ -165,7 +165,7 @@ def register_setup_wizard_callbacks(app):
         Output("sw-btn-prev", "disabled"),
         Output("sw-btn-next", "style"),
         Output("sw-btn-submit", "style"),
-        Output("sw-submit-spinner", "style"),
+        Output("sw-submit-spinner", "spinner_style"),
         Output("sw-error-msg", "children"),
         Input("sw-btn-prev", "n_clicks"),
         Input("sw-btn-next", "n_clicks"),
@@ -483,7 +483,7 @@ def register_setup_wizard_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Output("login-modal", "is_open", allow_duplicate=True),
         Output("sw-error-msg", "children", allow_duplicate=True),
-        Output("sw-submit-spinner", "style", allow_duplicate=True),
+        Output("sw-submit-spinner", "spinner_style", allow_duplicate=True),
         Output("agreement-modal", "is_open", allow_duplicate=True),
         Output("agreement-modal-body", "children", allow_duplicate=True),
         Input("sw-btn-submit", "n_clicks"),
@@ -546,7 +546,7 @@ def register_setup_wizard_callbacks(app):
         State("auth-store", "data"),
         running=[
             (Output("sw-btn-submit", "disabled"), True, False),
-            (Output("sw-submit-spinner", "style"), {"display": "inline-block"}, _hidden_spinner),
+            (Output("sw-submit-spinner", "spinner_style"), {"display": "inline-block"}, _hidden_spinner),
         ],
         prevent_initial_call=True
     )
