@@ -299,7 +299,7 @@ def instruments_for_regime(regime_code=DEFAULT_REGIME):
         from database.db_manager import db
         rows = db._execute(
             """SELECT instrument_type, title, enactment_year, issuing_authority,
-                      applicability, key_provisions, source_reference,
+                      applicability, key_provisions, source_reference, source_url,
                       display_order, status, last_verified_on
                FROM legal_instrument_catalog
                WHERE regime_code=%s

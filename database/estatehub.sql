@@ -1569,11 +1569,20 @@ CREATE TABLE apt_charges_fines_basis (
     --                          apt_maintenance_amount stays a hard override.
     --   'undivided_interest' : common_expense_budget_monthly x
     --                          apartments.undivided_interest_pct / 100.
-    -- Sinking / repair fund levies stay per-sq-ft in both modes.
+    --   'fixed'              : apt_maintenance_amount per apartment per month
+    --                          (the rate and the budget are ignored).
+    -- A row with apt_id IS NULL is the SOCIETY default; a row with apt_id set
+    -- overrides it for that one apartment, so apartments may differ.
+    -- Sinking / repair fund levies stay per-sq-ft in all modes.
     billing_basis VARCHAR(20) NOT NULL DEFAULT 'per_sqft'
-        CHECK (billing_basis IN ('per_sqft', 'undivided_interest')),
+        CHECK (billing_basis IN ('per_sqft', 'undivided_interest', 'fixed')),
     common_expense_budget_monthly NUMERIC(12, 2)
-        CHECK (common_expense_budget_monthly IS NULL OR common_expense_budget_monthly >= 0)
+        CHECK (common_expense_budget_monthly IS NULL OR common_expense_budget_monthly >= 0),
+    -- Construction cost of the whole project (INR). Recorded at setup; it is the
+    -- base for any fund whose basis is a % of construction cost, and a reference
+    -- figure for the Declaration. It is NOT itself billed as maintenance.
+    project_construction_cost NUMERIC(14, 2)
+        CHECK (project_construction_cost IS NULL OR project_construction_cost >= 0)
 );
 
 -- ── Vendor charges ─────────────────────────────────────────────
@@ -1997,14 +2006,19 @@ CREATE TABLE Dashboard_settings (
 CREATE TABLE society_compliance_settings (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    sinking_fund_rate_basis VARCHAR(20) DEFAULT 'per_sq_ft' CHECK (
+    -- 'undivided_interest_surplus' (default): the fund is a % of the year's net
+    -- surplus, shared by each flat's undivided-interest %. It is appropriated at
+    -- year end, so the monthly bill run does NOT bill it per sq ft.
+    sinking_fund_rate_basis VARCHAR(30) DEFAULT 'undivided_interest_surplus' CHECK (
         sinking_fund_rate_basis IN (
+            'undivided_interest_surplus',
             'per_sq_ft',
             'construction_cost'
         )
     ),
-    repair_fund_rate_basis VARCHAR(20) DEFAULT 'per_sq_ft' CHECK (
+    repair_fund_rate_basis VARCHAR(30) DEFAULT 'undivided_interest_surplus' CHECK (
         repair_fund_rate_basis IN (
+            'undivided_interest_surplus',
             'per_sq_ft',
             'construction_cost'
         )
@@ -2294,6 +2308,9 @@ CREATE TABLE legal_instrument_catalog (
     applicability TEXT,
     key_provisions TEXT NOT NULL,
     source_reference TEXT NOT NULL,
+    -- Verified public link to the instrument's text (NULL until someone has opened and checked it).
+    -- The Setup Wizard's Legal Hierarchy table shows a link only when this is set.
+    source_url TEXT CHECK (source_url IS NULL OR source_url ~* '^https?://'),
     display_order INT NOT NULL DEFAULT 100,
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (
         status IN ('active', 'superseded', 'draft')
@@ -3608,6 +3625,8 @@ DECLARE
     v_sgst_rate           NUMERIC(5,2);
     v_total_taxable       NUMERIC(10,2);
     v_fund_gst_exempt     BOOLEAN;
+    v_sink_basis          VARCHAR(30);
+    v_repair_basis        VARCHAR(30);
     v_first_rate          NUMERIC(5,2);
     v_first_inc           NUMERIC(10,2);
 BEGIN
@@ -3615,8 +3634,12 @@ BEGIN
     IF NOT FOUND THEN RETURN; END IF;
 
     -- Read fund_gst_exempt setting (default TRUE = exempt)
-    SELECT fund_gst_exempt INTO v_fund_gst_exempt FROM society_compliance_settings WHERE society_id = p_society_id;
+    SELECT fund_gst_exempt, sinking_fund_rate_basis, repair_fund_rate_basis
+      INTO v_fund_gst_exempt, v_sink_basis, v_repair_basis
+      FROM society_compliance_settings WHERE society_id = p_society_id;
     v_fund_gst_exempt := COALESCE(v_fund_gst_exempt, TRUE);
+    v_sink_basis      := COALESCE(v_sink_basis, 'undivided_interest_surplus');
+    v_repair_basis    := COALESCE(v_repair_basis, 'undivided_interest_surplus');
 
     -- Resolve fallback accounts once per society
     SELECT id INTO v_fallback_maint_acc FROM accounts
@@ -3712,11 +3735,9 @@ BEGIN
                 charge.apt_maintenance_amount := NULL;
                 charge.apt_maintenance_rate   := 3.0;
                 charge.apt_due_day            := 5;
-                charge.apt_interest_pct       := CASE
-                    WHEN fn_regime_param_exists(p_society_id, 'arrears_interest_pct', v_month)
-                        THEN NULL
-                    ELSE 1.75
-                END;
+                -- No charge row = no General Body resolution on record (UP Model Bye-Laws 2011, bye-law 46(a)),
+                -- so no interest rate is guessed. apt_interest_pct on apt_charges_fines_basis is the ONLY rate source.
+                charge.apt_interest_pct       := NULL;
                 charge.start_date             := v_month_start;
                 charge.end_date               := v_month_end;
                 charge.apt_sinking_fund_rate  := 0;
@@ -3767,6 +3788,9 @@ BEGIN
                     ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
                 END IF;
                 v_base_maint := ROUND(apt.apartment_size * charge.apt_maintenance_rate * v_overlap_days::NUMERIC / v_days_in_month, 2);
+            ELSIF charge.billing_basis = 'fixed' THEN
+                -- Fixed amount per apartment per month; the per-sq-ft rate is never used in this mode.
+                v_base_maint := ROUND(COALESCE(charge.apt_maintenance_amount, 0) * v_overlap_days::NUMERIC / v_days_in_month, 2);
             ELSIF charge.apt_maintenance_amount IS NOT NULL AND charge.apt_maintenance_amount > 0 THEN
                 v_base_maint := ROUND(charge.apt_maintenance_amount * v_overlap_days::NUMERIC / v_days_in_month, 2);
             ELSE
@@ -3778,10 +3802,14 @@ BEGIN
             -- on the apt_charges_fines_basis row; the rates are driven by resolutions
             -- the UP scheme can record through regime parameters, so the engine stops
             -- billing them as silent per-sq-ft defaults in every mode.
+            -- A fund on the 'undivided_interest_surplus' basis is appropriated from the year's surplus
+            -- at close; it is not a monthly per-sq-ft levy, so the bill run skips it.
             v_base_sinking := CASE WHEN COALESCE(charge.apt_sinking_fund_rate, 0) > 0
+                AND v_sink_basis <> 'undivided_interest_surplus'
                 THEN ROUND(apt.apartment_size * charge.apt_sinking_fund_rate * v_overlap_days::NUMERIC / v_days_in_month, 2)
                 ELSE 0 END;
             v_base_repair  := CASE WHEN COALESCE(charge.apt_repair_fund_rate, 0) > 0
+                AND v_repair_basis <> 'undivided_interest_surplus'
                 THEN ROUND(apt.apartment_size * charge.apt_repair_fund_rate * v_overlap_days::NUMERIC / v_days_in_month, 2)
                 ELSE 0 END;
 
@@ -3794,11 +3822,12 @@ BEGIN
             -- month the bill is overdue, so a flat billed in April with due_date in
             -- April does not pick up interest at creation time; interest from May
             -- onward is still added by fn_apply_receivable_interest when it next runs.
-            IF fn_regime_param_num(p_society_id, 'arrears_interest_pct', v_month) > 0
+            IF COALESCE(charge.charges_interest, TRUE)
+               AND COALESCE(charge.apt_interest_pct, 0) > 0
                AND v_base_maint > 0
                AND v_month < period_first_day(v_month)
             THEN
-                v_first_rate := fn_regime_param_num(p_society_id, 'arrears_interest_pct', v_month);
+                v_first_rate := charge.apt_interest_pct;
                 v_first_inc  := ROUND(v_base_maint * v_first_rate / 100.0, 2);
                 IF v_first_inc > 0 THEN
                     v_base_maint := v_base_maint + v_first_inc;
@@ -4017,14 +4046,21 @@ BEGIN
           AND r.due_date < CURRENT_DATE
         FOR UPDATE
     LOOP
-        -- Model Bye-Laws 2011, bye-law 46(a): interest on overdue common expenses
-        -- is set by General Body resolution and recorded as a regime parameter, so the
-        -- rate is a governance decision, not a free per-flat default. Before UP_AOA_2010
-        -- societies set the regime parameter 'arrears_interest_pct', a
-        -- society that hits this path has a compliance gap: interest is accruing at the
-        -- legacy default with no resolution trail. Caller (or the UP compliance card) must
-        -- record the resolution and set the parameter; this function never guesses.
-        v_rate := fn_regime_param_num(p_society_id, 'arrears_interest_pct', CURRENT_DATE);
+        -- UP Model Bye-Laws 2011, bye-law 46(a): the rate is set by General Body resolution. The rate the
+        -- admin records on Apartment Charges (apt_interest_pct) is that resolved rate. The regime parameter
+        -- 'arrears_interest_pct' is no longer read here; this function never guesses a rate.
+        -- apt_interest_pct (apt_charges_fines_basis) is the single source of truth. A flat's own row wins over
+        -- the society default (apt_id IS NULL). rec.entity_id is the apartment id for role = 'apartment'.
+        SELECT c.apt_interest_pct INTO v_rate
+          FROM apt_charges_fines_basis c
+         WHERE c.society_id = p_society_id
+           AND c.apt_status = TRUE
+           AND COALESCE(c.charges_interest, TRUE)
+           AND (c.apt_id = rec.entity_id OR c.apt_id IS NULL)
+           AND c.start_date <= rec.due_date
+           AND (c.end_date IS NULL OR c.end_date >= rec.due_date)
+         ORDER BY c.apt_id NULLS LAST, c.start_date DESC
+         LIMIT 1;
 
         IF v_rate IS NULL OR v_rate <= 0 THEN
             CONTINUE;
@@ -13610,8 +13646,8 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_email             VARCHAR(100) DEFAULT NULL,
     p_reg_num           VARCHAR(100) DEFAULT NULL,
     p_apt_interest      NUMERIC DEFAULT 0,
-    p_sinking_fund_basis VARCHAR(20) DEFAULT 'per_sq_ft',
-    p_repair_fund_basis VARCHAR(20) DEFAULT 'per_sq_ft',
+    p_sinking_fund_basis VARCHAR(30) DEFAULT 'undivided_interest_surplus',
+    p_repair_fund_basis VARCHAR(30) DEFAULT 'undivided_interest_surplus',
     p_fund_gst_exempt   BOOLEAN DEFAULT TRUE,
     p_fund_charges_int  BOOLEAN DEFAULT TRUE,
     p_gst_cadence       VARCHAR(20) DEFAULT 'monthly',
@@ -13622,7 +13658,9 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_duty_hrs           VARCHAR(2) DEFAULT '8',
     p_tds_effective_date DATE DEFAULT NULL,
     p_state              VARCHAR(50) DEFAULT NULL,
-    p_constitution       VARCHAR(20) DEFAULT 'AOA'
+    p_constitution       VARCHAR(20) DEFAULT 'AOA',
+    p_apt_construction_cost NUMERIC DEFAULT NULL,   -- project construction cost (INR), society default row
+    p_apt_budget         NUMERIC DEFAULT NULL       -- monthly common-expense budget (INR), needed for 'undivided_interest'
 ) RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
     v_item   JSONB;
@@ -13794,18 +13832,21 @@ BEGIN
         SET apt_maintenance_amount = p_apt_amt, apt_maintenance_rate = p_apt_rate,
             apt_due_day = p_apt_due_day, apt_sinking_fund_rate = p_apt_sinking,
             apt_repair_fund_rate = p_apt_repair, apt_interest_pct = p_apt_interest,
-            -- the wizard also offers 'fixed'; the table only knows per_sqft / undivided_interest (fixed = per_sqft + amount)
-            billing_basis = CASE WHEN p_apt_billing_basis = 'undivided_interest' THEN 'undivided_interest' ELSE 'per_sqft' END,
+            billing_basis = CASE WHEN p_apt_billing_basis IN ('undivided_interest', 'fixed') THEN p_apt_billing_basis ELSE 'per_sqft' END,
+            project_construction_cost = p_apt_construction_cost,
+            common_expense_budget_monthly = p_apt_budget,
             updated_at = NOW()
         WHERE id = v_apt_id;
     ELSE
         INSERT INTO apt_charges_fines_basis
             (society_id, apt_id, start_date, apt_maintenance_amount, apt_maintenance_rate,
-             apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct, billing_basis)
+             apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct, billing_basis,
+             project_construction_cost, common_expense_budget_monthly)
         VALUES
             (p_society_id, NULL, CURRENT_DATE, p_apt_amt, p_apt_rate,
              p_apt_due_day, p_apt_sinking, p_apt_repair, p_apt_interest,
-             CASE WHEN p_apt_billing_basis = 'undivided_interest' THEN 'undivided_interest' ELSE 'per_sqft' END);
+             CASE WHEN p_apt_billing_basis IN ('undivided_interest', 'fixed') THEN p_apt_billing_basis ELSE 'per_sqft' END,
+             p_apt_construction_cost, p_apt_budget);
     END IF;
 
     -- 4.5) Society compliance settings
@@ -15760,7 +15801,7 @@ RETURNS TEXT LANGUAGE sql STABLE AS $$
                    WHEN 'vote_ineligibility_basis' THEN 'any_overdue'
                    WHEN 'vote_loan_basis'          THEN 'margin_60_days'
                    WHEN 'levy_sinking_fund' THEN 'no' WHEN 'levy_repair_fund' THEN 'no'
-                   WHEN 'sinking_fund_basis' THEN 'per_sq_ft' WHEN 'repair_fund_basis' THEN 'per_sq_ft'
+                   WHEN 'sinking_fund_basis' THEN 'undivided_interest_surplus' WHEN 'repair_fund_basis' THEN 'undivided_interest_surplus'
                    WHEN 'fund_arrears_interest' THEN 'yes'
                    WHEN 'droppable_BL_07' THEN 'locked' WHEN 'droppable_BL_39' THEN 'locked'
                    WHEN 'droppable_BL_49' THEN 'locked' WHEN 'droppable_BL_55' THEN 'locked'

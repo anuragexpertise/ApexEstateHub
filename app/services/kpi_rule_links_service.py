@@ -45,6 +45,7 @@ _CATEGORIES = {
     "apartment_act": "Apartment Act / AOAs",
     "cooperative_act": "Cooperative Societies Act",
     "income_tax_mutuality": "Income Tax — Mutuality Principle",
+    "central_acts": "Central Acts (Income Tax / GST / RERA)",
     "other": "Other",
 }
 

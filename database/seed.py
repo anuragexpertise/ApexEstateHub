@@ -845,7 +845,7 @@ def seed_compliance_settings(cur, conn, society_id: int):
            (society_id, sinking_fund_rate_basis, repair_fund_rate_basis,
             fund_gst_exempt, fund_charges_interest, gst_filing_cadence,
             gst_registered, gstin, tds_no_pan_action, default_export_format)
-           VALUES (%s,'per_sq_ft','per_sq_ft',TRUE,TRUE,'monthly',TRUE,%s,'warn','structured')""",
+           VALUES (%s,'undivided_interest_surplus','undivided_interest_surplus',TRUE,TRUE,'monthly',TRUE,%s,'warn','structured')""",
         (society_id, SOCIETY["gstin"]),
     )
     conn.commit()
@@ -905,10 +905,21 @@ KPI_RULE_LINKS = [
      "https://www.indiacode.nic.in/handle/123456789/1962",
      "Regulates construction, ownership, and maintenance of apartment buildings with 4+ units in UP.",
      10),
-    ("apartment_act", "UP", "Allahabad HC — Designarch judgment (AOA registration)",
-     "https://indiankanoon.org/doc/1987654321/",
-     "Establishes that Registrar of Societies registers an AOA as a society; the Competent Authority under the Apartment Act handles Deed of Declaration matters.",
+    # REMOVED (audit, Oct 2026): "Allahabad HC — Designarch judgment" pointed at
+    # indiankanoon.org/doc/1987654321/, an unverified placeholder-looking ID. Re-add it only
+    # with a URL someone has opened and checked against the judgment.
+    ("central_acts", "ALL", "Income Tax Act, 1961 — Income Tax Department portal",
+     "https://www.incometaxindia.gov.in/",
+     "Official Income Tax Department portal (Act, rules, circulars). Portal home page, not the Act text itself.",
+     10),
+    ("central_acts", "ALL", "CGST Act, 2017 — GST portal",
+     "https://www.gst.gov.in/",
+     "Official GST portal (Acts, rules, notifications). Portal home page, not the Act text itself.",
      20),
+    ("central_acts", "ALL", "RERA Act, 2016 — RERA portal",
+     "https://rera.gov.in/",
+     "Official RERA portal. Portal home page, not the Act text itself.",
+     30),
     ("cooperative_act", "UP", "UP Co-operative Societies Act 1965",
      "https://www.indiacode.nic.in/handle/123456789/1963",
      "The older, parallel route for cooperative housing societies in UP.",
@@ -1290,6 +1301,14 @@ def seed_legal_instrument_catalog(cur, conn):
         )
         conn.commit()
         inserted += 1
+    # Verified links only. The UP Act link is the India Code entry already used in KPI_RULE_LINKS above.
+    # Rules / Bye-laws have no verified URL yet: leave NULL (the wizard shows plain text, no link).
+    cur.execute(
+        """UPDATE legal_instrument_catalog SET source_url = %s
+           WHERE regime_code = 'UP_AOA_2010' AND instrument_type = 'Act' AND source_url IS NULL""",
+        ("https://www.indiacode.nic.in/handle/123456789/1962",),
+    )
+    conn.commit()
     if inserted:
         print(f"  ✓ Legal instrument catalog seeded ({inserted} new rows)")
 

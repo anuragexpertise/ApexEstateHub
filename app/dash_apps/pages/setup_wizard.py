@@ -9,19 +9,15 @@ from database.db_manager import db
 # ── Defaults requested for first-time setup ────────────────────────────────
 DEFAULT_SINKING_FUND_RATE = 0.25    # ₹ per sq ft / month
 DEFAULT_REPAIR_FUND_RATE  = 0.75    # ₹ per sq ft / month
-MAX_INTEREST_RATE_PCT     = 1.75    # hard cap on the late-payment interest rate
+DEFAULT_INTEREST_RATE_PCT = 1.75    # pre-filled, EDITABLE late-payment interest (% per month, simple interest)
+# There is no hard cap in the wizard: the rate is whatever the General Body resolved.
+INTEREST_RATE_NOTE = ("Simple interest, % per month, on overdue dues after the Billing Due Day. "
+                      "UP Model Bye-Laws 2011, bye-law 46(a): the rate is set by General Body resolution.")
+# Case name + citation to print under the interest field. Left None until a verified citation is supplied.
+INTEREST_CASE_CITATION = None
 DEFAULT_VENDOR_1DAY, DEFAULT_VENDOR_7DAY, DEFAULT_VENDOR_1MTH = 100, 500, 2000
 
-# Legal hierarchy labels for the regime selection step
-LEGAL_HIERARCHY = [
-    ("Central Act", "Income Tax Act, 1961; GST Act, 2017; RERA Act, 2016", "locked"),
-    ("State Act", "UP Apartment Act, 2010 (or applicable state act)", "locked"),
-    ("AOA Rules", "UP Apartment Rules, 2011 (or applicable state rules)", "locked"),
-    ("Model Bye-laws", "UP Model Bye-Laws, 2011 (notified 16 Nov 2011)", "provisional"),
-    ("Society Adopted Bye-laws", "Clauses adopted / varied by General Body resolution", "provisional"),
-    ("Resolutions (Passed/Enacted)", "General Body / EGM resolutions activating choices", "provisional"),
-    ("Board Meetings", "Management Committee operational decisions", "provisional"),
-]
+# Legal hierarchy rows are built from the society's regime: see legal_hierarchy_rows()
 
 _Label = dbc.Label
 
@@ -70,7 +66,11 @@ FIELD_TIPS = {
     "Billing Due Day": "Day of the month by which bills must be paid (1–31). Interest starts after this day.",
     "Sinking Fund Rate": f"Monthly Sinking Fund contribution (₹ per sq ft). Default {DEFAULT_SINKING_FUND_RATE}.",
     "Repair Fund Rate": f"Monthly Repair & Maintenance Fund contribution (₹ per sq ft). Default {DEFAULT_REPAIR_FUND_RATE}.",
-    "Charges Interest Rate (%)": f"Interest charged on overdue dues. Capped at {MAX_INTEREST_RATE_PCT}%.",
+    "Charges Interest Rate (% per month)": "Simple interest per month on overdue dues. The rate is the one your General Body resolved (UP Model Bye-Laws 2011, bye-law 46(a)).",
+    "Construction Cost of Project (₹)": "Total construction cost of the project. Recorded for fund percentages and the Declaration; it is not billed as maintenance.",
+    "Monthly Common-Expense Budget (₹)": "Society's monthly common-expense budget. Under Undivided Interest billing each flat pays this x its undivided-interest %.",
+    "Default Rate per sq ft (₹)": "Monthly maintenance per sq ft of apartment area. Needed when the billing basis is Per Sq Ft.",
+    "Default Fixed Amount (₹)": "Flat monthly maintenance per apartment. Needed when the billing basis is Fixed Amount.",
     # Vendor charges
     "Vendor Pass (1 Day) ₹": f"Default fee for a one-day vendor pass. Default ₹{DEFAULT_VENDOR_1DAY}.",
     "Vendor Pass (7 Days) ₹": f"Default fee for a seven-day vendor pass. Default ₹{DEFAULT_VENDOR_7DAY}.",
@@ -254,6 +254,12 @@ def load_conversation_data():
     return data
 
 CONVERSATION_DATA = load_conversation_data()
+# conversation.xlsx is a binary file; corrected wording lives here so the fix is reviewable as text.
+CONVERSATION_TEXT_OVERRIDES = {
+    "Vendor Charges": ("Set the price of Vendor Passes (1-day, 7-day, 1-month) that vendors pay to work in the society. "
+                       "These are pass prices, not penalties or fines. Match them to your vendor policy."),
+}
+REVIEW_STEP_NAME = "Review"
 WIZARD_GROUPS = {
     "Organization Details": ["Instructions", "Society Details", "Administrator"],
     "Legal Regime": ["Legal Regime Selection"],
@@ -498,7 +504,9 @@ def fund_note(flags, regime):
         return (f"{regime} prescribes minimum Sinking / Repair fund rates "
                 f"(sinking {r['sinking']['min_pct']}% , repair {r['repair']['min_pct']}% of construction cost per year).")
     if flags["sinking"] or flags["repair"]:
-        return f"{regime} sets no statutory rate; these funds are levied by your General Body resolution (Model Bye-Laws Adoption step)."
+        return (f"{regime} sets no statutory rate; these funds are levied by your General Body resolution (Model Bye-Laws Adoption step). "
+                "Default basis: undivided interest of surplus (appropriated at year end, not billed per sq ft); you can choose per sq ft or "
+                "% of construction cost on that step.")
     return (f"{regime} does not prescribe a Sinking or Repair fund. None is being levied. To levy one, opt in on the "
             "Model Bye-Laws Adoption step (Funds & assessments).")
 
@@ -536,6 +544,273 @@ def state_thresholds_rows(state_code):
     return rows
 
 
+# ── Apartment Charges: society-default billing basis ───────────────────────
+BILLING_BASIS_OPTIONS = [
+    {"label": "Undivided Interest (monthly budget x flat's % of undivided interest)", "value": "undivided_interest"},
+    {"label": "Per Sq Ft (rate x apartment area)", "value": "per_sqft"},
+    {"label": "Fixed Amount per Apartment", "value": "fixed"},
+]
+BASIS_NEEDS = {   # basis -> (field label, key)
+    "undivided_interest": ("Monthly Common-Expense Budget (₹)", "budget"),
+    "per_sqft": ("Default Rate per sq ft (₹)", "rate"),
+    "fixed": ("Default Fixed Amount (₹)", "amt"),
+}
+
+
+def apt_charges_error(basis, budget, rate, amt):
+    """Message if the field the chosen billing basis needs is missing or 0, else None."""
+    need = BASIS_NEEDS.get(basis or "undivided_interest")
+    if not need:
+        return "Apartment Charges: choose a Maintenance Billing Basis."
+    label, key = need
+    try:
+        ok = float({"budget": budget, "rate": rate, "amt": amt}[key] or 0) > 0
+    except (TypeError, ValueError):
+        ok = False
+    if not ok:
+        return f"Apartment Charges: '{label}' is required (above 0) for the selected billing basis."
+    return None
+
+
+def basis_hint(basis):
+    label, _ = BASIS_NEEDS.get(basis or "undivided_interest", BASIS_NEEDS["undivided_interest"])
+    extra = (" Each flat also needs its undivided-interest % (area share is used until the Declaration figures are entered after enrolment)."
+             if (basis or "undivided_interest") == "undivided_interest" else "")
+    return dbc.Alert([html.I(className="fas fa-hand-point-up me-2"), html.Strong("Required for this basis: "), label + "." + extra],
+                     color="warning", className="py-2 mb-3", style={"fontSize": "12.5px"})
+
+
+# ── Legal Hierarchy: instruments as links ─────────────────────────────────
+_UNVERIFIED_URLS = {"https://indiankanoon.org/doc/1987654321/"}   # placeholder-looking seed ID, never surface
+
+
+def _usable_url(url):
+    u = (url or "").strip()
+    return u if u.lower().startswith(("http://", "https://")) and u not in _UNVERIFIED_URLS else None
+
+
+def _instrument_link(title, url, year=None):
+    text = title + (f" ({year})" if year else "")
+    u = _usable_url(url)
+    if not u:
+        return html.Span(text)
+    return html.A([text, html.I(className="fas fa-external-link-alt ms-1", style={"fontSize": "9px"})],
+                  href=u, target="_blank", rel="noopener noreferrer")
+
+
+def legal_hierarchy_rows(society_id=None, state=None):
+    """Body rows of the Legal Hierarchy table, driven by the society's regime (no hard-coded state)."""
+    from app.services.statutory_rules import instruments_for_society, grouped_instruments, normalize_state
+    st = normalize_state(state or _society_state(society_id))
+    regime, instruments = instruments_for_society(society_id, st)
+    groups = grouped_instruments(instruments)
+    try:
+        from app.services.kpi_rule_links_service import get_links_for_categories
+        central_links = get_links_for_categories(["central_acts"], state=st).get("central_acts", [])
+    except Exception:
+        central_links = []
+
+    def items(types):
+        out = []
+        for t in types:
+            for r in groups.get(t, []):
+                out.append(html.Div(_instrument_link(r["title"], r.get("source_url"), r.get("enactment_year")), className="mb-1"))
+        return out
+
+    central = items(("Central Act", "Central Rules"))
+    if not central:   # catalog has no Central Act rows: use the official-portal links
+        central = [html.Div(_instrument_link(l.label.split(" — ")[0], l.url), className="mb-1") for l in central_links]
+    pending = html.Small("link pending verification", className="text-muted")
+    state_act = items(("Act",)) or [html.Span(f"No {regime} Act in the catalog yet.", className="text-muted")]
+    rules = items(("Rules", "Notification")) or [html.Span(f"No {regime} Rules in the catalog yet.", className="text-muted")]
+    model_bl = items(("Bye-laws",)) or [html.Span(f"No {regime} Model Bye-laws in the catalog yet.", className="text-muted")]
+    rows = [
+        ("Central Act", central, "locked"),
+        ("State Act", state_act, "locked"),
+        ("AOA Rules", rules, "locked"),
+        ("Model Bye-laws", model_bl, "provisional"),
+        ("Society Adopted Bye-laws", [html.Span("Clauses adopted / varied by General Body resolution. Set them on the "),
+                                      html.Strong("Model Bye-Laws Adoption"), html.Span(" step (left menu).")], "provisional"),
+        ("Resolutions (Passed/Enacted)", [html.Span("Recorded after setup under "), html.Strong("Settings > Society governance > Meetings & Resolutions"),
+                                          html.Span(".")], "provisional"),
+        ("Board Meetings", [html.Span("Management Committee decisions, recorded under "), html.Strong("Settings > Society governance"),
+                            html.Span(".")], "provisional"),
+    ]
+    out = []
+    for label, body, badge_type in rows:
+        out.append(html.Tr([
+            html.Td(dbc.Badge(label, color="primary" if badge_type == "locked" else "warning", className="me-2", pill=True, style={"fontSize": "10px"})),
+            html.Td(body, style={"fontSize": "12px"}),
+            html.Td(dbc.Badge(badge_type.capitalize(), color="secondary" if badge_type == "locked" else "info", pill=True, style={"fontSize": "9px"})),
+        ]))
+    return out
+
+
+def _yn(v):
+    return "Yes" if v else "No"
+
+
+def render_review(v, society_id=None):
+    """Review step body built from the LIVE form values `v` (dict), not from the database.
+
+    Nothing is saved until Submit, so reading the database here could only ever show defaults or blanks.
+    Name / PAN / Registration are Master-owned, so they come from the database."""
+    v = v or {}
+    db_s = {}
+    if society_id:
+        db_s = db._execute("SELECT name, pan_number, registration_number FROM societies WHERE id = :id",
+                           {"id": society_id}, fetch_one=True) or {}
+
+    def num(x, d=0.0):
+        try:
+            return float(x if x not in (None, "") else d)
+        except (TypeError, ValueError):
+            return d
+
+    def rs(x):
+        return f"₹{num(x):,.2f}"
+
+    basis = v.get("apt_basis") or "undivided_interest"
+    basis_label = {o["value"]: o["label"] for o in BILLING_BASIS_OPTIONS}.get(basis, basis)
+    problems = []
+    for label, val in (("Address", v.get("address")), ("Email", v.get("email")), ("Phone", v.get("phone"))):
+        if not str(val or "").strip():
+            problems.append(f"{label} is empty (Society Details).")
+    if not v.get("state"):
+        problems.append("State is not selected (Society Details): the legal regime cannot be assigned.")
+    err = apt_charges_error(basis, v.get("apt_budget"), v.get("apt_rate"), v.get("apt_amt"))
+    if err:
+        problems.append(err)
+    if v.get("central_tds") and not str(v.get("tan") or "").strip():
+        problems.append("TDS applies but no TAN is entered (TAN & TDS Rates).")
+    if v.get("central_gst") and not str(v.get("gstin") or "").strip():
+        problems.append("GST applies but no GSTIN is entered (GSTIN & GST Rate).")
+    if not str(v.get("sec_name") or "").strip():
+        problems.append("Secretary name is empty (Administrator).")
+
+    # Brought Forward totals
+    bf_dr = bf_cr = 0.0
+    bf_n = 0
+    try:
+        from database.seed import ACCOUNTS
+        drcr = {a[0]: a[5] for a in ACCOUNTS}
+        for acc_id, amt in zip(v.get("bf_ids") or [], v.get("bf_amts") or []):
+            a = num(amt)
+            if a:
+                bf_n += 1
+                if drcr.get(acc_id) == "Dr":
+                    bf_dr += a
+                else:
+                    bf_cr += a
+    except Exception:
+        pass
+    if bf_n and abs(bf_dr - bf_cr) > 0.005:
+        problems.append(f"Brought Forward does not balance: Dr ₹{bf_dr:,.2f} vs Cr ₹{bf_cr:,.2f}. Submit will reject it.")
+
+    from database.seed import TDS_SECTION_RATE_SEED
+    rates = v.get("tds_rates") or []
+    tds_edited = sum(1 for i, item in enumerate(TDS_SECTION_RATE_SEED)
+                     if i < len(rates) and rates[i] is not None and abs(num(rates[i]) - num(item[3])) > 1e-9)
+
+    sections = [
+        ("Society Identity", [
+            ("Society Name (Master)", db_s.get("name") or "—"),
+            ("PAN (Master)", db_s.get("pan_number") or "—"),
+            ("Registration No. (Master)", db_s.get("registration_number") or "— (ask Master to enter it)"),
+            ("State", v.get("state") or "—"),
+            ("Constitution", v.get("constitution") or "—"),
+            ("Address", v.get("address") or "—"),
+            ("Email", v.get("email") or "—"),
+            ("Phone", v.get("phone") or "—"),
+        ]),
+        ("Central Acts", [
+            ("Income Tax - TAN required", _yn(v.get("central_it_tan"))),
+            ("TDS applicable", _yn(v.get("central_tds"))),
+            ("GST applicable", _yn(v.get("central_gst"))),
+            ("RERA applicable", _yn(v.get("central_rera"))),
+        ]),
+        ("TAN & TDS", [
+            ("TAN", v.get("tan") or "—"),
+            ("TDS effective date", v.get("tds_date") or "—"),
+            ("TDS rate rows changed from standard", tds_edited),
+        ]),
+        ("GST", [
+            ("GSTIN", v.get("gstin") or "—"),
+            ("CGST / SGST", f"{num(v.get('cgst')):g}% / {num(v.get('sgst')):g}%"),
+        ]),
+        ("Apartment Charges (society default)", [
+            ("Maintenance Billing Basis", basis_label),
+            ("Construction Cost of Project", rs(v.get("apt_cost"))),
+            ("Monthly Common-Expense Budget", rs(v.get("apt_budget"))),
+            ("Default Rate per sq ft", rs(v.get("apt_rate"))),
+            ("Default Fixed Amount", rs(v.get("apt_amt"))),
+            ("Billing Due Day", v.get("apt_due") or "—"),
+            ("Sinking Fund Rate", num(v.get("apt_sink"))),
+            ("Repair Fund Rate", num(v.get("apt_repair"))),
+            ("Interest (% per month, simple)", f"{num(v.get('apt_interest')):g}%"),
+        ]),
+        ("Vendor Pass Charges", [
+            ("1 Day Pass", f"₹{num(v.get('ven1')):,.0f}"),
+            ("7 Day Pass", f"₹{num(v.get('ven7')):,.0f}"),
+            ("1 Month Pass", f"₹{num(v.get('ven30')):,.0f}"),
+        ]),
+        ("Society Operations", [
+            ("Gate Pass Enforcement", str(v.get("gate") or "—").title()),
+            ("Security Duty Hours", f"{v.get('duty') or '—'} hours"),
+        ]),
+        ("Administrator", [
+            ("Secretary Name", v.get("sec_name") or "—"),
+            ("Secretary Email", v.get("sec_email") or "—"),
+            ("Secretary Phone", v.get("sec_phone") or "—"),
+        ]),
+        ("Accounts & Brought Forward", [
+            ("Accounting start date", v.get("calc_start") or "—"),
+            ("Brought Forward financial year", v.get("bf_fy") or "—"),
+            ("Accounts with an opening balance", bf_n),
+            ("Total Dr / Total Cr", f"₹{bf_dr:,.2f} / ₹{bf_cr:,.2f}"),
+        ]),
+    ]
+
+    def card(title, items):
+        rows = [html.Tr([html.Td(html.Strong(k), style={"width": "34%", "fontSize": "12px"}),
+                         html.Td(str(val), style={"fontSize": "12px"})]) for k, val in items]
+        return dbc.Card([dbc.CardHeader(html.H6(title, className="mb-0", style={"fontSize": "13px"})),
+                         dbc.CardBody(dbc.Table([html.Tbody(rows)], bordered=False, size="sm", style={"marginBottom": "0"}), className="py-2")],
+                        className="mb-3 shadow-sm")
+
+    # Bye-law / policy choices ARE saved instantly (provisional), so the database is the right source for these.
+    bye_law_status, policy_status = [], []
+    if society_id:
+        try:
+            from app.services import regime_rules_admin as rra
+            for r in rra.list_society_bye_laws(society_id):
+                if r["layer"] == 1 and r["status"] == "provisional":
+                    bye_law_status.append(f"{r['clause_id']}: {r['proposed_status'].replace('_', ' ').title()}")
+            for k, pv in rra.list_society_policies(society_id).items():
+                if pv["proposed"]:
+                    policy_status.append(f"{k}: {pv['proposed']} (awaiting resolution)")
+        except Exception:
+            pass
+    ratification = []
+    if bye_law_status:
+        ratification.append(html.Li([html.Strong("Bye-Law Adoptions: "), html.Ul([html.Li(i, style={"fontSize": "11px"}) for i in bye_law_status])]))
+    if policy_status:
+        ratification.append(html.Li([html.Strong("Society Policies: "), html.Ul([html.Li(i, style={"fontSize": "11px"}) for i in policy_status])]))
+    if not ratification:
+        ratification = [html.Li("No pending ratifications.", className="text-muted", style={"fontSize": "12px"})]
+
+    attention = (dbc.Alert([html.Strong("Fix before you submit:"), html.Ul([html.Li(x) for x in problems], className="mb-0")], color="danger", className="py-2")
+                 if problems else dbc.Alert("Nothing missing in the steps checked above.", color="success", className="py-2"))
+    return [
+        _render_banner("Review & Confirm", "These are the values currently on screen. Nothing is saved until you Submit on the Agreement step."),
+        attention,
+        html.Div([card(t, i) for t, i in sections]),
+        html.H6("Pending Ratification Checklist", className="text-primary mt-3 mb-2"),
+        html.P("These provisional choices need a General Body resolution to become active:", className="text-muted small mb-2"),
+        html.Ul(ratification, style={"fontSize": "12px"}),
+    ]
+
+
 def render_category_content(category, society_id=None, state=None):
     """
     Step body for one wizard category.
@@ -559,10 +834,11 @@ def render_category_content(category, society_id=None, state=None):
     # matching row for the category renders as its own banner.
     conv_infos = [item for item in CONVERSATION_DATA if item.get('Setup Wizard Category') == category]
     for conv_info in conv_infos:
-        if conv_info.get('Recommendation from Master to Admin'):
+        _conv_text = CONVERSATION_TEXT_OVERRIDES.get(category) or conv_info.get('Recommendation from Master to Admin')
+        if _conv_text:
             elements.append(
                 dbc.Alert(
-                    [html.I(className="fas fa-lightbulb me-2"), conv_info['Recommendation from Master to Admin']],
+                    [html.I(className="fas fa-lightbulb me-2"), _conv_text],
                     color="info",
                     className="mb-3",
                     style={"fontSize": "13px"}
@@ -617,7 +893,7 @@ def render_category_content(category, society_id=None, state=None):
             {"label": "Generic / Other", "value": "GENERIC"},
         ]
         return elements + [
-            _render_banner("Society Details", "Enter society identity details. State + Constitution together select the legal regime. Registration Number, Email, and Phone will be updated if provided. Logo and Background images are optional."),
+            _render_banner("Society Details", "Enter society identity details. State + Constitution together select the legal regime. Name, PAN and Registration Number are set by Master and cannot be edited here. Logo and Background images are optional."),
             _label("Society Name"),
             dbc.Input(id="sw-society-name", type="text", required=True, className="mb-3", value=s_name, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
             _label("Society Logo (Image)"),
@@ -645,7 +921,8 @@ def render_category_content(category, society_id=None, state=None):
             _label("PAN Number"),
             dbc.Input(id="sw-society-pan", type="text", required=True, className="mb-3", value=s_pan, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
             _label("Registration Number"),
-            dbc.Input(id="sw-society-reg", type="text", required=True, className="mb-3", value=s_reg),
+            dbc.Input(id="sw-society-reg", type="text", className="mb-1", value=s_reg, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
+            html.Small("Entered by Master. Contact Master to change it." if s_reg else "Not entered yet. Ask Master to add your registration number.", className="text-muted d-block mb-3"),
             _field_feedback("sw-society-reg-feedback"),
             _label("Login Background (Image)"),
             _render_image_capture_control("society", "bg", _imgs.get("bg"), society_id),
@@ -662,17 +939,7 @@ def render_category_content(category, society_id=None, state=None):
         name, status = regime_profile(regime)
         own = state_has_own_regime(picked_state)
         
-        hierarchy_rows = []
-        for label, desc, badge_type in LEGAL_HIERARCHY:
-            if badge_type == "locked":
-                badge = dbc.Badge(label, color="primary", className="me-2", pill=True, style={"fontSize": "10px"})
-            else:
-                badge = dbc.Badge(label, color="warning", className="me-2", pill=True, style={"fontSize": "10px"})
-            hierarchy_rows.append(html.Tr([
-                html.Td(badge),
-                html.Td(desc, style={"fontSize": "12px"}),
-                html.Td(dbc.Badge(badge_type.capitalize(), color="secondary" if badge_type == "locked" else "info", pill=True, style={"fontSize": "9px"})),
-            ]))
+        hierarchy_rows = legal_hierarchy_rows(society_id, picked_state)
         
         return elements + [
             _render_banner("Legal Regime Selection", "Your State and Constitution together determine the legal regime. The hierarchy below shows how rules flow — a lower layer can never loosen a higher one."),
@@ -695,7 +962,7 @@ def render_category_content(category, society_id=None, state=None):
             ]),
             html.Hr(),
             html.H6("Central Act Settings", className="text-primary mt-3 mb-2"),
-            html.P("The following Central Acts apply to all societies. Configure the rates and applicability for your society:", className="text-muted small mb-3"),
+            html.P("The following Central Acts apply to all societies. All answers default to Yes; answer No only on your CA's advice. TDS = No hides the TAN & TDS Rates step and GST = No hides the GSTIN & GST Rate step:", className="text-muted small mb-3"),
             dbc.Row([
                 dbc.Col([
                     _label("Income Tax — TAN Required?"),
@@ -709,39 +976,30 @@ def render_category_content(category, society_id=None, state=None):
             dbc.Row([
                 dbc.Col([
                     _label("GST Applicable?"),
-                    dbc.RadioItems(id="sw-central-gst", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=False, inline=True, className="mb-3"),
+                    dbc.RadioItems(id="sw-central-gst", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3"),
                 ], width=6),
                 dbc.Col([
                     _label("RERA Applicable?"),
-                    dbc.RadioItems(id="sw-central-rera", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=False, inline=True, className="mb-3"),
+                    dbc.RadioItems(id="sw-central-rera", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3"),
                 ], width=6),
             ]),
         ]
     elif category == "Central Acts Compliance":
         from app.services.statutory_rules import regime_for_society
         regime = regime_for_society(society_id, state)
-        
-        s_tan = ""
-        if society_id:
-            row = db._execute("SELECT tan_number FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
-            if row:
-                s_tan = row.get("tan_number") or ""
-        
+        # Read-only summary. TAN, the TDS effective date and the TDS rates table are entered ONLY on the
+        # "TAN & TDS Rates" step: rendering them here too created duplicate component IDs.
         return elements + [
-            _render_banner("Central Acts Compliance", f"Configure Income Tax, GST, and RERA settings for {regime}. These Central Acts apply uniformly across India."),
-            html.H6("Income Tax Act, 1961 — TAN & TDS", className="text-primary mb-3"),
-            _label("TAN Number"),
-            dbc.Input(id="sw-society-tan", type="text", placeholder="Enter TAN (e.g. ABCD12345E)...", value=s_tan, className="mb-4"),
-            _label("TDS Effective Date"),
-            html.Div(dcc.DatePickerSingle(
-                id="sw-tds-effective-date",
-                date=str(fy_start_date()),
-                display_format="YYYY-MM-DD"
-            ), className="mb-4"),
-            html.Hr(),
-            html.H6("TDS Section Rates", className="text-primary mb-3"),
-            html.P("Standard rates are pre-filled. Modify only if your CA advises.", className="text-muted small mb-3"),
-            _render_tds_rates_table(),
+            _render_banner("Central Acts Compliance", f"Central Acts that apply to a society under {regime}. These apply uniformly across India; you enter the figures on the next steps."),
+            dbc.Table([
+                html.Thead(html.Tr([html.Th("Central Act"), html.Th("What it means for your society"), html.Th("Where you enter it")])),
+                html.Tbody([
+                    html.Tr([html.Td("Income Tax Act, 1961"), html.Td("TAN, and TDS on payments to vendors and contractors."), html.Td("TAN & TDS Rates step (skipped if you answered TDS = No)")]),
+                    html.Tr([html.Td("CGST / SGST Act, 2017"), html.Td("GST on maintenance above the per-member threshold, and RCM."), html.Td("GSTIN & GST Rate step (skipped if you answered GST = No)")]),
+                    html.Tr([html.Td("RERA Act, 2016"), html.Td("Builder obligations and the corpus fund; no setup figure."), html.Td("Nothing to enter")]),
+                ]),
+            ], bordered=True, size="sm", style={"fontSize": "12.5px"}),
+            html.P("Change your TDS / GST answers on the Legal Regime Selection step.", className="text-muted small"),
         ]
     elif category == "State Act & Rules":
         from app.services.statutory_rules import regime_for_society, instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR, fund_rules_for_state
@@ -981,41 +1239,52 @@ def render_category_content(category, society_id=None, state=None):
             dbc.Input(type="number", value=exempt_val, className="mb-3", readonly=True, style=readonly_style),
         ]
     elif category == "Apartment Charges":
-        s_amt, s_rate, s_due = 0.0, 0.0, 1
-        s_billing_basis = "per_sqft"
+        s_amt, s_rate, s_due, s_cost, s_budget = 0.0, 0.0, 1, 0.0, 0.0
+        s_billing_basis = "undivided_interest"        # society default; apartments can override at enrolment
         _ff = fund_flags(society_id, state)
         # The 0.25 / 0.75 defaults are Maharashtra's statutory minimum percentages, so they are only a
         # sensible pre-fill where the state prescribes the fund; elsewhere the fund starts at 0 (not levied).
         s_sink = DEFAULT_SINKING_FUND_RATE if _ff["rules"]["sinking"]["mode"] == "statutory" else 0.0
         s_repair = DEFAULT_REPAIR_FUND_RATE if _ff["rules"]["repair"]["mode"] == "statutory" else 0.0
-        s_int = MAX_INTEREST_RATE_PCT
+        s_int = DEFAULT_INTEREST_RATE_PCT
         if society_id:
-            row = db._execute("SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct, billing_basis FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
+            row = db._execute("SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct, billing_basis, project_construction_cost, common_expense_budget_monthly FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
                 s_amt, s_rate, s_due = row.get("apt_maintenance_amount", 0.0) or 0.0, row.get("apt_maintenance_rate", 0.0) or 0.0, row.get("apt_due_day", 1) or 1
-                s_billing_basis = row.get("billing_basis", "per_sqft") or "per_sqft"
+                s_billing_basis = row.get("billing_basis") or "undivided_interest"
+                s_cost = row.get("project_construction_cost") or 0.0
+                s_budget = row.get("common_expense_budget_monthly") or 0.0
                 # a stored 0 means "never set" on first-time setup, so fall back to the defaults
                 s_sink = row.get("apt_sinking_fund_rate") or s_sink
                 s_repair = row.get("apt_repair_fund_rate") or s_repair
-                s_int = min(row.get("apt_interest_pct") or MAX_INTEREST_RATE_PCT, MAX_INTEREST_RATE_PCT)
+                s_int = row.get("apt_interest_pct") if row.get("apt_interest_pct") is not None else s_int
+        citation = [html.Small(INTEREST_CASE_CITATION, className="text-muted d-block mb-3")] if INTEREST_CASE_CITATION else []
         return elements + [
-            _render_banner("Apartment Charges", "Set default charges, billing cycle day and late-payment interest (capped at " + str(MAX_INTEREST_RATE_PCT) + "%). "
+            _render_banner("Apartment Charges", "Set the SOCIETY DEFAULT charges, billing day and late-payment interest. "
                            "Sinking / Repair fund rates appear only where your state prescribes them or you opted in on the Model Bye-Laws Adoption step."),
+            dbc.Alert([html.I(className="fas fa-info-circle me-2"),
+                       "These are the society defaults. Apartments can differ: an individual apartment can be given its own billing basis and amounts when you enrol it."],
+                      color="info", className="py-2 mb-3", style={"fontSize": "12.5px"}),
+            html.H6("Part A: Society defaults (all optional, fill what you know)", className="text-primary mb-2"),
             dbc.Row([
-                dbc.Col([_label("Base Maintenance Amount"), dbc.Input(id="sw-apt-amt", type="number", value=s_amt, step=1, className="mb-3")], width=4),
-                dbc.Col([_label("Maintenance Rate/SqFt"), dbc.Input(id="sw-apt-rate", type="number", value=s_rate, step=0.01, className="mb-3")], width=4),
-                dbc.Col([_label("Maintenance Billing Basis"), dbc.Select(id="sw-apt-billing-basis", options=[
-                    {"label": "Per Sq Ft", "value": "per_sqft"},
-                    {"label": "Undivided Interest (Construction Cost)", "value": "undivided_interest"},
-                    {"label": "Fixed Amount per Apartment", "value": "fixed"},
-                ], value=s_billing_basis, className="mb-3")], width=4),
+                dbc.Col([_label("Construction Cost of Project (₹)"), dbc.Input(id="sw-apt-cost", type="number", value=s_cost, min=0, step=1, className="mb-3")], width=3),
+                dbc.Col([_label("Monthly Common-Expense Budget (₹)"), dbc.Input(id="sw-apt-budget", type="number", value=s_budget, min=0, step=1, className="mb-3")], width=3),
+                dbc.Col([_label("Default Rate per sq ft (₹)"), dbc.Input(id="sw-apt-rate", type="number", value=s_rate, min=0, step=0.01, className="mb-3")], width=3),
+                dbc.Col([_label("Default Fixed Amount (₹)"), dbc.Input(id="sw-apt-amt", type="number", value=s_amt, min=0, step=1, className="mb-3")], width=3),
             ]),
+            html.H6("Part B: Maintenance Billing Basis (society default)", className="text-primary mb-2"),
+            dbc.Row([dbc.Col([_label("Maintenance Billing Basis"), dbc.Select(id="sw-apt-billing-basis", options=BILLING_BASIS_OPTIONS, value=s_billing_basis, className="mb-2")], width=8)]),
+            html.Div(id="sw-apt-basis-hint", children=basis_hint(s_billing_basis)),
+            html.Hr(),
             dbc.Row([
                 dbc.Col([_label("Billing Due Day"), dbc.Input(id="sw-apt-due", type="number", value=s_due, min=1, max=31, step=1, className="mb-3")], width=4),
                 dbc.Col([_label("Sinking Fund Rate"), dbc.Input(id="sw-apt-sink", type="number", value=s_sink, step=0.01, className="mb-3")], id="sw-apt-sink-col", width=4, style={} if _ff["sinking"] else {"display": "none"}),
                 dbc.Col([_label("Repair Fund Rate"), dbc.Input(id="sw-apt-repair", type="number", value=s_repair, step=0.01, className="mb-3")], id="sw-apt-repair-col", width=4, style={} if _ff["repair"] else {"display": "none"}),
             ]),
-            dbc.Row([dbc.Col([_label("Charges Interest Rate (%)"), dbc.Input(id="sw-apt-interest", type="number", value=s_int, min=0, max=MAX_INTEREST_RATE_PCT, step=0.01, className="mb-1"), html.Small(f"Maximum {MAX_INTEREST_RATE_PCT}%", className="text-muted d-block mb-3")], width=4)])
+            dbc.Row([dbc.Col([_label("Charges Interest Rate (% per month)"),
+                              dbc.Input(id="sw-apt-interest", type="number", value=s_int, min=0, step=0.01, className="mb-1"),
+                              html.Small(INTEREST_RATE_NOTE, className="text-muted d-block mb-1")] + citation, width=8)]),
+            html.P("After enrolment, each flat needs its undivided-interest %. Area share is used until you enter the Declaration figures.", className="text-muted small"),
         ]
     elif category == "Vendor Charges":
         s_v1, s_v7, s_v30 = DEFAULT_VENDOR_1DAY, DEFAULT_VENDOR_7DAY, DEFAULT_VENDOR_1MTH
@@ -1037,7 +1306,7 @@ def render_category_content(category, society_id=None, state=None):
                 s_gate_logic = row.get("gate_logic", "both") or "both"
                 s_duty_hrs = row.get("duty_hrs", "8") or "8"
         return elements + [
-            _render_banner("Society Operations", "Configure gate pass enforcement, security duty hours, and vendor pass charges."),
+            _render_banner("Society Operations", "Configure gate pass enforcement and security duty hours. (Vendor pass prices are set on the Vendor Charges step.)"),
             html.H6("Gate Pass & Security", className="text-primary mb-3"),
             _label("Gate Pass Enforcement"),
             dbc.Select(
@@ -1060,13 +1329,6 @@ def render_category_content(category, society_id=None, state=None):
                 value=s_duty_hrs,
                 className="mb-3"
             ),
-            html.Hr(),
-            html.H6("Vendor Pass Charges", className="text-primary mb-3"),
-            dbc.Row([
-                dbc.Col([_label("Vendor Pass (1 Day) ₹"), dbc.Input(id="sw-ven-1day", type="number", value=DEFAULT_VENDOR_1DAY, step=1, className="mb-3")], width=4),
-                dbc.Col([_label("Vendor Pass (7 Days) ₹"), dbc.Input(id="sw-ven-7day", type="number", value=DEFAULT_VENDOR_7DAY, step=1, className="mb-3")], width=4),
-                dbc.Col([_label("Vendor Pass (1 Month) ₹"), dbc.Input(id="sw-ven-1mth", type="number", value=DEFAULT_VENDOR_1MTH, step=1, className="mb-3")], width=4),
-            ]),
         ]
     elif category == "Accounts Heads":
         s_calc = str(fy_start_date())
@@ -1224,114 +1486,9 @@ def render_category_content(category, society_id=None, state=None):
             )
         ]
     elif category == "Review":
-        # Fetch existing data from DB for review
-        society_data = {}
-        compliance_data = {}
-        apt_charges = {}
-        vendor_charges = {}
-        bf_data = {}
-        if society_id:
-            society_data = db._execute("SELECT * FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True) or {}
-            compliance_data = db._execute("SELECT * FROM society_compliance_settings WHERE society_id = :id", {"id": society_id}, fetch_one=True) or {}
-            apt_charges = db._execute("SELECT * FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True) or {}
-            vendor_charges = db._execute("SELECT * FROM ven_charges_fines_basis WHERE society_id = :id AND ven_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True) or {}
-            bf_data = db._execute("SELECT * FROM brought_forward WHERE society_id = :id", {"id": society_id}, fetch_all=True) or []
-        
-        # Get bye-law adoption status
-        bye_law_status = []
-        policy_status = []
-        if society_id:
-            from app.services import regime_rules_admin as rra
-            try:
-                for r in rra.list_society_bye_laws(society_id):
-                    if r["layer"] == 1 and r["status"] == "provisional":
-                        bye_law_status.append(f"{r['clause_id']}: {r['proposed_status'].replace('_', ' ').title()}")
-                for k, v in rra.list_society_policies(society_id).items():
-                    if v["proposed"]:
-                        policy_status.append(f"{k}: {v['proposed']} (awaiting resolution)")
-            except Exception:
-                pass
-        
-        review_sections = [
-            ("Society Identity", [
-                ("Society Name", society_data.get("name", "—")),
-                ("State", society_data.get("state", "—")),
-                ("Constitution", society_data.get("constitution", "—")),
-                ("PAN", society_data.get("pan_number", "—")),
-                ("Registration No.", society_data.get("registration_number", "—")),
-                ("Email", society_data.get("email", "—")),
-                ("Phone", society_data.get("phone", "—")),
-            ]),
-            ("Central Acts Configuration", [
-                ("Income Tax - TAN Required", "Yes" if society_data.get("tan_number") else "No"),
-                ("TDS Applicable", "Yes" if compliance_data.get("gst_registered") else "No"),  # placeholder
-                ("GST Registered", "Yes" if compliance_data.get("gst_registered") else "No"),
-                ("RERA Applicable", "No"),  # placeholder
-            ]),
-            ("State Act & Funds", [
-                ("Sinking Fund", "Levied" if apt_charges.get("apt_sinking_fund_rate") else "Not levied"),
-                ("Repair Fund", "Levied" if apt_charges.get("apt_repair_fund_rate") else "Not levied"),
-                ("Maintenance Billing Basis", apt_charges.get("billing_basis", "per_sqft")),
-            ]),
-            ("Apartment Charges", [
-                ("Base Maintenance Amount", f"₹{apt_charges.get('apt_maintenance_amount', 0):,.2f}"),
-                ("Maintenance Rate/SqFt", f"₹{apt_charges.get('apt_maintenance_rate', 0):,.2f}"),
-                ("Billing Due Day", apt_charges.get("apt_due_day", 1)),
-                ("Interest Rate", f"{apt_charges.get('apt_interest_pct', 1.75)}%"),
-            ]),
-            ("Vendor Charges", [
-                ("1 Day Pass", f"₹{vendor_charges.get('vendor_1day', 100):,.0f}"),
-                ("7 Day Pass", f"₹{vendor_charges.get('vendor_7day', 500):,.0f}"),
-                ("1 Month Pass", f"₹{vendor_charges.get('vendor_1mth', 2000):,.0f}"),
-            ]),
-            ("Society Operations", [
-                ("Gate Pass Enforcement", society_data.get("gate_logic", "both").title()),
-                ("Security Duty Hours", f"{society_data.get('duty_hrs', '8')} hours"),
-            ]),
-            ("Administrator", [
-                ("Secretary Name", society_data.get("secretary_name", "—")),
-                ("Secretary Email", society_data.get("secretary_email", "—")),
-                ("Secretary Phone", society_data.get("secretary_phone", "—")),
-            ]),
-        ]
-        
-        def _section_card(title, items):
-            rows = []
-            for label, value in items:
-                rows.append(html.Tr([
-                    html.Td(html.Strong(label), style={"width": "30%", "fontSize": "12px"}),
-                    html.Td(str(value), style={"fontSize": "12px"}),
-                ]))
-            return dbc.Card([
-                dbc.CardHeader(html.H6(title, className="mb-0", style={"fontSize": "13px"})),
-                dbc.CardBody([
-                    dbc.Table([
-                        html.Tbody(rows)
-                    ], bordered=False, size="sm", style={"fontSize": "12px", "marginBottom": "0"}),
-                ], className="py-2"),
-            ], className="mb-3 shadow-sm")
-        
-        # Pending ratification checklist
-        ratification_items = []
-        if bye_law_status:
-            ratification_items.append(html.Li([html.Strong("Bye-Law Adoptions: "), html.Br(), html.Ul([html.Li(item, style={"fontSize": "11px"}) for item in bye_law_status])]))
-        if policy_status:
-            ratification_items.append(html.Li([html.Strong("Society Policies: "), html.Br(), html.Ul([html.Li(item, style={"fontSize": "11px"}) for item in policy_status])]))
-        if not ratification_items:
-            ratification_items = [html.Li("No pending ratifications — all choices are either not set or already backed by resolutions.", className="text-muted", style={"fontSize": "12px"})]
-        
-        return elements + [
-            _render_banner("Review & Confirm", "Review all settings below. Items marked 'awaiting resolution' require a General Body meeting and passed resolution to take effect in the engine."),
-            html.Div([_section_card(title, items) for title, items in review_sections]),
-            html.H6("Pending Ratification Checklist", className="text-primary mt-3 mb-2"),
-            html.P("The following provisional choices need a General Body resolution to become active:", className="text-muted small mb-2"),
-            html.Ul(ratification_items, style={"fontSize": "12px"}),
-            html.Hr(),
-            dbc.Alert([
-                html.I(className="fas fa-info-circle me-2"),
-                "After reviewing, proceed to the Agreement step to accept the terms and submit the setup."
-            ], color="info", className="mt-3"),
-        ]
+        # Filled by a callback (setup_wizard_callbacks.refresh_review) from the live form values when the
+        # admin opens this step. Reading the database here showed defaults, because nothing is saved before Submit.
+        return elements + [_render_banner("Review & Confirm", "Open this step after filling the earlier ones: it shows what you entered.")]
     elif category == "Agreement":
         here = os.path.dirname(os.path.abspath(__file__))
         agreement_path = os.path.abspath(os.path.join(here, "../../../database/AGREEMENT.md"))

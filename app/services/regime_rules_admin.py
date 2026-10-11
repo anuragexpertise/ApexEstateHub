@@ -416,7 +416,8 @@ POLICY_SPECS: dict[str, tuple] = {
 # Fund policies. Where a regime does not prescribe a fund (UP_AOA_2010: no statutory sinking / repair rate), the
 # Setup Wizard no longer asks for the fund's rate or basis; the society opts in HERE (General Body resolution under
 # bye-law 36 / 46) and only then do the rate fields appear on Apartment Charges. See statutory_rules.fund_rules_for_state.
-_BASIS = (("per_sq_ft", "Per sq ft of apartment area (default)"), ("construction_cost", "% of construction cost"))
+_BASIS = (("undivided_interest_surplus", "Undivided interest of surplus (default)"),
+          ("per_sq_ft", "Per sq ft of apartment area"), ("construction_cost", "% of construction cost"))
 POLICY_SPECS.update({
     "levy_sinking_fund":    ("Levy a Sinking Fund on members", "BL_46",
                               (("no", "No - not levied (default)"), ("yes", "Yes - by General Body resolution"))),

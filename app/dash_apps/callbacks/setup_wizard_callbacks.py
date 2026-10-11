@@ -6,7 +6,7 @@ from database.db_manager import db
 from database.seed import TDS_SECTION_RATE_SEED
 from app.dash_apps.pages.setup_wizard import (
     get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS,
-    build_rules_panel, rules_subtitle, MAX_INTEREST_RATE_PCT,
+    build_rules_panel, rules_subtitle, apt_charges_error, basis_hint, render_review,
     fund_flags, fund_note, regime_badge, state_thresholds_rows,
 )
 from app.utils.ux_toasts import error_toast
@@ -41,6 +41,9 @@ def _setup_validation_result(value, label, base_class="mb-3", kind="text"):
 def _society_details_error(address, email, phone, registration):
     """A6: server-side required checks for the Society Details step.
 
+    Registration number is NOT checked: Master owns it and it is read-only in the wizard (the argument is
+    kept so existing callers still work).
+
     Returns an error message, or None. Previously these fields only got red
     styling; Next and Submit never checked them, and a blank address was sent
     on as "" which COALESCE() treats as a real value, wiping the address the
@@ -50,7 +53,6 @@ def _society_details_error(address, email, phone, registration):
         (address, "Address", "text"),
         (email, "Email", "email"),
         (phone, "Phone number", "phone"),
-        (registration, "Registration number", "text"),
     ):
         cls, msg = _setup_validation_result(value, label, "", kind)
         if msg:
@@ -95,7 +97,7 @@ def register_setup_wizard_callbacks(app):
         address_result = _setup_validation_result(address, "Address", "mb-3")
         email_result = _setup_validation_result(email, "Email", "mb-3", "email")
         phone_result = _setup_validation_result(phone, "Phone number", "mb-3", "phone")
-        registration_result = _setup_validation_result(registration, "Registration number", "mb-3")
+        registration_result = ("mb-3", "")   # read-only, entered by Master: never flagged invalid here
         secret_result = _setup_validation_result(secret, "Signing secret", "mb-3", "secret")
         secret_confirm_result = _setup_validation_result(secret_confirm, "Signing secret confirmation", "mb-3", "secret")
         final_result = _setup_validation_result(secret_final, "Signing secret confirmation", "mb-3", "secret")
@@ -180,15 +182,27 @@ def register_setup_wizard_callbacks(app):
         State("sw-society-phone", "value"),
         State("sw-society-reg", "value"),
         State("sw-society-state", "value"),
+        State("sw-apt-billing-basis", "value"),
+        State("sw-apt-budget", "value"),
+        State("sw-apt-rate", "value"),
+        State("sw-apt-amt", "value"),
         prevent_initial_call=True
     )
     @require_session
     def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id, central_it_tan, central_tds, central_gst, central_rera, qr_secret, qr_confirm,
-                                 s_address, s_email_v, s_phone_v, s_reg_v, s_state_v):
+                                 s_address, s_email_v, s_phone_v, s_reg_v, s_state_v,
+                                 apt_basis_v, apt_budget_v, apt_rate_v, apt_amt_v):
         triggered_id = ctx.triggered_id
         
         error_msg = ""
         new_step = current_step
+
+        # Apartment Charges: block moving forward while the field the chosen billing basis needs is 0 / empty.
+        _forward = (triggered_id == "sw-btn-next" and n_next) or (
+            isinstance(triggered_id, dict) and triggered_id.get("type") == "sw-nav-item"
+            and any(nav_clicks or []) and triggered_id["index"] > current_step)
+        gate_err = (apt_charges_error(apt_basis_v, apt_budget_v, apt_rate_v, apt_amt_v)
+                    if _forward and CATEGORIES[current_step] == "Apartment Charges" else None)
         
         def get_next_valid_step(step, direction):
             while 0 <= step < len(CATEGORIES):
@@ -204,7 +218,9 @@ def register_setup_wizard_callbacks(app):
             return max(0, min(step, len(CATEGORIES) - 1))
             
         if triggered_id == "sw-btn-next" and n_next:
-            if CATEGORIES[current_step] == "Society Details" and _society_details_error(s_address, s_email_v, s_phone_v, s_reg_v):
+            if gate_err:
+                error_msg = gate_err
+            elif CATEGORIES[current_step] == "Society Details" and _society_details_error(s_address, s_email_v, s_phone_v, s_reg_v):
                 error_msg = _society_details_error(s_address, s_email_v, s_phone_v, s_reg_v)
             elif CATEGORIES[current_step] == "Administrator":
                 if not qr_secret or not qr_confirm:
@@ -231,6 +247,8 @@ def register_setup_wizard_callbacks(app):
                     error_msg = validate_signing_secret(qr_secret)
                 else:
                     new_step = get_next_valid_step(clicked_step, 1)
+            elif gate_err:
+                error_msg = gate_err
             else:
                 new_step = get_next_valid_step(clicked_step, 1)
 
@@ -260,6 +278,82 @@ def register_setup_wizard_callbacks(app):
 
         return new_step, cat_name, step_styles, rules_html, rules_sub, nav_active, nav_children, prev_disabled, next_style, submit_style, error_msg
 
+
+    # Apartment Charges: tell the admin which Part A field the chosen billing basis needs.
+    @app.callback(
+        Output("sw-apt-basis-hint", "children"),
+        Input("sw-apt-billing-basis", "value"),
+        prevent_initial_call=True,
+    )
+    def update_basis_hint(basis):
+        return basis_hint(basis)
+
+    # Review: built from the LIVE form values when the step opens. Nothing is saved before Submit, so the old
+    # database-backed Review could only ever show defaults.
+    REVIEW_STEP = CATEGORIES.index("Review") if "Review" in CATEGORIES else None
+    if REVIEW_STEP is not None:
+        @app.callback(
+            Output({"type": "sw-step-container", "index": REVIEW_STEP}, "children"),
+            Input("sw-current-step", "data"),
+            State("sw-society-state", "value"),
+            State("sw-society-constitution", "value"),
+            State("sw-society-address", "value"),
+            State("sw-society-email", "value"),
+            State("sw-society-phone", "value"),
+            State("sw-society-tan", "value"),
+            State("sw-tds-effective-date", "date"),
+            State("sw-society-gstin", "value"),
+            State("sw-cgst", "value"),
+            State("sw-sgst", "value"),
+            State("sw-central-it-tan", "value"),
+            State("sw-central-tds", "value"),
+            State("sw-central-gst", "value"),
+            State("sw-central-rera", "value"),
+            State({"type": "tds-rate", "index": ALL}, "value"),
+            State("sw-apt-cost", "value"),
+            State("sw-apt-budget", "value"),
+            State("sw-apt-rate", "value"),
+            State("sw-apt-amt", "value"),
+            State("sw-apt-billing-basis", "value"),
+            State("sw-apt-due", "value"),
+            State("sw-apt-sink", "value"),
+            State("sw-apt-repair", "value"),
+            State("sw-apt-interest", "value"),
+            State("sw-ven-1day", "value"),
+            State("sw-ven-7day", "value"),
+            State("sw-ven-1mth", "value"),
+            State("sw-gate-logic", "value"),
+            State("sw-duty-hrs", "value"),
+            State("sw-sec-name", "value"),
+            State("sw-sec-phone", "value"),
+            State("sw-sec-email", "value"),
+            State("sw-calc-start-date", "date"),
+            State("sw-bf-fy", "value"),
+            State({"type": "sw-bf-amt", "acc_id": ALL}, "id"),
+            State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
+            prevent_initial_call=True,
+        )
+        @require_session
+        def refresh_review(step, state, constitution, address, email, phone, tan, tds_date, gstin, cgst, sgst,
+                           central_it_tan, central_tds, central_gst, central_rera, tds_rates,
+                           apt_cost, apt_budget, apt_rate, apt_amt, apt_basis, apt_due, apt_sink, apt_repair, apt_interest,
+                           ven1, ven7, ven30, gate, duty, sec_name, sec_phone, sec_email, calc_start,
+                           bf_fy, bf_ids, bf_amts):
+            if step != REVIEW_STEP:
+                return no_update
+            values = {
+                "state": state, "constitution": constitution, "address": address, "email": email, "phone": phone,
+                "tan": tan, "tds_date": tds_date, "gstin": gstin, "cgst": cgst, "sgst": sgst,
+                "central_it_tan": central_it_tan, "central_tds": central_tds, "central_gst": central_gst,
+                "central_rera": central_rera, "tds_rates": tds_rates,
+                "apt_cost": apt_cost, "apt_budget": apt_budget, "apt_rate": apt_rate, "apt_amt": apt_amt,
+                "apt_basis": apt_basis, "apt_due": apt_due, "apt_sink": apt_sink, "apt_repair": apt_repair,
+                "apt_interest": apt_interest, "ven1": ven1, "ven7": ven7, "ven30": ven30,
+                "gate": gate, "duty": duty, "sec_name": sec_name, "sec_phone": sec_phone, "sec_email": sec_email,
+                "calc_start": calc_start, "bf_fy": bf_fy,
+                "bf_ids": [d.get("acc_id") for d in (bf_ids or [])], "bf_amts": bf_amts or [],
+            }
+            return render_review(values, get_current_society_id())
 
     # Bye-Laws Adoption step: each radio / variation edit is saved straight away as a PROVISIONAL Layer-1 row
     # (record_wizard_adoption — admin of this society or master; never active without a passed resolution).
@@ -432,6 +526,8 @@ def register_setup_wizard_callbacks(app):
         State("sw-apt-sink", "value"),
         State("sw-apt-repair", "value"),
         State("sw-apt-interest", "value"),
+        State("sw-apt-cost", "value"),
+        State("sw-apt-budget", "value"),
         State("sw-ven-1day", "value"),
         State("sw-ven-7day", "value"),
         State("sw-ven-1mth", "value"),
@@ -458,6 +554,7 @@ def register_setup_wizard_callbacks(app):
                             cgst, sgst,
                             c_gst_exempt, c_gst_cad, c_tds_act, c_exp_fmt,
                             apt_amt, apt_rate, apt_billing_basis, apt_due_day, apt_sinking, apt_repair, apt_interest,
+                            apt_cost, apt_budget,
                             ven_1day, ven_7day, ven_1mth,
                             bf_fy, bf_ids, bf_amts, bf_remarks, tds_effective_date,
                             central_it_tan, central_tds, central_gst, central_rera, auth):
@@ -516,6 +613,10 @@ def register_setup_wizard_callbacks(app):
             _details_err = _society_details_error(address, s_email, phone, reg_num)
             if _details_err:
                 return True, no_update, no_update, no_update, no_update, _details_err, no_update, no_update
+
+            _apt_err = apt_charges_error(apt_billing_basis, apt_budget, apt_rate, apt_amt)
+            if _apt_err:
+                return True, no_update, no_update, no_update, no_update, _apt_err, no_update, no_update
 
             if i_agree != 'I AGREE':
                 return True, no_update, no_update, no_update, no_update, "You must type 'I AGREE' to proceed.", no_update, no_update
@@ -602,7 +703,9 @@ def register_setup_wizard_callbacks(app):
             s_email = str(s_email)[:100] if s_email else None
             tan = str(tan)[:10] if tan else None
             gstin = str(gstin)[:15] if gstin else None
-            reg_num = str(reg_num)[:100] if reg_num else None
+            # Registration number is Master-owned and read-only in the wizard: never trust the posted value.
+            _reg_row = db._execute("SELECT registration_number FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True) or {}
+            reg_num = _reg_row.get("registration_number")
             phone = str(phone)[:20] if phone else None
             sec_phone = str(sec_phone)[:20] if sec_phone else None
             sec_name = str(sec_name)[:100] if sec_name else None
@@ -637,7 +740,8 @@ def register_setup_wizard_callbacks(app):
                         :ven_1, :ven_7, :ven_30,
                         :bf_fy, CAST(:bf_json AS jsonb), :created_by,
                         :s_email, :reg_num, :apt_interest,
-                        :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt, :gate_logic, :duty_hrs, :tds_effective_date, :s_state, :s_constitution
+                        :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt, :gate_logic, :duty_hrs, :tds_effective_date, :s_state, :s_constitution,
+                        :apt_cost, :apt_budget
                     ) AS result"""
             _setup_params = {
                         "sid": society_id,
@@ -665,7 +769,9 @@ def register_setup_wizard_callbacks(app):
                         "created_by": _sw_uid,
                         "s_email": s_email,
                         "reg_num": reg_num,
-                        "apt_interest": min(max(float(apt_interest or 0), 0.0), MAX_INTEREST_RATE_PCT),
+                        # No cap here: the rate is what the General Body resolved (UP Model Bye-Laws 2011, bye-law 46(a)).
+                        "apt_interest": max(float(apt_interest or 0), 0.0),
+                        "apt_cost": apt_cost, "apt_budget": apt_budget,
                         "c_sink": c_sink,
                         "c_repair": c_repair,
                         "c_gst_exempt": c_gst_exempt,
