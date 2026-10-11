@@ -165,6 +165,7 @@ def register_setup_wizard_callbacks(app):
         Output("sw-btn-prev", "disabled"),
         Output("sw-btn-next", "style"),
         Output("sw-btn-submit", "style"),
+        Output("sw-submit-spinner", "style"),
         Output("sw-error-msg", "children"),
         Input("sw-btn-prev", "n_clicks"),
         Input("sw-btn-next", "n_clicks"),
@@ -275,8 +276,9 @@ def register_setup_wizard_callbacks(app):
         
         next_style = {"display": "inline-block"} if new_step < len(CATEGORIES) - 1 else {"display": "none"}
         submit_style = {"display": "inline-block"} if new_step == len(CATEGORIES) - 1 else {"display": "none"}
+        spinner_style = {"display": "inline-block"} if new_step == len(CATEGORIES) - 1 else {"display": "none"}
 
-        return new_step, cat_name, step_styles, rules_html, rules_sub, nav_active, nav_children, prev_disabled, next_style, submit_style, error_msg
+        return new_step, cat_name, step_styles, rules_html, rules_sub, nav_active, nav_children, prev_disabled, next_style, submit_style, spinner_style, error_msg
 
 
     # Apartment Charges: tell the admin which Part A field the chosen billing basis needs.
@@ -481,6 +483,7 @@ def register_setup_wizard_callbacks(app):
         Output("toast-store", "data", allow_duplicate=True),
         Output("login-modal", "is_open", allow_duplicate=True),
         Output("sw-error-msg", "children", allow_duplicate=True),
+        Output("sw-submit-spinner", "style", allow_duplicate=True),
         Output("agreement-modal", "is_open", allow_duplicate=True),
         Output("agreement-modal-body", "children", allow_duplicate=True),
         Input("sw-btn-submit", "n_clicks"),
@@ -541,7 +544,10 @@ def register_setup_wizard_callbacks(app):
         State("sw-central-gst", "value"),
         State("sw-central-rera", "value"),
         State("auth-store", "data"),
-        running=[(Output("sw-btn-submit", "disabled"), True, False)],
+        running=[
+            (Output("sw-btn-submit", "disabled"), True, False),
+            (Output("sw-submit-spinner", "style"), {"display": "inline-block"}, _hidden_spinner),
+        ],
         prevent_initial_call=True
     )
     @require_session
@@ -559,7 +565,8 @@ def register_setup_wizard_callbacks(app):
                             bf_fy, bf_ids, bf_amts, bf_remarks, tds_effective_date,
                             central_it_tan, central_tds, central_gst, central_rera, auth):
         triggered = ctx.triggered_id
-        _noop = (no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update)
+        _noop = (no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update)
+        _hidden_spinner = {"display": "none"}
         
         # Default compliance settings (no longer in wizard, set defaults)
         c_gst_exempt = True
@@ -575,7 +582,7 @@ def register_setup_wizard_callbacks(app):
                 logout_user()
             except Exception:
                 pass
-            return False, None, "/dashboard/", {"type": "info", "message": "Setup cancelled. You have been logged out."}, True, "", no_update, no_update
+            return False, None, "/dashboard/", {"type": "info", "message": "Setup cancelled. You have been logged out."}, True, "", _hidden_spinner, no_update, no_update
 
         if triggered == "sw-btn-submit":
             if not n_submit:
@@ -592,9 +599,9 @@ def register_setup_wizard_callbacks(app):
             society_id = get_current_society_id()
             _sw_uid = get_current_user_id()
             if not society_id or not _sw_uid:
-                return True, no_update, no_update, no_update, no_update, "Session error — please log in again.", no_update, no_update
+                return True, no_update, no_update, no_update, no_update, "Session error — please log in again.", _hidden_spinner, no_update, no_update
             if get_current_user_role() != "admin":
-                return True, no_update, no_update, no_update, no_update, "Only the society admin can complete setup.", no_update, no_update
+                return True, no_update, no_update, no_update, no_update, "Only the society admin can complete setup.", _hidden_spinner, no_update, no_update
 
             # A11: the 5-second throttle used to be an in-memory dict, so with 2
             # gunicorn workers it was per-worker and reset on restart. One atomic
@@ -608,39 +615,39 @@ def register_setup_wizard_callbacks(app):
                 {"uid": uid}, fetch_one=True,
             )
             if not _slot:
-                return True, no_update, no_update, no_update, no_update, "Please wait before submitting again.", no_update, no_update
+                return True, no_update, no_update, no_update, no_update, "Please wait before submitting again.", _hidden_spinner, no_update, no_update
 
             _details_err = _society_details_error(address, s_email, phone, reg_num)
             if _details_err:
-                return True, no_update, no_update, no_update, no_update, _details_err, no_update, no_update
+                return True, no_update, no_update, no_update, no_update, _details_err, _hidden_spinner, no_update, no_update
 
             _apt_err = apt_charges_error(apt_billing_basis, apt_budget, apt_rate, apt_amt)
             if _apt_err:
-                return True, no_update, no_update, no_update, no_update, _apt_err, no_update, no_update
+                return True, no_update, no_update, no_update, no_update, _apt_err, _hidden_spinner, no_update, no_update
 
             if i_agree != 'I AGREE':
-                return True, no_update, no_update, no_update, no_update, "You must type 'I AGREE' to proceed.", no_update, no_update
+                return True, no_update, no_update, no_update, no_update, "You must type 'I AGREE' to proceed.", _hidden_spinner, no_update, no_update
 
             if not admin_pass:
-                return True, no_update, no_update, no_update, no_update, "Admin Password is required.", no_update, no_update
+                return True, no_update, no_update, no_update, no_update, "Admin Password is required.", _hidden_spinner, no_update, no_update
 
             # Validate the secret fields first so a typo there never counts
             # as a wrong-password attempt.
             if not qr_secret:
-                return True, no_update, no_update, no_update, no_update, "SIGNING_SECRET is required.", no_update, no_update
+                return True, no_update, no_update, no_update, no_update, "SIGNING_SECRET is required.", _hidden_spinner, no_update, no_update
 
             if qr_secret != qr_confirm or qr_secret != qr_confirm_final:
-                return True, no_update, no_update, no_update, no_update, "SIGNING_SECRETs do not match.", no_update, no_update
+                return True, no_update, no_update, no_update, no_update, "SIGNING_SECRETs do not match.", _hidden_spinner, no_update, no_update
 
             _secret_err = validate_signing_secret(qr_secret)
             if _secret_err:
-                return True, no_update, no_update, no_update, no_update, _secret_err, no_update, no_update
+                return True, no_update, no_update, no_update, no_update, _secret_err, _hidden_spinner, no_update, no_update
 
             # A11: wrong admin passwords here now feed the shared login lockout.
             from app.services.auth_service import verify_password_with_lockout
             _pw_ok, _pw_msg = verify_password_with_lockout(_sw_uid, admin_pass)
             if not _pw_ok:
-                return True, no_update, no_update, no_update, no_update, _pw_msg, no_update, no_update
+                return True, no_update, no_update, no_update, no_update, _pw_msg, _hidden_spinner, no_update, no_update
 
             # society_id was resolved from the server session above.
 
@@ -654,7 +661,7 @@ def register_setup_wizard_callbacks(app):
                 from app.services.secret_vault import encrypt_secret
                 secret_enc = encrypt_secret(qr_secret)
             except Exception as e:
-                return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to secure the signing secret. Check the server configuration and try again.")["message"], no_update, no_update
+                return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to secure the signing secret. Check the server configuration and try again.")["message"], _hidden_spinner, no_update, no_update
 
             # Zip edited rates back onto their seed sections. See the note
             # on fn_complete_society_setup: TDS_SECTION_RATE_SEED has two
@@ -796,13 +803,13 @@ def register_setup_wizard_callbacks(app):
                     if _res != "OK":
                         raise _SetupRejected(_res or "Setup could not be saved — please try again.")
             except _SetupRejected as rej:
-                return True, no_update, no_update, no_update, no_update, str(rej), no_update, no_update
+                return True, no_update, no_update, no_update, no_update, str(rej), _hidden_spinner, no_update, no_update
             except Exception as e:
-                return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to save the society setup. Please try again.")["message"], no_update, no_update
+                return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to save the society setup. Please try again.")["message"], _hidden_spinner, no_update, no_update
 
             outcome = (result or {}).get("result") or ""
             if outcome != "OK":
-                return True, no_update, no_update, no_update, no_update, outcome or "Setup could not be saved — please try again.", no_update, no_update
+                return True, no_update, no_update, no_update, no_update, outcome or "Setup could not be saved — please try again.", _hidden_spinner, no_update, no_update
 
             # State is now written inside fn_complete_society_setup (same
             # statement, same transaction), so a failure here can no longer be
@@ -835,6 +842,7 @@ def register_setup_wizard_callbacks(app):
                 False, no_update, "/dashboard/admin-portal",
                 {"type": "success", "message": "Setup completed successfully!"},
                 no_update, "",
+                _hidden_spinner,
                 agreement_open, agreement_body,
             )  # Close wizard modal, redirect to admin dashboard, open Agreement modal
 

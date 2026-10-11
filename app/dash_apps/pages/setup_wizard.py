@@ -1599,9 +1599,16 @@ def get_setup_wizard_layout(society_id=None):
                                 [
                                     dbc.Button("Previous", id="sw-btn-prev", color="secondary", className="me-2", disabled=True),
                                     dbc.Button("Next", id="sw-btn-next", color="primary", className="me-2"),
-                                    dbc.Button("Submit Setup", id="sw-btn-submit", color="success", style={"display": "none"})
+                                    dbc.Button("Submit Setup", id="sw-btn-submit", color="success"),
+                                    dbc.Spinner(
+                                        id="sw-submit-spinner",
+                                        type="border",
+                                        size="sm",
+                                        color="success",
+                                        style={"display": "none", "marginLeft": "8px"},
+                                    ),
                                 ],
-                                style={"textAlign": "right"}
+                                style={"textAlign": "right", "display": "flex", "justifyContent": "flex-end", "alignItems": "center"}
                             ),
                         ]),
                     ]),
