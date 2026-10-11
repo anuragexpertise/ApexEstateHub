@@ -135,7 +135,7 @@ STATUTORY_ROWS = {
         "The full tabulated list of Acts, Rules, Bye-laws and Notifications "
         "governing this AOA, with applicability, key provisions and sources.",
         True,
-        "Full table on the Setup Wizard's 'UP AOA Compliance' step; Master "
+        "Full table on the Setup Wizard's 'State Act & Rules' step; Master "
         "maintains it on Master Portal → RWA Compliance (UP).",
     ),
 }
@@ -143,45 +143,48 @@ STATUTORY_ROWS = {
 # Wizard step -> ordered STATUTORY_ROWS keys. Steps with no direct statute
 # (Administrator, Instructions, Agreement) fall back to the full framework.
 STEP_ROWS = {
-    "Society Details":    ["it_mutuality", "it_return", "labour"],
-    "Society Compliance": ["gst", "tds"],
-    "Bye-Laws Adoption":  ["sinking", "repair", "reserve", "corpus"],
-    "UP AOA Compliance":  ["up_aoa_act", "up_aoa_rules", "legal_instruments",
-                           "reserve", "corpus", "sinking", "repair"],
-    "TAN & TDS Rates":    ["tds"],
-    "GSTIN & GST Rate":   ["gst"],
-    "Apartment Charges":  ["sinking", "repair", "gst"],
-    "Vendor Charges":     ["tds", "gst", "labour"],
-    "Accounts":           ["it_mutuality", "it_80p", "reserve", "corpus"],
-    "Brought Forward":    ["corpus", "reserve", "sinking", "repair"],
+    "Society Details":          ["it_mutuality", "it_return", "labour"],
+    "Legal Regime Selection":   ["up_aoa_act", "up_aoa_rules", "legal_instruments"],
+    "Central Acts Compliance":  ["it_mutuality", "it_return", "gst", "tds"],
+    "State Act & Rules":        ["up_aoa_act", "up_aoa_rules", "legal_instruments",
+                                 "reserve", "corpus", "sinking", "repair"],
+    "Model Bye-Laws Adoption":  ["sinking", "repair", "reserve", "corpus"],
+    "TAN & TDS Rates":          ["tds"],
+    "GSTIN & GST Rate":         ["gst"],
+    "Apartment Charges":        ["sinking", "repair", "gst"],
+    "Vendor Charges":           ["tds", "gst", "labour"],
+    "Society Operations":       ["labour"],
+    "Accounts Heads":           ["it_mutuality", "it_80p", "reserve", "corpus"],
+    "Brought Forward":          ["corpus", "reserve", "sinking", "repair"],
 }
 
 # Wizard step -> kpi_rule_links.category keys (external "read the Act" links).
 STEP_LINK_CATEGORIES = {
-    "Society Details":    ["apartment_act", "cooperative_act", "rera"],
-    "Administrator":      ["apartment_act"],
-    "Society Compliance": ["fund_gst", "gst_registered", "tds_no_pan"],
-    "Bye-Laws Adoption":  ["apartment_act", "sinking_fund"],
-    "UP AOA Compliance":  ["apartment_act", "cooperative_act", "rera",
-                           "sinking_fund", "income_tax_mutuality"],
-    "TAN & TDS Rates":    ["tds_no_pan", "income_tax_mutuality"],
-    "GSTIN & GST Rate":   ["gst_registered", "fund_gst"],
-    "Apartment Charges":  ["sinking_fund", "apartment_act", "cooperative_act"],
-    "Vendor Charges":     ["tds_no_pan", "gst_registered"],
-    "Accounts":           ["income_tax_mutuality"],
-    "Brought Forward":    ["sinking_fund", "rera"],
-    "Agreement":          ["apartment_act", "cooperative_act"],
+    "Society Details":          ["apartment_act", "cooperative_act", "rera"],
+    "Administrator":            ["apartment_act"],
+    "Legal Regime Selection":   ["apartment_act", "cooperative_act", "rera"],
+    "Central Acts Compliance":  ["fund_gst", "gst_registered", "tds_no_pan", "income_tax_mutuality"],
+    "State Act & Rules":        ["apartment_act", "cooperative_act", "rera",
+                                 "sinking_fund", "income_tax_mutuality"],
+    "Model Bye-Laws Adoption":  ["apartment_act", "sinking_fund"],
+    "TAN & TDS Rates":          ["tds_no_pan", "income_tax_mutuality"],
+    "GSTIN & GST Rate":         ["gst_registered", "fund_gst"],
+    "Apartment Charges":        ["sinking_fund", "apartment_act", "cooperative_act"],
+    "Vendor Charges":           ["tds_no_pan", "gst_registered"],
+    "Accounts Heads":           ["income_tax_mutuality"],
+    "Brought Forward":          ["sinking_fund", "rera"],
+    "Agreement":                ["apartment_act", "cooperative_act"],
 }
 
 # Steps whose "Acts & Rules" column also lists the tabulated Act / Rules /
 # Bye-laws for the society's regime (legal_instrument_catalog). Steps without
 # an entry render the framework rows and official links only.
-STEP_INSTRUMENTS = {"Society Details", "Society Compliance", "UP AOA Compliance", "Bye-Laws Adoption",
-                    "Apartment Charges", "Accounts", "Agreement"}
+STEP_INSTRUMENTS = {"Society Details", "Legal Regime Selection", "Central Acts Compliance", "State Act & Rules",
+                    "Model Bye-Laws Adoption", "Apartment Charges", "Accounts Heads", "Agreement"}
 
 
 # ── Act / Rules / Bye-laws catalog (legal_instrument_catalog) ───────────────
-# The wizard's "UP AOA Compliance" step shows the same tabulated Acts, Rules,
+# The wizard's "State Act & Rules" step shows the same tabulated Acts, Rules,
 # Bye-laws and Notifications that the Master Portal's "RWA Compliance (UP)" tab
 # renders (app/dash_apps/pages/portal_pages.py::_rwa_compliance_up_page), from
 # the same table — so an admin reads the governing provisions while setting
@@ -344,7 +347,7 @@ def rows_for_step(step: str):
 # of construction cost). Where the threshold is NULL (UP: "no statutory floor",
 # database/seed.py NULL_NO_FLOOR) the fund is a society choice made by General
 # Body resolution under the Model Bye-Laws, so the wizard asks for it on the
-# Bye-Laws Adoption step and shows rate fields only if the society opts in.
+# Model Bye-Laws Adoption step and shows rate fields only if the society opts in.
 # The Corpus Fund is a one-time builder-handover receipt: it is never a setup
 # rate, so it only ever appears as an opening balance (Brought Forward).
 FUND_THRESHOLD_KEYS = {
