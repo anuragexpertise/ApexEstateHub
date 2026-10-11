@@ -13,7 +13,7 @@ build/
 app/static/uploads/
 generate_vapid_keys.py
 *.db
-migrations/
+#migrations/
 *.log
 *.diff
 *.patch
