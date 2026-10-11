@@ -416,8 +416,14 @@ POLICY_SPECS: dict[str, tuple] = {
 # Fund policies. Where a regime does not prescribe a fund (UP_AOA_2010: no statutory sinking / repair rate), the
 # Setup Wizard no longer asks for the fund's rate or basis; the society opts in HERE (General Body resolution under
 # bye-law 36 / 46) and only then do the rate fields appear on Apartment Charges. See statutory_rules.fund_rules_for_state.
-_BASIS = (("undivided_interest_surplus", "Undivided interest of surplus (default)"),
-          ("per_sq_ft", "Per sq ft of apartment area"), ("construction_cost", "% of construction cost"))
+_BASIS = (("regime_default", "Regime default (default)"),
+          ("per_sq_ft", "Per sq ft of apartment area"),
+          ("construction_cost", "% of construction cost per year, shared by undivided interest"),
+          ("undivided_interest", "Society's monthly fund amount, shared by undivided interest"))
+_COLLECTION = (("regime_default", "Regime default (default)"),
+               ("on_bill", "On every maintenance bill"),
+               ("fy_close", "At year close, from surplus"),
+               ("none", "Not collected"))
 POLICY_SPECS.update({
     "levy_sinking_fund":    ("Levy a Sinking Fund on members", "BL_46",
                               (("no", "No - not levied (default)"), ("yes", "Yes - by General Body resolution"))),
@@ -425,12 +431,16 @@ POLICY_SPECS.update({
     "levy_repair_fund":     ("Levy a Repair & Maintenance Fund", "BL_36",
                               (("no", "No - not levied (default)"), ("yes", "Yes - by General Body resolution"))),
     "repair_fund_basis":    ("Repair Fund rate basis (if levied)", "BL_36", _BASIS),
+    "sinking_fund_collection": ("Sinking Fund: when it is collected", "BL_46", _COLLECTION),
+    "repair_fund_collection":  ("Repair Fund: when it is collected", "BL_36", _COLLECTION),
     "fund_arrears_interest": ("Late-payment interest also applies to fund dues", "BL_46",
                               (("yes", "Yes (default)"), ("no", "No"))),
 })
-FUND_POLICY_KEYS = ("levy_sinking_fund", "sinking_fund_basis", "levy_repair_fund", "repair_fund_basis",
-                    "fund_arrears_interest")
-del _BASIS
+FUND_POLICY_KEYS = ("levy_sinking_fund", "sinking_fund_collection", "sinking_fund_basis",
+                    "levy_repair_fund", "repair_fund_collection", "repair_fund_basis", "fund_arrears_interest")
+# Asked on the Setup Wizard's Funds step (not on the Model Bye-Laws step, which keeps only fund_arrears_interest).
+FUND_STEP_POLICY_KEYS = tuple(k for k in FUND_POLICY_KEYS if k != "fund_arrears_interest")
+del _BASIS, _COLLECTION
 
 for _bl in STATUTE_BACKED_CLAUSES:
     POLICY_SPECS[f"droppable_{_bl}"] = (
