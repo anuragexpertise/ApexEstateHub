@@ -3,61 +3,46 @@
 """
 ApexEstateHub — comprehensive demo/seed data.
 
-⚠️  BLOCK-COA MIGRATION (2026-09) — ORDERING RULE
-================================================
-This seed has been renumbered to the block chart-of-accounts scheme
-(1000=Assets, 2000=Liabilities, 3000=Equity, 4000=Income, 5000=Expenses).
-Every acc_id in ACCOUNTS (mutuality_nature/tds_section are now inline fields
-on each ACCOUNTS row itself, not separate id-keyed dicts — see the comment
-above the ACCOUNTS list), BF_VALUES, SIMPLE_ASSETS, INSTRUMENT_PURCHASES,
-FULLY_DEPRECIATED_ASSET, EVENTS, RECEIPT_TYPES, and UP_AOA_ACCOUNT_MAPPINGS
-reflects the new IDs.
+  This seed is written for the block chart-of-accounts scheme
+  (1000=Assets, 2000=Liabilities, 3000=Equity, 4000=Income, 5000=Expenses).
+  Every acc_id in ACCOUNTS (mutuality_nature/tds_section are now inline fields
+  on each ACCOUNTS row itself, not separate id-keyed dicts — see the comment
+  above the ACCOUNTS list), BF_VALUES, SIMPLE_ASSETS, INSTRUMENT_PURCHASES,
+  FULLY_DEPRECIATED_ASSET, EVENTS, RECEIPT_TYPES, and UP_AOA_ACCOUNT_MAPPINGS
+  reflects the new IDs.
 
-Do NOT run this seed against a database that has NOT had
-migrations/001_block_coa_renumber.sql applied — the idempotency guard in
-seed_accounts() (SELECT 1 FROM accounts WHERE id = %s AND society_id = %s)
-will skip old-ID rows it thinks don't exist and INSERT duplicates.
+  estatehub.sql is the single source of truth for the schema; it carries no
+  IF NOT EXISTS / DROP IF EXISTS guards, so it is installed onto an empty
+  schema by database/migrate.py (or database/reset_database.py). This seed is
+  run afterwards by migrate.py --seed and is fully idempotent: safe to run
+  repeatedly.
 
-Do NOT run this seed against the migrated DB before
-migrations/002_block_coa_function_patch.sql is applied — every fn_* in
-estatehub.sql that resolves accounts via ILIKE-name or hardcoded literal
-(fn_resolve_gst_accounts, fn_resolve_sdr_leg, fn_resolve_depreciation_account,
-fn_sell_event_ticket, fn_complete_society_setup, ...) will fail to find the
-renumbered accounts and either silently no-op or raise. Apply 002 first.
+  FINANCIAL YEAR SCOPE
+  --------------------
+  Everything the seed *does* belongs to one financial year: FY 2026-27,
+  1-Apr-2026 to 31-Mar-2027, truncated at 30-Sep-2026 (SEED_FY_START /
+  SEED_CUTOFF_DATE). A single FY therefore reconciles on its own, with no
+  cross-year stitching in the statements, reconciliation or CA pack.
 
-Restores the full demo dataset after the block-COA migration: owners, vendors,
-security guards, events, concerns, assets, apartment/vendor charge histories,
-security roster + attendance, the depreciable-instruments ledger, receipts,
-salary/payables, receivables, advance credit, and polls. Fully idempotent: safe
-to run repeatedly.
+  Two kinds of pre-FY date remain, both opening balances rather than activity,
+  both declared with opening=True so the FY-start floor skips them:
+    * the four disposed DEPOSIT_PURCHASES (bought 2024-12 to 2025-11) and the
+      written-down FULLY_DEPRECIATED_ASSET (2019), whose purchase dates are the
+      cost basis the capital-gains holding period is measured from — without
+      them the STCG/LTCG and STCL/LTCL disposal cases all collapse to
+      short-term;
+    * every statutory/compliance effective_from in STATE_COMPLIANCE_THRESHOLDS
+      and LEGAL_REGIME_PROFILES, which are the real commencement dates of Acts,
+      Rules and circulars and must not be back-dated to the seed's window.
 
-FINANCIAL YEAR SCOPE
---------------------
-Everything the seed *does* belongs to one financial year: FY 2026-27,
-1-Apr-2026 to 31-Mar-2027, truncated at 30-Sep-2026 (SEED_FY_START /
-SEED_CUTOFF_DATE). A single FY therefore reconciles on its own, with no
-cross-year stitching in the statements, reconciliation or CA pack.
+  audit_seed_invariants() re-checks both ends of the window against the rows
+  actually written, counting opening-balance legs separately rather than
+  hiding them, and the seed refuses to report success if anything else falls
+  outside FY 2026-27.
 
-Two kinds of pre-FY date remain, both opening balances rather than activity,
-both declared with opening=True so the FY-start floor skips them:
-
-  * the four disposed DEPOSIT_PURCHASES (bought 2024-12 to 2025-11) and the
-    written-down FULLY_DEPRECIATED_ASSET (2019), whose purchase dates are the
-    cost basis the capital-gains holding period is measured from — without them
-    the STCG/LTCG and STCL/LTCL disposal cases all collapse to short-term;
-  * every statutory/compliance effective_from in STATE_COMPLIANCE_THRESHOLDS
-    and LEGAL_REGIME_PROFILES, which are the real commencement dates of Acts,
-    Rules and circulars and must not be back-dated to the seed's window.
-
-audit_seed_invariants() re-checks both ends of the window against the rows
-actually written, counting opening-balance legs separately rather than hiding
-them, and the seed refuses to report success if anything else falls outside
-FY 2026-27.
-
-What it seeds (society_id = 1, "Sunrise Residency"):
-
-  * Society (id=1) + master admin + admin/13 apartment owners/12 vendors/
-    12 security guards (from USERS below).
+  What it seeds (society_id = 1, "Sunrise Residency"):
+    * Society (id=1) + master admin + admin/13 apartment owners/12 vendors/
+      12 security guards (from USERS below).
   * 82 chart-of-accounts rows (block scheme), has_bf/drcr_bf already
     flagged inline.
   * societies.primary_bank_account_id -> SBI (id 1311 under BkAc 1310).

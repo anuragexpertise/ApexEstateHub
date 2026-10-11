@@ -1785,9 +1785,9 @@ CREATE INDEX idx_sm_user     ON societies_memberships (society_id, user_id);
 CREATE INDEX idx_sm_active   ON societies_memberships (society_id, user_id, status)
     WHERE status = 'active';
 
--- Seed reference data for the RBAC vocabulary (mirrors
--- database/migrations/006_rbac_foundation.sql). These rows define the system's
--- role + permission catalogue; the backfill of real users happens in seed.py.
+-- Seed reference data for the RBAC vocabulary (declared inline in this file).
+-- These rows define the system's role + permission catalogue; the backfill of
+-- real users happens in seed.py.
 
 INSERT INTO role_definitions (code, scope, name, description) VALUES
     ('platform_operator',  'platform', 'Platform Operator',  'System-wide operator (migrated master_admin).'),
