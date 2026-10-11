@@ -2081,6 +2081,7 @@ CREATE TABLE kpi_rule_links (
             'apartment_act',
             'cooperative_act',
             'income_tax_mutuality',
+            'central_acts',
             'other'
         )
     ),
