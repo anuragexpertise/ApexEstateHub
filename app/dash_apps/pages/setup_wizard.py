@@ -1815,9 +1815,9 @@ def get_setup_wizard_layout(society_id=None):
                             html.Div(id="sw-error-msg", style={"color": "red", "marginBottom": "8px"}),
                             html.Div(
                                 [
-                                    dbc.Button("Previous", id="sw-btn-prev", color="secondary", className="me-2", disabled=True),
-                                    dbc.Button("Next", id="sw-btn-next", color="primary", className="me-2"),
-                                    dbc.Button("Submit Setup", id="sw-btn-submit", color="success"),
+                                    dbc.Button("Previous", id="sw-btn-prev", color="secondary", className="me-2", disabled=True, style={"display": "inline-block"}),
+                                    dbc.Button("Next", id="sw-btn-next", color="primary", className="me-2", style={"display": "inline-block"}),
+                                    dbc.Button("Submit Setup", id="sw-btn-submit", color="success", style={"display": "none"}),
                                     # dbc.Spinner accepts no `style` (any dbc version), which crashed the whole wizard
                                     # layout; the id and style live on a wrapper the submit callback toggles.
                                     html.Span(

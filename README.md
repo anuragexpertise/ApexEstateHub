@@ -688,6 +688,52 @@ Every rule, parameter and adoption is shown with the **layer it comes from**, so
 
 Every write also inserts into `regime_rule_audit`.
 
+### Constitution Types (UP)
+
+In UP, the Setup Wizard's Constitution dropdown offers four distinct legal forms. **AOA ≠ Co-operative** — they are formed under completely different statutes.
+
+| Constitution Value | Legal Basis | Key Difference |
+|---|---|---|
+| **AOA** | UP Apartment Act, 2010 | Formed by apartment owners; **the AOA is itself registered as a society** under the Societies Registration Act |
+| **REG_SOCIETY** | Societies Registration Act, 1860 (UP amendment) | Traditional registered society (not apartment-specific) |
+| **COOP** | UP Co-operative Societies Act | Co-operative housing society — different governance, membership, and audit requirements |
+| **GENERIC** | Central laws only | Fallback for states without a seeded regime |
+
+> **Key distinction**: An **AOA under the UP Apartment Act** is a specific legal entity that *also* gets registered as a society. A **co-operative housing society** is formed under the Co-operative Societies Act with different rules for membership, voting, fund management, and audit. The regime selection logic (`regime_for_society` in `statutory_rules.py`) maps **State + Constitution** to a regime code (e.g., `UP_AOA_2010` for UP + AOA). Only UP + AOA is fully seeded today; other combinations fall back to `UP_AOA_2010` as a reference.
+
+### Key Implementation Files
+
+| Component | File |
+|---|---|
+| **Catalog of Acts/Rules/Bye-laws** | `legal_instrument_catalog` table (seeded from `LEGAL_INSTRUMENTS_UP_AOA` in `database/seed.py`) |
+| **Society Bye-law choices** | `society_bye_laws` table; CRUD via `regime_rules_admin.save_bye_law_version()` / `record_wizard_adoption()` |
+| **Society Policy choices** | `society_policy_settings` table; specs in `POLICY_SPECS` (`regime_rules_admin.py` lines 405–450); CRUD via `record_wizard_policy()` |
+| **Meetings** | `meetings` table (GBM/EGM/MC); `create_meeting()` |
+| **Resolutions** | `resolutions` table linked to `decision_types`; `create_resolution()` |
+| **Resolution → Rule activation** | `_auto_activate()` (`regime_rules_admin.py` lines 928–973) — fires on passed resolution, activates matching provisional L1/L2/L3 choices |
+| **Resolution enactments (regime-wide)** | `resolution_effects` table with handlers `set_regime_param`, `set_society_policy`, `set_board_param`; executed via `execute_enactment()` |
+| **Rule resolver (engine)** | SQL function `fn_resolve_rule` / `fn_rule` — reads Layer 0 → 1 → 2 → 3, only tightening |
+| **UI: Society governance tabs** | `governance_settings.py` → tabs: RWA Compliance \| Rules \| Society By-laws \| Meetings & Resolutions |
+| **UI: Setup Wizard steps** | `setup_wizard.py` → "Legal Regime Selection", "State Act & Rules", "Model Bye-Laws Adoption", "Funds" |
+
+### Flow Example: Adopting a Bye-law Clause
+
+1. Admin opens **Setup Wizard → Model Bye-Laws Adoption**
+2. Chooses "Adopt with variation" for BL_36 (Maintenance and Repairs), enters variation text
+3. Choice saved as **provisional** in `society_bye_laws` (Layer 1, status=`provisional`)
+4. Later, General Body meets → Admin records **Meeting (GBM)** → records **Resolution** (type `ADOPT_BYE_LAW`, clause `BL_36`, passed, quorum met, 2/3 majority)
+5. `_auto_activate()` fires → finds provisional choice for BL_36 Layer 1 → validates resolution matches → **activates** it (status=`adopted_with_variation`, resolution_id linked)
+6. Billing engine (`fn_resolve_rule`) now reads the society's variation for BL_36 instead of the Model Bye-law text
+
+### Flow Example: Setting Sinking Fund Rate Basis (Policy)
+
+1. Admin on **Setup Wizard → Funds** step chooses `levy_sinking_fund = yes`, `sinking_fund_basis = per_sq_ft`
+2. Saved as **provisional** in `society_policy_settings` (policy_key=`sinking_fund_basis`)
+3. General Body passes resolution (type `SET_SOCIETY_POLICY`, clause `BL_46`)
+4. `_auto_activate()` → activates the provisional policy → billing engine uses `per_sq_ft` basis
+
+This architecture ensures **auditability** (every change has a resolution trail), **legal correctness** (layers only tighten), and **separation of concerns** (Master maintains statutes; Society admin governs via resolutions).
+
 **`fn_resolve_rule(society, clause, date)`** returns the most specific *active* adoption — Layer 3 over 2 over 1 — and falls back to the Layer-0 baseline. `provisional`, `not_adopted` and resolution-less rows never resolve. `adopted_as_is` resolves to the baseline text.
 
 **`fn_get_standing(society, apartment, date)`** is the one defaulter definition behind No Dues / NOC, poll voting, bye-law 7 candidacy and s.22:
