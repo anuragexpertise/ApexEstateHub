@@ -127,7 +127,9 @@ def bye_choice_panel(clause_id, layer, status):
                         if int(layer or 1) != 1 else
                         "Write the wording the society adopts in place of the model clause (below).", style={"fontSize": "12px"})
     else:
-        body = html.Div("The society does not adopt this clause. Needs a simple-majority GBM resolution.",
+        body = html.Div("The society does not adopt this clause. Because it departs from the Model Bye-Laws, it needs a "
+                        "General Body resolution of type Not Adopt Model Bye-Law Clause (2/3 of all votes, provisional) and a "
+                        "reference to a written advocate's opinion. It stays provisional until that resolution is recorded.",
                         style={"fontSize": "12px"})
     box = html.Div([head, body, ref], style={"padding": "10px 12px", "background": "#f6f8fb",
                                               "border": "1px solid #e1e7ef", "borderRadius": "8px"})

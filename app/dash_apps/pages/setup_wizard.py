@@ -263,7 +263,9 @@ REVIEW_STEP_NAME = "Review"
 WIZARD_GROUPS = {
     "Organization Details": ["Instructions", "Society Details", "Administrator"],
     "Legal Regime": ["Legal Regime Selection"],
-    "Central Acts": ["Central Acts Compliance", "TAN & TDS Rates", "GSTIN & GST Rate"],
+    # Central Acts are not a choice: they apply to every society, so they are a read-only banner on
+    # "Legal Regime Selection". Only the two steps that need figures (TAN/TDS, GSTIN/GST) remain here.
+    "Central Acts": ["TAN & TDS Rates", "GSTIN & GST Rate"],
     "State Act & Rules": ["State Act & Rules", "Model Bye-Laws Adoption"],
     "Society Policy": ["Apartment Charges", "Funds", "Vendor Charges", "Society Operations"],
     "Accounts": ["Accounts Heads", "Brought Forward"],
@@ -274,7 +276,6 @@ CATEGORIES = [
     'Society Details',
     'Administrator',
     'Legal Regime Selection',
-    'Central Acts Compliance',
     'TAN & TDS Rates',
     'GSTIN & GST Rate',
     'State Act & Rules',
@@ -294,7 +295,6 @@ CATEGORY_ICONS = {
     "Administrator": "fas fa-user-shield",
     "Instructions": "fas fa-info-circle",
     "Legal Regime Selection": "fas fa-sitemap",
-    "Central Acts Compliance": "fas fa-landmark",
     "State Act & Rules": "fas fa-university",
     "Model Bye-Laws Adoption": "fas fa-scale-balanced",
     "TAN & TDS Rates": "fas fa-percent",
@@ -441,8 +441,32 @@ def _render_banner(title, text):
     ], className="mb-4 shadow-sm border-0 bg-light")
 
 
+def _central_acts_banner():
+    """Read-only table of the Central Acts (Layer 0). Nothing here is entered or chosen: figures go on the
+    'TAN & TDS Rates' and 'GSTIN & GST Rate' steps. Wording is deliberately conservative: the Income-tax Act, 2025
+    replaced the 1961 Act from 1 April 2026, and this app's section references still follow the 1961 Act."""
+    return dbc.Table([
+        html.Thead(html.Tr([html.Th("Central Act"), html.Th("What it means for your society"), html.Th("Where you enter it")])),
+        html.Tbody([
+            html.Tr([html.Td("Income-tax Act, 2025 (in force 1 April 2026; replaced the Income-tax Act, 1961)"),
+                     html.Td(["TAN, TDS on payments to vendors and contractors, and the mutuality position. ",
+                              html.Strong("Section references in this app still follow the 1961 Act"),
+                              " - your CA must re-map them for FY 2026-27 onward."]),
+                     html.Td("TAN & TDS Rates step (skipped if you answered TDS = No)")]),
+            html.Tr([html.Td("Central GST Act, 2017, and the UP GST Act, 2017 (state law mirroring it)"),
+                     html.Td("GST on maintenance above the per-member threshold, and reverse charge (RCM)."),
+                     html.Td("GSTIN & GST Rate step (skipped if you answered GST = No)")]),
+            html.Tr([html.Td("Real Estate (Regulation and Development) Act, 2016"),
+                     html.Td("Applies to registered projects and to the promoter's duties up to handover (maintenance until the "
+                             "association takes over, handover of common areas). It is not a compliance category for the "
+                             "association's own accounts."),
+                     html.Td("Nothing to enter")]),
+        ]),
+    ], bordered=True, size="sm", style={"fontSize": "12.5px"})
+
+
 def _render_tds_rates_table():
-    """Render the TDS rates table for Central Acts Compliance and TAN & TDS Rates steps."""
+    """Render the TDS rates table for the TAN & TDS Rates step."""
     from database.seed import TDS_SECTION_RATE_SEED
     header = html.Div([
         _th("Section", "Income Tax Act section the TDS is deducted under (e.g. 194C contractors, 194J professionals)."),
@@ -730,17 +754,41 @@ def legal_hierarchy_rows(society_id=None, state=None):
     state_act = items(("Act",)) or [html.Span(f"No {regime} Act in the catalog yet.", className="text-muted")]
     rules = items(("Rules", "Notification")) or [html.Span(f"No {regime} Rules in the catalog yet.", className="text-muted")]
     model_bl = items(("Bye-laws",)) or [html.Span(f"No {regime} Model Bye-laws in the catalog yet.", className="text-muted")]
+    try:
+        from app.services import regime_rules_admin as _rra
+        _dts = {d["code"]: d for d in _rra.list_decision_types()}
+    except Exception:
+        _dts = {}
+
+    def _maj(code):
+        """'66.67% of all votes (provisional)' for a decision type, read from decision_types (single source)."""
+        d = _dts.get(code)
+        if not d:
+            return "see Settings > Society governance"
+        tag = "" if d.get("verification") == "verified" else " (provisional - confirm with your advocate)"
+        if d["required_body"] == "GBM":
+            return f"{float(d['majority_pct']):g}% of all votes, by undivided interest{tag}"
+        return f"simple majority of the committee{tag}"
+
+    def _note(text):
+        return html.Div(html.Small(text, className="text-muted"))
+
     rows = [
-        ("Central Act", central, "locked"),
-        ("State Act", state_act, "locked"),
-        ("AOA Rules", rules, "locked"),
-        ("Model Bye-laws", model_bl, "provisional"),
-        ("Society Adopted Bye-laws", [html.Span("Clauses adopted / varied by General Body resolution. Set them on the "),
-                                      html.Strong("Model Bye-Laws Adoption"), html.Span(" step (left menu).")], "provisional"),
-        ("Resolutions (Passed/Enacted)", [html.Span("Recorded after setup under "), html.Strong("Settings > Society governance > Meetings & Resolutions"),
-                                          html.Span(".")], "provisional"),
-        ("Board Meetings", [html.Span("Management Committee decisions, recorded under "), html.Strong("Settings > Society governance"),
-                            html.Span(".")], "provisional"),
+        ("L0 - Central Acts", central + [_note("Income-tax, GST, RERA. Apply to every society; not a choice.")], "locked"),
+        ("L0 - State Act", state_act, "locked"),
+        ("L0 - Rules", rules, "locked"),
+        ("L0 - Model Bye-laws (notified)", model_bl + [_note("Made by the Governor under the Act; a society makes its bye-laws in accordance with them.")], "locked"),
+        ("L1 - Society Bye-laws", [html.Span("The Model Bye-laws as adopted or varied by the General Body on the "),
+                                  html.Strong("Model Bye-Laws Adoption"), html.Span(" step. Adopting or varying: "),
+                                  html.Span(_maj("ADOPT_BYE_LAW")), html.Span(". A clause may be recorded as not adopted only on "
+                                  "a written advocate's opinion, and never if the Act or Rules back it.")], "provisional"),
+        ("L2 - Society Policy / GBM Resolutions", [html.Span("Policy: "), html.Span(_maj("SET_SOCIETY_POLICY")),
+                                                  html.Span(". Ordinary General Body resolution: "), html.Span(_maj("GENERAL_RESOLUTION")),
+                                                  html.Span(", with quorum. Recorded under "), html.Strong("Settings > Society governance > Meetings & Resolutions"),
+                                                  html.Span(". A policy may tighten, never loosen, the layer above it.")], "provisional"),
+        ("L3 - Board / Working Committee", [html.Span("Operational limits decided by the committee: "), html.Span(_maj("SET_BOARD_PARAM")),
+                                           html.Span(", then placed before the General Body for ratification. Recorded under "),
+                                           html.Strong("Settings > Society governance"), html.Span(".")], "provisional"),
     ]
     out = []
     for label, body, badge_type in rows:
@@ -968,7 +1016,7 @@ def render_category_content(category, society_id=None, state=None):
             )
         
     # Add Print Button for specific categories
-    if category in ["Central Acts Compliance", "State Act & Rules", "Model Bye-Laws Adoption", "TAN & TDS Rates", "Accounts Heads"]:
+    if category in ["State Act & Rules", "Model Bye-Laws Adoption", "TAN & TDS Rates", "Accounts Heads"]:
         elements.append(
             html.Div([
                 dbc.Button([html.I(className="fas fa-print me-2"), "Print / Open in New Window"], 
@@ -1009,10 +1057,10 @@ def render_category_content(category, society_id=None, state=None):
             for code, name in _state_choices.items() if code != "ALL"
         ]
         constitution_options = [
-            {"label": "Apartment Owners' Association (AOA)", "value": "AOA"},
-            {"label": "Registered Society (REG_SOCIETY)", "value": "REG_SOCIETY"},
-            {"label": "Co-operative Housing Society (COOP)", "value": "COOP"},
-            {"label": "Generic / Other", "value": "GENERIC"},
+            {"label": "Apartment Owners' Association (AOA) - UP Apartment Act, 2010", "value": "AOA"},
+            {"label": "Registered Society - Societies Registration Act, 1860 (as amended in UP)", "value": "REG_SOCIETY"},
+            {"label": "Co-operative Housing Society - UP Co-operative Societies Act", "value": "COOP"},
+            {"label": "Generic / Other (central laws only)", "value": "GENERIC"},
         ]
         return elements + [
             _render_banner("Society Details", "Enter society identity details. State + Constitution together select the legal regime. Name, PAN and Registration Number are set by Master and cannot be edited here. Logo and Background images are optional."),
@@ -1029,7 +1077,9 @@ def render_category_content(category, society_id=None, state=None):
             dbc.Select(id="sw-society-constitution", options=constitution_options, value=s_constitution, className="mb-3"),
             html.Div(id="sw-regime-badge", children=regime_badge(s_state), className="mb-2"),
             html.P(
-                "State + Constitution together select the legal regime (Central Act → State Act → Rules → Model Bye-laws). "
+                "State + Constitution together select the legal regime (Central Acts → State Act → Rules → Model Bye-laws → "
+                "Society Bye-laws → Policy / Resolutions → Board). In UP an AOA is itself registered as a society; "
+                "the Apartment Act applies on top. "
                 "Drives GST inter-state (IGST) vs intra-state (CGST+SGST) determination on RCM, and which "
                 "state's statutory Balance Sheet head-mapping / fund-rate defaults apply.",
                 className="text-muted small mb-3",
@@ -1083,8 +1133,12 @@ def render_category_content(category, society_id=None, state=None):
                 ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
             ]),
             html.Hr(),
+            html.H6([html.I(className="fas fa-landmark me-2"), "Central Acts (Layer 0 - apply to every society, not a choice)"], className="text-primary mt-3 mb-2"),
+            _central_acts_banner(),
             html.H6("Central Act Settings", className="text-primary mt-3 mb-2"),
-            html.P("The following Central Acts apply to all societies. All answers default to Yes; answer No only on your CA's advice. TDS = No hides the TAN & TDS Rates step and GST = No hides the GSTIN & GST Rate step:", className="text-muted small mb-3"),
+            html.P("The Acts above apply to every society whatever you answer. What depends on your society's facts is whether a duty "
+                   "under them has been triggered (a GST registration threshold, TDS on payments you make). All answers default to Yes; "
+                   "answer No only on your CA's advice. TDS = No hides the TAN & TDS Rates step and GST = No hides the GSTIN & GST Rate step:", className="text-muted small mb-3"),
             dbc.Row([
                 dbc.Col([
                     _label("Income Tax — TAN Required?"),
@@ -1101,27 +1155,10 @@ def render_category_content(category, society_id=None, state=None):
                     dbc.RadioItems(id="sw-central-gst", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3"),
                 ], width=6),
                 dbc.Col([
-                    _label("RERA Applicable?"),
+                    _label("RERA - is the project RERA-registered? (handover rules only)"),
                     dbc.RadioItems(id="sw-central-rera", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3"),
                 ], width=6),
             ]),
-        ]
-    elif category == "Central Acts Compliance":
-        from app.services.statutory_rules import regime_for_society
-        regime = regime_for_society(society_id, state)
-        # Read-only summary. TAN, the TDS effective date and the TDS rates table are entered ONLY on the
-        # "TAN & TDS Rates" step: rendering them here too created duplicate component IDs.
-        return elements + [
-            _render_banner("Central Acts Compliance", f"Central Acts that apply to a society under {regime}. These apply uniformly across India; you enter the figures on the next steps."),
-            dbc.Table([
-                html.Thead(html.Tr([html.Th("Central Act"), html.Th("What it means for your society"), html.Th("Where you enter it")])),
-                html.Tbody([
-                    html.Tr([html.Td("Income Tax Act, 1961"), html.Td("TAN, and TDS on payments to vendors and contractors."), html.Td("TAN & TDS Rates step (skipped if you answered TDS = No)")]),
-                    html.Tr([html.Td("CGST / SGST Act, 2017"), html.Td("GST on maintenance above the per-member threshold, and RCM."), html.Td("GSTIN & GST Rate step (skipped if you answered GST = No)")]),
-                    html.Tr([html.Td("RERA Act, 2016"), html.Td("Builder obligations and the corpus fund; no setup figure."), html.Td("Nothing to enter")]),
-                ]),
-            ], bordered=True, size="sm", style={"fontSize": "12.5px"}),
-            html.P("Change your TDS / GST answers on the Legal Regime Selection step.", className="text-muted small"),
         ]
     elif category == "State Act & Rules":
         from app.services.statutory_rules import regime_for_society, instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR, fund_rules_for_state

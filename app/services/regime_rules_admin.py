@@ -1050,16 +1050,67 @@ def list_resolutions(society_id: int) -> list[dict]:
 
 def list_decision_types() -> list[dict]:
     """List all decision types."""
-    return _rows("""SELECT id, code, label, required_body, majority_pct, description
+    return _rows("""SELECT id, code, label, required_body, majority_pct, authority_layer, majority_basis,
+                           needs_advocate_opinion, verification, source_provision, description
                     FROM decision_types
                     ORDER BY code""")
 
 
+DEFAULT_GBM_QUORUM_PCT = 30.0   # Model Bye-Laws 2011, bye-law 9; the society's own figure (poll_quorum_pct) wins if set
+
+
+def gbm_quorum_floor(society_id: int) -> float:
+    """Minimum share of owners present IN PERSON for a General Body resolution to be recorded as passed. Read from
+    the same rule as the poll quorum (bye-law 9) so there is one figure; a society may raise it, never lower it."""
+    try:
+        row = _row("SELECT fn_regime_param_num(%s, 'poll_quorum_pct') AS q", (society_id,))
+        q = float(row["q"]) if row and row.get("q") is not None else DEFAULT_GBM_QUORUM_PCT
+    except Exception:
+        q = DEFAULT_GBM_QUORUM_PCT
+    return max(q, DEFAULT_GBM_QUORUM_PCT)
+
+
+def thresholds_ratification(society_id: int) -> dict:
+    """Has this society's General Body ratified the voting thresholds and quorum the software applies?
+    {'ratified': bool, 'resolution_id', 'passed_on', 'advocate_opinion_ref'}. Until it has, every threshold whose
+    decision type is not 'verified' is provisional and the screens say so."""
+    try:
+        row = _row("""SELECT r.id, r.passed_on, r.advocate_opinion_ref
+                        FROM resolutions r
+                        JOIN decision_types dt ON dt.id = r.decision_type_id
+                        JOIN meetings m ON m.id = r.meeting_id
+                       WHERE m.society_id = %s AND dt.code = 'RATIFY_VOTING_THRESHOLDS' AND r.passed
+                       ORDER BY r.passed_on DESC NULLS LAST, r.id DESC LIMIT 1""", (society_id,))
+    except Exception:
+        row = None
+    if not row:
+        return {"ratified": False, "resolution_id": None, "passed_on": None, "advocate_opinion_ref": None}
+    return {"ratified": True, "resolution_id": row["id"], "passed_on": row["passed_on"],
+            "advocate_opinion_ref": row.get("advocate_opinion_ref")}
+
+
+def _pct(v):
+    """None for blank, a float in [0, 100], or the string 'bad' for anything else."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return "bad"
+    return f if 0 <= f <= 100 else "bad"
+
+
 def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, decision_type_id: int,
                       clause_id: str | None, body: str, majority_required: float,
-                      passed: bool, passed_on, reason: str, actor_society_id=None) -> tuple[bool, str]:
+                      passed: bool, passed_on, reason: str, actor_society_id=None,
+                      votes_for_pct=None, owners_present_pct=None, advocate_opinion_ref=None) -> tuple[bool, str]:
     """Create a new resolution record (admin of that society only). If it is passed and names a clause, any
-    matching provisional bye-law choice of the society is activated automatically."""
+    matching provisional bye-law choice of the society is activated automatically.
+
+    A General Body resolution recorded as passed must say what was actually achieved: owners_present_pct (quorum,
+    bye-law 9: owners present in person) and votes_for_pct (share of ALL votes in favour, each vote weighted by the
+    owner's undivided interest, bye-laws 2(e) and 8). Both are checked against the decision type's threshold and
+    the society's quorum. A decision type that departs from the Model Bye-Laws also needs advocate_opinion_ref."""
     _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
     why = _text(reason, MIN_TEXT)
     if not why:
@@ -1073,31 +1124,53 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
         return False, "Meeting not found for this society."
     
     # Verify decision type exists
-    dt = _row("SELECT id, majority_pct FROM decision_types WHERE id = %s", (decision_type_id,))
+    dt = _row("""SELECT id, code, majority_pct, required_body, needs_advocate_opinion
+                   FROM decision_types WHERE id = %s""", (decision_type_id,))
     if not dt:
         return False, "Decision type not found."
-    
+
     # A resolution can never be recorded as passed on a smaller majority than its decision type requires
     # (e.g. 2/3 to adopt a bye-law), nor at a meeting that was not quorate, nor at the wrong kind of meeting.
-    maj = float(majority_required) if majority_required else float(dt["majority_pct"])
-    if maj < float(dt["majority_pct"]):
-        return False, f"This decision type needs at least {float(dt['majority_pct']):g}% to pass."
+    threshold = float(dt["majority_pct"])
+    maj = float(majority_required) if majority_required else threshold
+    if maj < threshold:
+        return False, f"This decision type needs at least {threshold:g}% to pass."
+    votes_for = _pct(votes_for_pct)
+    present = _pct(owners_present_pct)
+    if votes_for == "bad" or present == "bad":
+        return False, "Votes in favour and owners present must each be a percentage between 0 and 100."
+    advocate_ref = (advocate_opinion_ref or "").strip() or None
     if passed:
         mt = _row("SELECT type, quorum_met FROM meetings WHERE id = %s", (meeting_id,))
-        body_needed = _row("SELECT required_body FROM decision_types WHERE id = %s", (decision_type_id,))["required_body"]
+        body_needed = dt["required_body"]
         if not mt["quorum_met"]:
             return False, "A resolution cannot be recorded as passed at a meeting without a quorum."
         if body_needed == "GBM" and mt["type"] not in ("GBM", "EGM"):
             return False, "This decision type needs a General Body meeting (GBM/EGM)."
         if not _d(passed_on):
             return False, "Give the date the resolution was passed."
+        if body_needed == "GBM":
+            floor = gbm_quorum_floor(society_id)
+            if present is None:
+                return False, "Give the share of owners present in person (quorum, bye-law 9)."
+            if present < floor:
+                return False, f"Quorum not met: {present:g}% of owners present in person, {floor:g}% needed."
+            if votes_for is None:
+                return False, "Give the share of ALL votes cast in favour, weighted by undivided interest (bye-laws 2(e), 8)."
+            if votes_for < maj:
+                return False, (f"Not carried: {votes_for:g}% of all votes in favour, {maj:g}% needed. A majority is measured "
+                               "against all votes by undivided interest, not against those present or one vote per flat.")
+        if dt["needs_advocate_opinion"] and (not advocate_ref or len(advocate_ref) < 5):
+            return False, ("This decision departs from the Model Bye-Laws or ratifies the software's thresholds, so it needs a "
+                           "reference to the written advocate's opinion before it can be recorded as passed.")
     
     passed_date = _d(passed_on) if passed else None
     
     row = _row(
         """WITH ins AS (
-               INSERT INTO resolutions (meeting_id, clause_id, decision_type_id, body, majority_required, passed, passed_on, created_by)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+               INSERT INTO resolutions (meeting_id, clause_id, decision_type_id, body, majority_required, votes_for_pct,
+                                        owners_present_pct, advocate_opinion_ref, passed, passed_on, created_by)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                RETURNING id
            )
            INSERT INTO regime_rule_audit
@@ -1105,7 +1178,8 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
            SELECT 'resolutions', %s, 'resolution#' || ins.id, 'new_version',
                   '{}'::jsonb, to_jsonb(ins), %s, %s, %s
            FROM ins RETURNING rule_key""",
-        (meeting_id, clause_id, decision_type_id, body, maj, passed, passed_date, actor_id, society_id, why, actor_id, actor_role))
+        (meeting_id, clause_id, decision_type_id, body, maj, votes_for, present, advocate_ref, passed, passed_date, actor_id,
+         society_id, why, actor_id, actor_role))
     if not row:
         return False, "Failed to create resolution."
     new_id = int(row["rule_key"].split("#")[1])

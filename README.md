@@ -622,6 +622,34 @@ How a society's own decisions — not just the statute — reach the engine. Tab
 | 2 | Society policy — may only tighten a Layer-1 clause | General Body, 2/3 (`SET_SOCIETY_POLICY`) | `layer = 2` |
 | 3 | Board decision — operational limits | Managing Committee (`SET_BOARD_PARAM`) | `layer = 3` |
 
+#### Legal hierarchy and decision procedure (Uttar Pradesh AOA)
+
+EstateHub is built first for Uttar Pradesh Apartment Owners' Associations, so every figure below states where it comes from and how sure we are of it. **Authority** (which layer a decision creates or changes) and **majority** (how many must agree) are separate: `decision_types.authority_layer` vs `majority_pct` / `majority_basis`.
+
+| Layer | Instrument | Who may change it | Procedure | Status |
+|---|---|---|---|---|
+| L0 | Central Acts: Income-tax Act, 2025; Central GST Act, 2017 (and the UP GST Act, 2017, a state law mirroring it); RERA Act, 2016 | Nobody in the society. Not a choice, so there is no "Central Acts" setup step, only a banner on *Legal Regime Selection* | n/a | Verified as to existence; section references still follow the 1961 Income-tax Act and must be re-mapped by the society's CA |
+| L0 | UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010 | Nobody in the society | n/a | In force; the 2016 amendment was repealed without being enforced |
+| L0 | UP Apartment Rules, 2011 (made under s.30) | Nobody in the society | n/a | In force |
+| L0 | Model Bye-Laws, notified 16 Nov 2011 under s.14(6) | Nobody in the society | n/a | Made by the Governor; a society makes its bye-laws in accordance with them |
+| L1 | Society bye-laws (the Model Bye-Laws as adopted or varied) | General Body | `ADOPT_BYE_LAW`, `VARY_BYE_LAW`: 2/3 of all votes | Provisional: bye-law 58 as cited by the engine, gazette text not yet checked |
+| L1 | A Model clause recorded as **not adopted** | General Body, on a written advocate's opinion | `REJECT_BYE_LAW`: 2/3 of all votes and `advocate_opinion_ref`; never for a clause the Act or Rules back (`STATUTE_BACKED_CLAUSES`) | Provisional: dropping a clause treated as a variation |
+| L2 | Society policy | General Body | `SET_SOCIETY_POLICY`: 2/3 of all votes; tighten only | Provisional: a policy that only applies an existing bye-law may need only an ordinary majority |
+| L2 | Ordinary General Body resolution | General Body | `GENERAL_RESOLUTION`, `AMEND_CASH_LIMIT`: 51% of all votes, with quorum | Checked: bye-law 2(e) |
+| L3 | Board / working committee decision | Committee | `SET_BOARD_PARAM`: simple majority of the committee, then placed before the General Body for ratification (`loa_ratification`) | Provisional |
+
+**How a resolution is checked** (`regime_rules_admin.create_resolution`). A General Body resolution cannot be recorded as passed unless the meeting recorded a quorum **and** the entry gives `owners_present_pct` (owners present in person, at least the society's `poll_quorum_pct`, 30 under bye-law 9) **and** `votes_for_pct` (share of **all** votes in favour, each weighted by the owner's undivided interest under bye-laws 2(e) and 8, at least the decision type's majority). Both are stored on the resolution with the threshold that applied. The engine checks the percentages it is given; it does not yet tally per-apartment votes at a General Body meeting.
+
+**Provisional until ratified.** Every threshold whose `verification` is not `verified` is provisional. A society's General Body ratifies the set with a `RATIFY_VOTING_THRESHOLDS` resolution on a written advocate's opinion; until then the resolution form and the legal hierarchy table say so. `thresholds_ratification(society_id)` reports the status.
+
+**Open items for the society's advocate and CA** (nothing here is a legal opinion):
+1. Bye-law 58: does a policy need 2/3, or only an ordinary majority? Confirm the text and fix `SET_SOCIETY_POLICY`.
+2. Whether a Model clause may be recorded as not adopted at all, and with which majority.
+3. 2/3 for `APPROVE_LOAN`, `APPROPRIATE_FUND` and `SERVICE_CUTOFF` is the engine's stricter reading; bye-law 3(1)(f) and s.22 were not checked for a majority.
+4. Re-map every Income-tax Act, 1961 section cited in the app (43(6)(c), 50, 80P, 194C and others) to the Income-tax Act, 2025 for FY 2026-27 onward.
+5. Clause numbering: `statutory_rules.py` cites "Act prevails (54)" while the bye-law engine uses `BL_55`; confirm against the gazette.
+6. In UP an AOA is itself registered as a society under the Societies Registration Act, 1860 as amended in UP, with the Apartment Act on top; confirm how a Registered Society or Co-operative should be treated when the Apartment Act also applies.
+
 #### Layer of Authority — colour code (VIBGYOR)
 
 Every rule, parameter and adoption is shown with the **layer it comes from**, so a reader can tell at a glance whether a value is the law, the Model Bye-Laws, the society's own policy or a Board decision. Warm colours are reserved for deviation from a higher layer.

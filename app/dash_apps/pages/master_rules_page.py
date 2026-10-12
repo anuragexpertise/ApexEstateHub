@@ -327,7 +327,18 @@ def render_resolution_form(society_id: int | None, p: str = "mrl") -> html.Div:
         decision_types = rra.list_decision_types()
     except Exception:
         decision_types = []
-    dt_opts = [{"label": f"{dt['code']} — {dt['label']}", "value": dt["id"]} for dt in decision_types]
+    def _dt_label(dt):
+        """Code - label [authority layer, majority, provisional?]: authority and majority are shown separately."""
+        layer = f"L{dt['authority_layer']}" if dt.get("authority_layer") else ""
+        how = (f"{float(dt['majority_pct']):g}% of all votes" if dt.get("majority_basis", "all_votes") == "all_votes"
+               else "committee majority")
+        prov = "" if dt.get("verification") == "verified" else ", provisional"
+        return f"{dt['code']} — {dt['label']} [{layer}, {how}{prov}]"
+    dt_opts = [{"label": _dt_label(dt), "value": dt["id"]} for dt in decision_types]
+    try:
+        _ratified = rra.thresholds_ratification(society_id)
+    except Exception:
+        _ratified = {"ratified": False}
     
     try:
         clauses = rra.MODEL_BYE_LAW_CLAUSES
@@ -349,8 +360,22 @@ def render_resolution_form(society_id: int | None, p: str = "mrl") -> html.Div:
             dbc.Col([_label("Clause (optional)"), dcc.Dropdown(id=f"{p}-res-clause", options=clause_opts, style={"fontSize": "12px"})], md=6),
             dbc.Col([_label("Majority % (from decision type)"), dbc.Input(id=f"{p}-res-majority", type="number", step="0.01", size="sm", readonly=True)], md=3),
         ], className="mb-2"),
+        html.Div(
+            html.Small("Voting thresholds and quorum: ratified by your General Body." if _ratified.get("ratified") else
+                       "Voting thresholds and quorum are PROVISIONAL until your General Body ratifies them on a written advocate's "
+                       "opinion (decision type RATIFY_VOTING_THRESHOLDS). Authority (the layer) and majority are shown separately "
+                       "in the Decision Type list.", className="text-muted"),
+            className="mb-2"),
         _label("Resolution Body"),
         dbc.Textarea(id=f"{p}-res-body", rows=4, size="sm", className="mb-2", placeholder="Full text of the resolution..."),
+        dbc.Row([
+            dbc.Col([_label("Owners present in person (%) - quorum"),
+                     dbc.Input(id=f"{p}-res-present", type="number", min=0, max=100, step="0.01", size="sm")], md=4),
+            dbc.Col([_label("Votes in favour (% of ALL votes, by undivided interest)"),
+                     dbc.Input(id=f"{p}-res-votes-for", type="number", min=0, max=100, step="0.01", size="sm")], md=4),
+            dbc.Col([_label("Advocate's opinion reference (if the decision type needs one)"),
+                     dbc.Input(id=f"{p}-res-advocate", type="text", maxLength=255, size="sm")], md=4),
+        ], className="mb-2"),
         dbc.Row([
             dbc.Col([_label("Passed"), dbc.Checkbox(id=f"{p}-res-passed", label="Mark as passed", value=False)], md=4),
             dbc.Col([_label("Passed on"), dbc.Input(id=f"{p}-res-passed-on", type="date", size="sm", value=date.today().isoformat())], md=4),

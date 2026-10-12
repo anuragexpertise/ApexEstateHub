@@ -178,15 +178,19 @@ def register_governance_callbacks(app):
                   Output("gov-bye-body", "children", allow_duplicate=True), Input("gov-res-save", "n_clicks"),
                   State("gov-res-mtg", "value"), State("gov-res-dt", "value"), State("gov-res-clause", "value"),
                   State("gov-res-body", "value"), State("gov-res-majority", "value"), State("gov-res-passed", "value"),
-                  State("gov-res-passed-on", "value"), State("gov-res-reason", "value"), prevent_initial_call=True)
+                  State("gov-res-passed-on", "value"), State("gov-res-reason", "value"),
+                  State("gov-res-present", "value"), State("gov-res-votes-for", "value"), State("gov-res-advocate", "value"),
+                  prevent_initial_call=True)
     @require_session
-    def gov_save_resolution(n, mtg_id, dt_id, clause, body, majority, passed, passed_on, reason):
+    def gov_save_resolution(n, mtg_id, dt_id, clause, body, majority, passed, passed_on, reason,
+                            present, votes_for, advocate):
         if not n or not mtg_id or not dt_id or not body:
             return no_update, no_update, no_update
         return _run(lambda uid, role, sid: rra.create_resolution(
                         uid, role, sid, int(mtg_id), int(dt_id), clause or None, body,
                         float(majority) if majority else None, bool(passed), passed_on if passed else None, reason,
-                        actor_society_id=sid),
+                        actor_society_id=sid, votes_for_pct=votes_for, owners_present_pct=present,
+                        advocate_opinion_ref=advocate),
                     lambda sid: (gs.mtg_body(sid, True), gs.bye_body(sid)), 2)
 
     @app.callback(_TOAST, Output("gov-mtg-body", "children", allow_duplicate=True),

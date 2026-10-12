@@ -188,7 +188,8 @@ def test_save_is_provisional_then_activated_by_a_passed_resolution(pg):
     assert float(rule(pg, "arrears_disqualify_days", on=TOMORROW)["value"]) == 60          # inert until backed
     mid, dt = _meeting_and_resolution()
     ok, msg = rra.create_resolution(5, "admin", SOC, mid, dt["id"], "arrears_disqualify_days", "Shorten the arrears margin to 45 days",
-                                    float(dt["majority_pct"]), True, date.today(), "Recording the passed resolution", actor_society_id=SOC)
+                                    float(dt["majority_pct"]), True, date.today(), "Recording the passed resolution", actor_society_id=SOC,
+                                    votes_for_pct=100, owners_present_pct=100)
     assert ok and "now active" in msg, msg
     r = rule(pg, "arrears_disqualify_days", on=TOMORROW)
     assert float(r["value"]) == 45 and r["layer"] == 2
@@ -217,7 +218,8 @@ def test_resolution_without_minutes_does_not_activate(pg):
     assert ok
     mid, dt = _meeting_and_resolution(minutes=None)
     ok, msg = rra.create_resolution(5, "admin", SOC, mid, dt["id"], "petty_cash_limit", "Lower the ceiling to 10000",
-                                    float(dt["majority_pct"]), True, date.today(), "Recording the passed resolution", actor_society_id=SOC)
+                                    float(dt["majority_pct"]), True, date.today(), "Recording the passed resolution", actor_society_id=SOC,
+                                    votes_for_pct=100, owners_present_pct=100)
     assert ok and "now active" not in msg
     assert float(rule(pg, "petty_cash_limit", on=TOMORROW)["value"]) == 20000
     err = rp._resolution_ok(SOC, "petty_cash_limit", 2, "adopted_with_variation", int(msg.split("#")[1].split(" ")[0].rstrip(".")))
@@ -229,7 +231,8 @@ def test_wrong_decision_type_or_layer_does_not_activate(pg):
                      "Board lowers the petty cash ceiling", actor_society_id=SOC)
     mid, dt = _meeting_and_resolution(dt="SET_SOCIETY_POLICY")          # a GBM policy resolution cannot back a Layer 3 decision
     ok, msg = rra.create_resolution(5, "admin", SOC, mid, dt["id"], "petty_cash_limit", "Lower ceiling", float(dt["majority_pct"]),
-                                    True, date.today(), "Recording the passed resolution", actor_society_id=SOC)
+                                    True, date.today(), "Recording the passed resolution", actor_society_id=SOC,
+                                    votes_for_pct=100, owners_present_pct=100)
     assert ok and "now active" not in msg
     assert float(rule(pg, "petty_cash_limit", on=TOMORROW)["value"]) == 20000
 
