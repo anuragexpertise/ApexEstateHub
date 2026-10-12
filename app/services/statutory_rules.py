@@ -144,8 +144,9 @@ STATUTORY_ROWS = {
 # (Administrator, Instructions, Agreement) fall back to the full framework.
 STEP_ROWS = {
     "Society Details":          ["it_mutuality", "it_return", "labour"],
-    "Legal Regime Selection":   ["up_aoa_act", "up_aoa_rules", "legal_instruments"],
-    "Central Acts Compliance":  ["it_mutuality", "it_return", "gst", "tds"],
+    # Central Acts are a banner on this step (not a step of their own), so their rows are listed here.
+    "Legal Regime Selection":   ["up_aoa_act", "up_aoa_rules", "legal_instruments",
+                                 "it_mutuality", "it_return", "gst", "tds"],
     "State Act & Rules":        ["up_aoa_act", "up_aoa_rules", "legal_instruments",
                                  "reserve", "corpus", "sinking", "repair"],
     "Model Bye-Laws Adoption":  ["sinking", "repair", "reserve", "corpus"],
@@ -162,8 +163,8 @@ STEP_ROWS = {
 STEP_LINK_CATEGORIES = {
     "Society Details":          ["apartment_act", "cooperative_act", "rera"],
     "Administrator":            ["apartment_act"],
-    "Legal Regime Selection":   ["apartment_act", "cooperative_act", "rera"],
-    "Central Acts Compliance":  ["fund_gst", "gst_registered", "tds_no_pan", "income_tax_mutuality"],
+    "Legal Regime Selection":   ["apartment_act", "cooperative_act", "rera",
+                                 "fund_gst", "gst_registered", "tds_no_pan", "income_tax_mutuality"],
     "State Act & Rules":        ["apartment_act", "cooperative_act", "rera",
                                  "sinking_fund", "income_tax_mutuality"],
     "Model Bye-Laws Adoption":  ["apartment_act", "sinking_fund"],
@@ -179,7 +180,7 @@ STEP_LINK_CATEGORIES = {
 # Steps whose "Acts & Rules" column also lists the tabulated Act / Rules /
 # Bye-laws for the society's regime (legal_instrument_catalog). Steps without
 # an entry render the framework rows and official links only.
-STEP_INSTRUMENTS = {"Society Details", "Legal Regime Selection", "Central Acts Compliance", "State Act & Rules",
+STEP_INSTRUMENTS = {"Society Details", "Legal Regime Selection", "State Act & Rules",
                     "Model Bye-Laws Adoption", "Apartment Charges", "Accounts Heads", "Agreement"}
 
 

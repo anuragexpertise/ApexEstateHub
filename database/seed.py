@@ -1315,27 +1315,32 @@ def seed_society_legal_regime(cur, conn, society_id: int):
 
 
 def seed_decision_types(cur, conn):
-    """Seed the 10 whitelisted decision types for resolutions."""
+    """Seed the whitelisted decision types for resolutions (mirrors the INSERT in estatehub.sql).
+
+    Columns: code, label, required_body, majority_pct, authority_layer, majority_basis, needs_advocate_opinion,
+    verification, source_provision, description. Authority (which layer a decision changes) and majority (how
+    many must agree) are separate columns; every majority except the 51% bye-law 2(e) ones is provisional."""
     rows = [
-        ("ADOPT_BYE_LAW",        "Adopt Model Bye-Law Clause",            "GBM", 66.67, "Adopt a Model Bye-Law 2011 clause as-is or with variation (2/3 majority per Model Bye-Law 58)"),
-        ("VARY_BYE_LAW",         "Vary Adopted Bye-Law Clause",           "GBM", 66.67, "Change variation text of an already-adopted clause (2/3 majority)"),
-        ("REJECT_BYE_LAW",       "Not Adopt Model Bye-Law Clause",        "GBM", 50.00, "Record that a non-mandatory Model Bye-Law clause is not adopted (simple majority)"),
-        ("SET_SOCIETY_POLICY",   "Set Society Policy (Layer 2)",          "GBM", 66.67, "Create or tighten a society policy within an adopted clause (2/3 majority; never loosens Model Bye-Law)"),
-        ("SET_BOARD_PARAM",      "Set Board Parameter (Layer 3)",         "MC",  50.00, "Operational parameter set by Managing Committee (simple majority; within policy bounds)"),
-        ("APPROVE_LOAN",         "Approve Owner Loan",                    "GBM", 66.67, "General Body approval for lending to an owner (Bye-Law 3(1)(f))"),
-        ("APPROPRIATE_FUND",     "Appropriate Funds (Reserve/Sinking)",   "GBM", 66.67, "General Body resolution for fund appropriation per Bye-Laws 46-52"),
-        ("SERVICE_CUTOFF",       "Authorize Service Cut-Off (s.22)",      "GBM", 66.67, "General Body resolution to cut essential service per UP Apartment Act s.22"),
-        ("AMEND_CASH_LIMIT",     "Change Cash-Limit Enforcement Mode",    "GBM", 50.00, "Override cash_limit_mode for this society (simple majority)"),
-        ("GENERAL_RESOLUTION",   "General Resolution",                    "GBM", 50.00, "Any other GBM resolution not covered above"),
+        ('ADOPT_BYE_LAW', 'Adopt Model Bye-Law Clause', 'GBM', 66.67, 1, 'all_votes', False, 'provisional', 'Model Bye-Laws 2011, bye-law 58 (as cited by the engine; gazette text not yet checked)', 'Adopt a Model Bye-Law 2011 clause as-is or with variation (2/3 of all votes)'),
+        ('VARY_BYE_LAW', 'Vary Adopted Bye-Law Clause', 'GBM', 66.67, 1, 'all_votes', False, 'provisional', 'Model Bye-Laws 2011, bye-law 58 (as cited by the engine; gazette text not yet checked)', 'Change variation text of an already-adopted clause (2/3 of all votes)'),
+        ('REJECT_BYE_LAW', 'Not Adopt Model Bye-Law Clause', 'GBM', 66.67, 1, 'all_votes', True, 'provisional', 'Engine reading: dropping a Model clause departs from the Model Bye-Laws, so it takes the same majority as a variation', "Record that a Model Bye-Law clause is not adopted. Needs a written advocate's opinion; never allowed for a clause the Act or Rules back"),
+        ('SET_SOCIETY_POLICY', 'Set Society Policy (Layer 2)', 'GBM', 66.67, 2, 'all_votes', False, 'provisional', 'Engine policy: a policy that only applies an existing bye-law may need only an ordinary majority (bye-law 2(e)); 2/3 is the stricter reading pending the gazette text', 'Create or tighten a society policy within an adopted clause (2/3 of all votes; never loosens the Model Bye-Law)'),
+        ('SET_BOARD_PARAM', 'Set Board Parameter (Layer 3)', 'MC', 50.0, 3, 'committee', False, 'provisional', 'Committee decision; must be placed before the General Body for ratification (loa_ratification, bye-law 47(1) as cited by the engine)', 'Operational parameter set by the Managing Committee / working committee (simple majority; within policy bounds)'),
+        ('APPROVE_LOAN', 'Approve Owner Loan', 'GBM', 66.67, 2, 'all_votes', False, 'provisional', "Model Bye-Laws 2011, bye-law 3(1)(f) needs the consent of the apartment owners; the 2/3 figure is the engine's stricter reading", 'General Body approval for lending to an owner (Bye-Law 3(1)(f))'),
+        ('APPROPRIATE_FUND', 'Appropriate Funds (Reserve/Sinking)', 'GBM', 66.67, 2, 'all_votes', False, 'provisional', 'Model Bye-Laws 2011, bye-laws 46-52 (as cited by the engine; majority not checked)', 'General Body resolution for fund appropriation per Bye-Laws 46-52'),
+        ('SERVICE_CUTOFF', 'Authorize Service Cut-Off (s.22)', 'GBM', 66.67, 2, 'all_votes', False, 'provisional', "UP Apartment Act 2010 s.22; the Act's text was not checked for a General Body majority, so 2/3 is the engine's stricter reading", 'General Body resolution to cut essential service per UP Apartment Act s.22'),
+        ('AMEND_CASH_LIMIT', 'Change Cash-Limit Enforcement Mode', 'GBM', 51.0, 2, 'all_votes', False, 'checked', 'Model Bye-Laws 2011, bye-law 2(e): a majority is owners holding 51 per cent of the votes', 'Override cash_limit_mode for this society (majority = 51% of all votes)'),
+        ('GENERAL_RESOLUTION', 'General Resolution', 'GBM', 51.0, 2, 'all_votes', False, 'checked', 'Model Bye-Laws 2011, bye-law 2(e): a majority is owners holding 51 per cent of the votes', 'Any other GBM resolution not covered above (majority = 51% of all votes)'),
+        ('RATIFY_VOTING_THRESHOLDS', 'Ratify Voting Thresholds and Quorum', 'GBM', 66.67, 1, 'all_votes', True, 'provisional', "The majorities and quorum in this table are provisional until the society's General Body ratifies them on a written advocate's opinion", 'General Body ratifies the voting thresholds and quorum this software applies (provisional until recorded)'),
     ]
     inserted = 0
-    for code, label, body, majority, desc in rows:
-        row = _one(cur, "SELECT 1 FROM decision_types WHERE code=%s", (code,))
-        if not row:
+    for row in rows:
+        if not _one(cur, "SELECT 1 FROM decision_types WHERE code=%s", (row[0],)):
             cur.execute(
-                """INSERT INTO decision_types (code, label, required_body, majority_pct, description)
-                   VALUES (%s, %s, %s, %s, %s)""",
-                (code, label, body, majority, desc),
+                """INSERT INTO decision_types (code, label, required_body, majority_pct, authority_layer, majority_basis,
+                                               needs_advocate_opinion, verification, source_provision, description)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                row,
             )
             inserted += 1
     if inserted:

@@ -16846,7 +16846,22 @@ CREATE TABLE decision_types (
     code                VARCHAR(40) NOT NULL UNIQUE,
     label               VARCHAR(120) NOT NULL,
     required_body       VARCHAR(10) NOT NULL CHECK (required_body IN ('GBM', 'MC')),
-    majority_pct        NUMERIC(5, 2) NOT NULL DEFAULT 50.00 CHECK (majority_pct > 0 AND majority_pct <= 100),
+    majority_pct        NUMERIC(5, 2) NOT NULL DEFAULT 51.00 CHECK (majority_pct > 0 AND majority_pct <= 100),
+    -- Authority and majority are different questions. authority_layer says WHICH LAYER a decision of this type
+    -- creates or changes (1 society bye-law, 2 society policy / ordinary General Body resolution, 3 Board);
+    -- majority_pct / majority_basis say HOW MANY must agree. 'all_votes' = share of ALL votes, each weighted by the
+    -- owner's undivided interest (Model Bye-Laws 2011, bye-laws 2(e) and 8), not of those present or one per head;
+    -- 'committee' = simple majority of the committee members.
+    authority_layer     SMALLINT NOT NULL DEFAULT 2 CHECK (authority_layer BETWEEN 1 AND 3),
+    majority_basis      VARCHAR(12) NOT NULL DEFAULT 'all_votes' CHECK (majority_basis IN ('all_votes', 'committee')),
+    -- A decision that departs from the Model Bye-Laws needs a written advocate's opinion on file before it can be
+    -- recorded as passed (e.g. a clause recorded as 'not adopted').
+    needs_advocate_opinion BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Same meaning as the scheme packs: provisional = reading not checked against the gazette text; checked =
+    -- matches the text of an adopted copy; verified = advocate signed off. Provisional thresholds take effect for
+    -- a society only once its General Body ratifies them (decision type RATIFY_VOTING_THRESHOLDS).
+    verification        VARCHAR(12) NOT NULL DEFAULT 'provisional' CHECK (verification IN ('provisional', 'checked', 'verified')),
+    source_provision    TEXT,
     description         TEXT,
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -16871,7 +16886,10 @@ CREATE TABLE resolutions (
     clause_id           VARCHAR(30),
     decision_type_id    INT NOT NULL REFERENCES decision_types (id),
     body                TEXT NOT NULL,
-    majority_required   NUMERIC(5, 2) NOT NULL,
+    majority_required   NUMERIC(5, 2) NOT NULL,           -- the threshold that applied when this was recorded
+    votes_for_pct       NUMERIC(5, 2) CHECK (votes_for_pct BETWEEN 0 AND 100),        -- share of ALL votes (by undivided interest) in favour
+    owners_present_pct  NUMERIC(5, 2) CHECK (owners_present_pct BETWEEN 0 AND 100),   -- share of owners present in person (quorum)
+    advocate_opinion_ref VARCHAR(255),                       -- reference to the written advocate's opinion, where the decision type needs one
     passed              BOOLEAN NOT NULL DEFAULT FALSE,
     passed_on           DATE,
     text                TEXT,
@@ -17147,17 +17165,41 @@ BEGIN
 END $$;
 
 
-INSERT INTO decision_types (code, label, required_body, majority_pct, description) VALUES
-    ('ADOPT_BYE_LAW',        'Adopt Model Bye-Law Clause',            'GBM', 66.67, 'Adopt a Model Bye-Law 2011 clause as-is or with variation (2/3 majority per Model Bye-Law 58)'),
-    ('VARY_BYE_LAW',         'Vary Adopted Bye-Law Clause',           'GBM', 66.67, 'Change variation text of an already-adopted clause (2/3 majority)'),
-    ('REJECT_BYE_LAW',       'Not Adopt Model Bye-Law Clause',        'GBM', 50.00, 'Record that a non-mandatory Model Bye-Law clause is not adopted (simple majority)'),
-    ('SET_SOCIETY_POLICY',   'Set Society Policy (Layer 2)',          'GBM', 66.67, 'Create or tighten a society policy within an adopted clause (2/3 majority; never loosens Model Bye-Law)'),
-    ('SET_BOARD_PARAM',      'Set Board Parameter (Layer 3)',         'MC',  50.00, 'Operational parameter set by Managing Committee (simple majority; within policy bounds)'),
-    ('APPROVE_LOAN',         'Approve Owner Loan',                    'GBM', 66.67, 'General Body approval for lending to an owner (Bye-Law 3(1)(f))'),
-    ('APPROPRIATE_FUND',     'Appropriate Funds (Reserve/Sinking)',   'GBM', 66.67, 'General Body resolution for fund appropriation per Bye-Laws 46-52'),
-    ('SERVICE_CUTOFF',       'Authorize Service Cut-Off (s.22)',      'GBM', 66.67, 'General Body resolution to cut essential service per UP Apartment Act s.22'),
-    ('AMEND_CASH_LIMIT',     'Change Cash-Limit Enforcement Mode',    'GBM', 50.00, 'Override cash_limit_mode for this society (simple majority)'),
-    ('GENERAL_RESOLUTION',   'General Resolution',                    'GBM', 50.00, 'Any other GBM resolution not covered above')
+INSERT INTO decision_types (code, label, required_body, majority_pct, authority_layer, majority_basis,
+                            needs_advocate_opinion, verification, source_provision, description) VALUES
+    ('ADOPT_BYE_LAW',        'Adopt Model Bye-Law Clause',            'GBM', 66.67, 1, 'all_votes', FALSE, 'provisional',
+        'Model Bye-Laws 2011, bye-law 58 (as cited by the engine; gazette text not yet checked)',
+        'Adopt a Model Bye-Law 2011 clause as-is or with variation (2/3 of all votes)'),
+    ('VARY_BYE_LAW',         'Vary Adopted Bye-Law Clause',           'GBM', 66.67, 1, 'all_votes', FALSE, 'provisional',
+        'Model Bye-Laws 2011, bye-law 58 (as cited by the engine; gazette text not yet checked)',
+        'Change variation text of an already-adopted clause (2/3 of all votes)'),
+    ('REJECT_BYE_LAW',       'Not Adopt Model Bye-Law Clause',        'GBM', 66.67, 1, 'all_votes', TRUE,  'provisional',
+        'Engine reading: dropping a Model clause departs from the Model Bye-Laws, so it takes the same majority as a variation',
+        'Record that a Model Bye-Law clause is not adopted. Needs a written advocate''s opinion; never allowed for a clause the Act or Rules back'),
+    ('SET_SOCIETY_POLICY',   'Set Society Policy (Layer 2)',          'GBM', 66.67, 2, 'all_votes', FALSE, 'provisional',
+        'Engine policy: a policy that only applies an existing bye-law may need only an ordinary majority (bye-law 2(e)); 2/3 is the stricter reading pending the gazette text',
+        'Create or tighten a society policy within an adopted clause (2/3 of all votes; never loosens the Model Bye-Law)'),
+    ('SET_BOARD_PARAM',      'Set Board Parameter (Layer 3)',         'MC',  50.00, 3, 'committee', FALSE, 'provisional',
+        'Committee decision; must be placed before the General Body for ratification (loa_ratification, bye-law 47(1) as cited by the engine)',
+        'Operational parameter set by the Managing Committee / working committee (simple majority; within policy bounds)'),
+    ('APPROVE_LOAN',         'Approve Owner Loan',                    'GBM', 66.67, 2, 'all_votes', FALSE, 'provisional',
+        'Model Bye-Laws 2011, bye-law 3(1)(f) needs the consent of the apartment owners; the 2/3 figure is the engine''s stricter reading',
+        'General Body approval for lending to an owner (Bye-Law 3(1)(f))'),
+    ('APPROPRIATE_FUND',     'Appropriate Funds (Reserve/Sinking)',   'GBM', 66.67, 2, 'all_votes', FALSE, 'provisional',
+        'Model Bye-Laws 2011, bye-laws 46-52 (as cited by the engine; majority not checked)',
+        'General Body resolution for fund appropriation per Bye-Laws 46-52'),
+    ('SERVICE_CUTOFF',       'Authorize Service Cut-Off (s.22)',      'GBM', 66.67, 2, 'all_votes', FALSE, 'provisional',
+        'UP Apartment Act 2010 s.22; the Act''s text was not checked for a General Body majority, so 2/3 is the engine''s stricter reading',
+        'General Body resolution to cut essential service per UP Apartment Act s.22'),
+    ('AMEND_CASH_LIMIT',     'Change Cash-Limit Enforcement Mode',    'GBM', 51.00, 2, 'all_votes', FALSE, 'checked',
+        'Model Bye-Laws 2011, bye-law 2(e): a majority is owners holding 51 per cent of the votes',
+        'Override cash_limit_mode for this society (majority = 51% of all votes)'),
+    ('GENERAL_RESOLUTION',   'General Resolution',                    'GBM', 51.00, 2, 'all_votes', FALSE, 'checked',
+        'Model Bye-Laws 2011, bye-law 2(e): a majority is owners holding 51 per cent of the votes',
+        'Any other GBM resolution not covered above (majority = 51% of all votes)'),
+    ('RATIFY_VOTING_THRESHOLDS', 'Ratify Voting Thresholds and Quorum', 'GBM', 66.67, 1, 'all_votes', TRUE, 'provisional',
+        'The majorities and quorum in this table are provisional until the society''s General Body ratifies them on a written advocate''s opinion',
+        'General Body ratifies the voting thresholds and quorum this software applies (provisional until recorded)')
 ON CONFLICT (code) DO NOTHING;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
