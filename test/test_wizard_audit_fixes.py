@@ -131,14 +131,14 @@ def test_fund_rate_inputs_live_only_on_the_funds_step():
     for cat in w.CATEGORIES:
         ids = []
         _ids(w.render_category_content(cat, None, "UP"), ids)
-        assert ("sw-apt-sink" in ids) == (cat == "Funds"), cat
+        assert ("sw-apt-sinking" in ids) == (cat == "Funds"), cat
 
 
 def test_prescribed_state_locks_the_fund_questions():
     ids = []
     _ids(w.render_category_content("Funds", None, "MH"), ids)
     assert not any("sw-pol-choice" in i for i in ids)          # nothing to choose: the state prescribes both funds
-    assert "sw-apt-sink" in ids and "sw-apt-repair" in ids
+    assert "sw-apt-sinking" in ids and "sw-apt-repair" in ids
 
 
 def test_optional_state_asks_levy_mode_and_basis():
