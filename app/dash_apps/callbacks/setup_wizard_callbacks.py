@@ -189,7 +189,7 @@ def register_setup_wizard_callbacks(app):
         State("sw-apt-budget", "value"),
         State("sw-apt-rate", "value"),
         State("sw-apt-amt", "value"),
-        State("sw-apt-sink", "value"),
+        State("sw-apt-sinking", "value"),
         State("sw-apt-repair", "value"),
         State("sw-apt-cost", "value"),
         State({"type": "sw-pol-choice", "key": ALL}, "value"),
@@ -200,7 +200,7 @@ def register_setup_wizard_callbacks(app):
     def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id, central_it_tan, central_tds, central_gst, central_rera, qr_secret, qr_confirm,
                                  s_address, s_email_v, s_phone_v, s_reg_v, s_state_v,
                                  apt_basis_v, apt_budget_v, apt_rate_v, apt_amt_v,
-                                 apt_sink_v, apt_repair_v, apt_cost_v, pol_values, pol_ids):
+                                 apt_sinking_v, apt_repair_v, apt_cost_v, pol_values, pol_ids):
         triggered_id = ctx.triggered_id
         
         error_msg = ""
@@ -216,7 +216,7 @@ def register_setup_wizard_callbacks(app):
         elif _forward and CATEGORIES[current_step] == "Funds":
             # the live drop-down values, not the saved ones: the admin may not have left the field yet
             _chosen = {i["key"]: v for i, v in zip(pol_ids or [], pol_values or [])}
-            gate_err = funds_error(fund_plan(get_current_society_id(), s_state_v, _chosen)["plan"], apt_sink_v, apt_repair_v, apt_cost_v)
+            gate_err = funds_error(fund_plan(get_current_society_id(), s_state_v, _chosen)["plan"], apt_sinking_v, apt_repair_v, apt_cost_v)
         
         def get_next_valid_step(step, direction):
             while 0 <= step < len(CATEGORIES):
@@ -331,7 +331,7 @@ def register_setup_wizard_callbacks(app):
             State("sw-apt-amt", "value"),
             State("sw-apt-billing-basis", "value"),
             State("sw-apt-due", "value"),
-            State("sw-apt-sink", "value"),
+            State("sw-apt-sinking", "value"),
             State("sw-apt-repair", "value"),
             State("sw-apt-interest", "value"),
             State("sw-ven-1day", "value"),
@@ -353,7 +353,7 @@ def register_setup_wizard_callbacks(app):
         @require_session
         def refresh_review(step, state, constitution, address, email, phone, tan, tds_date, gstin, cgst, sgst,
                            central_it_tan, central_tds, central_gst, central_rera, tds_rates,
-                           apt_cost, apt_budget, apt_rate, apt_amt, apt_basis, apt_due, apt_sink, apt_repair, apt_interest,
+                           apt_cost, apt_budget, apt_rate, apt_amt, apt_basis, apt_due, apt_sinking, apt_repair, apt_interest,
                            ven1, ven7, ven30, gate, duty, sec_name, sec_phone, sec_email, calc_start,
                            bf_fy, bf_ids, bf_amts, pol_values, pol_ids):
             if step != REVIEW_STEP:
@@ -364,7 +364,7 @@ def register_setup_wizard_callbacks(app):
                 "central_it_tan": central_it_tan, "central_tds": central_tds, "central_gst": central_gst,
                 "central_rera": central_rera, "tds_rates": tds_rates,
                 "apt_cost": apt_cost, "apt_budget": apt_budget, "apt_rate": apt_rate, "apt_amt": apt_amt,
-                "apt_basis": apt_basis, "apt_due": apt_due, "apt_sink": apt_sink, "apt_repair": apt_repair,
+                "apt_basis": apt_basis, "apt_due": apt_due, "apt_sink": apt_sinking, "apt_repair": apt_repair,
                 "apt_interest": apt_interest, "ven1": ven1, "ven7": ven7, "ven30": ven30,
                 "gate": gate, "duty": duty, "sec_name": sec_name, "sec_phone": sec_phone, "sec_email": sec_email,
                 "calc_start": calc_start, "bf_fy": bf_fy,
@@ -566,7 +566,7 @@ def register_setup_wizard_callbacks(app):
         State("sw-apt-rate", "value"),
         State("sw-apt-billing-basis", "value"),
         State("sw-apt-due", "value"),
-        State("sw-apt-sink", "value"),
+        State("sw-apt-sinking", "value"),
         State("sw-apt-repair", "value"),
         State("sw-apt-interest", "value"),
         State("sw-apt-cost", "value"),

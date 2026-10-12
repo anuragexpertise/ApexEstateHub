@@ -503,11 +503,57 @@ def _society_state(society_id):
         return None
 
 
-FUND_NAMES = {"sinking": "Sinking Fund", "repair": "Repair & Maintenance Fund"}
+FUND_NAMES = {
+    "sinking": "Sinking Fund",
+    "repair": "Repair & Maintenance Fund",
+    "reserve": "Reserve Fund",
+    "major_repair": "Major Repair Fund",
+    "ifms_corpus": "IFMS Corpus",
+}
 FUND_MODE_LABELS = {"on_bill": "On every maintenance bill", "fy_close": "At year close, from surplus", "none": "Not collected"}
 FUND_BASIS_LABELS = {"per_sq_ft": "Per sq ft of apartment area", "construction_cost": "% of construction cost per year, shared by undivided interest",
                      "undivided_interest": "Society's monthly fund amount, shared by undivided interest"}
 FUND_BASES = ("per_sq_ft", "construction_cost", "undivided_interest")
+
+
+# UP AOA Fund definitions with statutory basis
+UP_AOA_FUNDS = {
+    "ifms_corpus": {
+        "name": "IFMS Corpus",
+        "statutory": True,
+        "source": "UP Apartment Act 2010, Sec 14(5)",
+        "description": "Interest-Free Maintenance Security Corpus — builder handover corpus; one-time receipt, not a recurring rate.",
+        "rate_applicable": False,
+    },
+    "major_repair": {
+        "name": "Major Repair Fund",
+        "statutory": True,
+        "source": "Model Bye-Laws 2011, bye-law 39",
+        "description": "½% of transfer value on sale, payable by seller. Not a recurring rate — levied per transfer.",
+        "rate_applicable": False,
+    },
+    "reserve": {
+        "name": "Reserve Fund",
+        "statutory": True,
+        "source": "Model Bye-Laws 2011, bye-laws 3(1)(d) and 46; Act Sec 14(8)(a)",
+        "description": "Common profits nucleus — appropriated from net surplus at FY close (default 25%, configurable).",
+        "rate_applicable": False,
+    },
+    "sinking": {
+        "name": "Sinking Fund",
+        "statutory": False,
+        "source": "Not prescribed by UP Apartment Act 2010 or Model Bye-Laws 2011; levied by General Body resolution",
+        "description": "Voluntary fund for structural overhauls, lifts, DG sets. Rate and basis set by society policy.",
+        "rate_applicable": True,
+    },
+    "repair": {
+        "name": "Repair & Maintenance Fund",
+        "statutory": False,
+        "source": "UP Apartment Act 2010 s.18 (common expenses by undivided interest); Model Bye-Laws 2011 bye-law 35/36",
+        "description": "Routine upkeep of common areas. Rate and basis set by society policy.",
+        "rate_applicable": True,
+    },
+}
 
 
 def fund_effective(statutory, regime_mode, regime_basis, levy, collection, basis_pick):
@@ -1163,6 +1209,7 @@ def render_category_content(category, society_id=None, state=None):
     elif category == "State Act & Rules":
         from app.services.statutory_rules import regime_for_society, instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR, fund_rules_for_state
         from app.services import regime_rules_admin as rra
+        from app.dash_apps.pages.setup_wizard import fund_flags
         regime, instruments = instruments_for_society(society_id, state)
         _ff = fund_flags(society_id, state)
         fund_rules = fund_rules_for_state(state)
@@ -1220,6 +1267,7 @@ def render_category_content(category, society_id=None, state=None):
     elif category == "Model Bye-Laws Adoption":
         from app.services import regime_rules_admin as rra
         from app.services.statutory_rules import regime_for_society
+        from app.dash_apps.pages.setup_wizard import fund_flags
         existing = {}
         try:
             for r in rra.list_society_bye_laws(society_id) if society_id else []:
@@ -1435,72 +1483,109 @@ def render_category_content(category, society_id=None, state=None):
         ]
     elif category == "Funds":
         from app.services import regime_rules_admin as rra
+        from app.dash_apps.pages.setup_wizard import fund_plan, fund_flags
+        from app.services.statutory_rules import fund_rules_for_state
         s_sink, s_repair = 0.0, 0.0
         if society_id:
             row = db._execute("SELECT apt_sinking_fund_rate, apt_repair_fund_rate FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
                 s_sink, s_repair = row.get("apt_sinking_fund_rate") or 0.0, row.get("apt_repair_fund_rate") or 0.0
         fp = fund_plan(society_id, state)
+        ff = fund_flags(society_id, state)
+        fund_rules = fund_rules_for_state(state)
         try:
             pol = rra.list_society_policies(society_id) if society_id else {}
         except Exception:
             pol = {}
         cards = []
-        for fund, rate_id, stored in (("sinking", "sw-apt-sink", s_sink), ("repair", "sw-apt-repair", s_repair)):
-            f = fp["plan"][fund]
-            name = FUND_NAMES[fund]
-            default_rate = (DEFAULT_SINKING_FUND_RATE if fund == "sinking" else DEFAULT_REPAIR_FUND_RATE) if f["statutory"] else 0.0
-            rate_value = stored or default_rate
 
-            def policy_select(key, lock_regime_label=None):
-                label, clause, choices = rra.POLICY_SPECS[key]
-                st = pol.get(key) or {"value": choices[0][0], "active": False, "proposed": None}
-                shown = st["proposed"] or st["value"]
-                opts = []
-                for v, lbl in choices:
-                    if v == "regime_default":
-                        lbl = f"Regime default: {FUND_MODE_LABELS.get(f['regime_mode'], f['regime_mode']) if key.endswith('collection') else FUND_BASIS_LABELS.get(f['regime_basis'], 'per sq ft of apartment area')}"
-                    opts.append({"label": lbl, "value": v})
-                return html.Div([
-                    _label(label),
-                    dbc.Select(id={"type": "sw-pol-choice", "key": key}, size="sm", options=opts, value=shown, className="mb-1"),
-                    html.Small([dbc.Badge("Active (resolution on file)", color="success") if st["active"] and not st["proposed"]
-                                else dbc.Badge("Provisional", color="warning", text_color="dark"),
-                                html.Span(id={"type": "sw-pol-msg", "key": key}, className="text-muted ms-2")], className="d-block mb-2"),
-                ])
+        def policy_select(key, lock_regime_label=None):
+            label, clause, choices = rra.POLICY_SPECS[key]
+            st = pol.get(key) or {"value": choices[0][0], "active": False, "proposed": None}
+            shown = st["proposed"] or st["value"]
+            opts = []
+            for v, lbl in choices:
+                if v == "regime_default":
+                    lbl = f"Regime default: {FUND_MODE_LABELS.get(f['regime_mode'], f['regime_mode']) if key.endswith('collection') else FUND_BASIS_LABELS.get(f['regime_basis'], 'per sq ft of apartment area')}"
+                opts.append({"label": lbl, "value": v})
+            return html.Div([
+                _label(label),
+                dbc.Select(id={"type": "sw-pol-choice", "key": key}, size="sm", options=opts, value=shown, className="mb-1"),
+                html.Small([dbc.Badge("Active (resolution on file)", color="success") if st["active"] and not st["proposed"]
+                            else dbc.Badge("Provisional", color="warning", text_color="dark"),
+                            html.Span(id={"type": "sw-pol-msg", "key": key}, className="text-muted ms-2")], className="d-block mb-2"),
+            ])
 
-            if f["statutory"]:
-                body = [
-                    dbc.Alert([html.I(className="fas fa-lock me-2"), html.Strong("Prescribed by the state. "),
-                               f"Collected on every maintenance bill, shared by construction cost; minimum {f['min_pct']}% of project construction cost per year. "
-                               "No resolution is needed."], color="primary", className="py-2 mb-2", style={"fontSize": "12.5px"}),
-                    html.Div(id=f"sw-fund-{fund}-collect-wrap", style={"display": "none"}),
-                    html.Div(id=f"sw-fund-{fund}-basis-wrap", style={"display": "none"}),
-                ]
+        for fund_key, fund_info in UP_AOA_FUNDS.items():
+            name = fund_info["name"]
+            rate_applicable = fund_info["rate_applicable"]
+
+            # Check if sinking/repair is statutory for this state
+            is_statutory = fund_info["statutory"]
+            if fund_key in ("sinking", "repair"):
+                is_statutory = fund_rules[fund_key]["mode"] == "statutory"
+
+            # Get stored rate and plan for voluntary funds
+            if fund_key == "sinking":
+                stored_rate = s_sink
+                f = fp["plan"]["sinking"]
+            elif fund_key == "repair":
+                stored_rate = s_repair
+                f = fp["plan"]["repair"]
             else:
-                levy_key, cm_key, bp_key = f"levy_{fund}_fund", f"{fund}_fund_collection", f"{fund}_fund_basis"
-                show_collect = {} if (f["levy"] == "yes" or f["mode"] != "none") else {"display": "none"}
+                stored_rate = 0.0
+                f = {"statutory": is_statutory, "mode": "none", "basis": "per_sq_ft", "min_pct": None, "regime_mode": "none", "regime_basis": "per_sq_ft"}
+
+            rate_value = stored_rate or 0.0
+
+            if is_statutory:
+                # Statutory funds - show locked info
+                badge_color = "primary" if rate_applicable else "secondary"
                 body = [
+                    dbc.Badge(f"Statutory — {fund_info['source']}", color=badge_color, className="mb-2", pill=True),
+                    html.Small(fund_info["description"], className="text-muted d-block mb-2"),
+                ]
+                if not rate_applicable:
+                    body.append(html.Small("No recurring rate — this fund is not billed monthly.", className="text-info d-block"))
+                # For statutory funds with rate (like MH sinking/repair), show rate info
+                if rate_applicable and fund_key in ("sinking", "repair"):
+                    min_pct = fund_rules[fund_key].get("min_pct")
+                    if min_pct:
+                        body.append(html.Small(f"Statutory minimum: {min_pct}% of construction cost per year", className="text-warning d-block mb-2"))
+                    body.append(html.Div([
+                        html.Div(_label(fund_rate_label(f.get("basis", "per_sq_ft"))), id=f"sw-fund-{fund_key}-rate-label"),
+                        dbc.Input(id=f"sw-apt-{fund_key}", type="number", value=rate_value, min=0, step=0.01, className="mb-1", disabled=True),
+                    ], id=f"sw-fund-{fund_key}-rate-wrap", style={"display": "block"}))
+                    body.append(html.Small("Rate fixed by state statute — cannot be changed.", className="text-muted d-block"))
+            else:
+                # Voluntary funds - show policy choices
+                levy_key, cm_key, bp_key = f"levy_{fund_key}_fund", f"{fund_key}_fund_collection", f"{fund_key}_fund_basis"
+                show_collect = {} if (f.get("levy") == "yes" or f.get("mode") != "none") else {"display": "none"}
+                body = [
+                    dbc.Badge("Voluntary — Society Policy", color="warning", className="mb-2", pill=True, text_color="dark"),
+                    html.Small(fund_info["description"], className="text-muted d-block mb-2"),
                     html.Small(f"Not prescribed by {fp['regime']}. Optional: the society decides, by General Body resolution.", className="text-muted d-block mb-2"),
                     policy_select(levy_key),
-                    html.Div(policy_select(cm_key), id=f"sw-fund-{fund}-collect-wrap", style=show_collect),
-                    html.Div(policy_select(bp_key), id=f"sw-fund-{fund}-basis-wrap", style={} if f["mode"] == "on_bill" else {"display": "none"}),
+                    html.Div(policy_select(cm_key), id=f"sw-fund-{fund_key}-collect-wrap", style=show_collect),
+                    html.Div(policy_select(bp_key), id=f"sw-fund-{fund_key}-basis-wrap", style={} if f.get("mode") == "on_bill" else {"display": "none"}),
                 ]
+
+            if rate_applicable and not is_statutory:
+                body.append(html.Div([
+                    html.Div(_label(fund_rate_label(f.get("basis", "per_sq_ft"))), id=f"sw-fund-{fund_key}-rate-label"),
+                    dbc.Input(id=f"sw-apt-{fund_key}", type="number", value=rate_value, min=0, step=0.01, className="mb-1"),
+                ], id=f"sw-fund-{fund_key}-rate-wrap", style={} if f.get("mode") == "on_bill" else {"display": "none"}))
+                body.append(html.Small(fund_hint(f, fp["regime"]), id=f"sw-fund-{fund_key}-hint", className="text-muted d-block"))
+
             cards.append(dbc.Card([
                 dbc.CardHeader(html.Strong(name)),
-                dbc.CardBody(body + [
-                    html.Div([
-                        html.Div(_label(fund_rate_label(f["basis"])), id=f"sw-fund-{fund}-rate-label"),
-                        dbc.Input(id=rate_id, type="number", value=rate_value, min=0, step=0.01, className="mb-1"),
-                    ], id=f"sw-fund-{fund}-rate-wrap", style={} if f["mode"] == "on_bill" else {"display": "none"}),
-                    html.Small(fund_hint(f, fp["regime"]), id=f"sw-fund-{fund}-hint", className="text-muted d-block"),
-                ]),
+                dbc.CardBody(body),
             ], className="mb-3 shadow-sm"))
+
         return elements + [
-            _render_banner("Funds", "Sinking and Repair & Maintenance funds: whether each is collected, when, and how it is shared between flats."),
+            _render_banner("Funds", "All UP AOA funds: statutory funds (IFMS Corpus, Major Repair Fund, Reserve Fund) and voluntary funds (Sinking Fund, Repair & Maintenance Fund)."),
             dbc.Alert([html.I(className="fas fa-info-circle me-2"),
-                       "A fund the state prescribes is shown locked. For any other fund you choose. Your choices are provisional until the General Body "
-                       "resolution is recorded (Settings > Society governance); only then does billing change."],
+                       "Statutory funds are fixed by law and cannot be changed. Voluntary funds require a General Body resolution to levy; choices are provisional until the resolution is recorded (Settings > Society governance)."],
                       color="info", className="py-2 mb-3", style={"fontSize": "12.5px"}),
             *cards,
         ]
@@ -1596,6 +1681,18 @@ def render_category_content(category, society_id=None, state=None):
             if row: s_fy = row.get("financial_year") or s_fy
         from database.seed import ACCOUNTS
 
+        # UP AOA Fund account labels per statutory heads
+        UP_AOA_FUND_LABELS = {
+            3100: "Capital Account / Share Capital",
+            3210: "Sinking Fund Reserve",
+            3220: "Repair & Maintenance Fund Reserve",
+            3230: "IFMS Corpus (Interest-Free Maintenance Security Corpus)",
+            3240: "Gifts Received",
+            3250: "Provisions",
+            3260: "Gifts Given",
+            3270: "Major Repair Fund (Transfer Fee ½%)",
+        }
+
         # Same shape as the Balance Sheet: Assets (Dr) on the left,
         # Liabilities + Equity/Reserves (Cr) on the right, each as a parent -> child tree.
         children = {}
@@ -1607,12 +1704,17 @@ def render_category_content(category, society_id=None, state=None):
         def _has_bf(acc):
             return bool(acc[6]) or any(_has_bf(c) for c in children.get(acc[0], []))
 
+        def _get_aoa_label(acc_id, default_name):
+            """Get UP AOA label for fund accounts, fallback to default name."""
+            return UP_AOA_FUND_LABELS.get(acc_id, default_name)
+
         def _render_node(acc, depth):
             out = []
             indent = {"paddingLeft": f"{12 + depth * 14}px"}
             if acc[6]:   # postable account -> amount + remarks inputs (ids unchanged)
+                aoa_label = _get_aoa_label(acc[0], acc[3] or "")
                 out.append(html.Div([
-                    html.Div([acc[3] or "", html.Small(f"{acc[2] or ''} · {acc[5] or ''}")], className="sw-bf-name"),
+                    html.Div([aoa_label, html.Small(f"{acc[2] or ''} · {acc[5] or ''}")], className="sw-bf-name"),
                     dbc.Input(id={"type": "sw-bf-amt", "acc_id": acc[0]}, type="number", value=0.0, step=0.01, min=0, size="sm"),
                     dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc[0]}, type="text", placeholder="Remarks...", size="sm", className="sw-bf-remarks"),
                 ], className="sw-bf-row", style={**indent, "paddingRight": "12px"}))
