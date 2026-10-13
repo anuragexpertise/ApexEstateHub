@@ -1132,6 +1132,19 @@ LEGAL_INSTRUMENTS_UP_AOA = [
      "2/3rd of the units AND the competent authority's prior approval (Bye-law 58) — an AOA cannot simply amend and file bye-laws without this.",
      "Notified 16 Nov 2011 under Sec 14(6); interpreted in Olive Country Apartment Owners Association vs "
      "State of UP, WP No. 12110/2013, Allahabad HC, 14-11-2013", 30, "active"),
+    ("UP_AOA_2010", "Notification",
+     "UP RERA General Regulations 2019 - Regulation 47 as amended: Interest Free Maintenance Security (IFMS)",
+     2026, "Uttar Pradesh Real Estate Regulatory Authority",
+     "Promoters collecting interest-free maintenance security (IFMS) on projects in Uttar Pradesh; the corpus passes "
+     "to the Association / RWA at handover of the common areas",
+     "Notification 7098/U.P. RERA/Regulation/2026-27 dated 13.07.2026 sets project-wise IFMS rates; the promoter "
+     "collects the IFMS at registration of the deed into a separate scheduled-bank account and invests it at the "
+     "highest FD rate; at handover the whole corpus and a unit-wise statement go to the RWA; spend is limited to "
+     "operation, maintenance, repair and replacement of common areas; the RWA keeps separate books and a CA audit "
+     "reported to the AGM within three months. Rates and unit (sq ft vs sq m) reported inconsistently - "
+     "PROVISIONAL until checked against the notification text.",
+     "Reported by Business Standard (16 Jul 2026), India TV (20 Aug 2026), Zeus Law newsletter (Aug 2026); "
+     "notification text not yet read. Builds on UP Apartment Act 2010 s.14(5) proviso.", 35, "active"),
     ("UP_AOA_2010", "Act",
      "Societies Registration Act, 1860 (as applicable in Uttar Pradesh)",
      1860, "Government of India / adapted by UP",
