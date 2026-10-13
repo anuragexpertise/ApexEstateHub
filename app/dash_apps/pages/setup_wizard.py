@@ -516,44 +516,27 @@ FUND_BASIS_LABELS = {"per_sq_ft": "Per sq ft of apartment area", "construction_c
 FUND_BASES = ("per_sq_ft", "construction_cost", "undivided_interest")
 
 
-# UP AOA Fund definitions with statutory basis
-UP_AOA_FUNDS = {
-    "ifms_corpus": {
-        "name": "IFMS Corpus",
-        "statutory": True,
-        "source": "UP Apartment Act 2010, Sec 14(5)",
-        "description": "Interest-Free Maintenance Security Corpus — builder handover corpus; one-time receipt, not a recurring rate.",
-        "rate_applicable": False,
-    },
-    "major_repair": {
-        "name": "Major Repair Fund",
-        "statutory": True,
-        "source": "Model Bye-Laws 2011, bye-law 39",
-        "description": "½% of transfer value on sale, payable by seller. Not a recurring rate — levied per transfer.",
-        "rate_applicable": False,
-    },
-    "reserve": {
-        "name": "Reserve Fund",
-        "statutory": True,
-        "source": "Model Bye-Laws 2011, bye-laws 3(1)(d) and 46; Act Sec 14(8)(a)",
-        "description": "Common profits nucleus — appropriated from net surplus at FY close (default 25%, configurable).",
-        "rate_applicable": False,
-    },
-    "sinking": {
-        "name": "Sinking Fund",
-        "statutory": False,
-        "source": "Not prescribed by UP Apartment Act 2010 or Model Bye-Laws 2011; levied by General Body resolution",
-        "description": "Voluntary fund for structural overhauls, lifts, DG sets. Rate and basis set by society policy.",
-        "rate_applicable": True,
-    },
-    "repair": {
-        "name": "Repair & Maintenance Fund",
-        "statutory": False,
-        "source": "UP Apartment Act 2010 s.18 (common expenses by undivided interest); Model Bye-Laws 2011 bye-law 35/36",
-        "description": "Routine upkeep of common areas. Rate and basis set by society policy.",
-        "rate_applicable": True,
-    },
-}
+# UP AOA fund catalogue (status, rate, applicability) lives in app/services/up_aoa_fund_catalog.py so the Funds step
+# and the Brought Forward step read one source. UP_AOA_FUNDS keeps its old name and legacy keys.
+from app.services.up_aoa_fund_catalog import (UP_AOA_FUNDS, bf_info as _bf_fund_info, fund_facts as _fund_facts,  # noqa: E402
+                                              status_spec as _fund_status_spec, verify_spec as _fund_verify_spec)
+
+
+def _fund_badge(text, colour, **kw):
+    return dbc.Badge(text, color=colour, pill=True, className=kw.pop("className", "me-1"),
+                     text_color="dark" if colour == "warning" else None, **kw)
+
+
+def _fund_facts_block(fund):
+    """Applicability / when levied / rate / use / source / verification, as small label: text lines."""
+    return html.Div([html.Small([html.B(f"{lbl}: "), txt], className="text-muted d-block mb-1")
+                     for lbl, txt in _fund_facts(fund)], className="mb-2")
+
+
+def _fund_status_badges(fund):
+    st_text, st_col = _fund_status_spec(fund)
+    v_text, v_col = _fund_verify_spec(fund)
+    return html.Div([_fund_badge(st_text, st_col), _fund_badge(v_text, v_col)], className="mb-2")
 
 
 def fund_effective(statutory, regime_mode, regime_basis, levy, collection, basis_pick):
@@ -1519,6 +1502,15 @@ def render_category_content(category, society_id=None, state=None):
         for fund_key, fund_info in UP_AOA_FUNDS.items():
             name = fund_info["name"]
             rate_applicable = fund_info["rate_applicable"]
+            if fund_info.get("info_only"):
+                # Prescribed or customary receipts with no rate to enter here: show status, rule and rate as information.
+                cards.append(dbc.Card([
+                    dbc.CardHeader(html.Strong(name)),
+                    dbc.CardBody([_fund_status_badges(fund_info),
+                                  html.Small(fund_info["description"], className="text-muted d-block mb-2"),
+                                  _fund_facts_block(fund_info)]),
+                ], className="mb-3 shadow-sm"))
+                continue
 
             # Check if sinking/repair is statutory for this state
             is_statutory = fund_info["statutory"]
@@ -1540,10 +1532,10 @@ def render_category_content(category, society_id=None, state=None):
 
             if is_statutory:
                 # Statutory funds - show locked info
-                badge_color = "primary" if rate_applicable else "secondary"
                 body = [
-                    dbc.Badge(f"Statutory — {fund_info['source']}", color=badge_color, className="mb-2", pill=True),
+                    _fund_status_badges(fund_info),
                     html.Small(fund_info["description"], className="text-muted d-block mb-2"),
+                    _fund_facts_block(fund_info),
                 ]
                 if not rate_applicable:
                     body.append(html.Small("No recurring rate — this fund is not billed monthly.", className="text-info d-block"))
@@ -1562,8 +1554,9 @@ def render_category_content(category, society_id=None, state=None):
                 levy_key, cm_key, bp_key = f"levy_{fund_key}_fund", f"{fund_key}_fund_collection", f"{fund_key}_fund_basis"
                 show_collect = {} if (f.get("levy") == "yes" or f.get("mode") != "none") else {"display": "none"}
                 body = [
-                    dbc.Badge("Voluntary — Society Policy", color="warning", className="mb-2", pill=True, text_color="dark"),
+                    _fund_status_badges(fund_info),
                     html.Small(fund_info["description"], className="text-muted d-block mb-2"),
+                    _fund_facts_block(fund_info),
                     html.Small(f"Not prescribed by {fp['regime']}. Optional: the society decides, by General Body resolution.", className="text-muted d-block mb-2"),
                     policy_select(levy_key),
                     html.Div(policy_select(cm_key), id=f"sw-fund-{fund_key}-collect-wrap", style=show_collect),
@@ -1583,9 +1576,9 @@ def render_category_content(category, society_id=None, state=None):
             ], className="mb-3 shadow-sm"))
 
         return elements + [
-            _render_banner("Funds", "All UP AOA funds: statutory funds (IFMS Corpus, Major Repair Fund, Reserve Fund) and voluntary funds (Sinking Fund, Repair & Maintenance Fund)."),
+            _render_banner("Funds", "All UP AOA funds with their status, rate and applicability: IFMS Corpus (statutory); Major Repair Fund, Reserve Fund, rent reserve, special levy and share capital (Model Bye-Laws 2011); Sinking and Repair & Maintenance Fund (optional, provisional)."),
             dbc.Alert([html.I(className="fas fa-info-circle me-2"),
-                       "Statutory funds are fixed by law and cannot be changed. Voluntary funds require a General Body resolution to levy; choices are provisional until the resolution is recorded (Settings > Society governance)."],
+                       "Statutory = fixed by the Act, Rules or a Regulation. Model Bye-Law (prescribed) = fixed by the 2011 Model Bye-Laws once adopted; a departure needs 2/3rd of owners and the competent authority's prior approval (bye-law 58). Optional - Provisional = the society's choice by General Body resolution; the choice stays provisional until the resolution is recorded (Settings > Society governance). 'Provisional - verify' marks a rate that was not checked against the gazetted text."],
                       color="info", className="py-2 mb-3", style={"fontSize": "12.5px"}),
             *cards,
         ]
@@ -1681,16 +1674,12 @@ def render_category_content(category, society_id=None, state=None):
             if row: s_fy = row.get("financial_year") or s_fy
         from database.seed import ACCOUNTS
 
-        # UP AOA Fund account labels per statutory heads
+        # UP AOA labels for the equity / fund accounts. The fund rows come from the shared fund catalogue
+        # (status, rate and applicability); the rest are plain accounts with a fixed label.
         UP_AOA_FUND_LABELS = {
-            3100: "Capital Account / Share Capital",
-            3210: "Sinking Fund Reserve",
-            3220: "Repair & Maintenance Fund Reserve",
-            3230: "IFMS Corpus (Interest-Free Maintenance Security Corpus)",
             3240: "Gifts Received",
             3250: "Provisions",
             3260: "Gifts Given",
-            3270: "Major Repair Fund (Transfer Fee ½%)",
         }
 
         # Same shape as the Balance Sheet: Assets (Dr) on the left,
@@ -1706,6 +1695,9 @@ def render_category_content(category, society_id=None, state=None):
 
         def _get_aoa_label(acc_id, default_name):
             """Get UP AOA label for fund accounts, fallback to default name."""
+            _fi = _bf_fund_info(acc_id)
+            if _fi:
+                return _fi["label"]
             return UP_AOA_FUND_LABELS.get(acc_id, default_name)
 
         def _render_node(acc, depth):
@@ -1713,8 +1705,14 @@ def render_category_content(category, society_id=None, state=None):
             indent = {"paddingLeft": f"{12 + depth * 14}px"}
             if acc[6]:   # postable account -> amount + remarks inputs (ids unchanged)
                 aoa_label = _get_aoa_label(acc[0], acc[3] or "")
+                _fi = _bf_fund_info(acc[0])
+                _name_kids = [aoa_label]
+                if _fi:   # fund account: status badges (Statutory / Model Bye-Law / Optional - Provisional) + rate hint
+                    _name_kids.append(html.Div([_fund_badge(t, c) for t, c in _fi["tags"]], className="mt-1"))
+                    _name_kids.append(html.Small(_fi["hint"], className="d-block text-muted"))
+                _name_kids.append(html.Small(f"{acc[2] or ''} · {acc[5] or ''}"))
                 out.append(html.Div([
-                    html.Div([aoa_label, html.Small(f"{acc[2] or ''} · {acc[5] or ''}")], className="sw-bf-name"),
+                    html.Div(_name_kids, className="sw-bf-name"),
                     dbc.Input(id={"type": "sw-bf-amt", "acc_id": acc[0]}, type="number", value=0.0, step=0.01, min=0, size="sm"),
                     dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc[0]}, type="text", placeholder="Remarks...", size="sm", className="sw-bf-remarks"),
                 ], className="sw-bf-row", style={**indent, "paddingRight": "12px"}))

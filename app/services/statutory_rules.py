@@ -96,13 +96,17 @@ STATUTORY_ROWS = {
         "Dedicated ledger account, same rate config and billing as Sinking Fund.",
     ),
     "corpus": (
-        "Corpus Fund",
-        "Builder-buyer agreement / General Body resolution (not an UP Act or Bye-Law rule)",
-        "One-time builder-handover capital receipt. Keeping the principal intact "
-        "and spending only the interest is a society / agreement policy, not a "
-        "requirement of the UP Act, the Rules or the Model Bye-Laws.",
+        "Corpus Fund (IFMS)",
+        "UP Apartment Act 2010 s.14(5) proviso; UP RERA General Regulations 2019 Reg. 47 as amended "
+        "(Notification 7098/U.P. RERA/Regulation/2026-27, 13.07.2026)",
+        "Interest-Free Maintenance Security collected by the promoter at registration of the deed and handed to the "
+        "AOA at handover. One-time receipt, so it only ever appears as an opening balance (Brought Forward). Spend is "
+        "limited to operation, maintenance, repair and replacement of common areas; it sits in a separate account with "
+        "separate books and a CA audit. The 2026 category rates were taken from press / law-firm reports and are "
+        "provisional until checked against the notification text. A corpus a society builds for itself, rather than "
+        "receives from the promoter, is an optional General Body choice, not a UP rule.",
         True,
-        "Dedicated ledger account; principal locked by policy via statutory_lock_pct.",
+        "Dedicated ledger account (3230); principal locked by policy via statutory_lock_pct.",
     ),
     "up_aoa_act": (
         "Governing Statute — UP Apartment Act, 2010",
