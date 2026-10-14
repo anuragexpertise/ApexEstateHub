@@ -27,10 +27,11 @@ STATUS_META = {
 
 VERIFY_META = {
     "checked": ("Text checked", "success"),
+    "supplied": ("As supplied \u2014 notification not read", "info"),
     "provisional": ("Provisional \u2014 verify", "warning"),
 }
 
-FUND_ORDER = ("ifms_corpus", "major_repair", "reserve", "sinking", "repair")
+FUND_ORDER = ("ifms_corpus", "major_repair", "reserve", "sinking", "repair", "depreciation")
 
 # Parameters that belong to every optional on-bill fund, and to billing generally.
 SHARED_PARAMETERS = [
@@ -45,20 +46,22 @@ FUNDS = {
     "ifms_corpus": {
         "name": "IFMS Corpus (Corpus Fund)",
         "status": "statutory",
-        "verification": "provisional",
+        "verification": "supplied",
         "verification_note": (
-            "Act s.14(5) proviso read in the Act. The 2026 category rates come from press / law-firm reports of "
-            "Notification 7098/U.P. RERA/Regulation/2026-27 (13.07.2026); the notification text was not read and "
-            "reports disagree on the unit (per sq ft vs per sq m)."),
+            "Act s.14(5) proviso read in the Act. The slabs are the text of Regulation 47(d) (Notification No. "
+            "7098/UPRERA/Regulation/2026-27) as supplied by the society's administrator; the notification itself was not "
+            "independently read. The text gives a rate per sq ft but not which area (carpet, built-up or super) it is charged on."),
         "source": "UP Apartment Act 2010 s.14(5) proviso; UP RERA General Regulations 2019, Reg. 47 (as amended 13.07.2026)",
         "description": "Interest-Free Maintenance Security collected by the promoter; handed to the AOA at handover.",
         "applicability": ("Promoter-collected security. The AOA does not levy it: it receives the corpus and a unit-wise "
                           "statement at handover and records it as an opening balance."),
-        "levy_when": "One-time, by the promoter, at registration of the sale / lease deed.",
-        "rate": ("Set by UP RERA by project type and unit category - group housing about \u20b920\u2013100, commercial "
-                 "\u20b940 (non-central AC) / \u20b950 (central AC), as reported. Unit and exact slabs: verify in the notification."),
-        "use": ("Operation, maintenance, repair and replacement of common areas and equipment only. Separate bank "
-                "account, separate books, CA-audited, reported at the AGM. The app locks the principal (100%)."),
+        "levy_when": "One-time, by the promoter, at registration of the sale / lease / sub-lease deed.",
+        "rate": ("Per sq ft, as a range, by project type and house category (Reg. 47(d)): group housing \u20b920\u201330 (EWS) up to "
+                 "\u20b990\u2013100 (Ultra-Luxury); plotted \u20b920\u201330 (plot up to 100 sq m) or \u20b930\u201340 (above); commercial "
+                 "\u20b940 (non-central AC) or \u20b950 (central AC). Full table: IFMS_SLABS."),
+        "use": ("Operation, maintenance, repair and replacement of common areas and equipment only. Kept by the promoter in a separate "
+                "account in a scheduled bank, in the highest-interest fixed deposit on bank quotations. At handover the whole corpus passes "
+                "to the RWA with the account's operating rights and an audited reconciliation statement. The app locks the principal (100%)."),
         "rate_applicable": False,
         "opt_in_policy": None,
         "account": {
@@ -67,8 +70,8 @@ FUNDS = {
             "engine_lookup": "head IFMS_CORPUS; statutory_lock_pct 100 (fn_process_fund_utilization refuses principal draw-down)",
         },
         "parameters": [
-            {"key": "ifms_rate", "label": "IFMS rate by project type / unit category", "unit": "INR (unit to verify)",
-             "kind": "statutory", "store": "UP RERA notification 7098 of 13.07.2026 (not stored in the app)", "default": None},
+            {"key": "ifms_rate", "label": "IFMS rate by project type / house category", "unit": "INR per sq ft (a range)",
+             "kind": "statutory", "store": "UP RERA Reg. 47(d): IFMS_SLABS in this module (not stored per society)", "default": None},
             {"key": "statutory_lock_pct", "label": "Principal lock", "unit": "%", "kind": "statutory",
              "store": "accounts.statutory_lock_pct", "default": 100},
         ],
@@ -215,6 +218,45 @@ FUNDS = {
              "dr": "Income Expenditure A/c (5100)", "cr": 3220, "when": "yearly"},
         ],
     },
+    "depreciation": {
+        "name": "Depreciation Fund",
+        "status": "optional",
+        "verification": "provisional",
+        "verification_note": ("Not in the Act, Rules or Model Bye-Laws 2011 (bye-law 46(d) is about raising loans). Its rate, basis and the "
+                              "5% default are the society's own / engine defaults, not legal figures."),
+        "source": "Society policy by General Body resolution; not in the UP Apartment Act 2010 or the Model Bye-Laws 2011",
+        "description": ("Opt-in fund for replacing worn-out assets. It has its own account, separate from the Depreciation expense "
+                        "(5110) and from Gifts Received (3240)."),
+        "applicability": "Only if the General Body resolves to keep it.",
+        "levy_when": "Once a year, dated the last day of the year (fn_appropriate_depreciation_fund); not on the monthly bill.",
+        "rate": ("The society's own: a % of asset value, a rate per sq ft, or a rate per flat (Legal rules > depreciation_fund_*). "
+                 "The 5% shown by default is an engine default, not a legal figure."),
+        "use": "Replacement of depreciating assets.",
+        "rate_applicable": False,
+        "opt_in_policy": "levy_depreciation_fund",
+        "account": {
+            "id": 3280, "seed_name": "Depreciation Fund", "head_code": "DEPRECIATION_FUND", "lock_pct": 0.0,
+            "head_source": "Society policy (General Body resolution); not in the Model Bye-Laws 2011",
+            "engine_lookup": ("fixed id 3280, tab DepFund (fn_ensure_depreciation_fund creates it if missing); NOT 5110 (Depreciation "
+                              "expense) and NOT 3240 (Gifts Received)"),
+        },
+        "parameters": [
+            {"key": "levy_depreciation_fund", "label": "Opt in (keep a Depreciation Fund)", "unit": "yes/no", "kind": "policy",
+             "store": "society policy levy_depreciation_fund", "default": "no"},
+            {"key": "depreciation_fund_basis", "label": "Basis of the yearly contribution",
+             "unit": "pct_of_asset_value / fixed_amount_per_sqft / fixed_amount_per_flat", "kind": "policy",
+             "store": "regime parameter depreciation_fund_basis", "default": "pct_of_asset_value"},
+            {"key": "depreciation_fund_pct", "label": "Percentage of asset value", "unit": "%", "kind": "policy",
+             "store": "regime parameter depreciation_fund_pct", "default": 5},
+            {"key": "depreciation_fund_rate", "label": "Rate when the basis is a fixed amount", "unit": "INR per sq ft / flat",
+             "kind": "policy", "store": "regime parameter depreciation_fund_rate", "default": 2.0},
+        ],
+        "appropriations": [
+            {"trigger": "Year end", "function": "fn_appropriate_depreciation_fund",
+             "dr": "Sundry Debtors (a receivable on the society itself, charge_kind depreciation_fund)", "cr": 3280,
+             "when": "yearly; dated the last day of the year"},
+        ],
+    },
 }
 
 
@@ -329,3 +371,60 @@ SUPPORT_META = {
     "partial": ("Partly automatic", "warning"),
     "manual": ("Manual entry", "secondary"),
 }
+
+
+# ── IFMS slabs: UP RERA Regulation 47(d), inserted by Notification No. 7098/UPRERA/Regulation/2026-27 ──────────────
+# Text as supplied by the society's administrator (not independently read from the notification). Rates are INR per sq ft
+# and are ranges. House categories are defined by CARPET area in sq m (plots by plot area in sq m).
+IFMS_PROJECT_TYPES = {
+    "group_housing": "Multi-storey group housing",
+    "plotted_housing": "Plotted group housing",
+    "commercial": "Commercial",
+    "plotted_commercial": "Plotted group commercial",
+}
+
+_PLOTTED = [
+    {"code": "PLOT_LE_100", "label": "Plot up to 100 sq m", "area_sqm_from": None, "area_sqm_to": 100, "rate_min": 20, "rate_max": 30},
+    {"code": "PLOT_GT_100", "label": "Plot above 100 sq m", "area_sqm_from": 100, "area_sqm_to": None, "rate_min": 30, "rate_max": 40},
+]
+
+IFMS_SLABS = {
+    "group_housing": [
+        {"code": "EWS", "label": "EWS house", "area_sqm_from": 30, "area_sqm_to": 40, "rate_min": 20, "rate_max": 30},
+        {"code": "LIG", "label": "LIG house", "area_sqm_from": 35, "area_sqm_to": 45, "rate_min": 30, "rate_max": 40},
+        {"code": "STUDIO", "label": "Studio apartment", "area_sqm_from": 35, "area_sqm_to": 45, "rate_min": 30, "rate_max": 40},
+        {"code": "MIG", "label": "MIG house", "area_sqm_from": 45, "area_sqm_to": 90, "rate_min": 40, "rate_max": 50},
+        {"code": "HIG", "label": "HIG house", "area_sqm_from": 90, "area_sqm_to": 200, "rate_min": 50, "rate_max": 60},
+        {"code": "LUXURY", "label": "Luxury house", "area_sqm_from": 200, "area_sqm_to": 300, "rate_min": 70, "rate_max": 80},
+        {"code": "ULTRA_LUXURY", "label": "Ultra-Luxury house", "area_sqm_from": 300, "area_sqm_to": None, "rate_min": 90, "rate_max": 100},
+    ],
+    "plotted_housing": [dict(r) for r in _PLOTTED],
+    "commercial": [
+        {"code": "NON_CENTRAL_AC", "label": "Non-central AC project", "area_sqm_from": None, "area_sqm_to": None, "rate_min": 40, "rate_max": 40},
+        {"code": "CENTRAL_AC", "label": "Central AC project", "area_sqm_from": None, "area_sqm_to": None, "rate_min": 50, "rate_max": 50},
+    ],
+    "plotted_commercial": [dict(r) for r in _PLOTTED],
+}
+
+IFMS_NOTES = [
+    "Rates are per sq ft. The text does not say which area (carpet, built-up or super) the rate is charged on.",
+    "House categories are defined by carpet area in sq m and overlap at the edges (LIG and Studio share 35\u201345; 45, 90 and 200 sq m "
+    "each end one band and start the next), so the category comes from the house type, not from the area alone.",
+    "Each residential rate is a range. The text does not say who picks the figure within it.",
+    "Handover: the whole corpus, the bank account's operating rights and an audited reconciliation statement pass to the RWA when the common "
+    "areas are handed over.",
+]
+
+
+def ifms_rate_range(project_type, category):
+    """(min, max) INR per sq ft for a project type and category code; KeyError if either is unknown."""
+    for row in IFMS_SLABS[project_type]:
+        if row["code"] == category:
+            return row["rate_min"], row["rate_max"]
+    raise KeyError(f"{project_type}/{category}")
+
+
+def ifms_amount_range(project_type, category, area_sqft):
+    """(min, max) corpus for a given area in sq ft, at the slab's range. The text does not say which area applies."""
+    lo, hi = ifms_rate_range(project_type, category)
+    return round(lo * area_sqft, 2), round(hi * area_sqft, 2)

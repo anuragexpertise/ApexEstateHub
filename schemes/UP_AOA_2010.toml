@@ -704,12 +704,11 @@ source = """Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration 
 
 [[parameter]]
 key = "depreciation_fund_pct"
-label = "Bye-law 46(d) depreciation fund (% of asset value or fixed amount)"
-instrument = "UP Model Bye-Laws, 2011"
-provision = "bye-law 46(d)"
-clause = "BL_46"
+label = "Depreciation fund (% of asset value, or fixed amount) - society policy"
+instrument = "Society policy (not in the Model Bye-Laws 2011)"
+provision = "-"
 nature = "non_statutory"
-base_source = "model_bye_law"
+base_source = "engine_default"
 type = "num"
 unit = "% or INR"
 value = 5
@@ -718,39 +717,35 @@ max = 100
 vary_max = 10
 layers = [2]
 tighten = "none"
-enforcement = "gated"
+enforcement = "policy"
 feeds = ["fn_ensure_depreciation_fund", "fn_appropriate_depreciation_fund"]
-verification = "checked"
-verified_on = 2026-10-07
-source = """Model Bye-Laws 2011, bye-law 46(d): depreciation fund for replacement of assets; rate set by General Body resolution (no statutory rate)"""
+verification = "provisional"
+source = """Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure"""
 
 [[parameter]]
 key = "depreciation_fund_basis"
-label = "Depreciation fund contribution basis"
-instrument = "UP Model Bye-Laws, 2011"
-provision = "bye-law 46(d)"
-clause = "BL_46"
+label = "Depreciation fund contribution basis - society policy"
+instrument = "Society policy (not in the Model Bye-Laws 2011)"
+provision = "-"
 nature = "non_statutory"
-base_source = "model_bye_law"
+base_source = "engine_default"
 type = "text"
 value_text = "pct_of_asset_value"
 choices = ["pct_of_asset_value", "fixed_amount_per_sqft", "fixed_amount_per_flat"]
 layers = [2]
 tighten = "none"
-enforcement = "gated"
+enforcement = "policy"
 feeds = ["fn_appropriate_depreciation_fund"]
-verification = "checked"
-verified_on = 2026-10-07
-source = """Model Bye-Laws 2011, bye-law 46(d): basis for depreciation fund contribution"""
+verification = "provisional"
+source = """Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the basis of the yearly contribution"""
 
 [[parameter]]
 key = "depreciation_fund_rate"
-label = "Depreciation fund rate (per sq ft or per flat)"
-instrument = "UP Model Bye-Laws, 2011"
-provision = "bye-law 46(d)"
-clause = "BL_46"
+label = "Depreciation fund rate (per sq ft or per flat) - society policy"
+instrument = "Society policy (not in the Model Bye-Laws 2011)"
+provision = "-"
 nature = "non_statutory"
-base_source = "model_bye_law"
+base_source = "engine_default"
 type = "num"
 unit = "INR per sq ft/flat"
 value = 2.0
@@ -759,11 +754,10 @@ max = 1000
 vary_max = 10
 layers = [2]
 tighten = "none"
-enforcement = "gated"
+enforcement = "policy"
 feeds = ["fn_appropriate_depreciation_fund"]
-verification = "checked"
-verified_on = 2026-10-07
-source = """Model Bye-Laws 2011, bye-law 46(d): rate when basis is fixed amount"""
+verification = "provisional"
+source = """Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the rate when the basis is a fixed amount"""
 
 [[parameter]]
 key = "investment_register"

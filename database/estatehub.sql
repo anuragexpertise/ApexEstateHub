@@ -14207,9 +14207,9 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
  ('UP_AOA_2010', 'borrowing_ca_approval', 'Bye-law 44(d) borrowing needs Competent Authority approval', 'UP Model Bye-Laws, 2011', 'bye-law 44(d)', 'BL_44', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_borrowing_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'tenant_joint_liability', 'Act s.18(2) tenant jointly liable with owner', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.18(2)', NULL, 'statutory', 'state_act_rules', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'hard_wired', ARRAY['fn_tenant_liability']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'board_election_voting_basis', 'Board election voting basis (Model Bye-Law 8)', 'UP Model Bye-Laws, 2011', 'bye-law 8', 'BL_08', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['one_apartment_one_vote', 'undivided_interest']::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_board_election_eligibility']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
- ('UP_AOA_2010', 'depreciation_fund_pct', 'Bye-law 46(d) depreciation fund (% of asset value or fixed amount)', 'UP Model Bye-Laws, 2011', 'bye-law 46(d)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', '% or INR', 0, 100, 0, 10, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_ensure_depreciation_fund', 'fn_appropriate_depreciation_fund']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
- ('UP_AOA_2010', 'depreciation_fund_basis', 'Depreciation fund contribution basis', 'UP Model Bye-Laws, 2011', 'bye-law 46(d)', 'BL_46', 'non_statutory', 'model_bye_law', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['pct_of_asset_value', 'fixed_amount_per_sqft', 'fixed_amount_per_flat']::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_appropriate_depreciation_fund']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
- ('UP_AOA_2010', 'depreciation_fund_rate', 'Depreciation fund rate (per sq ft or per flat)', 'UP Model Bye-Laws, 2011', 'bye-law 46(d)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', 'INR per sq ft/flat', 0, 1000, 0, 10, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY['fn_appropriate_depreciation_fund']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'depreciation_fund_pct', 'Depreciation fund (% of asset value, or fixed amount) - society policy', 'Society policy (not in the Model Bye-Laws 2011)', '-', NULL, 'non_statutory', 'engine_default', 'num', '% or INR', 0, 100, 0, 10, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_ensure_depreciation_fund', 'fn_appropriate_depreciation_fund']::TEXT[], 'provisional', NULL, FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'depreciation_fund_basis', 'Depreciation fund contribution basis - society policy', 'Society policy (not in the Model Bye-Laws 2011)', '-', NULL, 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['pct_of_asset_value', 'fixed_amount_per_sqft', 'fixed_amount_per_flat']::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_appropriate_depreciation_fund']::TEXT[], 'provisional', NULL, FALSE, TRUE, NULL),
+ ('UP_AOA_2010', 'depreciation_fund_rate', 'Depreciation fund rate (per sq ft or per flat) - society policy', 'Society policy (not in the Model Bye-Laws 2011)', '-', NULL, 'non_statutory', 'engine_default', 'num', 'INR per sq ft/flat', 0, 1000, 0, 10, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_appropriate_depreciation_fund']::TEXT[], 'provisional', NULL, FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'investment_register', 'Bye-law 47 investment register maintained', 'UP Model Bye-Laws, 2011', 'bye-law 47', 'BL_47', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2, 3]::INT[], 'higher', FALSE, 'tracked', ARRAY['fn_investment_register_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'affiliation_register', 'Bye-law 48 affiliation register maintained', 'UP Model Bye-Laws, 2011', 'bye-law 48', 'BL_48', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'tracked', ARRAY['fn_affiliation_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'accounts_inspection_allowed', 'Bye-law 48 accounts open for member inspection', 'UP Model Bye-Laws, 2011', 'bye-law 48', 'BL_48', 'non_statutory', 'model_bye_law', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'higher', FALSE, 'tracked', ARRAY['fn_accounts_inspection_check']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
@@ -14266,9 +14266,9 @@ INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, un
  ('UP_AOA_2010', 'borrowing_ca_approval', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 44(d): borrowing requires Competent Authority approval', DATE '2011-11-16'),
  ('UP_AOA_2010', 'tenant_joint_liability', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(2): tenant is jointly liable with the owner for common expenses', DATE '2011-11-16'),
  ('UP_AOA_2010', 'board_election_voting_basis', NULL, 'undivided_interest', NULL, 'Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration (Act s.12(1)(f): percentage for all purposes including voting). Advisory polls may use one-apartment-one-vote.', DATE '2011-11-16'),
- ('UP_AOA_2010', 'depreciation_fund_pct', 5, NULL, '% or INR', 'Model Bye-Laws 2011, bye-law 46(d): depreciation fund for replacement of assets; rate set by General Body resolution (no statutory rate)', DATE '2011-11-16'),
- ('UP_AOA_2010', 'depreciation_fund_basis', NULL, 'pct_of_asset_value', NULL, 'Model Bye-Laws 2011, bye-law 46(d): basis for depreciation fund contribution', DATE '2011-11-16'),
- ('UP_AOA_2010', 'depreciation_fund_rate', 2.0, NULL, 'INR per sq ft/flat', 'Model Bye-Laws 2011, bye-law 46(d): rate when basis is fixed amount', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'depreciation_fund_pct', 5, NULL, '% or INR', 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'depreciation_fund_basis', NULL, 'pct_of_asset_value', NULL, 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the basis of the yearly contribution', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'depreciation_fund_rate', 2.0, NULL, 'INR per sq ft/flat', 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the rate when the basis is a fixed amount', DATE '2011-11-16'),
  ('UP_AOA_2010', 'investment_register', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 47: Board shall maintain a register of all investments', DATE '2011-11-16'),
  ('UP_AOA_2010', 'affiliation_register', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 48: association may affiliate with federation; register maintained', DATE '2011-11-16'),
  ('UP_AOA_2010', 'accounts_inspection_allowed', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 48: books of account open to inspection by any member at reasonable times', DATE '2011-11-16'),
@@ -14573,27 +14573,28 @@ BEGIN
     RETURN 3270;
 END $$;
 
--- 3. Depreciation Fund (bye-law 46(d))
+-- 3. Depreciation Fund (society policy: not in the Model Bye-Laws 2011; bye-law 46(d) is about loans)
+--    Its own account (3280, tab DepFund), separate from the Depreciation EXPENSE account (5110) and from 3240 Gifts Received.
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION fn_ensure_depreciation_fund(p_society_id INT)
 RETURNS INT LANGUAGE plpgsql AS $$
 BEGIN
     INSERT INTO accounts (id, society_id, name, tab_name, header, parent_account_id,
                           drcr_account, has_bf, depreciation_percent, is_depreciable)
-    SELECT 3240, p_society_id, 'Depreciation Fund', 'DeprFund', 'Depreciation Fund',
+    SELECT 3280, p_society_id, 'Depreciation Fund', 'DepFund', 'Depreciation Fund',
            (SELECT 3200 FROM accounts WHERE society_id = p_society_id AND id = 3200),
            'Cr', TRUE, 100, FALSE
-    WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE society_id = p_society_id AND id = 3240);
+    WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE society_id = p_society_id AND id = 3280);
 
     INSERT INTO account_statutory_mappings
         (society_id, account_id, regime_code, head_code, effective_from, source_reference)
-    SELECT p_society_id, 3240, slr.regime_code, 'DEPRECIATION_FUND', DATE '2011-11-16',
-           'Model Bye-Laws 2011, bye-law 46(d)'
+    SELECT p_society_id, 3280, slr.regime_code, 'DEPRECIATION_FUND', DATE '2011-11-16',
+           'Society policy (General Body resolution); not in the Model Bye-Laws 2011'
     FROM society_legal_regime slr
     WHERE slr.society_id = p_society_id AND slr.regime_code = 'UP_AOA_2010'
       AND EXISTS (SELECT 1 FROM statutory_head_catalog WHERE regime_code = 'UP_AOA_2010' AND head_code = 'DEPRECIATION_FUND')
     ON CONFLICT DO NOTHING;
-    RETURN 3240;
+    RETURN 3280;
 END $$;
 
 CREATE OR REPLACE FUNCTION fn_appropriate_depreciation_fund(
@@ -14636,14 +14637,14 @@ BEGIN
           AND (disposed_at IS NULL OR disposed_at > v_period_end);
         v_appropriation_amount := ROUND(v_asset_value * v_pct / 100, 2);
     ELSIF v_basis = 'fixed_amount_per_sqft' THEN
-        SELECT COALESCE(SUM(built_up_area), 0) INTO v_total_sqft
+        SELECT COALESCE(SUM(apartment_size), 0) INTO v_total_sqft
         FROM apartments
-        WHERE society_id = p_society_id;
+        WHERE society_id = p_society_id AND active;
         v_appropriation_amount := ROUND(v_total_sqft * COALESCE(v_rate, 0), 2);
     ELSIF v_basis = 'fixed_amount_per_flat' THEN
         SELECT COUNT(*) INTO v_total_flats
         FROM apartments
-        WHERE society_id = p_society_id;
+        WHERE society_id = p_society_id AND active;
         v_appropriation_amount := ROUND(v_total_flats * COALESCE(v_rate, 0), 2);
     ELSE
         appropriation_id := NULL; amount := NULL;
@@ -17767,6 +17768,17 @@ BEGIN
         ELSE severity := 'ok'; detail := 'IFMS corpus principal is locked at 100%.'; END IF;
         RETURN NEXT;
     END IF;
+
+    -- Depreciation Fund: optional; opted by policy levy_depreciation_fund. It has its own account (3280), not 5110 or 3240.
+    check_code := 'OPTED_DEPRECIATION_FUND';
+    IF COALESCE(fn_society_policy(p_society_id, 'levy_depreciation_fund', CURRENT_DATE), 'no') <> 'yes' THEN
+        severity := 'info'; detail := 'Depreciation fund: not opted by this society (nothing is appropriated).';
+    ELSIF EXISTS (SELECT 1 FROM accounts WHERE society_id = p_society_id AND id = 3280) THEN
+        severity := 'ok'; detail := 'Depreciation fund is opted and has its own account (3280).';
+    ELSE
+        severity := 'info'; detail := 'Depreciation fund is opted; account 3280 is created on the first appropriation.';
+    END IF;
+    RETURN NEXT;
 
     -- Opted funds: collected on the bill => a rate must be set.
     FOR r IN SELECT * FROM (VALUES ('sinking'), ('repair')) AS t(f) LOOP

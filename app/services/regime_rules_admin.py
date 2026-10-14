@@ -433,11 +433,14 @@ POLICY_SPECS.update({
     "repair_fund_basis":    ("Repair Fund rate basis (if levied)", "BL_36", _BASIS),
     "sinking_fund_collection": ("Sinking Fund: when it is collected", "BL_46", _COLLECTION),
     "repair_fund_collection":  ("Repair Fund: when it is collected", "BL_36", _COLLECTION),
+    "levy_depreciation_fund": ("Keep a Depreciation Fund (yearly appropriation)", "BL_46",
+                               (("no", "No - not kept (default)"), ("yes", "Yes - by General Body resolution"))),
     "fund_arrears_interest": ("Late-payment interest also applies to fund dues", "BL_46",
                               (("yes", "Yes (default)"), ("no", "No"))),
 })
 FUND_POLICY_KEYS = ("levy_sinking_fund", "sinking_fund_collection", "sinking_fund_basis",
-                    "levy_repair_fund", "repair_fund_collection", "repair_fund_basis", "fund_arrears_interest")
+                    "levy_repair_fund", "repair_fund_collection", "repair_fund_basis", "levy_depreciation_fund",
+                    "fund_arrears_interest")
 # Asked on the Setup Wizard's Funds step (not on the Model Bye-Laws step, which keeps only fund_arrears_interest).
 FUND_STEP_POLICY_KEYS = tuple(k for k in FUND_POLICY_KEYS if k != "fund_arrears_interest")
 del _BASIS, _COLLECTION

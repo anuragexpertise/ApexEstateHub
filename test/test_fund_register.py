@@ -18,19 +18,20 @@ def _seed():
 
 
 def test_register_lists_only_prescribed_and_optional_funds():
-    assert set(fr.FUND_ORDER) == {"ifms_corpus", "major_repair", "reserve", "sinking", "repair"}
+    assert set(fr.FUND_ORDER) == {"ifms_corpus", "major_repair", "reserve", "sinking", "repair", "depreciation"}
     for key, f in fr.FUNDS.items():
         assert f["status"] in fr.STATUS_META and f["verification"] in fr.VERIFY_META, key
         assert f["parameters"] and f["appropriations"], key
     prescribed = {k for k in fr.FUND_ORDER if fr.is_prescribed(k)}
     assert prescribed == {"ifms_corpus", "major_repair", "reserve"}
-    assert {k for k in fr.FUND_ORDER if fr.FUNDS[k]["opt_in_policy"]} == {"sinking", "repair"}   # exactly the optional ones
+    assert {k for k in fr.FUND_ORDER if fr.FUNDS[k]["opt_in_policy"]} == {"sinking", "repair", "depreciation"}   # exactly the optional ones
 
 
 def test_optional_funds_are_active_only_once_opted():
     assert fr.active_keys({"sinking": "none", "repair": "none"}) == prescribed_keys()
     assert fr.active_keys({"sinking": "on_bill"}) == prescribed_keys() | {"sinking"}
     assert fr.active_keys({"repair": "fy_close"}) == prescribed_keys() | {"repair"}
+    assert fr.active_keys({"depreciation": "fy_close"}) == prescribed_keys() | {"depreciation"}
     assert fr.active_keys(None) == set(fr.FUND_ORDER)          # None means 'no filtering'
 
 
@@ -39,9 +40,11 @@ def prescribed_keys():
 
 
 def test_unread_or_unprescribed_figures_are_never_marked_checked():
-    for key in ("sinking", "repair", "ifms_corpus", "reserve"):
+    for key in ("sinking", "repair", "depreciation", "reserve"):
         assert fr.FUNDS[key]["verification"] == "provisional", key
     assert fr.FUNDS["major_repair"]["verification"] == "checked"
+    # IFMS slabs are the regulation text as supplied; the notification itself was not read, so never 'checked'
+    assert fr.FUNDS["ifms_corpus"]["verification"] == "supplied"
 
 
 def test_transfer_fee_matches_scheme_pack():
@@ -120,10 +123,72 @@ def test_wizard_brought_forward_hides_unopted_optional_funds():
     other = bf_info(3230, held, up=False)                             # not the UP regime: no UP labels or badges
     assert other["label"] is None and other["tags"] == []
     assert bf_info(3210, held, up=False)["hidden"] is True
+    assert bf_info(3280, held)["hidden"] is True                          # depreciation fund not opted: no row
+    opted = active_keys({"depreciation": "fy_close"})
+    assert bf_info(3280, opted)["hidden"] is False and bf_info(3280, opted)["label"] == "Depreciation Fund (DepFund)"
 
 
 def test_ifms_is_statutory_major_repair_is_model_bye_law_sinking_is_optional():
     from app.services.up_aoa_fund_catalog import bf_info
     tags = lambda acc: " ".join(t for t, _ in bf_info(acc)["tags"])
     assert "Statutory" in tags(3230) and "Model Bye-Law" in tags(3270) and "Optional" in tags(3210)
-    assert "Provisional" in tags(3230)          # IFMS slabs come from reports of the notification, not its text
+    assert "notification not read" in tags(3230)      # IFMS slabs are the supplied regulation text, not the notification itself
+
+
+# ── Depreciation Fund: its own account, a correct citation ─────────────────────────────────────────────────────────
+def test_depreciation_fund_has_its_own_account_not_the_expense_or_gifts():
+    seed = _seed()
+    by_id = {a[0]: a for a in seed.ACCOUNTS}
+    acc = fr.FUNDS["depreciation"]["account"]
+    assert acc["id"] == 3280 and acc["id"] not in (5110, 3240)
+    row = by_id[3280]
+    assert row[1] == "Depreciation Fund" and row[2] == "DepFund" and row[4] == 3200 and row[5] == "Cr" and row[6]
+    assert by_id[5110][1] == "Depreciation" and by_id[3240][1] == "Gifts Received"      # untouched
+    assert (3280, "DEPRECIATION_FUND") in {(a, h) for a, h, _ in seed.UP_AOA_ACCOUNT_MAPPINGS}
+    assert any(h[1] == "DEPRECIATION_FUND" for h in seed.STATUTORY_HEADS_UP_AOA)         # the head the mapping needs exists
+
+
+def test_sql_depreciation_function_uses_3280_and_real_columns():
+    i = SQL.index("CREATE OR REPLACE FUNCTION fn_ensure_depreciation_fund")
+    j = SQL.index("CREATE OR REPLACE FUNCTION fn_appropriate_depreciation_fund")
+    ensure = SQL[i:j]
+    assert "3280" in ensure and "3240" not in ensure and "'DepFund'" in ensure
+    assert "built_up_area" not in SQL                     # apartments has apartment_size, not built_up_area
+
+
+def test_depreciation_params_no_longer_cite_bye_law_46d_as_their_source():
+    pack = tomllib.loads((ROOT / "schemes" / "UP_AOA_2010.toml").read_text(encoding="utf-8"))
+    dep = [p for p in pack["parameter"] if p["key"].startswith("depreciation_fund_")]
+    assert len(dep) == 3
+    for p in dep:
+        assert p["provision"] == "-" and "clause" not in p
+        assert p["base_source"] == "engine_default" and p["enforcement"] == "policy" and p["verification"] == "provisional"
+        assert "loans" in p["source"] and "46(d)" in p["source"]       # says what 46(d) really is
+        assert "bye-law 46(d)" not in p["provision"]
+
+
+# ── IFMS slabs: UP RERA Reg. 47(d), as supplied ─────────────────────────────────────────────────────────────────────
+def test_ifms_slabs_match_the_supplied_regulation_text():
+    g = {r["code"]: (r["rate_min"], r["rate_max"], r["area_sqm_from"], r["area_sqm_to"]) for r in fr.IFMS_SLABS["group_housing"]}
+    assert g == {"EWS": (20, 30, 30, 40), "LIG": (30, 40, 35, 45), "STUDIO": (30, 40, 35, 45), "MIG": (40, 50, 45, 90),
+                 "HIG": (50, 60, 90, 200), "LUXURY": (70, 80, 200, 300), "ULTRA_LUXURY": (90, 100, 300, None)}
+    for ptype in ("plotted_housing", "plotted_commercial"):
+        assert {r["code"]: (r["rate_min"], r["rate_max"]) for r in fr.IFMS_SLABS[ptype]} == {"PLOT_LE_100": (20, 30), "PLOT_GT_100": (30, 40)}
+    assert {r["code"]: (r["rate_min"], r["rate_max"]) for r in fr.IFMS_SLABS["commercial"]} == {"NON_CENTRAL_AC": (40, 40), "CENTRAL_AC": (50, 50)}
+    assert set(fr.IFMS_SLABS) == set(fr.IFMS_PROJECT_TYPES)
+    assert all(r["rate_min"] <= r["rate_max"] for rows in fr.IFMS_SLABS.values() for r in rows)
+
+
+def test_ifms_lookup_and_amounts():
+    assert fr.ifms_rate_range("group_housing", "HIG") == (50, 60)
+    assert fr.ifms_rate_range("commercial", "CENTRAL_AC") == (50, 50)
+    assert fr.ifms_amount_range("group_housing", "MIG", 1000) == (40000, 50000)
+    with pytest.raises(KeyError):
+        fr.ifms_rate_range("group_housing", "NOPE")
+    with pytest.raises(KeyError):
+        fr.ifms_rate_range("hotel", "HIG")
+
+
+def test_ifms_notes_say_what_the_text_leaves_open():
+    notes = " ".join(fr.IFMS_NOTES)
+    assert "which area" in notes and "overlap" in notes and "who picks" in notes
