@@ -352,9 +352,19 @@ ACCOUNTS = [
 # would block legitimate, lawful utilisation rather than enforce a rule.
 # An admin who wants a stricter local policy can raise a fund's lock from
 # Settings > Accounts; the column is editable, not seeded-hardcoded.
-STATUTORY_PRINCIPAL_LOCKS = {
-    3230: 100.00,
-}
+def _fund_register():
+    """schemes/fund_register.py: the UP AOA fund register (pure data, no app imports), so this script and the app agree."""
+    import os
+    import sys
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from schemes import fund_register
+    return fund_register
+
+
+# Read from the register (account 3230, 100%). test_fund_register checks it against the accounts and SQL below.
+STATUTORY_PRINCIPAL_LOCKS = _fund_register().principal_locks()
 
 SOCIETY_ID = 1
 
@@ -1365,11 +1375,9 @@ def seed_decision_types(cur, conn):
 
 # UP AOA statutory head mappings — rekeyed to block account IDs.
 UP_AOA_ACCOUNT_MAPPINGS = [
-    # Liabilities
-    (3210, "SINKING_FUND", "Sinking Fund: voluntary fund, no statutory rate in UP (Act 2010 / Model Bye-Laws 2011)"),
-    (3220, "RESERVE_FUND", "Repair & Maintenance Fund Reserve mapped to Reserve Fund per Model Bye-Laws 2011, bye-law 46"),
-    (3230, "IFMS_CORPUS", "Corpus Fund (builder handover) is the interest-free maintenance security under UP Apartment Act 2010 s.14(5)"),
-    (3270, "MAJOR_REPAIR_FUND", "Model Bye-Laws 2011, bye-law 39"),
+    # Liabilities. Fund accounts (3210 Sinking, 3220 Reserve + Repair & Maintenance, 3230 IFMS Corpus, 3270 Major Repair)
+    # come from the fund register, so the head, the citation and the principal lock live in one place.
+    *_fund_register().account_mappings(),
     (2210, "TAX_PAYABLE", "CGST Payable"),
     (2220, "TAX_PAYABLE", "SGST Payable"),
     (2230, "TAX_PAYABLE", "CGST Payable (RCM)"),
