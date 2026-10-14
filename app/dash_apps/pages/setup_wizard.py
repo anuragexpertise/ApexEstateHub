@@ -542,11 +542,12 @@ def _fund_status_badges(fund):
 _SUPPORT_ORDER = ("automatic", "partial", "manual")
 
 
-def _fund_register_card(fp, sink_rate, repair_rate):
+def _fund_register_card(fp, sink_rate, repair_rate, dep_opted=False):
     """Funds this society holds (prescribed + opted), their live parameters and where each is appropriated."""
     from database.seed import ACCOUNTS
     from app.services.up_aoa_fund_catalog import FUNDS, register_rows
     modes = {k: fp["plan"][k]["mode"] for k in ("sinking", "repair")}
+    modes["depreciation"] = "fy_close" if dep_opted else "none"      # appropriated once a year, only if opted
     names = {a[0]: a[1] for a in ACCOUNTS}      # a[1] is accounts.name
     values = {"apt_sinking_fund_rate": sink_rate or None, "apt_repair_fund_rate": repair_rate or None}
     for k in ("sinking", "repair"):
@@ -568,11 +569,33 @@ def _fund_register_card(fp, sink_rate, repair_rate):
                        html.Tbody(route_rows)], bordered=True, size="sm", className="mb-3", style={"fontSize": "11.5px"}),
         ]))
     held = {r["key"] for r in register_rows(modes, names, values)}
-    not_opted = [FUNDS[k]["name"] for k in ("sinking", "repair") if k not in held]
+    not_opted = [FUNDS[k]["name"] for k in ("sinking", "repair", "depreciation") if k not in held]
     foot = (html.Small("Not opted by this society (no balance, no billing, hidden from Brought Forward): " + ", ".join(not_opted)
                        + ". Choose 'Yes' above to opt in.", className="text-muted d-block") if not_opted else None)
     return dbc.Card([dbc.CardHeader(html.Strong("Fund register \u2014 funds this society holds, and where each is appropriated")),
                      dbc.CardBody([*blocks] + ([foot] if foot else []))], className="mb-3 shadow-sm")
+
+
+def _ifms_slab_card():
+    """UP RERA Reg. 47(d) IFMS rates by project type and house category, with what the text does not say."""
+    from app.services.up_aoa_fund_catalog import IFMS_NOTES, IFMS_PROJECT_TYPES, IFMS_SLABS
+
+    def area(r):
+        lo, hi = r["area_sqm_from"], r["area_sqm_to"]
+        return "\u2014" if lo is None and hi is None else f"{lo}\u2013{hi}" if lo is not None and hi is not None else (f"above {lo}" if hi is None else f"up to {hi}")
+
+    rows = []
+    for ptype, label in IFMS_PROJECT_TYPES.items():
+        for r in IFMS_SLABS[ptype]:
+            rate = f"\u20b9{r['rate_min']}" if r["rate_min"] == r["rate_max"] else f"\u20b9{r['rate_min']}\u2013{r['rate_max']}"
+            rows.append(html.Tr([html.Td(label), html.Td(r["label"]), html.Td(area(r)), html.Td(html.B(rate + " per sq ft"))]))
+    return dbc.Card([dbc.CardHeader(html.Strong("IFMS rates \u2014 UP RERA Regulation 47(d), collected by the promoter at deed registration")),
+                     dbc.CardBody([dbc.Table([html.Thead(html.Tr([html.Th("Project type"), html.Th("Category"), html.Th("Carpet / plot area (sq m)"), html.Th("Rate")])),
+                                              html.Tbody(rows)], bordered=True, size="sm", style={"fontSize": "11.5px"}),
+                                   *[html.Small(n, className="text-muted d-block mb-1") for n in IFMS_NOTES],
+                                   html.Small("Slabs as supplied by the society's administrator from Notification No. 7098/UPRERA/Regulation/2026-27; "
+                                              "the notification itself was not independently read.", className="text-muted d-block")])],
+                    className="mb-3 shadow-sm")
 
 
 def _billing_channels_card():
@@ -1577,9 +1600,27 @@ def render_category_content(category, society_id=None, state=None, constitution=
                             html.Span(id={"type": "sw-pol-msg", "key": key}, className="text-muted ms-2")], className="d-block mb-2"),
             ])
 
+        _dp = pol.get("levy_depreciation_fund") or {}
+        dep_opted = (_dp.get("proposed") or _dp.get("value")) == "yes"
         for fund_key, fund_info in UP_AOA_FUNDS.items():
             name = fund_info["name"]
             rate_applicable = fund_info["rate_applicable"]
+            if fund_key == "depreciation":
+                if fp["regime"] != "UP_AOA_2010":
+                    continue            # the Depreciation Fund and its parameters exist only in the UP pack
+                # Opt-in only: the percentage / basis / rate are regime parameters (Legal rules), not a per-flat rate here.
+                cards.append(dbc.Card([
+                    dbc.CardHeader(html.Strong(name)),
+                    dbc.CardBody([_fund_status_badges(fund_info),
+                                  html.Small(fund_info["description"], className="text-muted d-block mb-2"),
+                                  _fund_facts_block(fund_info),
+                                  html.Small(f"Not prescribed by {fp['regime']}. Optional: the society decides, by General Body resolution.",
+                                             className="text-muted d-block mb-2"),
+                                  policy_select("levy_depreciation_fund"),
+                                  html.Small("Percentage, basis and rate are regime parameters (Legal rules > depreciation_fund_*), "
+                                             "not a per-flat rate asked here.", className="text-muted d-block")]),
+                ], className="mb-3 shadow-sm"))
+                continue
             # Check if sinking/repair is statutory for this state
             is_statutory = fund_info["statutory"]
             if fund_key in ("sinking", "repair"):
@@ -1644,12 +1685,12 @@ def render_category_content(category, society_id=None, state=None, constitution=
             ], className="mb-3 shadow-sm"))
 
         return elements + [
-            _render_banner("Funds", "Funds this society holds: the prescribed ones (IFMS Corpus, Major Repair Fund, Reserve Fund) and any optional fund it opts into (Sinking, Repair & Maintenance). Optional funds stay provisional until the General Body resolution is on file."),
+            _render_banner("Funds", "Funds this society holds: the prescribed ones (IFMS Corpus, Major Repair Fund, Reserve Fund) and any optional fund it opts into (Sinking, Repair & Maintenance, Depreciation). Optional funds stay provisional until the General Body resolution is on file."),
             dbc.Alert([html.I(className="fas fa-info-circle me-2"),
                        "Statutory = fixed by the Act, Rules or a Regulation. Model Bye-Law (prescribed) = fixed by the 2011 Model Bye-Laws once adopted; a departure needs 2/3rd of owners and the competent authority's prior approval (bye-law 58). Optional - Provisional = the society's choice by General Body resolution; the choice stays provisional until the resolution is recorded (Settings > Society governance). 'Provisional - verify' marks a rate that was not checked against the gazetted text."],
                       color="info", className="py-2 mb-3", style={"fontSize": "12.5px"}),
             *cards,
-            *([_fund_register_card(fp, s_sink, s_repair), _billing_channels_card()] if fp["regime"] == "UP_AOA_2010" else []),
+            *([_fund_register_card(fp, s_sink, s_repair, dep_opted), _billing_channels_card(), _ifms_slab_card()] if fp["regime"] == "UP_AOA_2010" else []),
         ]
     elif category == "Vendor Charges":
         s_v1, s_v7, s_v30 = DEFAULT_VENDOR_1DAY, DEFAULT_VENDOR_7DAY, DEFAULT_VENDOR_1MTH
@@ -1753,7 +1794,10 @@ def render_category_content(category, society_id=None, state=None, constitution=
         }
         from app.services.up_aoa_fund_catalog import active_keys as _active_keys
         _fp = _fund_plan_fn(society_id, state, constitution=constitution)
-        _held = _active_keys({k: _fp["plan"][k]["mode"] for k in ("sinking", "repair")})
+        from app.services import regime_rules_admin as _rra
+        _modes = {k: _fp["plan"][k]["mode"] for k in ("sinking", "repair")}
+        _modes["depreciation"] = "fy_close" if _rra.policy_intent(society_id, "levy_depreciation_fund") == "yes" else "none"
+        _held = _active_keys(_modes)
         _up = _fp["regime"] == "UP_AOA_2010"
 
         # Same shape as the Balance Sheet: Assets (Dr) on the left,

@@ -4,8 +4,9 @@ The register holds the data (status, parameters, account routes, billing channel
 screens need: the legacy UP_AOA_FUNDS shape, badge specs, and the Brought Forward row labels that show only the
 funds a society holds - every prescribed fund, plus an optional fund only once the society opts in.
 """
-from schemes.fund_register import (BILLING_CHANNELS, FUND_ORDER, FUNDS, SHARED_PARAMETERS, STATUS_META,  # noqa: F401
-                                   SUPPORT_META, VERIFY_META, account_mappings, active_keys, is_prescribed,
+from schemes.fund_register import (BILLING_CHANNELS, FUND_ORDER, FUNDS, IFMS_NOTES, IFMS_PROJECT_TYPES,  # noqa: F401
+                                   IFMS_SLABS, SHARED_PARAMETERS, STATUS_META, SUPPORT_META, VERIFY_META,
+                                   account_mappings, active_keys, ifms_amount_range, ifms_rate_range, is_prescribed,
                                    principal_locks, register_rows)
 
 # Legacy shape kept for existing callers: name, statutory (= prescribed, so the card is locked), source,
@@ -23,6 +24,7 @@ _BF_LABEL = {
     3220: {"reserve": "Reserve Fund", "both": "Reserve Fund / Repair & Maintenance Fund Reserve"},
     3230: "IFMS Corpus (Interest-Free Maintenance Security) \u2014 a.k.a. Corpus Fund",
     3270: "Major Repair Fund (\u00bd% transfer fee + common-area rent reserve)",
+    3280: "Depreciation Fund (DepFund)",
 }
 
 

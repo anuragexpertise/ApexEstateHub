@@ -226,3 +226,28 @@ def test_audit_reports_the_gaps(cur):
     cur.execute("SELECT check_code, severity FROM fn_fund_management_audit(%s)", (SID,))
     got = dict(cur.fetchall())
     assert got["SIGNATORIES"] == "fail"       # two signatures required, nobody can sign yet
+
+
+# ── Depreciation Fund: its own account ──────────────────────────────────────────────────────────────────────────────
+def test_depreciation_fund_account_is_3280_not_gifts_not_the_expense(cur):
+    assert one(cur, "SELECT name FROM accounts WHERE society_id=%s AND id=3240", SID) == "Gifts Received"
+    assert one(cur, "SELECT name FROM accounts WHERE society_id=%s AND id=5110", SID) == "Depreciation"
+    assert one(cur, "SELECT fn_ensure_depreciation_fund(%s)", SID) == 3280
+    assert one(cur, "SELECT name||'|'||tab_name FROM accounts WHERE society_id=%s AND id=3280", SID) == "Depreciation Fund|DepFund"
+    assert one(cur, "SELECT name FROM accounts WHERE society_id=%s AND id=3240", SID) == "Gifts Received"      # untouched
+    assert one(cur, """SELECT count(*) FROM account_statutory_mappings WHERE society_id=%s AND account_id=3280
+                       AND head_code='DEPRECIATION_FUND'""", SID) == 1
+    assert one(cur, "SELECT count(*) FROM account_statutory_mappings WHERE society_id=%s AND account_id=3240 AND head_code='DEPRECIATION_FUND'", SID) == 0
+
+
+def test_depreciation_appropriation_credits_3280(cur):
+    cur.execute("SELECT amount, msg FROM fn_appropriate_depreciation_fund(%s, CURRENT_DATE)", (SID,))
+    amount, msg = cur.fetchone()
+    if not amount:
+        pytest.skip("seed has no depreciable assets: " + str(msg))
+    assert one(cur, "SELECT acc_id FROM receivables WHERE society_id=%s AND charge_kind='depreciation_fund' ORDER BY id DESC LIMIT 1", SID) == 3280
+
+
+def test_audit_reports_depreciation_fund_opt_in(cur):
+    cur.execute("SELECT check_code, severity FROM fn_fund_management_audit(%s)", (SID,))
+    assert dict(cur.fetchall())["OPTED_DEPRECIATION_FUND"] == "info"        # not opted by default
