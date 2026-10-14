@@ -539,6 +539,59 @@ def _fund_status_badges(fund):
     return html.Div([_fund_badge(st_text, st_col), _fund_badge(v_text, v_col)], className="mb-2")
 
 
+_SUPPORT_ORDER = ("automatic", "partial", "manual")
+
+
+def _fund_register_card(fp, sink_rate, repair_rate):
+    """Funds this society holds (prescribed + opted), their live parameters and where each is appropriated."""
+    from database.seed import ACCOUNTS
+    from app.services.up_aoa_fund_catalog import FUNDS, register_rows
+    modes = {k: fp["plan"][k]["mode"] for k in ("sinking", "repair")}
+    names = {a[0]: a[1] for a in ACCOUNTS}      # a[1] is accounts.name
+    values = {"apt_sinking_fund_rate": sink_rate or None, "apt_repair_fund_rate": repair_rate or None}
+    for k in ("sinking", "repair"):
+        p = fp["plan"][k]
+        values.update({f"levy_{k}_fund": p["levy"], f"{k}_fund_collection": p["mode"], f"{k}_fund_basis": p["basis"]})
+    blocks = []
+    for r in register_rows(modes, names, values):
+        st_text, st_col = _fund_status_spec(FUNDS[r["key"]])
+        v_text, v_col = _fund_verify_spec(FUNDS[r["key"]])
+        route_rows = [html.Tr([html.Td(x["trigger"]), html.Td(x["dr"]), html.Td(x["cr"]), html.Td(x["when"]),
+                               html.Td(html.Small(x["function"], className="text-muted"))]) for x in r["routes"]]
+        blocks.append(html.Div([
+            html.Div([html.Strong(r["name"] + "  "), _fund_badge(st_text, st_col), _fund_badge(v_text, v_col)], className="mb-1"),
+            html.Small([html.B("Held in account: "), r["account"],
+                        " \u2014 shared with the Reserve Fund / Repair & Maintenance Fund pair." if r["shares_account"] else ""],
+                       className="d-block text-muted mb-1"),
+            html.Small([html.B("Parameters: "), "; ".join(f"{a}: {b}" for a, b in r["parameters"])], className="d-block text-muted mb-1"),
+            dbc.Table([html.Thead(html.Tr([html.Th("Trigger"), html.Th("Debit"), html.Th("Credit"), html.Th("When"), html.Th("Engine")])),
+                       html.Tbody(route_rows)], bordered=True, size="sm", className="mb-3", style={"fontSize": "11.5px"}),
+        ]))
+    held = {r["key"] for r in register_rows(modes, names, values)}
+    not_opted = [FUNDS[k]["name"] for k in ("sinking", "repair") if k not in held]
+    foot = (html.Small("Not opted by this society (no balance, no billing, hidden from Brought Forward): " + ", ".join(not_opted)
+                       + ". Choose 'Yes' above to opt in.", className="text-muted d-block") if not_opted else None)
+    return dbc.Card([dbc.CardHeader(html.Strong("Fund register \u2014 funds this society holds, and where each is appropriated")),
+                     dbc.CardBody([*blocks] + ([foot] if foot else []))], className="mb-3 shadow-sm")
+
+
+def _billing_channels_card():
+    """The nine ways money reaches the books, and whether the engine does it or the admin must."""
+    from app.services.up_aoa_fund_catalog import BILLING_CHANNELS, FUNDS, SUPPORT_META
+    rows = []
+    for c in BILLING_CHANNELS:
+        t, col = SUPPORT_META[c["support"]]
+        rows.append(html.Tr([
+            html.Td(str(c["no"])), html.Td(html.B(c["channel"])),
+            html.Td(", ".join(FUNDS[k]["name"] for k in c["funds"]) or "\u2014"),
+            html.Td(_fund_badge(t, col)), html.Td([c["how"], html.Br(), html.Small(c["engine"], className="text-muted")]),
+        ]))
+    return dbc.Card([dbc.CardHeader(html.Strong("How each fund is billed")),
+                     dbc.CardBody(dbc.Table([html.Thead(html.Tr([html.Th("#"), html.Th("Channel"), html.Th("Funds"), html.Th("In this app"),
+                                                                 html.Th("How it works")])), html.Tbody(rows)],
+                                            bordered=True, size="sm", style={"fontSize": "11.5px"}))], className="mb-3 shadow-sm")
+
+
 def fund_effective(statutory, regime_mode, regime_basis, levy, collection, basis_pick):
     """(mode, basis) a fund ends up with. Mirrors the SQL function fn_fund_rule, so what the wizard asks for is what
     the billing engine will do once the General Body resolution is recorded.
@@ -570,7 +623,7 @@ def fund_rate_label(basis):
             "undivided_interest": "Monthly fund amount for the whole society (₹)"}.get(basis, "Rate")
 
 
-def fund_plan(society_id=None, state=None, chosen=None):
+def fund_plan(society_id=None, state=None, chosen=None, constitution=None):
     """Per fund: is it prescribed or optional, and the mode / basis it ends up with.
 
     `chosen` ({policy_key: value}) overrides what is stored: the Funds step passes the live drop-down values so the
@@ -579,8 +632,7 @@ def fund_plan(society_id=None, state=None, chosen=None):
     from app.services import regime_rules_admin as rra
     picked_state = state if state else _society_state(society_id)
     rules = fund_rules_for_state(picked_state)
-    constitution = None
-    if society_id:
+    if not constitution and society_id:      # the live dropdown wins; otherwise what the society has saved
         _row = db._execute("SELECT constitution FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
         constitution = (_row or {}).get("constitution")
     regime = scheme_for(picked_state, constitution)      # the scheme the billing engine will use
@@ -603,11 +655,16 @@ def fund_plan(society_id=None, state=None, chosen=None):
             "sinking": plan["sinking"]["mode"] == "on_bill", "repair": plan["repair"]["mode"] == "on_bill"}
 
 
-def fund_flags(society_id=None, state=None):
+def fund_flags(society_id=None, state=None, constitution=None):
     """Which fund RATE inputs the wizard should ask for: a fund needs a rate only if it is collected on the bill.
     (Kept for existing callers; the full answer, with mode and basis, is fund_plan().)"""
-    p = fund_plan(society_id, state)
+    p = fund_plan(society_id, state, constitution=constitution)
     return {"rules": p["rules"], "sinking": p["sinking"], "repair": p["repair"], "plan": p["plan"], "regime": p["regime"]}
+
+
+# render_category_content() imports fund_plan locally in its Funds branch, which makes the bare name a local variable
+# for the whole function; other branches read the module-level function through this alias instead.
+_fund_plan_fn = fund_plan
 
 
 def funds_error(plan, sink_rate, repair_rate, project_cost):
@@ -670,20 +727,22 @@ def fund_note(flags, regime):
             "Model Bye-Laws Adoption step (Funds & assessments).")
 
 
-def regime_badge(state_code):
-    """Society Details: which legal regime the picked State puts the society under."""
-    from app.services.statutory_rules import (regime_for_society, state_has_own_regime, regime_profile)
+def regime_badge(state_code, constitution=None):
+    """Society Details: the legal regime the picked State + Constitution put the society under, by name."""
+    from app.services.statutory_rules import regime_selection
     if not state_code:
-        return html.Small("Select a State to see the governing legal regime.", className="text-muted")
-    regime = regime_for_society(None, state_code)
-    name, status = regime_profile(regime)
-    own = state_has_own_regime(state_code)
-    parts = [dbc.Badge(regime, color="primary" if own else "secondary", className="me-2"), html.Span(name, className="small")]
-    if status == "draft":
+        return html.Small("Select a State, then a Constitution, to see the legal regime that applies.", className="text-muted")
+    sel = regime_selection(state_code, constitution)
+    parts = [html.Span([html.B("Legal regime: "), dbc.Badge(sel["regime"], color="primary" if sel["dedicated"] else "secondary", className="me-2"),
+                        html.Span(sel["name"] or "", className="small")])]
+    if sel["status"] == "draft":
         parts.append(dbc.Badge("draft", color="warning", text_color="dark", className="ms-2"))
-    if not own:
-        parts.append(html.Div("No dedicated regime is seeded for this state yet. UP_AOA_2010 is shown as a reference only; "
-                              "confirm applicable law with an advocate.", className="small text-warning mt-1"))
+    parts.append(html.Div(
+        f"{sel['constitution_label']} in this State is governed by the central Acts, the State Act, its Rules and the Model Bye-Laws bundled in {sel['regime']}."
+        if sel["dedicated"] else
+        f"No State Act / Rules / Model Bye-Laws pack is seeded for {sel['constitution_label']} in this State yet, so only the central laws "
+        f"(regime GENERIC) apply. Confirm the applicable law with an advocate.",
+        className="small text-muted" if sel["dedicated"] else "small text-warning mt-1"))
     return html.Div(parts)
 
 
@@ -1010,7 +1069,7 @@ def render_review(v, society_id=None):
     ]
 
 
-def render_category_content(category, society_id=None, state=None):
+def render_category_content(category, society_id=None, state=None, constitution=None):
     """
     Step body for one wizard category.
 
@@ -1104,7 +1163,7 @@ def render_category_content(category, society_id=None, state=None):
             dbc.Select(id="sw-society-state", options=state_options, value=s_state, className="mb-1"),
             _label("Constitution", html_for="sw-society-constitution"),
             dbc.Select(id="sw-society-constitution", options=constitution_options, value=s_constitution, className="mb-3"),
-            html.Div(id="sw-regime-badge", children=regime_badge(s_state), className="mb-2"),
+            html.Div(id="sw-regime-badge", children=regime_badge(s_state, s_constitution), className="mb-2"),
             html.P(
                 "State + Constitution together select the legal regime (Central Acts → State Act → Rules → Model Bye-laws → "
                 "Society Bye-laws → Policy / Resolutions → Board). In UP an AOA is itself registered as a society; "
@@ -1141,9 +1200,28 @@ def render_category_content(category, society_id=None, state=None):
         own = state_has_own_regime(picked_state)
         
         hierarchy_rows = legal_hierarchy_rows(society_id, picked_state)
+        from app.services.statutory_rules import regime_options, regime_selection
+        _sel = regime_selection(picked_state, picked_constitution or "AOA")
+        _opt_rows = [html.Tr([
+            html.Td(html.B(o["label"]) if o["constitution"] == (picked_constitution or "AOA").upper() else o["label"]),
+            html.Td(dbc.Badge(o["regime"], color="primary" if o["dedicated"] else "secondary", pill=True)),
+            html.Td("Central Acts + State Act + Rules + Model Bye-Laws" if o["dedicated"] else "Central Acts only"),
+            html.Td(dbc.Badge("Your choice", color="success", pill=True) if o["constitution"] == (picked_constitution or "AOA").upper() else ""),
+        ]) for o in regime_options(picked_state)]
         
         return elements + [
             _render_banner("Legal Regime Selection", "Your State and Constitution together determine the legal regime. The hierarchy below shows how rules flow — a lower layer can never loosen a higher one."),
+            dbc.Card(dbc.CardBody([
+                html.H6([html.I(className="fas fa-balance-scale me-2"), "Your legal regime"], className="text-primary mb-2"),
+                html.Div([html.Span("State: ", className="text-muted"), html.B(picked_state or "not chosen"),
+                          html.Span("   Constitution: ", className="text-muted ms-2"), html.B(_sel["constitution_label"]),
+                          html.Span("   \u2192   ", className="mx-1"),
+                          dbc.Badge(_sel["regime"] or "\u2014", color="primary" if _sel["dedicated"] else "secondary", className="fs-6")], className="mb-2"),
+                html.Small("The regime is the named bundle of instruments that govern the society: central Acts, the State Act, Rules and Model Bye-Laws. "
+                           "State and Constitution are chosen on the Society Details step.", className="text-muted d-block mb-2"),
+                dbc.Table([html.Thead(html.Tr([html.Th("Constitution"), html.Th("Regime"), html.Th("Instruments"), html.Th("")])),
+                           html.Tbody(_opt_rows)], bordered=True, size="sm", style={"fontSize": "12px"}),
+            ]), className="mb-3 shadow-sm"),
             html.Div([
                 html.H6([html.I(className="fas fa-sitemap me-2"), f"Active Regime: {regime}"], className="text-primary mb-3"),
                 html.Div([
@@ -1473,8 +1551,8 @@ def render_category_content(category, society_id=None, state=None):
             row = db._execute("SELECT apt_sinking_fund_rate, apt_repair_fund_rate FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
                 s_sink, s_repair = row.get("apt_sinking_fund_rate") or 0.0, row.get("apt_repair_fund_rate") or 0.0
-        fp = fund_plan(society_id, state)
-        ff = fund_flags(society_id, state)
+        fp = fund_plan(society_id, state, constitution=constitution)
+        ff = fund_flags(society_id, state, constitution=constitution)
         fund_rules = fund_rules_for_state(state)
         try:
             pol = rra.list_society_policies(society_id) if society_id else {}
@@ -1502,16 +1580,6 @@ def render_category_content(category, society_id=None, state=None):
         for fund_key, fund_info in UP_AOA_FUNDS.items():
             name = fund_info["name"]
             rate_applicable = fund_info["rate_applicable"]
-            if fund_info.get("info_only"):
-                # Prescribed or customary receipts with no rate to enter here: show status, rule and rate as information.
-                cards.append(dbc.Card([
-                    dbc.CardHeader(html.Strong(name)),
-                    dbc.CardBody([_fund_status_badges(fund_info),
-                                  html.Small(fund_info["description"], className="text-muted d-block mb-2"),
-                                  _fund_facts_block(fund_info)]),
-                ], className="mb-3 shadow-sm"))
-                continue
-
             # Check if sinking/repair is statutory for this state
             is_statutory = fund_info["statutory"]
             if fund_key in ("sinking", "repair"):
@@ -1576,11 +1644,12 @@ def render_category_content(category, society_id=None, state=None):
             ], className="mb-3 shadow-sm"))
 
         return elements + [
-            _render_banner("Funds", "All UP AOA funds with their status, rate and applicability: IFMS Corpus (statutory); Major Repair Fund, Reserve Fund, rent reserve, special levy and share capital (Model Bye-Laws 2011); Sinking and Repair & Maintenance Fund (optional, provisional)."),
+            _render_banner("Funds", "Funds this society holds: the prescribed ones (IFMS Corpus, Major Repair Fund, Reserve Fund) and any optional fund it opts into (Sinking, Repair & Maintenance). Optional funds stay provisional until the General Body resolution is on file."),
             dbc.Alert([html.I(className="fas fa-info-circle me-2"),
                        "Statutory = fixed by the Act, Rules or a Regulation. Model Bye-Law (prescribed) = fixed by the 2011 Model Bye-Laws once adopted; a departure needs 2/3rd of owners and the competent authority's prior approval (bye-law 58). Optional - Provisional = the society's choice by General Body resolution; the choice stays provisional until the resolution is recorded (Settings > Society governance). 'Provisional - verify' marks a rate that was not checked against the gazetted text."],
                       color="info", className="py-2 mb-3", style={"fontSize": "12.5px"}),
             *cards,
+            *([_fund_register_card(fp, s_sink, s_repair), _billing_channels_card()] if fp["regime"] == "UP_AOA_2010" else []),
         ]
     elif category == "Vendor Charges":
         s_v1, s_v7, s_v30 = DEFAULT_VENDOR_1DAY, DEFAULT_VENDOR_7DAY, DEFAULT_VENDOR_1MTH
@@ -1677,10 +1746,15 @@ def render_category_content(category, society_id=None, state=None):
         # UP AOA labels for the equity / fund accounts. The fund rows come from the shared fund catalogue
         # (status, rate and applicability); the rest are plain accounts with a fixed label.
         UP_AOA_FUND_LABELS = {
+            3100: "Capital Account / Share Capital (entrance fee \u20b91,000 + share)",
             3240: "Gifts Received",
             3250: "Provisions",
             3260: "Gifts Given",
         }
+        from app.services.up_aoa_fund_catalog import active_keys as _active_keys
+        _fp = _fund_plan_fn(society_id, state, constitution=constitution)
+        _held = _active_keys({k: _fp["plan"][k]["mode"] for k in ("sinking", "repair")})
+        _up = _fp["regime"] == "UP_AOA_2010"
 
         # Same shape as the Balance Sheet: Assets (Dr) on the left,
         # Liabilities + Equity/Reserves (Cr) on the right, each as a parent -> child tree.
@@ -1690,24 +1764,32 @@ def render_category_content(category, society_id=None, state=None):
         for kids in children.values():
             kids.sort(key=lambda a: a[0])
 
+        def _fi_for(acc_id):
+            return _bf_fund_info(acc_id, _held, _up)
+
         def _has_bf(acc):
-            return bool(acc[6]) or any(_has_bf(c) for c in children.get(acc[0], []))
+            if acc[6]:
+                _f = _fi_for(acc[0])
+                if _f and _f["hidden"]:      # an optional fund the society has not opted into
+                    return any(_has_bf(c) for c in children.get(acc[0], []))
+                return True
+            return any(_has_bf(c) for c in children.get(acc[0], []))
 
         def _get_aoa_label(acc_id, default_name):
             """Get UP AOA label for fund accounts, fallback to default name."""
-            _fi = _bf_fund_info(acc_id)
-            if _fi:
+            _fi = _fi_for(acc_id)
+            if _fi and _fi["label"]:
                 return _fi["label"]
-            return UP_AOA_FUND_LABELS.get(acc_id, default_name)
+            return UP_AOA_FUND_LABELS.get(acc_id, default_name) if _up else default_name
 
         def _render_node(acc, depth):
             out = []
             indent = {"paddingLeft": f"{12 + depth * 14}px"}
             if acc[6]:   # postable account -> amount + remarks inputs (ids unchanged)
                 aoa_label = _get_aoa_label(acc[0], acc[3] or "")
-                _fi = _bf_fund_info(acc[0])
+                _fi = _fi_for(acc[0])
                 _name_kids = [aoa_label]
-                if _fi:   # fund account: status badges (Statutory / Model Bye-Law / Optional - Provisional) + rate hint
+                if _fi and _fi["tags"]:   # fund account: status badges (Statutory / Model Bye-Law / Optional - Provisional) + rate hint
                     _name_kids.append(html.Div([_fund_badge(t, c) for t, c in _fi["tags"]], className="mt-1"))
                     _name_kids.append(html.Small(_fi["hint"], className="d-block text-muted"))
                 _name_kids.append(html.Small(f"{acc[2] or ''} · {acc[5] or ''}"))
@@ -1738,6 +1820,8 @@ def render_category_content(category, society_id=None, state=None):
             _render_banner("Brought Forward", "Enter brought forward (opening balance) amounts for accounts. Values will be saved for the specified Financial Year."),
             _label("Financial Year (Start Year)"),
             dbc.Input(id="sw-bf-fy", type="number", value=s_fy, step=1, className="mb-3"),
+            html.Small("Only funds this society holds are listed: the prescribed funds, plus any optional fund it opted into on the Funds step. "
+                       "To carry an opening balance for Sinking or Repair & Maintenance, opt in first.", className="text-muted d-block mb-2"),
             html.H6("Brought Forward Accounts", className="mt-4 mb-2 text-primary"),
             html.Div([
                 _side("Assets", "Dr", [1000]),

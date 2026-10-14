@@ -4,6 +4,7 @@ from database.db_manager import db
 import app.services.push_service as PushService
 from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
 from app.utils.ux_toasts import error_toast
+import json
 import logging
 from app.security.guards import require_session
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
@@ -39,6 +40,41 @@ Only the Create/Edit Poll form callbacks below are still reachable
 (the form itself is rendered by drilldown_callbacks.py intercepting
 card_id in ("form_poll_new", "form_poll_edit") — see poll_page.py).
 """
+
+
+
+def parse_custom_weights(text, flat_ids):
+    """Parse the custom-weights box: one 'FLAT=weight' (or 'FLAT: weight') per line.
+
+    flat_ids maps flat number -> apartment id. Returns ({apartment_id (str): weight}, None) or (None, message).
+    Every active flat needs a weight; unknown flats, repeats, and non-numeric or negative weights are refused."""
+    out = {}
+    for n, raw in enumerate((text or "").splitlines(), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        sep = "=" if "=" in line else ":" if ":" in line else None
+        if sep is None:
+            return None, f"Line {n}: write it as FLAT=weight, for example A-101=2"
+        flat, _, w = line.partition(sep)
+        flat = flat.strip()
+        if flat not in flat_ids:
+            return None, f"Line {n}: '{flat}' is not an active flat of this society"
+        try:
+            weight = float(w.strip())
+        except ValueError:
+            return None, f"Line {n}: the weight for {flat} must be a number"
+        if weight < 0:
+            return None, f"Line {n}: the weight for {flat} cannot be negative"
+        if str(flat_ids[flat]) in out:
+            return None, f"Line {n}: {flat} appears twice"
+        out[str(flat_ids[flat])] = weight
+    missing = sorted(f for f, i in flat_ids.items() if str(i) not in out)
+    if missing:
+        return None, "No weight for: " + ", ".join(missing[:8]) + (" ..." if len(missing) > 8 else "")
+    if sum(out.values()) <= 0:
+        return None, "The weights add up to zero"
+    return out, None
 
 
 def _require_auth(auth_data=None, required_role=None):
@@ -100,12 +136,13 @@ def register_poll_callbacks(app):
         State("poll-ends-at", "value"),
         State("poll-open-to", "value"),
         State("poll-vote-basis", "value"),
+        State("poll-custom-weights", "value"),
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
     def save_poll(n_clicks, poll_id, title, description, choice_count,
-                  c1, c2, c3, c4, c5, ends_at, open_to, vote_basis, auth_data):
+                  c1, c2, c3, c4, c5, ends_at, open_to, vote_basis, custom_weights, auth_data):
         """Handles both Create Poll (poll_id empty) and Edit Poll
         (poll_id set — the hidden field from poll_page.poll_form)."""
         user_id, society_id, auth_error = _require_auth(auth_data, required_role="admin")
@@ -186,6 +223,15 @@ def register_poll_callbacks(app):
                     f"Poll '{title}' updated successfully.",
                 ], className="alert alert-success mt-2")
 
+            weights = None
+            if (vote_basis or "apartment") == "custom":
+                # Parsed BEFORE the poll exists, so a bad weight list never leaves a half-made poll behind.
+                flats = db._execute("SELECT id, flat_number FROM apartments WHERE society_id = %s AND active",
+                                    (society_id,), fetch_all=True) or []
+                weights, werr = parse_custom_weights(custom_weights, {f["flat_number"]: f["id"] for f in flats})
+                if werr:
+                    return html.Div(werr, className="alert alert-warning mt-2")
+
             result = db._execute(
                 "SELECT fn_create_poll(%s::INT, %s::VARCHAR(200), %s::TEXT, "
                 "%s::SMALLINT, %s::VARCHAR(100), %s::VARCHAR(100), %s::VARCHAR(100), "
@@ -196,6 +242,9 @@ def register_poll_callbacks(app):
                 fetch_one=True
             )
             new_poll_id = result["poll_id"] if result else None
+            if weights is not None and new_poll_id:
+                db._execute("SELECT fn_set_poll_weights(%s::INT, %s::INT, %s::JSONB) AS n",
+                            (new_poll_id, society_id, json.dumps(weights)), fetch_one=True)
             audit_event("poll.create", "poll", new_poll_id,
                         after={"title": title, "choice_count": choice_count,
                                "open_to": open_to or "no_dues", "ends_at": ends_at},

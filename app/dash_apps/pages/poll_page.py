@@ -108,13 +108,24 @@ def poll_form(sid=None, user_id=None, role=None, prefill: dict | None = None):
                         options=[
                             {"label": "One vote per flat (advisory)", "value": "apartment"},
                             {"label": "Weighted by undivided interest (bye-law 8)", "value": "undivided_interest"},
+                            {"label": "Weighted by flat area (frozen when the poll is created)", "value": "area"},
+                            {"label": "Weighted by weights I enter, per flat", "value": "custom"},
                         ],
                         value=prefill.get("vote_basis") or "apartment",
                         clearable=False,
                         disabled=bool(prefill),   # fixed once the poll exists: changing it would change how cast votes count
                     ),
-                    dbc.FormText("Either way an online poll is not a General Body resolution (bye-law 10: votes are cast in person)."),
+                    dbc.FormText("Every flat has exactly one vote, shared by all its family members; this only sets how much that vote weighs. "
+                                 "An online poll is not a General Body resolution (bye-law 10: votes are cast in person)."),
                 ], width=4, className="mb-3"),
+            ]),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Custom weights (only for 'weights I enter')", html_for="poll-custom-weights"),
+                    dbc.Textarea(id="poll-custom-weights", placeholder="One line per flat, e.g.\nA-101=2\nA-201=1.5\n(every active flat needs a weight)",
+                                 rows=4, disabled=bool(prefill)),
+                    dbc.FormText("Weights are scaled to add up to 100 and cannot change once the poll exists."),
+                ], width=8, className="mb-3"),
             ]),
             dbc.Row([
                 dbc.Col([

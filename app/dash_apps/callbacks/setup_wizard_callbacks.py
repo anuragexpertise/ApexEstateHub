@@ -440,12 +440,13 @@ def register_setup_wizard_callbacks(app):
             Output("sw-regime-badge", "children"),
             Output("sw-state-thresholds", "children"),
             Input("sw-society-state", "value"),
+            Input("sw-society-constitution", "value"),
             State("sw-society-id", "data"),
             State("sw-current-step", "data"),
             prevent_initial_call=True,
         )
         @require_session
-        def refresh_state_dependent_steps(picked_state, _client_society_id, current_step):
+        def refresh_state_dependent_steps(picked_state, picked_constitution, _client_society_id, current_step):
             # The society comes from the server session; the browser-side sw-society-id store is never trusted
             # for what data to render.
             society_id = get_current_society_id()
@@ -456,10 +457,10 @@ def register_setup_wizard_callbacks(app):
             return (
                 render_category_content("State Act & Rules", society_id, picked_state),
                 render_category_content("Model Bye-Laws Adoption", society_id, picked_state),
-                render_category_content("Funds", society_id, picked_state),
+                render_category_content("Funds", society_id, picked_state, constitution=picked_constitution),
                 build_rules_panel(here, society_id, picked_state),
                 rules_subtitle(here, society_id, picked_state),
-                regime_badge(picked_state),
+                regime_badge(picked_state, picked_constitution),
                 state_thresholds_rows(picked_state),
             )
 

@@ -300,6 +300,42 @@ def regime_reserve_pct(regime_code):
     return 25.0
 
 
+CONSTITUTION_LABELS = {
+    "AOA": "Apartment Owners' Association (AOA)",
+    "REG_SOCIETY": "Registered Society (Societies Registration Act, 1860)",
+    "COOP": "Co-operative Housing Society",
+    "GENERIC": "Generic / Other (central laws only)",
+}
+
+
+def regime_options(state_code):
+    """What each constitution gives in this State, for the 'choose your constitution' table.
+
+    [{constitution, label, regime, dedicated, name, status}] - `regime` is the scheme the billing engine will use
+    (scheme_for), so the table and the engine cannot disagree. dedicated=False means only the central laws apply
+    (GENERIC): no State Act, Rules or Model Bye-Laws pack has been researched for that State + constitution."""
+    out = []
+    for const, label in CONSTITUTION_LABELS.items():
+        regime = scheme_for(state_code, const)
+        name, status = regime_profile(regime)
+        out.append({"constitution": const, "label": label, "regime": regime, "dedicated": regime != "GENERIC",
+                    "name": name, "status": status})
+    return out
+
+
+def regime_selection(state_code, constitution):
+    """The society's legal regime for the State + Constitution it picked: {regime, dedicated, name, status,
+    constitution_label}. Empty regime until a State is chosen."""
+    const = (constitution or "AOA").upper()
+    label = CONSTITUTION_LABELS.get(const, const)
+    if not state_code:
+        return {"regime": None, "dedicated": False, "name": None, "status": None, "constitution_label": label}
+    regime = scheme_for(state_code, const)
+    name, status = regime_profile(regime)
+    return {"regime": regime, "dedicated": regime != "GENERIC", "name": name, "status": status,
+            "constitution_label": label}
+
+
 def regime_for_society(society_id=None, state_code=None):
     """
     Legal regime governing this society.

@@ -1117,6 +1117,8 @@ CREATE TABLE fund_utilizations (
     transaction_id VARCHAR(255),
     approval_ref VARCHAR(255), -- General Body / Managing Committee resolution reference
     approval_date DATE, -- date of the resolution
+    -- Signatures needed before the money moves; frozen when the withdrawal is requested (fund_spend_policy).
+    signatories_required INT NOT NULL DEFAULT 1 CHECK (signatories_required BETWEEN 1 AND 5),
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
         status IN (
             'pending', -- awaiting admin confirmation
@@ -2520,11 +2522,14 @@ CREATE TABLE polls (
     quorum_pct NUMERIC(5,2) NOT NULL DEFAULT 33.33 CHECK (quorum_pct > 0 AND quorum_pct <= 100),
     majority_pct NUMERIC(5,2) NOT NULL DEFAULT 50.00 CHECK (majority_pct > 0 AND majority_pct <= 100),
     -- Bye-law 8 / Act s.12(1)(f): in the Model Bye-Laws a vote carries the owner's undivided-interest
-    -- percentage, not one vote per flat. 'apartment' (default) is the advisory one-flat-one-vote poll;
-    -- 'undivided_interest' tallies each flat's percentage and takes quorum / majority from the society's
-    -- rules (poll_quorum_pct, poll_majority_pct). Either way an online poll is NOT a General Body
+    -- percentage, not one vote per flat. 'apartment' (default) is the advisory one-flat-one-vote poll.
+    -- Every basis is still ONE VOTE PER FLAT (all family members share it); the basis only sets the WEIGHT of
+    -- that vote, chosen when the poll is created: 'undivided_interest' (the flat's percentage), 'area' (flat
+    -- area / total area, frozen at creation) or 'custom' (weights the Secretary enters, frozen in
+    -- poll_flat_weights). Weighted polls take quorum / majority from the society's rules (poll_quorum_pct,
+    -- poll_majority_pct). Either way an online poll is NOT a General Body
     -- resolution (bye-law 10: votes are cast in person) - see fn_declare_results.
-    vote_basis VARCHAR(20) NOT NULL DEFAULT 'apartment' CHECK (vote_basis IN ('apartment', 'undivided_interest')),
+    vote_basis VARCHAR(20) NOT NULL DEFAULT 'apartment' CHECK (vote_basis IN ('apartment', 'undivided_interest', 'area', 'custom')),
     results_announced_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP,
@@ -2565,6 +2570,16 @@ CREATE TABLE poll_weight_tally (
     choice     SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5),
     weight_sum NUMERIC(10, 4) NOT NULL DEFAULT 0 CHECK (weight_sum >= 0),
     PRIMARY KEY (poll_id, choice)
+);
+
+-- Per-flat weights for 'area' and 'custom' polls, frozen when the poll is created so a later change to a flat's
+-- size cannot move an open poll. A weight is a percentage of the whole (they sum to 100). It says nothing about
+-- how a flat voted, so it does not weaken the secret ballot; only the poll functions read it.
+CREATE TABLE poll_flat_weights (
+    poll_id      INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id),
+    weight       NUMERIC(10, 4) NOT NULL CHECK (weight >= 0),
+    PRIMARY KEY (poll_id, apartment_id)
 );
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -4348,7 +4363,11 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    IF p_credit_acc_id IS NOT NULL THEN
+    -- UPI is paid by scanning the society's payment QR, and the app holds ONE QR: the primary bank account's.
+    -- Whatever fund a UPI payment is for, the money has landed in the primary account, so the ledger must say so;
+    -- booking it to the fund's own bank would put cash in a book that the bank statement does not show. Moving
+    -- it on to the fund's account is a separate, explicit bank transfer (fn_transfer_between_banks).
+    IF p_credit_acc_id IS NOT NULL AND p_mode IS DISTINCT FROM 'upi' THEN
         SELECT bank_acc_id INTO v_mapped_acc_id
         FROM fund_bank_account_map
         WHERE society_id = p_society_id AND fund_acc_id = p_credit_acc_id;
@@ -6882,6 +6901,11 @@ DECLARE
     v_fund_balance   NUMERIC(15,2);
     v_locked         NUMERIC(15,2);
     v_available      NUMERIC(15,2);
+    v_req            BOOLEAN;
+    v_min            INT;
+    v_cosign         NUMERIC;
+    v_offices        TEXT[];
+    v_need           INT := 1;
 BEGIN
     -- Validate amount
     IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
@@ -6937,11 +6961,28 @@ BEGIN
             v_fund_name, p_fund_acc_id, v_available, p_amount;
     END IF;
 
+    -- Spend controls (fund_spend_policy; defaults when the society has set none): a resolution reference and date are
+    -- mandatory here, in the database, not only on the form; and a withdrawal above cosign_above stays pending until
+    -- min_signatories different office-bearers have signed it (fn_sign_fund_utilization).
+    SELECT require_resolution, min_signatories, cosign_above, signatory_offices
+      INTO v_req, v_min, v_cosign, v_offices FROM fund_spend_policy WHERE society_id = p_society_id;
+    IF NOT FOUND THEN
+        v_req := TRUE; v_min := 1; v_cosign := 0; v_offices := NULL;
+    END IF;
+    IF v_req AND (NULLIF(BTRIM(COALESCE(p_approval_ref, '')), '') IS NULL OR p_approval_date IS NULL) THEN
+        RAISE EXCEPTION 'A General Body / Managing Committee resolution reference and its date are required to use fund money';
+    END IF;
+    IF v_min > 1 AND p_amount > v_cosign THEN
+        v_need := v_min;
+    END IF;
+
     -- Only admins can confirm immediately; others go to pending
     SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin
     FROM users WHERE id = p_created_by;
 
-    IF v_is_admin THEN
+    IF v_need > 1 THEN
+        v_status := 'pending';          -- waits for the office-bearers' signatures, whoever asked
+    ELSIF v_is_admin THEN
         v_status := 'confirmed';
     ELSE
         v_status := 'pending';
@@ -6956,11 +6997,11 @@ BEGIN
     -- Insert fund_utilization record
     INSERT INTO fund_utilizations (
         society_id, user_id, fund_acc_id, expense_acc_id, particulars,
-        amount, mode, cheque_no, transaction_id, approval_ref, approval_date,
+        amount, mode, cheque_no, transaction_id, approval_ref, approval_date, signatories_required,
         status, confirmed_by, confirmed_at, previous_hash, created_at
     ) VALUES (
         p_society_id, p_created_by, p_fund_acc_id, p_expense_acc_id, p_particulars,
-        p_amount, p_mode, p_cheque_no, p_trx_id, p_approval_ref, p_approval_date,
+        p_amount, p_mode, p_cheque_no, p_trx_id, p_approval_ref, p_approval_date, v_need,
         v_status,
         CASE WHEN v_status = 'confirmed' THEN p_created_by ELSE NULL END,
         CASE WHEN v_status = 'confirmed' THEN NOW() ELSE NULL END,
@@ -6968,42 +7009,11 @@ BEGIN
     ) RETURNING id INTO v_utilization_id;
 
     IF v_status = 'confirmed' THEN
-        v_journal_id := NEXTVAL('seq_transaction_number');
-
-        -- Post journal entries:
-        -- 1. Dr Fund Account (reduce fund balance - Cr account, so Dr reduces it)
-        -- 2. Cr Expense/Bank Account (increase expense or reduce bank)
-        --
-        -- trx_date / acc_particulars / source_table are the real column
-        -- names. This previously wrote `particulars`, `entity_type` and
-        -- omitted `trx_date` entirely — none of which exist on
-        -- `transactions` (its columns are acc_particulars, source_table and
-        -- a NOT NULL trx_date, per the CREATE TABLE at ~line 1124). The
-        -- INSERT therefore raised "column \"particulars\" does not exist" on
-        -- every confirmed utilization, so the *only* code path that
-        -- actually moves money out of a fund had never successfully run —
-        -- and no test caught it, because test/fake_db.py has no
-        -- `_fn_process_fund_utilization` handler, so the call silently
-        -- returned None (see _handle_function's `return None`).
-        -- mode is taken from the caller (p_mode), NOT hardcoded to 'journal':
-        -- this is a real money movement out to a bank/expense, unlike the
-        -- depreciation and reserve-appropriation journals which are pure
-        -- book entries.
-        INSERT INTO transactions (
-            society_id, journal_id, acc_id, entry_side, trx_date, amount,
-            acc_particulars, mode, status, source_table, source_id, created_by
-        ) VALUES (
-            p_society_id, v_journal_id, p_fund_acc_id, 'Dr', CURRENT_DATE, p_amount,
-            p_particulars, p_mode, 'paid', 'fund_utilization', v_utilization_id, p_created_by
-        );
-
-        INSERT INTO transactions (
-            society_id, journal_id, acc_id, entry_side, trx_date, amount,
-            acc_particulars, mode, status, source_table, source_id, created_by
-        ) VALUES (
-            p_society_id, v_journal_id, p_expense_acc_id, 'Cr', CURRENT_DATE, p_amount,
-            p_particulars, p_mode, 'paid', 'fund_utilization', v_utilization_id, p_created_by
-        );
+        -- Dr fund (reduces its Cr balance) / Cr expense or bank: a real money movement, mode from the caller.
+        v_journal_id := fn_post_fund_utilization_journal(v_utilization_id);
+    ELSIF v_need > 1 AND EXISTS (SELECT 1 FROM fn_office_for_user(p_society_id, p_created_by, CURRENT_DATE, v_offices)) THEN
+        -- the requester, if an office-bearer, is the first signature
+        PERFORM fn_sign_fund_utilization(v_utilization_id, p_society_id, p_created_by);
     END IF;
 
     utilization_id := v_utilization_id;
@@ -11974,6 +11984,8 @@ DECLARE
     v_major   NUMERIC := NULL;
     v_missing INT;
     v_sum     NUMERIC;
+    v_area_missing INT;
+    v_area_total   NUMERIC;
 BEGIN
     IF p_choice_count < 2 OR p_choice_count > 5 THEN
         RAISE EXCEPTION 'choice_count must be between 2 and 5';
@@ -11983,8 +11995,8 @@ BEGIN
         RAISE EXCEPTION 'open_to must be no_dues or all_members';
     END IF;
 
-    IF p_vote_basis IS NULL OR p_vote_basis NOT IN ('apartment', 'undivided_interest') THEN
-        RAISE EXCEPTION 'vote_basis must be apartment or undivided_interest';
+    IF p_vote_basis IS NULL OR p_vote_basis NOT IN ('apartment', 'undivided_interest', 'area', 'custom') THEN
+        RAISE EXCEPTION 'vote_basis must be apartment, undivided_interest, area or custom';
     END IF;
 
     IF p_ends_at IS NOT NULL AND p_ends_at <= NOW() THEN
@@ -12005,6 +12017,18 @@ BEGIN
         END IF;
         v_quorum := fn_regime_param_num(p_society_id, 'poll_quorum_pct');
         v_major  := fn_regime_param_num(p_society_id, 'poll_majority_pct');
+    ELSIF p_vote_basis IN ('area', 'custom') THEN
+        -- One vote per flat, weighted by area (frozen now) or by weights entered next (fn_set_poll_weights).
+        IF p_vote_basis = 'area' THEN
+            SELECT COUNT(*) FILTER (WHERE COALESCE(apartment_size, 0) <= 0), COALESCE(SUM(apartment_size), 0)
+              INTO v_area_missing, v_area_total
+              FROM apartments WHERE society_id = p_society_id AND active;
+            IF v_area_missing > 0 OR v_area_total <= 0 THEN
+                RAISE EXCEPTION '% flat(s) have no area (apartment_size); enter it before an area-weighted poll', v_area_missing;
+            END IF;
+        END IF;
+        v_quorum := fn_regime_param_num(p_society_id, 'poll_quorum_pct');
+        v_major  := fn_regime_param_num(p_society_id, 'poll_majority_pct');
     END IF;
 
     INSERT INTO polls (society_id, title, description, choice_count, choice_1, choice_2, choice_3, choice_4, choice_5,
@@ -12012,6 +12036,12 @@ BEGIN
     VALUES (p_society_id, p_title, p_description, p_choice_count, p_choice_1, p_choice_2, p_choice_3, p_choice_4, p_choice_5,
             p_ends_at, p_open_to, p_vote_basis, COALESCE(v_quorum, 33.33), COALESCE(v_major, 50.00))
     RETURNING id INTO v_poll_id;
+
+    IF p_vote_basis = 'area' THEN
+        INSERT INTO poll_flat_weights (poll_id, apartment_id, weight)
+        SELECT v_poll_id, a.id, ROUND(a.apartment_size * 100.0 / v_area_total, 4)
+          FROM apartments a WHERE a.society_id = p_society_id AND a.active;
+    END IF;
 
     RETURN v_poll_id;
 END;
@@ -12291,8 +12321,12 @@ BEGIN
     INSERT INTO poll_participation (poll_id, apartment_id) VALUES (p_poll_id, v_apt_id);
     INSERT INTO poll_ballots (poll_id, choice) VALUES (p_poll_id, p_choice);
 
-    IF v_poll.vote_basis = 'undivided_interest' THEN
-        SELECT undivided_interest_pct INTO v_weight FROM apartments WHERE id = v_apt_id;
+    IF v_poll.vote_basis <> 'apartment' THEN
+        IF v_poll.vote_basis = 'undivided_interest' THEN
+            SELECT undivided_interest_pct INTO v_weight FROM apartments WHERE id = v_apt_id;
+        ELSE
+            SELECT weight INTO v_weight FROM poll_flat_weights WHERE poll_id = p_poll_id AND apartment_id = v_apt_id;
+        END IF;
         IF v_weight IS NULL OR v_weight <= 0 THEN
             -- Roll the whole call back: the two inserts above must not survive without a weight.
             RAISE EXCEPTION 'no_weight';
@@ -12310,7 +12344,7 @@ EXCEPTION
         RETURN;
     WHEN raise_exception THEN
         IF SQLERRM = 'no_weight' THEN
-            RETURN QUERY SELECT FALSE, 'This apartment has no undivided-interest percentage, so it cannot vote in a weighted poll - ask the Secretary to record it'::TEXT, 0::BIGINT;
+            RETURN QUERY SELECT FALSE, 'This apartment has no vote weight for this poll (undivided-interest percentage, area or custom weight) - ask the Secretary to record it'::TEXT, 0::BIGINT;
             RETURN;
         END IF;
         RAISE;
@@ -12414,7 +12448,7 @@ BEGIN
         RETURN;
     END IF;
 
-    v_weighted := (v_poll.vote_basis = 'undivided_interest');
+    v_weighted := (v_poll.vote_basis <> 'apartment');
 
     -- Count total votes
     SELECT COUNT(*) INTO v_total_votes FROM poll_ballots WHERE poll_id = p_poll_id;
@@ -12422,14 +12456,19 @@ BEGIN
     -- Count eligible voters (apartments that can vote based on open_to) and, for a weighted poll, their
     -- combined undivided-interest percentage (the "100%" a majority is measured against).
     IF v_poll.open_to = 'no_dues' THEN
-        SELECT COUNT(*), COALESCE(SUM(a.undivided_interest_pct), 0) INTO v_eligible_voters, v_base_weight
+        SELECT COUNT(*), COALESCE(SUM(CASE WHEN v_poll.vote_basis = 'undivided_interest' THEN a.undivided_interest_pct ELSE w.weight END), 0)
+          INTO v_eligible_voters, v_base_weight
         FROM apartments a
+        LEFT JOIN poll_flat_weights w ON w.poll_id = p_poll_id AND w.apartment_id = a.id
         LEFT JOIN LATERAL fn_get_standing(p_society_id, a.id, CURRENT_DATE) s ON TRUE
         WHERE a.society_id = p_society_id AND a.active
           AND NOT s.ineligible_vote;
     ELSE
-        SELECT COUNT(*), COALESCE(SUM(undivided_interest_pct), 0) INTO v_eligible_voters, v_base_weight
-        FROM apartments WHERE society_id = p_society_id AND active;
+        SELECT COUNT(*), COALESCE(SUM(CASE WHEN v_poll.vote_basis = 'undivided_interest' THEN a.undivided_interest_pct ELSE w.weight END), 0)
+          INTO v_eligible_voters, v_base_weight
+        FROM apartments a
+        LEFT JOIN poll_flat_weights w ON w.poll_id = p_poll_id AND w.apartment_id = a.id
+        WHERE a.society_id = p_society_id AND a.active;
     END IF;
 
     -- Quorum is a head-count of owners (bye-law 9: "30 percent of owners"), for both vote bases.
@@ -17367,4 +17406,450 @@ BEGIN
         -- So blocked when overdue_s22_months = 0 (no >6mo default) OR loan_overdue if policy
         (rec.overdue_s22_months = 0 AND (v_counts_s22 = 0 OR ln.overdue_s22 = 0)) AS s22_blocked
     FROM rec, ln;
+END $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+-- FUND CONTROLS, OFFICE-BEARERS, VOTE WEIGHTS (2026-10)
+--   1. committee_offices        who holds which office, for which flat (President ... Working Committee member)
+--   2. fund_spend_policy        resolution + co-signature rules for using fund money (defaults when no row)
+--   3. fund_utilization_signoffs  the signatures behind a fund withdrawal
+--   4. fn_transfer_between_banks  moving collected money to a fund's own bank account (QR pays the primary only)
+--   5. fn_set_poll_weights      custom per-flat vote weights, frozen before the first vote
+--   6. fn_fund_management_audit  is fund management actually applied for this society?
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+-- 1. Office-bearers. An office belongs to a FLAT (and so to that flat's dues, loans, NOC and vote) and is held by a
+--    named person with a login (user_id), who may be a family member. The five single-seat offices have at most one
+--    active holder; Working Committee members are many.
+CREATE TABLE committee_offices (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id        INT NOT NULL REFERENCES apartments (id),
+    office_code         VARCHAR(30) NOT NULL CHECK (office_code IN
+                          ('president', 'vice_president', 'secretary', 'joint_secretary', 'treasurer',
+                           'working_committee_member')),
+    holder_name         VARCHAR(100) NOT NULL,
+    user_id             INT REFERENCES users (id),
+    term_start          DATE NOT NULL DEFAULT CURRENT_DATE,
+    term_end            DATE,
+    elected_via_poll_id INT REFERENCES polls (id),
+    resolution_ref      VARCHAR(255),
+    status              VARCHAR(10) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ended')),
+    ended_at            TIMESTAMP,
+    ended_reason        TEXT,
+    appointed_by        INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT committee_term_order CHECK (term_end IS NULL OR term_end > term_start)
+);
+CREATE UNIQUE INDEX uq_committee_single_seat ON committee_offices (society_id, office_code)
+    WHERE status = 'active' AND office_code <> 'working_committee_member';
+CREATE UNIQUE INDEX uq_committee_flat_office ON committee_offices (society_id, apartment_id, office_code)
+    WHERE status = 'active';
+CREATE INDEX idx_committee_user ON committee_offices (society_id, user_id) WHERE status = 'active';
+
+-- 2. Spend policy. No row = the defaults below (resolution required, one signature), so nothing changes for a society
+--    until it sets a rule. Co-signing is by office-bearers, never by 'any admin'.
+CREATE TABLE fund_spend_policy (
+    society_id         INT PRIMARY KEY REFERENCES societies (id) ON DELETE CASCADE,
+    require_resolution BOOLEAN NOT NULL DEFAULT TRUE,
+    min_signatories    INT NOT NULL DEFAULT 1 CHECK (min_signatories BETWEEN 1 AND 5),
+    cosign_above       NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (cosign_above >= 0),
+    signatory_offices  TEXT[] NOT NULL DEFAULT ARRAY['president', 'vice_president', 'secretary', 'joint_secretary', 'treasurer'],
+    updated_by         INT REFERENCES users (id),
+    updated_at         TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- 3. Signatures on a fund withdrawal. One per person per withdrawal.
+CREATE TABLE fund_utilization_signoffs (
+    id             SERIAL PRIMARY KEY,
+    utilization_id INT NOT NULL REFERENCES fund_utilizations (id) ON DELETE CASCADE,
+    office_id      INT NOT NULL REFERENCES committee_offices (id),
+    user_id        INT NOT NULL REFERENCES users (id),
+    signed_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_signoff_user UNIQUE (utilization_id, user_id)
+);
+
+-- The active office held by a user, limited to the offices that may sign (NULL = any office). NULL if none.
+CREATE OR REPLACE FUNCTION fn_office_for_user(p_society_id INT, p_user_id INT, p_asof DATE DEFAULT CURRENT_DATE,
+                                              p_offices TEXT[] DEFAULT NULL)
+RETURNS TABLE (office_id INT, office_code VARCHAR) LANGUAGE sql STABLE AS $$
+    SELECT o.id, o.office_code
+      FROM committee_offices o
+     WHERE o.society_id = p_society_id AND o.user_id = p_user_id AND o.status = 'active'
+       AND o.term_start <= p_asof AND (o.term_end IS NULL OR o.term_end >= p_asof)
+       AND (p_offices IS NULL OR o.office_code = ANY (p_offices))
+     ORDER BY CASE o.office_code WHEN 'president' THEN 1 WHEN 'vice_president' THEN 2 WHEN 'secretary' THEN 3
+                                 WHEN 'joint_secretary' THEN 4 WHEN 'treasurer' THEN 5 ELSE 6 END
+     LIMIT 1
+$$;
+
+-- Appoint an office-bearer for a flat. The flat must be able to stand for election: no overdue bill or loan, and no
+-- bye-law 7 arrears (fn_get_standing.ineligible_stand), tested on the term's start date.
+CREATE OR REPLACE FUNCTION fn_appoint_office_bearer(
+    p_society_id INT, p_apartment_id INT, p_office_code VARCHAR, p_holder_name VARCHAR, p_user_id INT,
+    p_term_start DATE DEFAULT CURRENT_DATE, p_term_end DATE DEFAULT NULL,
+    p_resolution_ref VARCHAR DEFAULT NULL, p_poll_id INT DEFAULT NULL, p_appointed_by INT DEFAULT NULL)
+RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE
+    v_id INT;
+    v_stand BOOLEAN;
+    v_u RECORD;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM apartments WHERE id = p_apartment_id AND society_id = p_society_id AND active) THEN
+        RAISE EXCEPTION 'Apartment % is not an active flat of this society', p_apartment_id;
+    END IF;
+    IF NULLIF(BTRIM(p_holder_name), '') IS NULL THEN
+        RAISE EXCEPTION 'The name of the office-bearer is required';
+    END IF;
+    IF p_user_id IS NOT NULL THEN
+        SELECT society_id, role, linked_id INTO v_u FROM users WHERE id = p_user_id;
+        IF NOT FOUND OR v_u.society_id IS DISTINCT FROM p_society_id THEN
+            RAISE EXCEPTION 'User % does not belong to this society', p_user_id;
+        END IF;
+        IF v_u.role = 'apartment' AND v_u.linked_id IS DISTINCT FROM p_apartment_id THEN
+            RAISE EXCEPTION 'User % is linked to a different flat; an office-bearer must belong to the flat they represent', p_user_id;
+        END IF;
+    END IF;
+    IF p_poll_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM polls WHERE id = p_poll_id AND society_id = p_society_id) THEN
+        RAISE EXCEPTION 'Poll % does not belong to this society', p_poll_id;
+    END IF;
+
+    SELECT s.ineligible_stand INTO v_stand FROM fn_get_standing(p_society_id, p_apartment_id, p_term_start) s;
+    IF COALESCE(v_stand, FALSE) THEN
+        RAISE EXCEPTION 'This flat has overdue dues or loan arrears and cannot hold office (bye-law 7); clear them first';
+    END IF;
+
+    INSERT INTO committee_offices (society_id, apartment_id, office_code, holder_name, user_id, term_start, term_end,
+                                   elected_via_poll_id, resolution_ref, appointed_by)
+    VALUES (p_society_id, p_apartment_id, p_office_code, BTRIM(p_holder_name), p_user_id, p_term_start, p_term_end,
+            p_poll_id, p_resolution_ref, p_appointed_by)
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END $$;
+
+CREATE OR REPLACE FUNCTION fn_end_office(p_office_id INT, p_society_id INT, p_reason TEXT DEFAULT NULL)
+RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE committee_offices
+       SET status = 'ended', ended_at = NOW(), ended_reason = p_reason,
+           term_end = LEAST(COALESCE(term_end, CURRENT_DATE), CURRENT_DATE)
+     WHERE id = p_office_id AND society_id = p_society_id AND status = 'active';
+    RETURN FOUND;
+END $$;
+
+-- The managing committee today, with each flat's standing: can it vote, stand, be given a NOC, and may the holder sign.
+CREATE OR REPLACE FUNCTION fn_committee_current(p_society_id INT, p_asof DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (office_id INT, office_code VARCHAR, flat_number VARCHAR, holder_name VARCHAR, user_id INT,
+               term_start DATE, term_end DATE, dues_outstanding NUMERIC, loan_outstanding NUMERIC,
+               ineligible_vote BOOLEAN, ineligible_stand BOOLEAN, noc_blocked BOOLEAN, can_sign BOOLEAN)
+LANGUAGE sql STABLE AS $$
+    SELECT o.id, o.office_code, a.flat_number::VARCHAR, o.holder_name, o.user_id, o.term_start, o.term_end,
+           s.dues_outstanding, s.loan_outstanding, s.ineligible_vote, s.ineligible_stand, s.noc_blocked,
+           (o.user_id IS NOT NULL AND o.office_code = ANY (
+               COALESCE((SELECT p.signatory_offices FROM fund_spend_policy p WHERE p.society_id = p_society_id),
+                        ARRAY['president', 'vice_president', 'secretary', 'joint_secretary', 'treasurer'])))
+      FROM committee_offices o
+      JOIN apartments a ON a.id = o.apartment_id AND a.society_id = o.society_id
+      LEFT JOIN LATERAL fn_get_standing(p_society_id, o.apartment_id, p_asof) s ON TRUE
+     WHERE o.society_id = p_society_id AND o.status = 'active'
+       AND o.term_start <= p_asof AND (o.term_end IS NULL OR o.term_end >= p_asof)
+     ORDER BY CASE o.office_code WHEN 'president' THEN 1 WHEN 'vice_president' THEN 2 WHEN 'secretary' THEN 3
+                                 WHEN 'joint_secretary' THEN 4 WHEN 'treasurer' THEN 5 ELSE 6 END, a.flat_number
+$$;
+
+-- Set the spend policy. min_signatories > 1 means a withdrawal above cosign_above stays 'pending' until that many
+-- different office-bearers have signed it (fn_sign_fund_utilization).
+CREATE OR REPLACE FUNCTION fn_set_fund_spend_policy(
+    p_society_id INT, p_min_signatories INT, p_cosign_above NUMERIC DEFAULT 0, p_require_resolution BOOLEAN DEFAULT TRUE,
+    p_offices TEXT[] DEFAULT NULL, p_updated_by INT DEFAULT NULL)
+RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+DECLARE
+    v_offices TEXT[] := COALESCE(p_offices, ARRAY['president', 'vice_president', 'secretary', 'joint_secretary', 'treasurer']);
+BEGIN
+    IF EXISTS (SELECT 1 FROM unnest(v_offices) o WHERE o NOT IN ('president', 'vice_president', 'secretary', 'joint_secretary',
+                                                                  'treasurer', 'working_committee_member')) THEN
+        RAISE EXCEPTION 'Unknown office in signatory_offices';
+    END IF;
+    INSERT INTO fund_spend_policy (society_id, require_resolution, min_signatories, cosign_above, signatory_offices, updated_by, updated_at)
+    VALUES (p_society_id, p_require_resolution, p_min_signatories, p_cosign_above, v_offices, p_updated_by, NOW())
+    ON CONFLICT (society_id) DO UPDATE
+       SET require_resolution = EXCLUDED.require_resolution, min_signatories = EXCLUDED.min_signatories,
+           cosign_above = EXCLUDED.cosign_above, signatory_offices = EXCLUDED.signatory_offices,
+           updated_by = EXCLUDED.updated_by, updated_at = NOW();
+    RETURN TRUE;
+END $$;
+
+-- Post the journal for a CONFIRMED fund withdrawal, once. The principal lock is re-checked here, at the moment money
+-- moves, because a withdrawal that waited for signatures may meet a smaller balance than when it was requested.
+CREATE OR REPLACE FUNCTION fn_post_fund_utilization_journal(p_util_id INT)
+RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE
+    u fund_utilizations%ROWTYPE;
+    v_journal_id INT;
+    v_lock NUMERIC(5,2);
+    v_balance NUMERIC(15,2);
+    v_available NUMERIC(15,2);
+BEGIN
+    SELECT * INTO u FROM fund_utilizations WHERE id = p_util_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Fund utilization % not found', p_util_id; END IF;
+    IF u.status <> 'confirmed' THEN RAISE EXCEPTION 'Fund utilization % is % - only a confirmed one is posted', p_util_id, u.status; END IF;
+    IF EXISTS (SELECT 1 FROM transactions WHERE society_id = u.society_id AND source_table = 'fund_utilization' AND source_id = p_util_id) THEN
+        RAISE EXCEPTION 'Fund utilization % is already posted', p_util_id;
+    END IF;
+
+    SELECT COALESCE(statutory_lock_pct, 0) INTO v_lock FROM accounts WHERE society_id = u.society_id AND id = u.fund_acc_id;
+    SELECT COALESCE(SUM(CASE WHEN entry_side = 'Cr' THEN amount ELSE -amount END), 0) INTO v_balance
+      FROM transactions WHERE society_id = u.society_id AND acc_id = u.fund_acc_id;
+    v_available := GREATEST(v_balance - ROUND(v_balance * v_lock / 100, 2), 0);
+    IF u.amount > v_available THEN
+        RAISE EXCEPTION 'Fund account % can no longer cover this withdrawal. Drawable: %, requested: %', u.fund_acc_id, v_available, u.amount;
+    END IF;
+
+    v_journal_id := NEXTVAL('seq_transaction_number');
+    INSERT INTO transactions (society_id, journal_id, acc_id, entry_side, trx_date, amount, acc_particulars, mode, status,
+                              source_table, source_id, created_by)
+    VALUES (u.society_id, v_journal_id, u.fund_acc_id, 'Dr', CURRENT_DATE, u.amount, u.particulars, u.mode, 'paid',
+            'fund_utilization', p_util_id, COALESCE(u.confirmed_by, u.user_id));
+    INSERT INTO transactions (society_id, journal_id, acc_id, entry_side, trx_date, amount, acc_particulars, mode, status,
+                              source_table, source_id, created_by)
+    VALUES (u.society_id, v_journal_id, u.expense_acc_id, 'Cr', CURRENT_DATE, u.amount, u.particulars, u.mode, 'paid',
+            'fund_utilization', p_util_id, COALESCE(u.confirmed_by, u.user_id));
+    RETURN v_journal_id;
+END $$;
+
+-- An office-bearer signs a pending withdrawal. When the required number of different office-bearers have signed, the
+-- withdrawal is confirmed and posted in the same transaction.
+CREATE OR REPLACE FUNCTION fn_sign_fund_utilization(p_util_id INT, p_society_id INT, p_user_id INT)
+RETURNS TABLE (signatures INT, required INT, status VARCHAR, journal_id INT) LANGUAGE plpgsql AS $$
+DECLARE
+    u fund_utilizations%ROWTYPE;
+    v_offices TEXT[];
+    v_office RECORD;
+    v_count INT;
+    v_journal INT := NULL;
+BEGIN
+    SELECT * INTO u FROM fund_utilizations WHERE id = p_util_id AND society_id = p_society_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Fund utilization % not found for this society', p_util_id; END IF;
+    IF u.status <> 'pending' THEN RAISE EXCEPTION 'Fund utilization % is % and cannot be signed', p_util_id, u.status; END IF;
+
+    SELECT signatory_offices INTO v_offices FROM fund_spend_policy WHERE society_id = p_society_id;
+    IF v_offices IS NULL THEN
+        v_offices := ARRAY['president', 'vice_president', 'secretary', 'joint_secretary', 'treasurer'];
+    END IF;
+    SELECT * INTO v_office FROM fn_office_for_user(p_society_id, p_user_id, CURRENT_DATE, v_offices);
+    IF v_office.office_id IS NULL THEN
+        RAISE EXCEPTION 'Only a serving office-bearer (President, Vice-President, Secretary, Joint Secretary or Treasurer) can sign a fund withdrawal';
+    END IF;
+
+    INSERT INTO fund_utilization_signoffs (utilization_id, office_id, user_id) VALUES (p_util_id, v_office.office_id, p_user_id)
+    ON CONFLICT (utilization_id, user_id) DO NOTHING;
+    SELECT COUNT(*) INTO v_count FROM fund_utilization_signoffs WHERE utilization_id = p_util_id;
+
+    IF v_count >= u.signatories_required THEN
+        UPDATE fund_utilizations SET status = 'confirmed', confirmed_by = p_user_id, confirmed_at = NOW() WHERE id = p_util_id;
+        v_journal := fn_post_fund_utilization_journal(p_util_id);
+        u.status := 'confirmed';
+    END IF;
+
+    signatures := v_count; required := u.signatories_required; status := u.status; journal_id := v_journal;
+    RETURN NEXT;
+END $$;
+
+-- 4. Move money between two bank accounts. UPI/QR collections for a fund land in the primary bank (only the primary has
+--    a QR); when the society keeps that fund in a different account (fund_bank_account_map) this is the explicit move.
+CREATE OR REPLACE FUNCTION fn_transfer_between_banks(
+    p_society_id INT, p_from_bank INT, p_to_bank INT, p_amount NUMERIC, p_particulars TEXT,
+    p_created_by INT, p_ref VARCHAR DEFAULT NULL)
+RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE
+    v_journal_id INT;
+    v_bad INT;
+BEGIN
+    IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
+    IF p_from_bank = p_to_bank THEN RAISE EXCEPTION 'The two bank accounts must be different'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM users WHERE id = p_created_by AND (role = 'admin' OR is_master_admin)) THEN
+        RAISE EXCEPTION 'Only an administrator can record a bank transfer';
+    END IF;
+    SELECT COUNT(*) INTO v_bad FROM accounts a
+      LEFT JOIN accounts par ON par.society_id = a.society_id AND par.id = a.parent_account_id
+     WHERE a.society_id = p_society_id AND a.id IN (p_from_bank, p_to_bank) AND par.tab_name = 'BkAc';
+    IF v_bad <> 2 THEN
+        RAISE EXCEPTION 'Both accounts must be bank accounts (children of the Bank Accounts header) of this society';
+    END IF;
+    v_journal_id := NEXTVAL('seq_transaction_number');
+    INSERT INTO transactions (society_id, journal_id, acc_id, entry_side, trx_date, amount, acc_particulars, mode, status,
+                              source_table, source_id, created_by)
+    VALUES (p_society_id, v_journal_id, p_to_bank, 'Dr', CURRENT_DATE, p_amount,
+            COALESCE(p_particulars, 'Bank transfer') || COALESCE(' [' || p_ref || ']', ''), 'bank', 'paid', 'bank_transfer', NULL, p_created_by);
+    INSERT INTO transactions (society_id, journal_id, acc_id, entry_side, trx_date, amount, acc_particulars, mode, status,
+                              source_table, source_id, created_by)
+    VALUES (p_society_id, v_journal_id, p_from_bank, 'Cr', CURRENT_DATE, p_amount,
+            COALESCE(p_particulars, 'Bank transfer') || COALESCE(' [' || p_ref || ']', ''), 'bank', 'paid', 'bank_transfer', NULL, p_created_by);
+    RETURN v_journal_id;
+END $$;
+
+-- 5. Custom vote weights for a 'custom' poll: {"<apartment_id>": weight, ...}, one entry per active flat. Weights are
+--    scaled to sum to 100 and frozen; allowed only while the poll is active and nobody has voted.
+CREATE OR REPLACE FUNCTION fn_set_poll_weights(p_poll_id INT, p_society_id INT, p_weights JSONB)
+RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE
+    v_poll polls%ROWTYPE;
+    v_missing INT;
+    v_total NUMERIC;
+    v_n INT;
+BEGIN
+    SELECT * INTO v_poll FROM polls WHERE id = p_poll_id AND society_id = p_society_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Poll not found'; END IF;
+    IF v_poll.vote_basis <> 'custom' THEN RAISE EXCEPTION 'Only a custom-weight poll takes weights set by hand'; END IF;
+    IF v_poll.status <> 'active' THEN RAISE EXCEPTION 'The poll is no longer active'; END IF;
+    IF EXISTS (SELECT 1 FROM poll_participation WHERE poll_id = p_poll_id) THEN
+        RAISE EXCEPTION 'Votes have already been cast; weights can no longer change';
+    END IF;
+    SELECT COUNT(*) FILTER (WHERE (p_weights ->> a.id::TEXT) IS NULL OR (p_weights ->> a.id::TEXT)::NUMERIC < 0),
+           COALESCE(SUM((p_weights ->> a.id::TEXT)::NUMERIC), 0)
+      INTO v_missing, v_total
+      FROM apartments a WHERE a.society_id = p_society_id AND a.active;
+    IF v_missing > 0 THEN RAISE EXCEPTION '% flat(s) have no weight (or a negative one)', v_missing; END IF;
+    IF v_total <= 0 THEN RAISE EXCEPTION 'The weights add up to zero'; END IF;
+    DELETE FROM poll_flat_weights WHERE poll_id = p_poll_id;
+    INSERT INTO poll_flat_weights (poll_id, apartment_id, weight)
+    SELECT p_poll_id, a.id, ROUND((p_weights ->> a.id::TEXT)::NUMERIC * 100.0 / v_total, 4)
+      FROM apartments a WHERE a.society_id = p_society_id AND a.active;
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RETURN v_n;
+END $$;
+
+-- 6. Is fund management applied? One row per check: severity ok | info | warn | fail. Read-only.
+CREATE OR REPLACE FUNCTION fn_fund_management_audit(p_society_id INT)
+RETURNS TABLE (check_code TEXT, severity TEXT, detail TEXT) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_regime TEXT;
+    v_primary INT;
+    v_n INT;
+    v_pol fund_spend_policy%ROWTYPE;
+    v_rate NUMERIC;
+    v_mode TEXT;
+    r RECORD;
+    v_signers INT;
+BEGIN
+    SELECT regime_code INTO v_regime FROM society_legal_regime WHERE society_id = p_society_id ORDER BY effective_from DESC LIMIT 1;
+    check_code := 'REGIME';
+    IF v_regime IS NULL THEN severity := 'fail'; detail := 'No legal regime is recorded for this society, so no fund is prescribed or checked.';
+    ELSE severity := 'ok'; detail := 'Legal regime ' || v_regime; END IF;
+    RETURN NEXT;
+
+    -- Prescribed funds: account present, mapped to its statutory head, principal lock where the law gives one.
+    IF v_regime = 'UP_AOA_2010' THEN
+        FOR r IN SELECT * FROM (VALUES (3220, 'RESERVE_FUND', 'Reserve Fund'), (3230, 'IFMS_CORPUS', 'IFMS Corpus'),
+                                       (3270, 'MAJOR_REPAIR_FUND', 'Major Repair Fund')) AS t(acc_id, head, nm)
+        LOOP
+            check_code := 'PRESCRIBED_' || r.head;
+            IF NOT EXISTS (SELECT 1 FROM accounts WHERE society_id = p_society_id AND id = r.acc_id) THEN
+                IF r.acc_id = 3270 THEN
+                    severity := 'info'; detail := r.nm || ' account is created on the first transfer (fn_ensure_major_repair_fund).';
+                ELSE
+                    severity := 'fail'; detail := r.nm || ' is prescribed but account ' || r.acc_id || ' does not exist.';
+                END IF;
+            ELSIF NOT EXISTS (SELECT 1 FROM account_statutory_mappings m WHERE m.society_id = p_society_id AND m.account_id = r.acc_id
+                                AND m.regime_code = v_regime AND m.head_code = r.head AND m.effective_to IS NULL) THEN
+                severity := 'fail'; detail := r.nm || ' (account ' || r.acc_id || ') is not mapped to statutory head ' || r.head || '.';
+            ELSE
+                severity := 'ok'; detail := r.nm || ' (account ' || r.acc_id || ') exists and is mapped to ' || r.head || '.';
+            END IF;
+            RETURN NEXT;
+        END LOOP;
+
+        check_code := 'IFMS_PRINCIPAL_LOCK';
+        SELECT COUNT(*) INTO v_n FROM accounts a JOIN account_statutory_mappings m
+          ON m.society_id = a.society_id AND m.account_id = a.id AND m.head_code = 'IFMS_CORPUS' AND m.effective_to IS NULL
+         WHERE a.society_id = p_society_id AND COALESCE(a.statutory_lock_pct, 0) < 100;
+        IF v_n > 0 THEN severity := 'fail'; detail := 'The IFMS corpus principal is not 100% locked; it can be spent.';
+        ELSE severity := 'ok'; detail := 'IFMS corpus principal is locked at 100%.'; END IF;
+        RETURN NEXT;
+    END IF;
+
+    -- Opted funds: collected on the bill => a rate must be set.
+    FOR r IN SELECT * FROM (VALUES ('sinking'), ('repair')) AS t(f) LOOP
+        check_code := 'OPTED_' || upper(r.f) || '_FUND';
+        SELECT m.mode INTO v_mode FROM fn_fund_rule(p_society_id, r.f) m;
+        IF v_mode = 'none' THEN
+            severity := 'info'; detail := initcap(r.f) || ' fund: not opted by this society (nothing is billed).';
+        ELSIF v_mode = 'on_bill' THEN
+            SELECT CASE r.f WHEN 'sinking' THEN apt_sinking_fund_rate ELSE apt_repair_fund_rate END INTO v_rate
+              FROM apt_charges_fines_basis WHERE society_id = p_society_id AND apt_id IS NULL AND end_date IS NULL LIMIT 1;
+            IF COALESCE(v_rate, 0) <= 0 THEN severity := 'fail'; detail := initcap(r.f) || ' fund is billed on every maintenance bill but no rate is set.';
+            ELSE severity := 'ok'; detail := initcap(r.f) || ' fund is billed on the monthly bill at ' || v_rate || '.'; END IF;
+        ELSE
+            severity := 'ok'; detail := initcap(r.f) || ' fund is collected at financial-year close.';
+        END IF;
+        RETURN NEXT;
+    END LOOP;
+
+    -- Banks: the QR belongs to the primary account only.
+    SELECT primary_bank_account_id INTO v_primary FROM societies WHERE id = p_society_id;
+    check_code := 'PRIMARY_BANK';
+    IF v_primary IS NULL THEN severity := 'fail'; detail := 'No primary bank account: non-cash receipts cannot be recorded.';
+    ELSE severity := 'ok'; detail := 'Primary bank account ' || v_primary || ' carries the payment QR.'; END IF;
+    RETURN NEXT;
+    FOR r IN SELECT m.fund_acc_id, m.bank_acc_id, a.name FROM fund_bank_account_map m
+               JOIN accounts a ON a.society_id = m.society_id AND a.id = m.fund_acc_id
+              WHERE m.society_id = p_society_id AND m.bank_acc_id IS DISTINCT FROM v_primary
+    LOOP
+        check_code := 'FUND_BANK_' || r.fund_acc_id; severity := 'warn';
+        detail := r.name || ' is kept in bank account ' || r.bank_acc_id || ', but UPI/QR payments land in the primary account; record a bank transfer (fn_transfer_between_banks) for them.';
+        RETURN NEXT;
+    END LOOP;
+
+    -- Spend controls.
+    SELECT * INTO v_pol FROM fund_spend_policy WHERE society_id = p_society_id;
+    check_code := 'SPEND_POLICY';
+    IF NOT FOUND THEN
+        severity := 'warn'; detail := 'No spend policy set: fund money needs a resolution reference but only one signature (defaults).';
+    ELSE
+        severity := 'ok'; detail := 'Spend policy: ' || v_pol.min_signatories || ' signature(s) above ' || v_pol.cosign_above
+                                  || ', resolution ' || CASE WHEN v_pol.require_resolution THEN 'required' ELSE 'not required' END || '.';
+    END IF;
+    RETURN NEXT;
+    IF FOUND AND v_pol.min_signatories > 1 THEN
+        SELECT COUNT(DISTINCT o.user_id) INTO v_signers FROM committee_offices o
+         WHERE o.society_id = p_society_id AND o.status = 'active' AND o.user_id IS NOT NULL
+           AND o.office_code = ANY (v_pol.signatory_offices);
+        check_code := 'SIGNATORIES';
+        IF v_signers < v_pol.min_signatories THEN
+            severity := 'fail'; detail := 'The policy needs ' || v_pol.min_signatories || ' signatures but only ' || v_signers || ' office-bearer(s) with a login can sign: fund withdrawals are blocked.';
+        ELSE severity := 'ok'; detail := v_signers || ' office-bearers can sign.'; END IF;
+        RETURN NEXT;
+    END IF;
+    check_code := 'COMMITTEE';
+    SELECT COUNT(DISTINCT office_code) INTO v_n FROM committee_offices WHERE society_id = p_society_id AND status = 'active'
+       AND office_code IN ('president', 'secretary', 'treasurer');
+    IF v_n < 3 THEN severity := 'warn'; detail := 'President, Secretary and Treasurer are not all recorded (' || v_n || ' of 3).';
+    ELSE severity := 'ok'; detail := 'President, Secretary and Treasurer are recorded.'; END IF;
+    RETURN NEXT;
+
+    -- Usage history.
+    check_code := 'UTILIZATIONS_WITHOUT_RESOLUTION';
+    SELECT COUNT(*) INTO v_n FROM fund_utilizations WHERE society_id = p_society_id AND status = 'confirmed'
+       AND NULLIF(BTRIM(COALESCE(approval_ref, '')), '') IS NULL;
+    IF v_n > 0 THEN severity := 'warn'; detail := v_n || ' confirmed withdrawal(s) carry no resolution reference.';
+    ELSE severity := 'ok'; detail := 'Every confirmed withdrawal cites a resolution.'; END IF;
+    RETURN NEXT;
+    check_code := 'STALE_PENDING_UTILIZATIONS';
+    SELECT COUNT(*) INTO v_n FROM fund_utilizations WHERE society_id = p_society_id AND status = 'pending'
+       AND created_at < NOW() - INTERVAL '30 days';
+    IF v_n > 0 THEN severity := 'warn'; detail := v_n || ' withdrawal(s) have waited more than 30 days for signatures.';
+    ELSE severity := 'ok'; detail := 'No withdrawal is waiting more than 30 days.'; END IF;
+    RETURN NEXT;
+
+    -- Fund balances must not be overdrawn.
+    FOR r IN SELECT a.id, a.name, COALESCE(SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount ELSE -t.amount END), 0) AS bal
+               FROM accounts a JOIN account_statutory_mappings m
+                 ON m.society_id = a.society_id AND m.account_id = a.id AND m.effective_to IS NULL
+                AND m.head_code IN ('IFMS_CORPUS', 'MAJOR_REPAIR_FUND', 'RESERVE_FUND', 'SINKING_FUND')
+               LEFT JOIN transactions t ON t.society_id = a.society_id AND t.acc_id = a.id
+              WHERE a.society_id = p_society_id GROUP BY a.id, a.name HAVING COALESCE(SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount ELSE -t.amount END), 0) < 0
+    LOOP
+        check_code := 'OVERDRAWN_' || r.id; severity := 'fail'; detail := r.name || ' is overdrawn by ' || (-r.bal) || '.';
+        RETURN NEXT;
+    END LOOP;
 END $$;
