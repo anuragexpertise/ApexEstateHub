@@ -1,5 +1,8 @@
 import json
 import re
+import traceback
+from functools import wraps
+from dash.exceptions import PreventUpdate
 from dash import Input, Output, State, ALL, MATCH, callback, no_update, html, ctx, clientside_callback
 import dash_bootstrap_components as dbc
 from database.db_manager import db
@@ -8,7 +11,7 @@ from app.dash_apps.pages.setup_wizard import (
     get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS,
     build_rules_panel, rules_subtitle, apt_charges_error, basis_hint, render_review,
     fund_plan, funds_error, fund_rate_label, fund_hint, FUND_BASIS_LABELS,
-    fund_flags, fund_note, regime_badge, state_thresholds_rows,
+    fund_flags, fund_note, regime_badge, state_thresholds_rows, legal_regime_live, fund_status_children,
 )
 from app.utils.ux_toasts import error_toast
 from app.security.guards import require_session
@@ -423,6 +426,24 @@ def register_setup_wizard_callbacks(app):
             return f"✗ not saved ({exc.__class__.__name__})"
         return ("✓ " if ok else "✗ ") + msg
 
+    # Legal Regime Selection: State/Constitution are only persisted on submit, so this block is driven by the
+    # live dropdowns. It also listens to the current step so it is rebuilt on arrival at the step, not only
+    # when a dropdown changes.
+    @app.callback(
+        Output("sw-legal-regime-live", "children"),
+        Input("sw-society-state", "value"),
+        Input("sw-society-constitution", "value"),
+        Input("sw-current-step", "data"),
+        State("sw-society-id", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def refresh_legal_regime_step(picked_state, picked_constitution, _current_step, _client_society_id):
+        return legal_regime_live(get_current_society_id(), picked_state, picked_constitution)
+
+
+    # NOTE: Dash skips a multi-output callback entirely if ANY of its outputs is not in the layout, so every Output
+    # below must be a component the wizard actually renders (a removed panel used to silently disable this callback).
     # Every step body is rendered once, when the modal is built — so the
     # statutes step kept showing whatever societies.state held at that moment
     # (empty for a society being onboarded, and a full name like
@@ -438,7 +459,6 @@ def register_setup_wizard_callbacks(app):
             Output("sw-compliance-rules-panel", "children", allow_duplicate=True),
             Output("sw-rules-subtitle", "children", allow_duplicate=True),
             Output("sw-regime-badge", "children"),
-            Output("sw-state-thresholds", "children"),
             Input("sw-society-state", "value"),
             Input("sw-society-constitution", "value"),
             State("sw-society-id", "data"),
@@ -461,16 +481,16 @@ def register_setup_wizard_callbacks(app):
                 build_rules_panel(here, society_id, picked_state),
                 rules_subtitle(here, society_id, picked_state),
                 regime_badge(picked_state, picked_constitution),
-                state_thresholds_rows(picked_state),
             )
 
         # The Funds step follows the admin's clicks: which questions are shown, what the rate field means, and the
         # sentence under it. fund_plan() applies the same rules as the SQL function fn_fund_rule.
+        from app.services.up_aoa_fund_catalog import FUNDS as _UP_FUNDS
         _FUND_OUTS = []
         for _f in ("sinking", "repair"):
             _FUND_OUTS += [Output(f"sw-fund-{_f}-collect-wrap", "style"), Output(f"sw-fund-{_f}-basis-wrap", "style"),
                            Output(f"sw-fund-{_f}-rate-wrap", "style"), Output(f"sw-fund-{_f}-rate-label", "children"),
-                           Output(f"sw-fund-{_f}-hint", "children")]
+                           Output(f"sw-fund-{_f}-hint", "children"), Output(f"sw-fund-{_f}-status", "children")]
 
         @app.callback(
             *_FUND_OUTS,
@@ -493,7 +513,8 @@ def register_setup_wizard_callbacks(app):
                         show(not f["statutory"] and f["mode"] == "on_bill"),                          # basis question
                         show(f["mode"] == "on_bill"),                                                 # rate field
                         dbc.Label(fund_rate_label(f["basis"]), className="fw-semibold small"),
-                        fund_hint(f, fp["regime"])]
+                        fund_hint(f, fp["regime"]),
+                        no_update if f["statutory"] else fund_status_children(_UP_FUNDS[fund], opted=(f["levy"] == "yes"))]
             return tuple(out)
 
         # Answering "No" to "collect this fund?" also records "Not collected"; "Yes" lifts that back to the regime default.
@@ -516,6 +537,21 @@ def register_setup_wizard_callbacks(app):
     # Defined BEFORE the decorator below: its running= list reads it while the callback is being registered
     # (it used to be defined inside the function body, so registration raised NameError).
     _hidden_spinner = {"display": "none", "marginLeft": "8px"}
+
+    def _surface_errors(fn):
+        """Submit Setup: an unexpected exception used to return a bare 500 and the wizard just sat there. Log it and
+        show the admin a message in the red error line instead (PreventUpdate still passes through)."""
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except PreventUpdate:
+                raise
+            except Exception as exc:
+                traceback.print_exc()
+                msg = error_toast(exc, "Setup could not be submitted. Please check the entries on each step and try again.")["message"]
+                return True, no_update, no_update, no_update, no_update, msg, _hidden_spinner, no_update, no_update
+        return wrapped
 
     @app.callback(
         Output("setup-wizard-modal", "is_open"),
@@ -559,10 +595,6 @@ def register_setup_wizard_callbacks(app):
         State({"type": "tds-agg-bill", "index": ALL}, "value"),
         State("sw-cgst", "value"),
         State("sw-sgst", "value"),
-        State("sw-comp-gst-exempt", "value"),
-        State("sw-comp-gst-cadence", "value"),
-        State("sw-comp-tds-action", "value"),
-        State("sw-comp-export-fmt", "value"),
         State("sw-apt-amt", "value"),
         State("sw-apt-rate", "value"),
         State("sw-apt-billing-basis", "value"),
@@ -592,6 +624,7 @@ def register_setup_wizard_callbacks(app):
         prevent_initial_call=True
     )
     @require_session
+    @_surface_errors
     def submit_setup_wizard(n_submit, n_close, 
                             logo_data, address, s_state, s_constitution, s_email, phone, bg_data, 
                             tan, gstin, reg_num, gate_logic, duty_hrs, pay_qr_data, calc_start, 
@@ -599,7 +632,6 @@ def register_setup_wizard_callbacks(app):
                             qr_secret, qr_confirm, i_agree, admin_pass, qr_confirm_final,
                             tds_natures, tds_rates, tds_rates_no_pan, tds_single_bills, tds_agg_bills,
                             cgst, sgst,
-                            c_gst_exempt, c_gst_cad, c_tds_act, c_exp_fmt,
                             apt_amt, apt_rate, apt_billing_basis, apt_due_day, apt_sinking, apt_repair, apt_interest,
                             apt_cost, apt_budget,
                             ven_1day, ven_7day, ven_1mth,

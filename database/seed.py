@@ -1176,16 +1176,6 @@ LEGAL_INSTRUMENTS_UP_AOA = [
      "annexures, the public-notice/objection window (15-30 days, at the Registrar's discretion), and annual "
      "return/renewal filing.",
      "UP Society Registration Rules, 1976", 50, "active"),
-    ("UP_AOA_2010", "Act",
-     "Uttar Pradesh Co-operative Societies Act, 1965",
-     1965, "Government of Uttar Pradesh",
-     "Group housing societies that register as a cooperative rather than under the 1860 Act or the 2010 "
-     "Apartment Act — an alternative route noted in case law (Resident Welfare Association vs State of UP, "
-     "2015) though courts have held the Apartment Act 2010 governs apartment owners specifically",
-     "Alternative registration/governance framework for housing cooperatives in UP, administered by the "
-     "Registrar of Cooperative Societies rather than Registrar of Firms/Societies/Chits.",
-     "Allahabad HC, Resident Welfare Association vs State of U.P., 16-10-2015 (discusses applicability "
-     "vs the 1860 Act/2010 Apartment Act)", 60, "active"),
     ("UP_AOA_2010", "Central Act",
      "Real Estate (Regulation and Development) Act, 2016 (RERA)",
      2016, "Government of India",

@@ -98,8 +98,8 @@ GENERIC_DEFAULT = ("on_bill", "per_sq_ft")           # GENERIC scheme defaults
     (False, UP_DEFAULT, "yes", "on_bill", "regime_default", ("on_bill", "undivided_interest")),
     (False, UP_DEFAULT, "yes", "on_bill", "per_sq_ft", ("on_bill", "per_sq_ft")),
     (False, UP_DEFAULT, "yes", "none", "regime_default", ("none", "undivided_interest")),
-    # GENERIC bills a fund that has a rate (the behaviour before the regime parameter existed); 'none' switches it off
-    (False, GENERIC_DEFAULT, "no", "regime_default", "regime_default", ("on_bill", "per_sq_ft")),
+    # GENERIC no longer bills a fund the society has not opted into; opting in follows the regime (on the bill)
+    (False, GENERIC_DEFAULT, "no", "regime_default", "regime_default", ("none", "per_sq_ft")),
     (False, GENERIC_DEFAULT, "yes", "regime_default", "construction_cost", ("on_bill", "construction_cost")),
     (False, GENERIC_DEFAULT, "no", "none", "regime_default", ("none", "per_sq_ft")),
     # a regime that collects nothing, opted in: needs a concrete way to bill
