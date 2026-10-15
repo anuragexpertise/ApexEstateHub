@@ -384,6 +384,13 @@ def _seed_fallback_instruments(regime_code):
     return out
 
 
+# Instruments that must not be listed for a regime even if the catalog (or an older seed) still holds them.
+# The UP Co-operative Societies Act, 1965 governs housing co-operatives, not an AOA under the UP Apartment Act 2010.
+EXCLUDED_INSTRUMENTS = {
+    "UP_AOA_2010": {"Uttar Pradesh Co-operative Societies Act, 1965"},
+}
+
+
 def instruments_for_regime(regime_code=DEFAULT_REGIME):
     """
     Act / Rules / Bye-laws rows for one regime, from legal_instrument_catalog.
@@ -407,6 +414,8 @@ def instruments_for_regime(regime_code=DEFAULT_REGIME):
         rows = []
     if not rows:
         rows = _seed_fallback_instruments(regime_code)
+    _skip = EXCLUDED_INSTRUMENTS.get(regime_code, set())
+    rows = [r for r in rows if r.get("title") not in _skip]
     return sorted(
         rows,
         key=lambda r: (

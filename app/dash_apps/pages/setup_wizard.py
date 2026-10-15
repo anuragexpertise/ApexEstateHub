@@ -533,10 +533,22 @@ def _fund_facts_block(fund):
                      for lbl, txt in _fund_facts(fund)], className="mb-2")
 
 
-def _fund_status_badges(fund):
+def fund_status_children(fund, opted=None):
+    """The status + verification badges of a fund card.
+
+    `opted` is None for funds whose status does not depend on a choice. For an Optional fund it says whether the
+    society has actually answered Yes: until then the badge reads just "Optional" (not "opted by Society")."""
     st_text, st_col = _fund_status_spec(fund)
+    if opted is not None and fund.get("status") == "optional" and not opted:
+        st_text = "Optional"
     v_text, v_col = _fund_verify_spec(fund)
-    return html.Div([_fund_badge(st_text, st_col), _fund_badge(v_text, v_col)], className="mb-2")
+    return [_fund_badge(st_text, st_col), _fund_badge(v_text, v_col)]
+
+
+def _fund_status_badges(fund, opted=None, fund_key=None):
+    # fund_key gives the block an id so the Funds step can refresh it live when the Yes / No answer changes
+    return html.Div(fund_status_children(fund, opted), className="mb-2",
+                    **({"id": f"sw-fund-{fund_key}-status"} if fund_key else {}))
 
 
 _SUPPORT_ORDER = ("automatic", "partial", "manual")
@@ -616,23 +628,23 @@ def _billing_channels_card():
 
 
 def fund_effective(statutory, regime_mode, regime_basis, levy, collection, basis_pick):
-    """(mode, basis) a fund ends up with. Mirrors the SQL function fn_fund_rule, so what the wizard asks for is what
-    the billing engine will do once the General Body resolution is recorded.
+    """(mode, basis) a fund ends up with.
 
       statutory   : the state prescribes the fund -> on every bill, shared by construction cost, no resolution needed
-      collection / basis_pick : the society's choice, or 'regime_default' to keep the regime's default
-      levy        : 'yes' = the society opts in; 'no' leaves the fund uncollected unless the regime itself bills on the bill
+      collection / basis_pick : the society's explicit choice, or 'regime_default' to keep the regime's default basis
+      levy        : a Sinking / Repair fund is NEVER opted in automatically. Unless the society answers 'yes' (or names a
+                    collection mode itself) the fund is not collected, whatever the regime's default mode is.
+
+    The SQL function fn_fund_rule still honours a regime whose default mode is on_bill (GENERIC), but a fund the society
+    did not opt into is stored with rate 0 on submit, so nothing is billed.
     """
     if statutory:
         return "on_bill", "construction_cost"
-    mode, basis = regime_mode or "none", regime_basis or "none"
+    mode, basis = "none", regime_basis or "none"
     if collection in ("on_bill", "fy_close", "none"):
         mode = collection
     elif levy == "yes":
-        if mode == "none":
-            mode = "on_bill"
-    elif mode != "on_bill":
-        mode = "none"
+        mode = regime_mode if regime_mode in ("on_bill", "fy_close") else "on_bill"
     if basis_pick in FUND_BASES:
         basis = basis_pick
     if mode == "on_bill" and basis not in FUND_BASES:
@@ -1092,6 +1104,62 @@ def render_review(v, society_id=None):
     ]
 
 
+def legal_regime_live(society_id=None, state=None, constitution=None):
+    """State/Constitution-dependent part of the Legal Regime Selection step.
+
+    `state` / `constitution` are the live Society Details dropdown values (they are only persisted on
+    submit); when absent we fall back to what is saved on the society.
+    """
+    from app.services.statutory_rules import regime_for_society, regime_profile, state_has_own_regime, regime_options, regime_selection
+    picked_state = state or _society_state(society_id)
+    picked_constitution = constitution or ""
+    if not picked_constitution and society_id:
+        row = db._execute("SELECT constitution FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+        if row:
+            picked_constitution = row.get("constitution", "AOA") or "AOA"
+    regime = regime_for_society(society_id, picked_state)
+    name, status = regime_profile(regime)
+    own = state_has_own_regime(picked_state)
+    hierarchy_rows = legal_hierarchy_rows(society_id, picked_state)
+    _sel = regime_selection(picked_state, picked_constitution or "AOA")
+    _opt_rows = [html.Tr([
+        html.Td(html.B(o["label"]) if o["constitution"] == (picked_constitution or "AOA").upper() else o["label"]),
+        html.Td(dbc.Badge(o["regime"], color="primary" if o["dedicated"] else "secondary", pill=True)),
+        html.Td("Central Acts + State Act + Rules + Model Bye-Laws" if o["dedicated"] else "Central Acts only"),
+        html.Td(dbc.Badge("Your choice", color="success", pill=True) if o["constitution"] == (picked_constitution or "AOA").upper() else ""),
+    ]) for o in regime_options(picked_state)]
+    return [
+        dbc.Card(dbc.CardBody([
+            html.H6([html.I(className="fas fa-balance-scale me-2"), "Your legal regime"], className="text-primary mb-2"),
+            html.Div([html.Span("State: ", className="text-muted"), html.B(picked_state or "not chosen"),
+                      html.Span("   Constitution: ", className="text-muted ms-2"), html.B(_sel["constitution_label"]),
+                      html.Span("   \u2192   ", className="mx-1"),
+                      dbc.Badge(_sel["regime"] or "\u2014", color="primary" if _sel["dedicated"] else "secondary", className="fs-6")], className="mb-2"),
+            html.Small("The regime is the named bundle of instruments that govern the society: central Acts, the State Act, Rules and Model Bye-Laws. "
+                       "State and Constitution are chosen on the Society Details step.", className="text-muted d-block mb-2"),
+            dbc.Table([html.Thead(html.Tr([html.Th("Constitution"), html.Th("Regime"), html.Th("Instruments"), html.Th("")])),
+                       html.Tbody(_opt_rows)], bordered=True, size="sm", style={"fontSize": "12px"}),
+        ]), className="mb-3 shadow-sm"),
+        html.Div([
+            html.H6([html.I(className="fas fa-sitemap me-2"), f"Active Regime: {regime}"], className="text-primary mb-3"),
+            html.Div([
+                dbc.Badge(regime, color="primary" if own else "secondary", className="me-2"),
+                html.Span(name, className="small"),
+            ], className="mb-2"),
+            html.Small(f"This regime is {'active' if own else 'a fallback (UP reference)'} — confirm applicable law with an advocate if not a dedicated regime." if not own else "", className="text-muted d-block mb-3"),
+            html.H6("Legal Hierarchy (Precedence Order)", className="text-primary mt-3 mb-2"),
+            dbc.Table([
+                html.Thead(html.Tr([
+                    html.Th("Layer", style={"fontSize": "11px", "width": "150px"}),
+                    html.Th("Instrument", style={"fontSize": "11px"}),
+                    html.Th("Status", style={"fontSize": "11px", "width": "120px"}),
+                ])),
+                html.Tbody(hierarchy_rows),
+            ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
+        ]),
+    ]
+
+
 def render_category_content(category, society_id=None, state=None, constitution=None):
     """
     Step body for one wizard category.
@@ -1211,57 +1279,12 @@ def render_category_content(category, society_id=None, state=None, constitution=
             _render_image_capture_control("society", "bg", _imgs.get("bg"), society_id),
         ]
     elif category == "Legal Regime Selection":
-        from app.services.statutory_rules import regime_for_society, regime_profile, state_has_own_regime, normalize_state
-        picked_state = state or _society_state(society_id)
-        picked_constitution = ""
-        if society_id:
-            row = db._execute("SELECT constitution FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
-            if row:
-                picked_constitution = row.get("constitution", "AOA") or "AOA"
-        regime = regime_for_society(society_id, picked_state)
-        name, status = regime_profile(regime)
-        own = state_has_own_regime(picked_state)
-        
-        hierarchy_rows = legal_hierarchy_rows(society_id, picked_state)
-        from app.services.statutory_rules import regime_options, regime_selection
-        _sel = regime_selection(picked_state, picked_constitution or "AOA")
-        _opt_rows = [html.Tr([
-            html.Td(html.B(o["label"]) if o["constitution"] == (picked_constitution or "AOA").upper() else o["label"]),
-            html.Td(dbc.Badge(o["regime"], color="primary" if o["dedicated"] else "secondary", pill=True)),
-            html.Td("Central Acts + State Act + Rules + Model Bye-Laws" if o["dedicated"] else "Central Acts only"),
-            html.Td(dbc.Badge("Your choice", color="success", pill=True) if o["constitution"] == (picked_constitution or "AOA").upper() else ""),
-        ]) for o in regime_options(picked_state)]
-        
         return elements + [
-            _render_banner("Legal Regime Selection", "Your State and Constitution together determine the legal regime. The hierarchy below shows how rules flow — a lower layer can never loosen a higher one."),
-            dbc.Card(dbc.CardBody([
-                html.H6([html.I(className="fas fa-balance-scale me-2"), "Your legal regime"], className="text-primary mb-2"),
-                html.Div([html.Span("State: ", className="text-muted"), html.B(picked_state or "not chosen"),
-                          html.Span("   Constitution: ", className="text-muted ms-2"), html.B(_sel["constitution_label"]),
-                          html.Span("   \u2192   ", className="mx-1"),
-                          dbc.Badge(_sel["regime"] or "\u2014", color="primary" if _sel["dedicated"] else "secondary", className="fs-6")], className="mb-2"),
-                html.Small("The regime is the named bundle of instruments that govern the society: central Acts, the State Act, Rules and Model Bye-Laws. "
-                           "State and Constitution are chosen on the Society Details step.", className="text-muted d-block mb-2"),
-                dbc.Table([html.Thead(html.Tr([html.Th("Constitution"), html.Th("Regime"), html.Th("Instruments"), html.Th("")])),
-                           html.Tbody(_opt_rows)], bordered=True, size="sm", style={"fontSize": "12px"}),
-            ]), className="mb-3 shadow-sm"),
-            html.Div([
-                html.H6([html.I(className="fas fa-sitemap me-2"), f"Active Regime: {regime}"], className="text-primary mb-3"),
-                html.Div([
-                    dbc.Badge(regime, color="primary" if own else "secondary", className="me-2"),
-                    html.Span(name, className="small"),
-                ], className="mb-2"),
-                html.Small(f"This regime is {'active' if own else 'a fallback (UP reference)'} — confirm applicable law with an advocate if not a dedicated regime." if not own else "", className="text-muted d-block mb-3"),
-                html.H6("Legal Hierarchy (Precedence Order)", className="text-primary mt-3 mb-2"),
-                dbc.Table([
-                    html.Thead(html.Tr([
-                        html.Th("Layer", style={"fontSize": "11px", "width": "150px"}),
-                        html.Th("Instrument", style={"fontSize": "11px"}),
-                        html.Th("Status", style={"fontSize": "11px", "width": "120px"}),
-                    ])),
-                    html.Tbody(hierarchy_rows),
-                ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
-            ]),
+            _render_banner("Legal Regime Selection", "Your State and Constitution together determine the legal regime. The hierarchy below shows how rules flow \u2014 a lower layer can never loosen a higher one."),
+            # State/Constitution are only persisted on submit, so this block is re-rendered live from the
+            # Society Details dropdowns (refresh_state_dependent_steps). It is its own container so that
+            # re-rendering does not reset the Central Act radios further down this step.
+            html.Div(id="sw-legal-regime-live", children=legal_regime_live(society_id, state, constitution)),
             html.Hr(),
             html.H6([html.I(className="fas fa-landmark me-2"), "Central Acts (Layer 0 - apply to every society, not a choice)"], className="text-primary mt-3 mb-2"),
             _central_acts_banner(),
@@ -1291,12 +1314,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
             ]),
         ]
     elif category == "State Act & Rules":
-        from app.services.statutory_rules import regime_for_society, instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR, fund_rules_for_state
-        from app.services import regime_rules_admin as rra
-        from app.dash_apps.pages.setup_wizard import fund_flags
+        from app.services.statutory_rules import instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR
         regime, instruments = instruments_for_society(society_id, state)
-        _ff = fund_flags(society_id, state)
-        fund_rules = fund_rules_for_state(state)
         
         # Show the State Act instruments
         instrument_rows = []
@@ -1311,41 +1330,12 @@ def render_category_content(category, society_id=None, state=None, constitution=
                     html.Td(html.Small("· " + r["title"] + (f" ({r['enactment_year']})" if r.get("enactment_year") else ""), className="text-muted", style={"fontSize": "10px"})),
                 ]))
         
-        # Fund prescriptions
-        fund_rows = []
-        for fund_key in ["sinking", "repair"]:
-            rule = fund_rules[fund_key]
-            if rule["mode"] == "statutory":
-                fund_rows.append(html.Tr([
-                    html.Td(f"{fund_key.capitalize()} Fund", style={"fontWeight": "600"}),
-                    html.Td(f"Statutory minimum: {rule['min_pct']}% of construction cost per year"),
-                    html.Td(dbc.Badge("Mandatory", color="danger", pill=True, style={"fontSize": "9px"})),
-                ]))
-            elif _ff[fund_key]:
-                fund_rows.append(html.Tr([
-                    html.Td(f"{fund_key.capitalize()} Fund", style={"fontWeight": "600"}),
-                    html.Td("Opted in via Model Bye-Laws Adoption step"),
-                    html.Td(dbc.Badge("Optional (levied)", color="warning", pill=True, style={"fontSize": "9px"})),
-                ]))
-            else:
-                fund_rows.append(html.Tr([
-                    html.Td(f"{fund_key.capitalize()} Fund", style={"fontWeight": "600"}),
-                    html.Td("Not prescribed by state; not opted in"),
-                    html.Td(dbc.Badge("Not levied", color="secondary", pill=True, style={"fontSize": "9px"})),
-                ]))
-        
         return elements + [
-            _render_banner("State Act & Rules", f"Review the State Act and Rules governing this society ({regime}). These are read-only — maintained by Master. The statutory fund rates prescribed by your state are shown below."),
+            _render_banner("State Act & Rules", f"Review the State Act and Rules governing this society ({regime}). These are read-only — maintained by Master. Fund rates and opt-ins are set later, on the Funds step."),
             html.H6("State Instruments", className="text-primary mt-3 mb-2"),
             dbc.Table([
                 html.Thead(html.Tr([html.Th("Type", style={"fontSize": "11px"}), html.Th("Instrument", style={"fontSize": "11px"})])),
                 html.Tbody(instrument_rows),
-            ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
-            html.H6("Fund Prescriptions", className="text-primary mt-3 mb-2"),
-            html.Small(fund_note(_ff, regime), className="text-muted d-block mb-2"),
-            dbc.Table([
-                html.Thead(html.Tr([html.Th("Fund", style={"fontSize": "11px"}), html.Th("Rule", style={"fontSize": "11px"}), html.Th("Status", style={"fontSize": "11px"})])),
-                html.Tbody(fund_rows),
             ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
         ]
     elif category == "Model Bye-Laws Adoption":
@@ -1611,7 +1601,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 # Opt-in only: the percentage / basis / rate are regime parameters (Legal rules), not a per-flat rate here.
                 cards.append(dbc.Card([
                     dbc.CardHeader(html.Strong(name)),
-                    dbc.CardBody([_fund_status_badges(fund_info),
+                    dbc.CardBody([_fund_status_badges(fund_info, opted=dep_opted),
                                   html.Small(fund_info["description"], className="text-muted d-block mb-2"),
                                   _fund_facts_block(fund_info),
                                   html.Small(f"Not prescribed by {fp['regime']}. Optional: the society decides, by General Body resolution.",
@@ -1663,7 +1653,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 levy_key, cm_key, bp_key = f"levy_{fund_key}_fund", f"{fund_key}_fund_collection", f"{fund_key}_fund_basis"
                 show_collect = {} if (f.get("levy") == "yes" or f.get("mode") != "none") else {"display": "none"}
                 body = [
-                    _fund_status_badges(fund_info),
+                    _fund_status_badges(fund_info, opted=(f.get("levy") == "yes"), fund_key=fund_key),
                     html.Small(fund_info["description"], className="text-muted d-block mb-2"),
                     _fund_facts_block(fund_info),
                     html.Small(f"Not prescribed by {fp['regime']}. Optional: the society decides, by General Body resolution.", className="text-muted d-block mb-2"),
