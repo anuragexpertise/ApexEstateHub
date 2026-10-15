@@ -4,6 +4,8 @@
 > **Multi-tenant · Role-aware · Real-time · Zero-reload**
 > Built on Python Dash + Flask + PostgreSQL (Aiven) · Hosted on Render
 
+> ⚖️ **Secretaries, auditors, CAs, tax officers:** start at [Statutory Compliance & Audit Assurance](#statutory-compliance--audit-assurance) — what is enforced, where, how to verify it, and what is *not* yet built.
+
 > 📌 **Schema source of truth:** `database/estatehub.sql` — see [§22 Database Migrations](#22-deployment--utility-notes) for details.
 
 > 🆕 **Recent release — fund segregation & the Agreement print fix.** Agreement
@@ -19,8 +21,183 @@
 
 ---
 
+## Statutory Compliance & Audit Assurance
+
+> **For Society Secretaries, Managing Committees, statutory / legal auditors, Chartered Accountants and Income-tax officers.**
+> EstateHub is built first for **Uttar Pradesh Apartment Owners' Associations (AOAs)** under the *UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010*, the *UP Apartment Rules, 2011* and the *Model Bye-Laws notified 16 Nov 2011*, with the Central tax Acts layered on top. This section states **what the software enforces, where in the code, and how you can verify it yourself**. It also states, in the same table, what it does **not** yet do. A compliance tool that overstates itself is worse than none, so every claim below carries a status:
+>
+> ✅ **Implemented and tested** · 🟡 **Partial** (works, with a stated limit) · ⬜ **Not yet built** (do not rely on it)
+>
+> Nothing here is legal, tax or audit advice. The society's own advocate and CA remain the authority on interpretation; the software's job is to make their decisions enforceable, visible and reproducible.
+
+### How the rules are followed — in spirit, not just in letter
+
+Most software "complies" by hard-coding a number. EstateHub is designed so that a reviewer can see *why* a rule applies, *who* changed it, and *what it can never be silently turned into*:
+
+| Principle | What it means in practice |
+|---|---|
+| **Rules are data, with effective dates** | Every statutory threshold (petty cash ₹20,000; cheque above ₹2,500; arrears > 60 days; 15-day deemed No-Dues; s.22 notice periods; bye-law 49 deadlines) is a dated row in `regime_rule_parameters`, resolved by `fn_regime_param_num(society, key, on_date)`. A change in law is a new dated row, not a code edit, and history stays queryable. |
+| **Four layers of authority; a lower layer can tighten, never loosen** | L0 Act/Rules (locked) → L1 Model Bye-Laws as adopted/varied (General Body, 2/3) → L2 Society policy (General Body) → L3 Board decision (Managing Committee, must be ratified by the General Body within 180 days, bye-law 47(1), or it lapses). Resolved by `fn_resolve_rule`. |
+| **"Rule not applicable" is never reported as "compliant"** | If a society's legal regime does not define a rule, the engine returns *empty*, not a default and not a pass. `fn_bye_law7_eligibility` returns zero rows rather than "everyone eligible". |
+| **Statute is never confused with policy** | A parameter is badged as statutory only once its provision is verified. Engine policy and society choices are labelled as such (`source_reference`), and provisional readings are marked *provisional until ratified by the General Body on an advocate's written opinion*. |
+| **Rule changes cannot be back-dated** | A rule or bye-law change that would silently re-grade filings and eligibility already reported is refused (`regime_rules_admin.py`). Statutory keys additionally require the amending instrument to be cited, an explicit confirmation and a reason. |
+| **The software advises; it does not act unlawfully on its own** | `fn_service_cutoff_check` reports blockers and the earliest lawful date for an essential-services cut-off under **s.22** (more than 6 months' default, 7 days' notice, General Body resolution, certified copy, one-month wait, displayed notice, appeal window) and the screen refuses to record a cut-off the check does not allow. It never cuts a service itself. |
+| **Every change to a rule is itself audited** | `regime_rule_audit` is append-only; a database trigger rejects `UPDATE` and `DELETE`, and the change and its audit row commit in one statement. |
+
+The full, source-cited catalogue of Acts, Rules, Bye-laws and Notifications for UP is held in the `legal_instrument_catalog` table and shown at **Master → RWA Compliance (UP)**; the society sees the same list in the Setup Wizard's *UP AOA Compliance* step. Rows are never deleted. Superseded instruments are retired with `status = 'superseded'` and a `last_verified_on` date.
+
+---
+
+### 1. Financial integrity
+
+| Control | Status | How it works | Where to verify |
+|---|---|---|---|
+| **Double-entry ledger** | ✅ | Every confirmed receipt and expense posts **paired Dr / Cr legs** to `transactions`, sharing one `journal_id`. `amount > 0` and `entry_side ∈ {Dr, Cr}` are database constraints, and the account is a society-scoped foreign key. Reports key off each leg's own `entry_side` (a past bug where account nature was used instead was found, fixed and documented in §19). | `fn_verify_receipt`, `fn_verify_expense`, `transactions` table; `test_accounting_integrity_live.py`, `test_scenario_b_receipt_ledger.py` |
+| **Books must balance before a year closes** | ✅ | `fn_fy_closing_report` rolls every account up its parent hierarchy; a non-zero root total is treated as *"a hard error signal, not something to silently absorb"*. Year-end reserve appropriation **refuses to run on unbalanced books**, so an error is never baked into equity. | `fn_fy_close_reserve_appropriation`; `test_scenario_g_fy_close.py` |
+| **Year-end close is idempotent** | ✅ | `UNIQUE (society_id, financial_year)` on `fy_closures` makes a second close impossible, even under a race between two admins. | `fy_closures` |
+| **Immutable audit trail** | 🟡 | `audit_events` records actor, role, society, action, resource, **before/after values (JSONB)**, reason, correlation id (ties one user action to the ledger and notification rows it produced), permission used, authorization-policy version and IP. A trigger raises an exception on any `UPDATE` or `DELETE`. When the caller supplies its transaction cursor the audit row commits or rolls back **with** the business change, so there is no un-audited write. Credential-like keys are stripped before logging. Other append-only logs cover rule changes, concern transitions, receivable payments and polls. *Limit:* the app connects as a single database role, so the trigger is the control; a database superuser can still alter the table. Production should `REVOKE` write access from the app role and back this table up separately (guidance is in the schema comments). Full coverage of every ledger write path has not been independently audited. | `audit_events`, `trg_audit_events_immutable`, `app/security/service_guard.py::audit_event` |
+| **Tamper-evident receipt and expense numbering** | ✅ | On confirmation each receipt is issued a **SHA-256 number** computed over society, account, amount, timestamp, party, mode, date, source reference **and the previous confirmed receipt's hash** for that (society, account). The numbers therefore form a hash chain: altering, inserting or removing a historical receipt breaks every later link. Expenses are chained the same way. | `fn_compute_receipt_hash`, triggers `trg_receipt_hash_*` / `trg_expense_hash_*` |
+| **Auditor-runnable chain verification** | ✅ | `fn_verify_receipt_chain(society, account)` recomputes every hash, checks each link and flags back-dated confirmations that follow newer ones. An auditor can run it independently of the application. | `fn_verify_receipt_chain`, `fn_verify_all_receipt_chains(society)`, `fn_audit_receipt_chain` |
+| **Voucher / transaction numbering** | 🟡 | Every ledger leg gets `TXN-YYYYMM-NNNNNN` from a database sequence. *Limit:* the sequence is platform-wide, not per-society, and a rolled-back transaction can leave a gap. Receipt numbers are hash strings, not human serials; the auditor-facing serial is the TXN number. A per-society, gap-free voucher series is on the roadmap. | `fn_trg_transaction_number`, `seq_transaction_number` |
+| **Maker–checker (segregation of duties)** | ✅ | Capabilities are **explicit sets with no wildcards**: the *Accountant* may prepare and post; the *Treasurer* may approve payments, reverse and reconcile; the *Secretary/Admin* manages roles, enrolment and polls but holds **no finance-approval capability**. The central `authorize()` decision point denies the preparer of an item approving, posting or reversing **their own item**. Tenant isolation is a hard deny, and a platform operator has no access to society data. Delegations (temporary maker/checker hand-over) are time-bound. *Limit:* per-item separation applies where the call site supplies the preparer's identity; `approval_steps` (multi-step approvals citing a resolution or bye-law clause) exists in the schema. | `app/security/authorization.py`, `policy.py`, `service_guard.py`; `test_rbac_policy.py`, `test_authorization_core.py`, `test_service_guard.py` |
+| **Cash discipline (Model Bye-Laws 46–52)** | ✅ | Cash payments above **₹2,500** are flagged in `compliance_flags`, or refused outright when the society sets `cash_limit_mode = 'block'`. `fn_petty_cash_check` compares cash-in-hand against the **₹20,000** ceiling. The **daily cash book must be signed** by the Secretary and one Board member (bye-law 23(f), `fn_cashbook_signature_check`). | `fn_verify_expense`, `fn_petty_cash_check`, `cashbook_signatures` |
+| **Earmarked funds kept ring-fenced** | ✅ | Corpus Fund principal is locked at the ledger (`accounts.statutory_lock_pct`; `fn_process_fund_utilization` refuses a draw that would breach it); Sinking, Repair and Major-Repair funds are segregated accounts; reserve appropriation from surplus is automatic at year-end at the society's configured percentage; income can be appropriated to a fund only through a confirmed, journalled step; each fund can route to its own bank account with per-account bank reconciliation. | `docs/UP_AOA_FUNDS.md`; `test_scenario_i/j/k_*`, `test_fund_controls_live.py` |
+| **Period locking** | ⬜ | **Not enforced.** A financial year can be *closed* (reserve appropriated, idempotently) but entries dated into a closed year are **not blocked**. The `finance.period.close` permission exists and is held only by the Treasurer, but a hard lock keyed off `entry_side`, as the schema comments describe, is still to be built. Until then, treat a closed year as "reported", not "frozen", and rely on the audit trail and hash chain to detect later edits. | Comment at `fn_close_financial_year — REMOVED` in `estatehub.sql` |
+| **Reversals / corrections** | 🟡 | Confirmed receipts and expenses are not edited in place. Cancelled and pending states are distinct, and a posted fund journal cannot be un-posted. *Limit:* there is no compensating-entry UI for owner-loan postings; a mistake there requires a controlled database correction, which would appear against the audit trail. | README §20 |
+
+---
+
+### 2. Income-tax treatment
+
+| Area | Status | What EstateHub does | What it deliberately does not do |
+|---|---|---|---|
+| **Principle of mutuality** | ✅ | Every income account is tagged `mutual` or `non_mutual` (`accounts.mutuality_nature`, database `CHECK`). Member contributions (maintenance, sinking/repair, corpus) are mutual. Bank/FD interest, rentals, cell-tower and advertisement income, and guest event tickets are non-mutual. `fn_income_tax_summary_fy` and the **Mutuality Summary** Excel (`income_tax_export.py`) split income and expense both ways and show a **taxable-income estimate = non-mutual income − non-mutual expense** as the *starting point* for the society's CA. | It does not compute tax, file returns, or decide allocation of shared expenses between mutual and non-mutual heads. That judgement stays with the CA. |
+| **Section 80P / 80AC** | ⬜ | **Not computed.** Whether any 80P deduction is available to an AOA assessed as an AOP, as opposed to a co-operative society, is a question for the society's CA. 80AC is likewise not modelled. The software neither claims nor calculates either. | No deduction schedule is produced. |
+| **TDS on payments (vendors / contractors / professionals / rent)** | ✅ | `fn_compute_tds_pct` and `tds_compliance.py` form a single choke-point, used by the expense form, the save handler and the export, for **section, rate and PAN-vs-no-PAN** (194A, 194C, 194H, 194-I, 194-IA/IB/IC, 194J). It applies both **single-bill and annual-aggregate thresholds**, distinguishes individual/HUF from other payees, and warns or blocks when the payee has no PAN (a society setting). The vendor's cumulative position for the financial year is tracked. | Rates and thresholds must be re-confirmed by the CA each year; the 26Q column layout is flagged in code for professional review. |
+| **TDS return support (Form 26Q)** | 🟡 | `tds_export.py` produces a **26Q-shaped quarterly workbook** with per-deduction records (date, section, rate, PAN, amount, TDS) for the CA to transcribe. The society's TAN is captured in the Setup Wizard. | It is **not** a TRACES integration and does not e-file or generate challans. |
+| **Form 26AS / AIS reconciliation** | ⬜ | **Not built.** The society's TDS-deducted records can be exported for comparison, but there is no automated match against 26AS or AIS. | |
+| **Return of income, tax audit** | ⬜ | Out of scope by design: EstateHub is a **books-of-account** system, not an e-filer. There is no s.44AB turnover flag yet. | |
+| **Statute version** | 🟡 | The Income-tax Act, 2025 is recognised at the legal-hierarchy layer, but section references inside the app still follow the 1961 Act (43(6)(c), 50, 80P, 194C and others). **Re-mapping is listed as an open item for the society's CA** (README, *Legal hierarchy*, item 4). | |
+
+---
+
+### 3. GST
+
+| Rule | Status | Implementation |
+|---|---|---|
+| **Member-charge threshold** (CGST Act s.22(1); Notification 12/2017-CT(R), Entry 77) | ✅ | Billing (`fn_auto_generate_receivables`) levies GST **only when both conditions hold**: (a) the apartment's monthly taxable charge **exceeds ₹7,500** (`gst_per_member_monthly`) **and** (b) the society's financial-year aggregate turnover (`fn_society_turnover_fy`) **exceeds ₹20 lakh** (`gst_turnover_lakh`). Below either threshold, CGST/SGST are zero. Both thresholds are rows in `state_compliance_thresholds`, not constants. |
+| **Rates with effective dates** | ✅ | CGST/SGST come from `gst_rates` (`effective_from` / `effective_to`) in force for the billing month, replacing any hard-coded 18%. |
+| **Sinking / repair fund treatment** | ✅ | `fund_gst_exempt` controls whether sinking and repair contributions enter the taxable base, so the choice is explicit and auditable. |
+| **Reverse charge (RCM) and ITC** | ✅ | RCM on unregistered-vendor supplies is computed; **CGST/SGST/IGST Payable and ITC-Receivable** are separate ledger accounts; inter-state supply is determined from `societies.state` and `vendors.state`. |
+| **Returns support** | 🟡 | `gst_export.py` / `rcm_export.py` produce **GSTR-1 / GSTR-3B-shaped summaries** and an RCM register for the CA. EstateHub does not file returns. |
+| **E-invoicing (IRN / QR)** | ⬜ | **Not implemented.** E-invoicing applies only above a notified aggregate-turnover threshold, which a typical society will not reach, but the CA should confirm for each society. |
+| **GST registration decision** | 🟡 | The ₹20 lakh gate drives *whether tax is billed*; it does not register the society or issue a GSTIN. Registration remains the society's act. |
+
+Tests: `test_scenario_gst_summary.py`.
+
+---
+
+### 4. Audit readiness
+
+Everything below is produced from the ledger on demand. It is not re-keyed, so the report and the books cannot drift apart.
+
+| Report / register | Status | Source | Notes for the auditor |
+|---|---|---|---|
+| **Financial statements** (Receipts & Payments, Income & Expenditure, Balance Sheet, Depreciation, Capital Account, asset holdings) | ✅ | `financial_statements_export.py`, `fn_income_expenditure_fy`, `fn_balance_sheet_fy` | Carries an authorisation footer for the Secretary's signature. |
+| **FY closing report / trial-balance roll-up** | ✅ | `fn_fy_closing_report`, `ledger_export.py` | Hierarchical roll-up with a root-must-be-zero check. Exports a per-account ledger workbook and index. |
+| **Cash book** (day-wise, with daily signature status) | ✅ | `cashbook_export.py`, `fn_cashbook_paired_v3` | Bye-law 23(f) signature tracked per day. |
+| **Bank reconciliation** | ✅ | Admin → Bank Reconcile | Per-bank-account statement upload, exact and fuzzy matching, manual reconcile. |
+| **Receipt chain verification** | ✅ | `fn_verify_receipt_chain` | Independent re-computation of every hash (see §1). |
+| **Mutuality summary** | ✅ | `income_tax_export.py` | See §2. |
+| **GST summary / RCM register** | ✅ | `gst_export.py`, `rcm_export.py` | See §3. |
+| **TDS quarterly (26Q-shaped)** | ✅ | `tds_export.py` | See §2. |
+| **Defaulter and arrears lists** | ✅ | `fn_get_standing`: the single defaulter definition behind No-Dues/NOC, poll voting, bye-law 7 and s.22; `fn_bye_law7_eligibility`; `fn_s20_recovery_candidates` (s.20(2)) | The same definition is used everywhere, so the lists cannot disagree. |
+| **Bye-law 49 filing calendar and owner/loanee lists** | ✅ | `fn_statutory_calendar`, `aoa_statutory_filings`, `fn_aoa_owner_list`, `fn_aoa_loanee_list` | Audited statement by **31 Jul**, copy to the competent authority by **15 Aug**, summary to owners within **15 days**; Excel download of both lists. |
+| **Transfers, No-Dues, purchaser statement** | ✅ | `fn_record_apartment_transfer`, `fn_nodues_certificate_status`, `fn_issue_purchaser_statement` | Bye-law 39 fee (½%) levied to the Major Repair Fund; 15-day deemed No-Dues; s.23(2) statement frozen as at transfer date. |
+| **Owner loans (bye-law 3(1)(f))** | ✅ | `fn_disburse_owner_loan`, `fn_repay_owner_loan` | A **passed General Body resolution is mandatory**; the cash limit applies. |
+| **Member-wise ledger / Form 26AS match** | 🟡 / ⬜ | Receivables and payment history are available in the apartment profile and the account ledger. 26AS match: not built (see §2). | |
+
+---
+
+### 5. Governance
+
+| Area | Status | What is enforced |
+|---|---|---|
+| **Meetings and resolutions** | ✅ | General Body (GBM), Extraordinary (EGM) and Managing Committee meetings are recorded, with a **quorum flag and minutes reference**. A resolution cannot be recorded as *passed* unless the meeting recorded a quorum **and** owners present meet the society's quorum (**30%**, bye-law 9) **and** votes in favour meet the decision type's majority, weighted by each owner's **undivided interest** (bye-laws 2(e), 8). The thresholds that applied are stored on the resolution. |
+| **Majorities by decision type** | ✅ | `decision_types` carries `majority_pct` and `majority_basis`: 2/3 of all votes for adopting or varying a bye-law, or for setting society policy; 51% with quorum for ordinary resolutions; simple committee majority for Board parameters, which then require ratification. Dropping a Model clause requires 2/3 **and** an advocate's opinion reference, and is never allowed for statute-backed clauses (bye-laws 7, 39, 49, 55). |
+| **Provisional → active** | ✅ | A choice saved without a resolution is *provisional* and ignored by the engine. It becomes active only when a **passed resolution of the right type, in the same society, at a valid meeting** is linked. |
+| **Board decisions must be ratified** | ✅ | `loa_ratification` tracks every Layer-3 decision. If the General Body does not ratify within **180 days** (bye-law 47(1)), `fn_expire_overdue_ratifications` lapses it and the engine reverts to the layer beneath. |
+| **Voting rights** | ✅ | Bye-law 7: owners with arrears beyond **60 days** may not vote or stand for the Board (`fn_bye_law7_eligibility`; whether "year" is the financial or calendar year is contested, so it is a switchable parameter, default financial year). |
+| **Online polls** | ✅ | One vote per apartment; the eligible-voter set is **frozen at poll creation**; **secret ballot by design**: "who voted" and "what was chosen" live in two tables that cannot be joined (no user, apartment, id or timestamp on ballot rows), and admins receive counts only. A poll that misses quorum or majority is **not declared**. Online polls are labelled as *not* General Body resolutions where the bye-laws require in-person quorum. |
+| **Role boundaries** | ✅ | Secretary/Admin (roles, enrolment, polls, concerns, events) ≠ Accountant (prepare/post) ≠ Treasurer (approve, reverse, reconcile) ≠ Owner (own dues and vote only). Cross-society access is a hard deny; the role is read from the **server-side session**, never from the browser. |
+| **Limit: General Body tally** | 🟡 | The engine **validates the percentages entered** for a General Body resolution; it does not yet tally per-apartment votes at an in-person meeting. |
+| **Limit: thresholds under legal review** | 🟡 | Voting thresholds not yet verified against the gazette text are marked **provisional** on screen and in the resolution form until the General Body ratifies them (`RATIFY_VOTING_THRESHOLDS`) on a written advocate's opinion. The open items for the advocate (bye-law 58, droppable clauses, 2/3 reading for loans and fund appropriation, clause-numbering) are listed in *Legal hierarchy and decision procedure*. |
+
+---
+
+### 6. Data and privacy (DPDP Act, 2023)
+
+**Status: not yet DPDP-compliant as a product.** EstateHub holds personal data of owners, tenants, family members, vendors and security staff (names, contact details, ID-proof and photo images, vehicle and visitor records), so the Act applies to the society as Data Fiduciary. The following controls exist; the Act's rights-and-notice machinery does not.
+
+| Control | Status | Detail |
+|---|---|---|
+| Tenant isolation | ✅ | Every record is scoped by `society_id`; cross-society access is denied centrally. |
+| Least-privilege access | ✅ | Explicit capability sets, no wildcards (see §1 and §5). |
+| Credential protection | ✅ | bcrypt password hashing, password policy, JWT sessions, a secret vault and secret-policy module. Credential-like keys are stripped from audit records. |
+| Secret ballot | ✅ | Vote choice cannot be linked to a voter (see §5). |
+| Masked sensitive logs | ✅ | QR re-issue logs mask nonces to their last two digits at the query level. |
+| Purpose-bound access trail | 🟡 | `audit_events` records who did what, with a reason, but read-access logging of personal data is not comprehensive. |
+| Notice and **consent records** | ⬜ | No consent capture or versioned privacy notice is stored. |
+| Data-principal rights (access, correction, **erasure**, nominee) | ⬜ | No self-service or workflow for these requests. |
+| **Retention and deletion schedule** | ⬜ | No automated retention limits. Note that tax and society record-keeping duties may legitimately require retention, so the policy needs to come from the society's advisers. |
+| Breach notification workflow | ⬜ | None. |
+| Grievance officer / contact | ⬜ | None in the product. |
+
+Until these are built, the society should adopt a written privacy notice and retention policy outside the software and restrict ID-proof images to roles that need them.
+
+---
+
+### Verify it yourself
+
+You do not have to take any of this on trust.
+
+```bash
+# 1. Run the automated suite (several live-DB tests are skipped unless a Postgres 16 URL is configured)
+pip install -r requirements.txt
+pytest test/ -q
+
+# 2. Re-compute the receipt hash chain for a society and income account (SQL)
+SELECT * FROM fn_verify_receipt_chain(<society_id>, <acc_id>);   -- one account
+SELECT * FROM fn_verify_all_receipt_chains(<society_id>);          -- whole society
+
+# 3. Confirm the audit table refuses tampering
+UPDATE audit_events SET reason = 'x' WHERE id = 1;   -- raises: audit_events is append-only
+
+# 4. See which Acts, Rules and Bye-laws the society is bound by, and when each was last verified
+SELECT instrument_type, title, status, last_verified_on FROM legal_instrument_catalog;
+```
+
+Relevant suites include `test_accounting_integrity_live`, `test_scenario_b_receipt_ledger`, `test_scenario_g_fy_close`, `test_scenario_tds_compliance`, `test_scenario_gst_summary`, `test_aoa_bye_laws_live`, `test_up_aoa_compliance_live`, `test_rule_layers_live`, `test_poll_weights_and_regime`, `test_rbac_policy` and `test_authorization_core`.
+
+### Gaps we are open about
+
+| Gap | Why it matters | Planned |
+|---|---|---|
+| Hard period lock | Back-dated entries into a closed year are not blocked | Rebuild year-end lock keyed off `entry_side` |
+| Per-society gap-free voucher series | Auditors expect serial vouchers | Per-society sequences with gap reporting |
+| 26AS / AIS reconciliation, 80P/80AC, s.44AB flag | Income-tax completeness | Alongside the Income-tax Act, 2025 re-mapping |
+| E-invoicing | Only relevant above the notified turnover threshold | Only if a society crosses it |
+| DPDP rights, consent, retention, breach workflow | Statutory obligations of the Data Fiduciary | See §6 |
+| EPF / ESI / contract-labour challan gate on manpower-agency invoices | Internal-audit checklist item | New hold-until-verified step before TDS |
+| Full audit-log coverage of every write path and read access | Completeness of the trail | Ongoing |
+
+> **If you are a CA or auditor reviewing a society that uses EstateHub:** start at `database/estatehub.sql` (schema is the source of truth), the `legal_instrument_catalog`, `regime_rule_parameters` and `regime_rule_audit` tables, and run the verification queries above. Findings, disagreements with our reading of a provision, and corrections are welcome; the rules are data precisely so that they can be fixed without a redeploy.
+
+---
+
 ## Table of Contents
 
+0. [Statutory Compliance & Audit Assurance](#statutory-compliance--audit-assurance)
 1. [What is EstateHub?](#1-what-is-estatehub)
 2. [Feature Highlights](#2-feature-highlights)
 3. [Architecture Overview](#3-architecture-overview)
