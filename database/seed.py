@@ -841,7 +841,7 @@ def seed_compliance_settings(cur, conn, society_id: int):
            (society_id, sinking_fund_rate_basis, repair_fund_rate_basis,
             fund_gst_exempt, fund_charges_interest, gst_filing_cadence,
             gst_registered, gstin, tds_no_pan_action, default_export_format)
-           VALUES (%s,'per_sq_ft','per_sq_ft',TRUE,TRUE,'monthly',TRUE,%s,'warn','structured')""",
+           VALUES (%s,'per_sq_ft','per_sq_ft',FALSE,TRUE,'monthly',TRUE,%s,'warn','structured')""",
         (society_id, SOCIETY["gstin"]),
     )
     conn.commit()
@@ -1982,7 +1982,7 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
                 apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status,
                 apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)
                VALUES (%s,NULL,%s,NULL,%s,0,%s,%s,TRUE,%s,%s,%s)""",
-             (society_id, SOCIETY["calc_start_date"], 3.0, 5, 1.75, 0.25, 0.25, True),
+             (society_id, SOCIETY["calc_start_date"], 3.0, 5, None, 0.25, 0.25, True),
         )
         conn.commit()
         print("  ✓ Apartment charge basis (default, rate-based) added")
@@ -1998,7 +1998,7 @@ def seed_apt_charge_histories(cur, conn, society_id: int, apartments_by_flat: di
                     apt_maintenance_amount, apt_due_day, apt_interest_pct, apt_status,
                     apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)
                    VALUES (%s,%s,%s,NULL,0,%s,%s,%s,TRUE,%s,%s,%s)""",
-                 (society_id, b202, B202_CHARGE_START, 3500.00, 5, 1.75, 0.25, 0.25, True),
+                 (society_id, b202, B202_CHARGE_START, 3500.00, 5, None, 0.25, 0.25, True),
             )
             conn.commit()
             print("  ✓ Apartment charge basis (B-202, fixed amount) added")

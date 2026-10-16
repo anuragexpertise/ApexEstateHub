@@ -61,15 +61,15 @@ def _discriminator_from_vendor(payee_type: str | None, section: str) -> str | No
     return None
 
 
-def get_section_rate(db, society_id: int, section: str, discriminator: str | None = None, as_of=None) -> dict | None:
+def get_section_rate(db, society_id: int, section: str, discriminator: str | None = None, as_of=None, act_version: str | None = None) -> dict | None:
     """Resolve the active CBDT rate row for a TDS section, or None if the
     section isn't configured for this society. Returns
     {rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold}."""
     if not section:
         return None
     row = db._execute(
-        "SELECT * FROM fn_tds_section_rate(%s,%s,%s,%s)",
-        (society_id, section, discriminator, as_of), fetch_one=True,
+        "SELECT * FROM fn_tds_section_rate(%s,%s,%s,%s,%s)",
+        (society_id, section, discriminator, as_of, act_version), fetch_one=True,
     )
     if not row or row.get("rate") is None:
         return None
