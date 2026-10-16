@@ -192,6 +192,8 @@ CREATE TABLE accounts (
         CHECK (statutory_lock_pct >= 0 AND statutory_lock_pct <= 100)
 );
 
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_gst_exempt_supply BOOLEAN DEFAULT FALSE;
+
 CREATE TABLE apartments (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -1557,7 +1559,7 @@ CREATE TABLE apt_charges_fines_basis (
     apt_maintenance_amount NUMERIC(10, 2) NOT NULL DEFAULT 1500, -- amount overide rate
     apt_maintenance_rate NUMERIC(10, 2) NOT NULL DEFAULT 3.0,
     apt_due_day INTEGER DEFAULT 5,
-    apt_interest_pct NUMERIC(5, 2) DEFAULT 1.75,
+    apt_interest_pct NUMERIC(5, 2),
     apt_status BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
@@ -2028,7 +2030,7 @@ CREATE TABLE society_compliance_settings (
             'undivided_interest'
         )
     ),
-    fund_gst_exempt BOOLEAN DEFAULT TRUE,
+    fund_gst_exempt BOOLEAN DEFAULT FALSE,
     fund_charges_interest BOOLEAN DEFAULT TRUE,
     gst_filing_cadence VARCHAR(20) DEFAULT 'monthly' CHECK (
         gst_filing_cadence IN ('monthly', 'qrmp')
@@ -2652,12 +2654,16 @@ CREATE TABLE tds_section_rates (
     annual_aggregate_threshold NUMERIC(12, 2) NOT NULL DEFAULT 0,
     effective_from DATE NOT NULL DEFAULT '2024-04-01',
     effective_to DATE,
+    act_version VARCHAR(10) NOT NULL DEFAULT 'IT1961'
+        CHECK (act_version IN ('IT1961', 'IT2025')),
+    section_2025 VARCHAR(50),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_tds_section_rate UNIQUE (
         society_id,
         section,
         discriminator,
-        effective_from
+        effective_from,
+        act_version
     )
 );
 
@@ -3754,7 +3760,7 @@ BEGIN
 
     -- Read fund_gst_exempt setting (default TRUE = exempt)
     SELECT fund_gst_exempt INTO v_fund_gst_exempt FROM society_compliance_settings WHERE society_id = p_society_id;
-    v_fund_gst_exempt := COALESCE(v_fund_gst_exempt, TRUE);
+    v_fund_gst_exempt := COALESCE(v_fund_gst_exempt, FALSE);
 
     -- Project construction cost (society-default row): base of a 'construction_cost' fund levy.
     SELECT project_construction_cost INTO v_project_cost FROM apt_charges_fines_basis
@@ -4001,8 +4007,14 @@ BEGIN
                AND (effective_to IS NULL OR effective_to >= v_month)
              ORDER BY effective_from DESC LIMIT 1;
              
+            IF v_cgst_rate IS NULL AND v_sgst_rate IS NULL THEN
+                RAISE EXCEPTION 'No active GST rate found for society % on %', p_society_id, v_month;
+            END IF;
             v_cgst_rate := COALESCE(v_cgst_rate, 0);
             v_sgst_rate := COALESCE(v_sgst_rate, 0);
+            IF v_cgst_rate = 0 AND v_sgst_rate = 0 THEN
+                RAISE EXCEPTION 'No active GST rate found for society % on %', p_society_id, v_month;
+            END IF;
 
             -- Fetch dynamic thresholds
             SELECT value INTO v_gst_threshold FROM state_compliance_thresholds WHERE threshold_key = 'gst_per_member_monthly' AND is_active = TRUE LIMIT 1;
@@ -6302,8 +6314,14 @@ BEGIN
        AND effective_from <= p_sale_date
        AND (effective_to IS NULL OR effective_to >= p_sale_date)
      ORDER BY effective_from DESC LIMIT 1;
+    IF v_cgst_rate IS NULL AND v_sgst_rate IS NULL THEN
+        RAISE EXCEPTION 'No active GST rate found for society % on %', v_asset.society_id, p_sale_date;
+    END IF;
     v_cgst_rate := COALESCE(v_cgst_rate, 0);
     v_sgst_rate := COALESCE(v_sgst_rate, 0);
+    IF v_cgst_rate = 0 AND v_sgst_rate = 0 THEN
+        RAISE EXCEPTION 'No active GST rate found for society % on %', v_asset.society_id, p_sale_date;
+    END IF;
     v_tax_on_value := ROUND(p_sale_value * (v_cgst_rate + v_sgst_rate) / 100.0, 2);
 
     v_liability := GREATEST(v_itc_reversal, v_tax_on_value);
@@ -6558,14 +6576,12 @@ BEGIN
     IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
     IF p_particulars IS NULL OR TRIM(p_particulars) = '' THEN RAISE EXCEPTION 'particulars is required'; END IF;
 
-    -- Cash transaction warnings (P1 Item 1)
-    -- Sec 40A(3): Cash expenses > 10,000 not deductible
-    -- Sec 269SS/269T: Cash loans/deposits/repayments > 20,000 attract penalty = amount
-    IF p_mode = 'cash' AND p_amount >= 10000 THEN
-        v_cash_warning := 'Cash receipt ≥ ₹10,000 — may attract Sec 40A(3) disallowance if treated as expense. ';
-        IF p_amount >= 20000 THEN
-            v_cash_warning := v_cash_warning || 'Cash receipt ≥ ₹20,000 — Sec 269SS/269T may apply for loan/deposit transactions (penalty = amount).';
-        END IF;
+    -- C-01: 269ST check for cash receipts >= Rs 2,00,000
+    -- fn_check_269st should be called by posting functions; here we just warn
+    IF p_mode = 'cash' AND p_amount >= 200000 THEN
+        v_cash_warning := 'WARNING: Cash receipt ≥ ₹2,00,000 may attract penalty under Section 269ST.';
+    ELSIF p_mode = 'cash' AND p_amount >= 20000 THEN
+        v_cash_warning := 'Cash receipt ≥ ₹20,000 — Sec 269SS/269T may apply for loan/deposit transactions (penalty = amount).';
     ELSE
         v_cash_warning := NULL;
     END IF;
@@ -10627,7 +10643,8 @@ BEGIN
        AND t.trx_date BETWEEN v_fy_start AND v_fy_end
        AND t.entry_side = 'Cr'
        AND a.drcr_account = 'Cr'
-       AND a.tab_name NOT IN ('BkAc', 'CiH', 'Dp', 'SCr');
+       AND a.tab_name NOT IN ('BkAc', 'CiH', 'Dp', 'SCr')
+       AND COALESCE(a.is_gst_exempt_supply, FALSE) = FALSE;
 
     RETURN COALESCE(v_total, 0);
 END;
@@ -12728,26 +12745,42 @@ CREATE OR REPLACE FUNCTION fn_tds_section_rate(
     p_society_id INT,
     p_section    VARCHAR,
     p_discriminator VARCHAR DEFAULT NULL,
-    p_as_of      DATE DEFAULT CURRENT_DATE
+    p_as_of      DATE DEFAULT CURRENT_DATE,
+    p_act_version VARCHAR DEFAULT NULL
 )
 RETURNS TABLE (
     rate NUMERIC(5, 2),
     rate_no_pan NUMERIC(5, 2),
     single_bill_threshold NUMERIC(12, 2),
-    annual_aggregate_threshold NUMERIC(12, 2)
+    annual_aggregate_threshold NUMERIC(12, 2),
+    act_version VARCHAR(10),
+    section_2025 VARCHAR(50)
 ) LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_act VARCHAR(10);
 BEGIN
+    v_act := p_act_version;
+    IF v_act IS NULL THEN
+        IF p_as_of >= '2026-04-01' THEN
+            v_act := 'IT2025';
+        ELSE
+            v_act := 'IT1961';
+        END IF;
+    END IF;
     RETURN QUERY
     SELECT r.rate,
            COALESCE(r.rate_no_pan, r.rate),
            r.single_bill_threshold,
-           r.annual_aggregate_threshold
+           r.annual_aggregate_threshold,
+           r.act_version,
+           r.section_2025
       FROM tds_section_rates r
      WHERE r.society_id = p_society_id
        AND r.section = p_section
        AND (r.discriminator = p_discriminator OR (r.discriminator IS NULL AND p_discriminator IS NULL))
        AND r.effective_from <= p_as_of
        AND (r.effective_to IS NULL OR r.effective_to >= p_as_of)
+       AND r.act_version = v_act
      ORDER BY r.effective_from DESC
      LIMIT 1;
 END;
@@ -12805,12 +12838,15 @@ CREATE OR REPLACE FUNCTION fn_compute_tds_pct(
     p_discriminator   VARCHAR,
     p_fy              VARCHAR,
     p_amount          NUMERIC,
-    p_pan_captured    BOOLEAN DEFAULT TRUE
+    p_pan_captured    BOOLEAN DEFAULT TRUE,
+    p_as_of           DATE DEFAULT CURRENT_DATE
 )
 RETURNS TABLE (
     tds_pct NUMERIC(5, 2),
     applies BOOLEAN,
-    basis TEXT
+    basis TEXT,
+    act_version VARCHAR(10),
+    section_2025 VARCHAR(50)
 ) LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_rate     NUMERIC(5, 2);
@@ -12818,26 +12854,36 @@ DECLARE
     v_single   NUMERIC(12, 2);
     v_annual   NUMERIC(12, 2);
     v_cum      NUMERIC(15, 2);
+    v_act VARCHAR(10);
+    v_sec2025 VARCHAR(50);
 BEGIN
     IF p_section IS NULL OR p_amount IS NULL OR p_amount <= 0 THEN
-        RETURN QUERY SELECT 0::NUMERIC(5, 2), FALSE, 'no-section-or-zero-amount'::TEXT;
+        RETURN QUERY SELECT 0::NUMERIC(5, 2), FALSE, 'no-section-or-zero-amount'::TEXT, NULL::VARCHAR, NULL::VARCHAR;
         RETURN;
     END IF;
 
+    IF p_as_of >= '2026-04-01' THEN
+        v_act := 'IT2025';
+    ELSE
+        v_act := 'IT1961';
+    END IF;
+
     SELECT r.rate, COALESCE(r.rate_no_pan, r.rate),
-           r.single_bill_threshold, r.annual_aggregate_threshold
-      INTO v_rate, v_rate_nopan, v_single, v_annual
+           r.single_bill_threshold, r.annual_aggregate_threshold,
+           r.act_version, r.section_2025
+      INTO v_rate, v_rate_nopan, v_single, v_annual, v_act, v_sec2025
       FROM tds_section_rates r
      WHERE r.society_id = p_society_id
        AND r.section = p_section
        AND (r.discriminator = p_discriminator OR (r.discriminator IS NULL AND p_discriminator IS NULL))
-       AND r.effective_from <= CURRENT_DATE
-       AND (r.effective_to IS NULL OR r.effective_to >= CURRENT_DATE)
+       AND r.effective_from <= p_as_of
+       AND (r.effective_to IS NULL OR r.effective_to >= p_as_of)
+       AND r.act_version = v_act
      ORDER BY r.effective_from DESC
      LIMIT 1;
 
     IF NOT FOUND THEN
-        RETURN QUERY SELECT 0::NUMERIC(5, 2), FALSE, 'section-not-configured'::TEXT;
+        RETURN QUERY SELECT 0::NUMERIC(5, 2), FALSE, 'section-not-configured'::TEXT, NULL::VARCHAR, NULL::VARCHAR;
         RETURN;
     END IF;
 
@@ -12848,19 +12894,19 @@ BEGIN
     -- Single-bill test: threshold 0 means "no minimum single bill" (e.g. 194J).
     -- Annual-aggregate test: threshold 0 means "aggregate test disabled".
     IF p_amount >= v_single THEN
-        RETURN QUERY SELECT v_rate, TRUE, 'single-bill'::TEXT;
+        RETURN QUERY SELECT v_rate, TRUE, 'single-bill'::TEXT, v_act, v_sec2025;
         RETURN;
     END IF;
 
     IF v_annual > 0 THEN
         v_cum := fn_vendor_tds_cumulative_fy(p_society_id, p_vendor_id, p_section, p_fy);
         IF (v_cum + p_amount) >= v_annual THEN
-            RETURN QUERY SELECT v_rate, TRUE, 'annual-aggregate'::TEXT;
+            RETURN QUERY SELECT v_rate, TRUE, 'annual-aggregate'::TEXT, v_act, v_sec2025;
             RETURN;
         END IF;
     END IF;
 
-    RETURN QUERY SELECT 0::NUMERIC(5, 2), FALSE, 'below-threshold'::TEXT;
+    RETURN QUERY SELECT 0::NUMERIC(5, 2), FALSE, 'below-threshold'::TEXT, v_act, v_sec2025;
 END;
 $$;
 
@@ -13548,6 +13594,7 @@ BEGIN
       AND t.entry_side = 'Cr'
       AND t.status = 'paid'
       AND (t.bank_reconciled = TRUE OR t.bank_reconciled IS NULL)
+      AND (a.statement_section IN ('Income') OR a.statement_section ILIKE 'income')
     GROUP BY a.mutuality_nature
     
     UNION ALL
@@ -13563,6 +13610,7 @@ BEGIN
       AND t.entry_side = 'Dr'
       AND t.status = 'paid'
       AND (t.bank_reconciled = TRUE OR t.bank_reconciled IS NULL)
+      AND (a.statement_section IN ('Expenditure', 'Expense', 'Expenses') OR a.statement_section ILIKE 'expen%')
     GROUP BY a.mutuality_nature;
 END;
 $$;
@@ -16914,6 +16962,15 @@ CREATE TABLE meetings (
     held_on             DATE NOT NULL,
     quorum_met          BOOLEAN NOT NULL DEFAULT FALSE,
     minutes_pdf         VARCHAR(255),
+    notice_date         DATE,
+    notice_sent_date    DATE,
+    agenda              TEXT,
+    venue               VARCHAR(255),
+    chaired_by          INT REFERENCES users (id) ON DELETE SET NULL,
+    adjourned_from      INT REFERENCES meetings (id) ON DELETE SET NULL,
+    minutes_signed_by   VARCHAR(255),
+    minutes_signed_date DATE,
+    requisition_ref     VARCHAR(255),
     created_by          INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -17865,3 +17922,41 @@ BEGIN
         RETURN NEXT;
     END LOOP;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- G-02  ATTENDANCE & VOTE REGISTERS (compute percentages, don't type them)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS meeting_attendance (
+    id                  SERIAL PRIMARY KEY,
+    meeting_id          INT NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
+    apartment_id        INT NOT NULL REFERENCES apartments (id) ON DELETE RESTRICT,
+    present_in_person   BOOLEAN NOT NULL DEFAULT FALSE,
+    proxy_holder        VARCHAR(255),
+    undivided_interest_pct NUMERIC(5,2),
+    attended_on         TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_meeting_att UNIQUE (meeting_id, apartment_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_meeting_att_meeting ON meeting_attendance (meeting_id);
+CREATE INDEX IF NOT EXISTS idx_meeting_att_apartment ON meeting_attendance (apartment_id);
+
+COMMENT ON TABLE meeting_attendance IS
+    'Attendance register for GBM/EGM/MC meetings. Percentages (owners_present_pct) '
+    'must be computed from this table, not self-attested.';
+
+CREATE TABLE IF NOT EXISTS resolution_votes (
+    id                  SERIAL PRIMARY KEY,
+    resolution_id       INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
+    apartment_id        INT NOT NULL REFERENCES apartments (id) ON DELETE RESTRICT,
+    vote                VARCHAR(10) NOT NULL CHECK (vote IN ('FOR','AGAINST','ABSTAIN')),
+    weight              NUMERIC(5,2),
+    voted_at            TIMESTAMP,
+    CONSTRAINT uq_resolution_vote UNIQUE (resolution_id, apartment_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_resolution_votes_res ON resolution_votes (resolution_id);
+CREATE INDEX IF NOT EXISTS idx_resolution_votes_ap ON resolution_votes (apartment_id);
+
+COMMENT ON TABLE resolution_votes IS
+    'Vote register per apartment per resolution. Votes_for_pct must be computed '
+    'from these weighted votes, not self-attested.';

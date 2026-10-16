@@ -165,8 +165,18 @@ def generate_income_tax_summary_excel(
     wb = Workbook()
     wb.remove(wb.active)
 
-    ws = wb.create_sheet(title="Mutuality Summary")
-    _apply_header(ws, 2, _COL_WIDTHS)
+    ws = wb.create_sheet(title="Working Paper (CA)")
+    ws.append([
+        "WORKING PAPER FOR CA — NOT A TAX RETURN",
+        f"FY {fy}-{fy+1}",
+        "",
+        "",
+        "",
+        "",
+        ""
+    ])
+    ws.merge_cells('A1:G1')
+    _apply_header(ws, 3, _COL_WIDTHS)
     _write_mutuality_sheet(ws, rows, fy)
 
     filename = f"{filename_prefix}_FY{fy}-{fy+1}.xlsx"
