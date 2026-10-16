@@ -483,12 +483,23 @@ def post_unmatched_bank_lines(sid, actor_id):
 
 
 def delete_unreconciled_bank_txns(sid, actor_id):
-    """Admin-only: delete all transactions that came from bank statements
-    but have NOT been reconciled (bank_reconciled=FALSE). Returns count."""
+    """Admin-only: delete bank-import draft transactions that have NOT been
+    reconciled (bank_reconciled=FALSE and status='pending'). Returns count.
+
+    A-01 (ER.md): the trg_transactions_immutable trigger on transactions
+    explicitly permits deletion of rows where status='pending' AND
+    source_table='bank_statement_lines'.  These are pre-posting placeholders,
+    not confirmed ledger entries.  Confirmed (status='paid') rows are
+    protected — correct those via fn_post_reversal_journal instead.
+    The AND status='pending' clause below is intentional and required by the
+    immutable-ledger constraint.
+    """
     result = db.execute(
         """DELETE FROM transactions
-           WHERE society_id=%s AND bank_reconciled=FALSE
-           AND source_table='bank_statement_lines'""",
+           WHERE society_id=%s
+             AND bank_reconciled=FALSE
+             AND source_table='bank_statement_lines'
+             AND status='pending'""",
         (sid,),
     )
     db.execute(
