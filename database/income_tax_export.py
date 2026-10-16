@@ -1,28 +1,33 @@
 # database/income_tax_export.py
 """
-Income Tax (Principle of Mutuality) Summary Excel Generator — EstateHub
-=========================================================================
-Produces a structured mutual-vs-non-mutual income/expense breakup for one
-financial year, for the society's CA to determine taxable income.
+Income Tax (Principle of Mutuality) — WORKING PAPER FOR CA — EstateHub
+=======================================================================
+This report is a WORKING PAPER for the society's Chartered Accountant.
+IT IS NOT a taxable-income computation and MUST NOT be filed as or
+mistaken for an income-tax return (ITR-5).
 
-Under the principle of mutuality (see Bangalore Club v. CIT and settled RWA
-case law), member-contribution income (maintenance, sinking/repair fund
-contributions, etc.) is exempt as mutual income, but investment income
-(bank/FD interest) and non-member income (guest event tickets, advertisement
-income, etc.) are NOT — they're taxable under normal provisions regardless
-of mutuality. accounts.mutuality_nature ('mutual'/'non_mutual') tags which
-accounts fall into which bucket; this report sums transactions by that tag.
+What this report does:
+  Produces a mutual-vs-non-mutual income/expenditure breakup for one
+  financial year from P&L accounts (statement_section = Income/Expenditure)
+  ONLY — balance-sheet items, capital receipts, fund appropriations and
+  liability legs are excluded (A-03 fix).
 
-One sheet:
-  * "Mutuality Summary" — Income and Expense, each split mutual/non_mutual,
-    with a taxable-income-estimate line (non_mutual income − non_mutual
-    expense) for the CA to start from.
+What the CA must do before filing:
+  1. Verify apportionment of common expenses between mutual/non-mutual income.
+  2. Add depreciation per the CA's schedule (IT Act 2025 s.19 / Sch II).
+  3. Check brought-forward losses (if any).
+  4. Confirm Sec 269ST cash receipt compliance.
+  5. Confirm interest from non-co-operative banks is treated as taxable
+     non-mutual income (doctrine of mutuality; Bangalore Club v CIT, SC 2013).
+  6. File ITR-5 with the correct tax regime.
 
 Data source: fn_income_tax_summary_fy(p_society_id, p_fy)
+See ER.md §2 (A-03) for the statutory background.
 """
 
 from __future__ import annotations
 import io
+from decimal import Decimal
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -55,10 +60,13 @@ def _apply_header(ws, row: int, widths: dict) -> None:
 
 
 def _write_mutuality_sheet(ws, rows: list[dict], fy: int) -> None:
-    ws.cell(row=1, column=1, value=f"Income Tax — Mutuality Summary FY {fy}-{fy+1}")
-    ws.cell(row=1, column=1).font = _FONT_TITLE
+    ws.cell(
+        row=1, column=1,
+        value=f"WORKING PAPER FOR CA — NOT A TAX RETURN  |  Mutuality Analysis FY {fy}-{fy + 1}"
+    )
+    ws.cell(row=1, column=1).font = Font(name="Arial", size=10, bold=True, color="CC0000")
 
-    headers = ["Category", "Nature", "Total Amount"]
+    headers = ["Category", "Nature", "Total Amount (₹)"]
     for col, hdr in enumerate(headers, start=1):
         cell = ws.cell(row=2, column=col, value=hdr)
         cell.font = _FONT_HEADER
@@ -74,7 +82,8 @@ def _write_mutuality_sheet(ws, rows: list[dict], fy: int) -> None:
     for row in rows:
         category = row.get("category") or ""
         nature = row.get("nature") or ""
-        amount = float(row.get("total_amount", 0) or 0)
+        # A-03 / Hygiene: use Decimal so statement totals match SQL NUMERIC to the paisa.
+        amount = Decimal(str(row.get("total_amount") or "0"))
         totals[(category, nature)] = totals.get((category, nature), 0.0) + amount
 
         values = [category, nature.replace("_", " ").title(), amount]
@@ -90,14 +99,16 @@ def _write_mutuality_sheet(ws, rows: list[dict], fy: int) -> None:
         r += 1
 
     r += 1
+    # A-03: category is now 'Expenditure' (not 'Expense') matching statement_section
     taxable_estimate = (
-        totals[("Income", "non_mutual")] - totals[("Expense", "non_mutual")]
+        totals.get(("Income", "non_mutual"), Decimal(0))
+        - totals.get(("Expenditure", "non_mutual"), Decimal(0))
     )
     summary_rows = [
-        ("Total Mutual Income (exempt)", totals[("Income", "mutual")]),
-        ("Total Non-Mutual Income (taxable)", totals[("Income", "non_mutual")]),
-        ("Total Non-Mutual Expense", totals[("Expense", "non_mutual")]),
-        ("Estimated Taxable Income (Non-Mutual Income − Expense)", taxable_estimate),
+        ("Total Mutual Income (exempt under mutuality)", totals.get(("Income", "mutual"), Decimal(0))),
+        ("Total Non-Mutual Income (potentially taxable)", totals.get(("Income", "non_mutual"), Decimal(0))),
+        ("Total Non-Mutual Expenditure (P&L accounts)", totals.get(("Expenditure", "non_mutual"), Decimal(0))),
+        ("Indicated Surplus for CA Review — NOT taxable income", taxable_estimate),
     ]
     for label, val in summary_rows:
         cell_a = ws.cell(row=r, column=1, value=label)
@@ -118,17 +129,21 @@ def _write_mutuality_sheet(ws, rows: list[dict], fy: int) -> None:
     note = ws.cell(
         row=r + 1, column=1,
         value=(
-            "Note: figures above are estimates for the society's CA to review — "
-            "consult a qualified Chartered Accountant before filing. Mutual income "
-            "(member contributions) is generally exempt under the Principle of "
-            "Mutuality; non-mutual income (e.g. bank/FD interest, non-member "
-            "receipts) is taxable under normal provisions regardless of mutuality."
+            "IMPORTANT — WORKING PAPER ONLY: This report is restricted to P&L accounts "
+            "(statement_section = Income/Expenditure) and excludes capital receipts, "
+            "fund appropriations and liability legs. It is NOT a taxable-income computation "
+            "and MUST NOT be used as a substitute for ITR-5 preparation by a qualified CA. "
+            "The CA must additionally consider: (1) apportionment of common expenses between "
+            "mutual/non-mutual income; (2) depreciation per IT Act 2025 s.19/Sch II; "
+            "(3) brought-forward losses; (4) Sec 269ST cash receipt compliance; "
+            "(5) interest income from non-cooperative banks (taxable regardless of mutuality). "
+            "Source: fn_income_tax_summary_fy — see ER.md A-03."
         ),
     )
-    note.font = Font(name="Arial", size=8, italic=True)
+    note.font = Font(name="Arial", size=8, italic=True, color="CC0000")
     note.alignment = Alignment(wrap_text=True, vertical="top")
     ws.merge_cells(start_row=r + 1, start_column=1, end_row=r + 1, end_column=4)
-    ws.row_dimensions[r + 1].height = 45
+    ws.row_dimensions[r + 1].height = 60
 
 
 def generate_income_tax_summary_excel(
