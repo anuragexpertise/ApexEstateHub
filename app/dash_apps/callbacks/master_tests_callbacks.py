@@ -16,6 +16,7 @@ from pathlib import Path
 from dash import ALL, Input, Output, State, ctx, html, no_update
 from dash.exceptions import PreventUpdate
 
+from app.security.audit_context import get_current_user_role
 from app.security.guards import require_session
 
 
@@ -24,8 +25,20 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _allowed_tests() -> list:
+    """Server-side allow-list: exactly the files the Tests page discovers.
+
+    Never trust the test name in the callback payload (or tests-list-store):
+    Dash ids and Store data come from the client and can be forged.
+    """
+    from app.dash_apps.pages.portal_pages import _discover_tests  # lazy: avoids import cycle
+    return [t["file"] for t in _discover_tests()]
+
+
 def _run_pytest(test_file: str):
     """Run a single test file with pytest; return (returncode, combined_output)."""
+    if test_file not in _allowed_tests():
+        return 1, "Refused: not a discovered test file.\n"
     root = _project_root()
     test_path = root / "test" / test_file
     if not test_path.exists():
@@ -67,6 +80,8 @@ def register_master_tests_callbacks(app):
     )
     @require_session
     def run_single_test(n_clicks_list, tests):
+        if get_current_user_role() != "master":
+            raise PreventUpdate
         triggered = ctx.triggered_id
         if not isinstance(triggered, dict) or "test" not in triggered:
             raise PreventUpdate
@@ -102,15 +117,18 @@ def register_master_tests_callbacks(app):
     )
     @require_session
     def run_all_tests(n_clicks, tests):
+        if get_current_user_role() != "master":
+            raise PreventUpdate
         if not n_clicks:
             raise PreventUpdate
-        if not tests:
+        # Ignore the client-supplied `tests` Store; rebuild the list server-side.
+        files = _allowed_tests()
+        if not files:
             return html.Small("No test files to run.", className="text-muted")
 
         parts = []
         any_failed = False
-        for t in tests:
-            test_file = t["file"]
+        for test_file in files:
             parts.append(f"===== {test_file} =====")
             rc, output = _run_pytest(test_file)
             parts.append(output or "(no output)")
