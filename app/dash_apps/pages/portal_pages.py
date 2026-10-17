@@ -835,6 +835,11 @@ def master_tests_page(c) -> html.Div:
             type="circle", color="#c96a19",
         ),
         dcc.Store(id="tests-list-store", data=tests),
+        # Run All driver (see master_tests_callbacks.py): the Interval is paused
+        # while a test runs; the Stores carry the queue and the current file.
+        dcc.Interval(id="tests-run-interval", interval=400, disabled=True),
+        dcc.Store(id="tests-run-queue"),
+        dcc.Store(id="tests-run-current"),
     ], className="portal-page")
 
 
