@@ -1103,17 +1103,53 @@ def _pct(v):
     return f if 0 <= f <= 100 else "bad"
 
 
+def _clean_db_error(exc) -> str:
+    """The first line of a database exception, without the CONTEXT noise."""
+    return (str(exc).strip().splitlines() or [str(exc)])[0]
+
+
+def _flat_tokens(text) -> list[str]:
+    """'A-101, A-102  b-7' -> ['A-101', 'A-102', 'b-7'] (commas, semicolons or whitespace separate flats)."""
+    if not text:
+        return []
+    return [x for x in re.split(r"[,;\s]+", str(text).strip()) if x]
+
+
+def _flats_to_ids(society_id: int, present, proxy, votes_for, against, abstain):
+    """Resolve the flat-number lists of the registers to apartment ids. -> (ok, message, {list: [ids]})."""
+    lists = {"present": present, "proxy": proxy, "for": votes_for, "against": against, "abstain": abstain}
+    toks = {k: _flat_tokens(v) for k, v in lists.items()}
+    every = {x.lower() for v in toks.values() for x in v}
+    if not every:
+        return True, "", {k: [] for k in lists}
+    rows = _rows("SELECT id, flat_number FROM apartments WHERE society_id = %s AND active "
+                 "AND lower(flat_number) = ANY(%s)", (society_id, sorted(every)))
+    by_flat = {r["flat_number"].lower(): int(r["id"]) for r in rows}
+    unknown = sorted(every - set(by_flat))
+    if unknown:
+        return False, "Not active flats of this society: " + ", ".join(unknown[:10]), {}
+    for k, v in toks.items():
+        if len({x.lower() for x in v}) != len(v):
+            return False, f"A flat is listed twice under '{k}'.", {}
+    return True, "", {k: [by_flat[x.lower()] for x in v] for k, v in toks.items()}
+
+
 def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, decision_type_id: int,
                       clause_id: str | None, body: str, majority_required: float,
                       passed: bool, passed_on, reason: str, actor_society_id=None,
-                      votes_for_pct=None, owners_present_pct=None, advocate_opinion_ref=None) -> tuple[bool, str]:
+                      votes_for_pct=None, owners_present_pct=None, advocate_opinion_ref=None,
+                      present_flats=None, proxy_flats=None, for_flats=None, against_flats=None,
+                      abstain_flats=None) -> tuple[bool, str]:
     """Create a new resolution record (admin of that society only). If it is passed and names a clause, any
     matching provisional bye-law choice of the society is activated automatically.
 
-    A General Body resolution recorded as passed must say what was actually achieved: owners_present_pct (quorum,
-    bye-law 9: owners present in person) and votes_for_pct (share of ALL votes in favour, each vote weighted by the
-    owner's undivided interest, bye-laws 2(e) and 8). Both are checked against the decision type's threshold and
-    the society's quorum. A decision type that departs from the Model Bye-Laws also needs advocate_opinion_ref."""
+    A General Body resolution is passed FROM THE REGISTERS, never from typed percentages: the flats present in
+    person (quorum, bye-law 9), present by proxy, and voting FOR / AGAINST / ABSTAIN are entered as flat numbers,
+    each flat is weighted by its undivided interest (bye-laws 2(e) and 8), and the database derives owners_present_pct
+    and votes_for_pct and checks them against the quorum floor and the decision type's majority. The typed
+    votes_for_pct / owners_present_pct arguments are ignored for a General Body decision (kept so old callers still
+    import). A Managing Committee decision still rests on the committee minutes, so it takes votes_for_pct.
+    A decision type that departs from the Model Bye-Laws also needs advocate_opinion_ref."""
     _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
     why = _text(reason, MIN_TEXT)
     if not why:
@@ -1146,28 +1182,37 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
     if passed:
         mt = _row("SELECT type, quorum_met FROM meetings WHERE id = %s", (meeting_id,))
         body_needed = dt["required_body"]
-        if not mt["quorum_met"]:
+        if body_needed != "GBM" and not mt["quorum_met"]:
             return False, "A resolution cannot be recorded as passed at a meeting without a quorum."
         if body_needed == "GBM" and mt["type"] not in ("GBM", "EGM"):
             return False, "This decision type needs a General Body meeting (GBM/EGM)."
         if not _d(passed_on):
             return False, "Give the date the resolution was passed."
         if body_needed == "GBM":
-            floor = gbm_quorum_floor(society_id)
-            if present is None:
-                return False, "Give the share of owners present in person (quorum, bye-law 9)."
-            if present < floor:
-                return False, f"Quorum not met: {present:g}% of owners present in person, {floor:g}% needed."
-            if votes_for is None:
-                return False, "Give the share of ALL votes cast in favour, weighted by undivided interest (bye-laws 2(e), 8)."
-            if votes_for < maj:
-                return False, (f"Not carried: {votes_for:g}% of all votes in favour, {maj:g}% needed. A majority is measured "
-                               "against all votes by undivided interest, not against those present or one vote per flat.")
+            # Quorum and majority are derived from the registers by the database, not typed.
+            if not (present_flats or proxy_flats) or not (for_flats or against_flats or abstain_flats):
+                return False, ("A General Body resolution is passed from the attendance and vote registers: list the flats "
+                               "present in person, any present by proxy, and the flats voting for, against or abstaining.")
+        elif votes_for is None:
+            return False, "Give the share of the committee voting in favour (from the committee minutes)."
+        elif votes_for < maj:
+            return False, f"Not carried: {votes_for:g}% in favour, {maj:g}% needed."
         if dt["needs_advocate_opinion"] and (not advocate_ref or len(advocate_ref) < 5):
             return False, ("This decision departs from the Model Bye-Laws or ratifies the software's thresholds, so it needs a "
                            "reference to the written advocate's opinion before it can be recorded as passed.")
     
-    passed_date = _d(passed_on) if passed else None
+    gbm = dt["required_body"] == "GBM"
+    ids = {}
+    if gbm:
+        # A General Body resolution is first a DRAFT with no tallies; the registers are recorded against it and
+        # the database then passes (or rejects) it from them.
+        ok, why_not, ids = _flats_to_ids(society_id, present_flats, proxy_flats, for_flats, against_flats, abstain_flats)
+        if not ok:
+            return False, why_not
+        passed_date, ins_passed, ins_votes, ins_present = None, False, None, None
+    else:
+        passed_date, ins_passed = (_d(passed_on) if passed else None), bool(passed)
+        ins_votes, ins_present = votes_for, present
     
     row = _row(
         """WITH ins AS (
@@ -1181,13 +1226,30 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
            SELECT 'resolutions', %s, 'resolution#' || ins.id, 'new_version',
                   '{}'::jsonb, to_jsonb(ins), %s, %s, %s
            FROM ins RETURNING rule_key""",
-        (meeting_id, clause_id, decision_type_id, body, maj, votes_for, present, advocate_ref, passed, passed_date, actor_id,
-         society_id, why, actor_id, actor_role))
+        (meeting_id, clause_id, decision_type_id, body, maj, ins_votes, ins_present, advocate_ref, ins_passed, passed_date,
+         actor_id, society_id, why, actor_id, actor_role))
     if not row:
         return False, "Failed to create resolution."
     new_id = int(row["rule_key"].split("#")[1])
     msg = f"Resolution #{new_id} created."
-    if passed and clause_id:
+    carried = bool(passed) and not gbm
+    if gbm and any(ids.get(k) for k in ("present", "proxy", "for", "against", "abstain")):
+        try:
+            _row("SELECT fn_record_resolution_register(%s, %s, %s, %s, %s, %s) AS r",
+                 (new_id, ids["present"], ids["proxy"], ids["for"], ids["against"], ids["abstain"]))
+            if passed:
+                outcome = _row("SELECT fn_pass_resolution(%s, %s, %s) AS r", (new_id, _d(passed_on), actor_id))["r"]
+                msg += " " + outcome
+                if not outcome.startswith("Passed"):
+                    return False, msg
+                carried = True
+            else:
+                msg += " Registers recorded; it stays a draft until it is passed."
+        except Exception as exc:
+            return False, f"Resolution #{new_id} was saved as a draft, but: {_clean_db_error(exc)}"
+    elif gbm and passed:
+        return False, f"Resolution #{new_id} was saved as a draft: record the registers to pass it."
+    if carried and clause_id:
         try:
             notes = _auto_activate(actor_id, actor_role, society_id, new_id)
         except Exception as exc:   # the resolution is saved; activation can be retried by recording again

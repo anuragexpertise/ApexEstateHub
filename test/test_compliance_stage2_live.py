@@ -135,8 +135,8 @@ def test_society_can_raise_the_poll_quorum_and_new_polls_follow(cur):
     mid = q1(cur, "INSERT INTO meetings (society_id,type,held_on,quorum_met,minutes_pdf) VALUES (%s,'GBM',%s,TRUE,'m.pdf') RETURNING id",
              (SOC, date.today()))["id"]
     dt = q1(cur, "SELECT id, majority_pct FROM decision_types WHERE code='SET_SOCIETY_POLICY'")
-    res = q1(cur, """INSERT INTO resolutions (meeting_id,clause_id,decision_type_id,body,majority_required,passed,passed_on)
-                     VALUES (%s,'poll_quorum_pct',%s,'raise quorum',%s,TRUE,%s) RETURNING id""", (mid, dt["id"], dt["majority_pct"], date.today()))["id"]
+    from test import resolution_fixtures as rf
+    res = rf.passed_resolution(cur, mid, "poll_quorum_pct", dt["id"], body="raise quorum")
     cur.execute("""INSERT INTO society_rule_decisions (society_id,rule_key,layer,status,value,resolution_id,effective_from)
                    VALUES (%s,'poll_quorum_pct',2,'adopted_with_variation',50,%s,%s)""", (SOC, res, date.today()))
     _weights(cur)

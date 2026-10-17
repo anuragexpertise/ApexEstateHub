@@ -115,11 +115,9 @@ def _bl(cur, clause, layer, status, text, resolution=None, proposed=None):
 def _passed_resolution(cur, clause, code):
     cur.execute("INSERT INTO meetings (society_id,type,held_on,quorum_met) VALUES (%s,'GBM',CURRENT_DATE-1,true) RETURNING id", (SOC,))
     m = cur.fetchone()[0]
-    cur.execute("SELECT id, majority_pct FROM decision_types WHERE code=%s", (code,))
-    dt, pct = cur.fetchone()
-    cur.execute("""INSERT INTO resolutions (meeting_id, clause_id, decision_type_id, body, majority_required, passed, passed_on)
-                   VALUES (%s,%s,%s,'x',%s,true,CURRENT_DATE-1) RETURNING id""", (m, clause, dt, pct))
-    return cur.fetchone()[0]
+    from datetime import date, timedelta
+    from test import resolution_fixtures as rf
+    return rf.pass_for_code(cur, m, clause, code, body="x", passed_on=date.today() - timedelta(days=1))
 
 
 def test_resolver_falls_back_to_statute_baseline(cur):
