@@ -992,7 +992,7 @@ STATE_COMPLIANCE_THRESHOLDS = [
      "TDS 194J threshold raised from ₹30,000 to ₹50,000/year by Finance Act 2025."),
     ("ALL", "tds_no_pan_rate", 20.00, None,
      "percent", "2010-04-01", None,
-     "When payee has no PAN, TDS deducted at higher of 20% or the applicable section rate (Section 206AA, ITA)."),
+     "When payee has no PAN, TDS deducted at higher of 20% or the applicable section rate (Section 206AA of the 1961 Act; s.397(2) of the Income-tax Act 2025)."),
     ("ALL", "income_tax_basic_exemption_new_regime", 300000.00, None,
      "rupees", "2023-04-01", None,
      "FY 2025-26 (new tax regime): basic exemption ₹3 lakh. No tax on income up to ₹7 lakh due to rebate u/s 87A."),
@@ -1566,103 +1566,133 @@ def seed_admin_created_by(cur, conn, admin_uid: int):
 #   206AB : omitted by Finance Act 2025 from 1-Apr-2025
 #
 # Income-tax Act 2025 (ER.md T-02):
-#   Applies from 1-Apr-2026; TDS governed by Section 393 Table.
-#   IT1961 rows remain for lookups of pre-Apr-2026 transactions.
-#   IT2025 rows (effective_from='2026-04-01') carry new section references.
+#   Applies from 1-Apr-2026. Residents' TDS is s.393(1), non-residents s.393(2),
+#   "any person" s.393(3), salary s.392, higher rate for no PAN s.397(2).
+#   The IT2025 rows live in TDS_IT2025_SEED below (figures from the Income-tax
+#   Department's text of s.393).
+#   IT1961 rows remain for look-ups of pre-Apr-2026 transactions; their
+#   section_2025 field is the cross-reference to the 2025 Act.
 TDS_SECTION_RATE_SEED = [
     # ── FY 2024-25 baseline (effective 2024-04-01, IT1961) ──────────────────
-    ('192',    None,          'Salary income',                                            0.00, 20.00,        0,        0, '2024-04-01', 'IT1961', 'Sec 393(1) Table 1'),
-    ('192A',   None,          'Premature EPF withdrawal',                                10.00, 30.00,    50000,    50000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 2'),
+    ('192',    None,          'Salary income',                                            0.00, 20.00,        0,        0, '2024-04-01', 'IT1961', 'Sec 392'),
+    ('192A',   None,          'Premature EPF withdrawal',                                10.00, 30.00,    50000,    50000, '2024-04-01', 'IT1961', 'Sec 392(7)'),
     ('193',    None,          'Interest on securities',                                  10.00, 20.00,    10000,    10000, '2024-04-01', 'IT1961', None),
-    ('194',    None,          'Dividend on shares/mutual funds',                         10.00, 20.00,     5000,     5000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 3'),
-    ('194A',   None,          'Interest other than securities',                          10.00, 20.00,    40000,    40000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 4'),
-    ('194B',   None,          'Winnings from lottery, puzzles, crossword',               30.00, 30.00,    10000,    10000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 5(i)'),
-    ('194BA',  None,          'Net winnings from online games',                          30.00, 30.00,        0,        0, '2024-04-01', 'IT1961', None),
-    ('194BB',  None,          'Winnings from horse races',                               30.00, 30.00,    10000,    10000, '2024-04-01', 'IT1961', None),
-    ('194C',   'ind_huf',     'Payments to contractors / subcontractors (Ind/HUF)',       1.00, 20.00,    30000,   100000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 6(i)'),
-    ('194C',   'other',       'Payments to contractors / subcontractors (Others)',        2.00, 20.00,    30000,   100000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 6(i)'),
-    ('194D',   'ind_huf',     'Insurance commission (Ind/HUF)',                           2.00, 20.00,    20000,    20000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 7'),
-    ('194D',   'company',     'Insurance commission (Company)',                          10.00, 20.00,    20000,    20000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 7'),
-    ('194DA',  None,          'Maturity proceeds from life insurance policies',           5.00, 20.00,   100000,   100000, '2024-04-01', 'IT1961', None),
-    ('194EE',  None,          'Payments from National Savings Scheme (NSS)',             10.00, 20.00,     2500,     2500, '2024-04-01', 'IT1961', None),
+    ('194',    None,          'Dividend on shares/mutual funds',                         10.00, 20.00,     5000,     5000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 7'),
+    ('194A',   None,          'Interest other than securities',                          10.00, 20.00,    40000,    40000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 5(iii)'),
+    ('194B',   None,          'Winnings from lottery, puzzles, crossword',               30.00, 30.00,    10000,    10000, '2024-04-01', 'IT1961', 'Sec 393(3) Sl. 1'),
+    ('194BA',  None,          'Net winnings from online games',                          30.00, 30.00,        0,        0, '2024-04-01', 'IT1961', 'Sec 393(3) Sl. 2'),
+    ('194BB',  None,          'Winnings from horse races',                               30.00, 30.00,    10000,    10000, '2024-04-01', 'IT1961', 'Sec 393(3) Sl. 3'),
+    ('194C',   'ind_huf',     'Payments to contractors / subcontractors (Ind/HUF)',       1.00, 20.00,    30000,   100000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 6(i) [D(a)]'),
+    ('194C',   'other',       'Payments to contractors / subcontractors (Others)',        2.00, 20.00,    30000,   100000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 6(i) [D(b)]'),
+    ('194D',   'ind_huf',     'Insurance commission (Ind/HUF)',                           2.00, 20.00,    20000,    20000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 1(i)'),
+    ('194D',   'company',     'Insurance commission (Company)',                          10.00, 20.00,    20000,    20000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 1(i)'),
+    ('194DA',  None,          'Maturity proceeds from life insurance policies',           5.00, 20.00,   100000,   100000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 8(i)'),
+    ('194EE',  None,          'Payments from National Savings Scheme (NSS)',             10.00, 20.00,     2500,     2500, '2024-04-01', 'IT1961', 'Sec 393(3) Sl. 6'),
     ('194F',   None,          'Repurchase of units by Mutual Fund/UTI',                 20.00, 20.00,        0,        0, '2024-04-01', 'IT1961', None),
-    ('194G',   None,          'Commission on sale of lottery tickets',                   5.00, 20.00,    15000,    15000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 8'),
-    # 194H FY2024-25: threshold ₹15,000 (closes 2025-03-31 via ER migration)
-    ('194H',   None,          'Brokerage or commission',                                  2.00, 20.00,    15000,    15000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 9'),
+    ('194G',   None,          'Commission on sale of lottery tickets',                   5.00, 20.00,    15000,    15000, '2024-04-01', 'IT1961', 'Sec 393(3) Sl. 4'),
+    # 194H FY2024-25: threshold ₹15,000 (closed 2025-03-31 by seed_tds_section_rates)
+    ('194H',   None,          'Brokerage or commission',                                  2.00, 20.00,    15000,    15000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 1(ii)'),
     # 194-I: ₹2,40,000/yr threshold (Finance Act 2019; unchanged by FA 2025)
-    ('194-I',  'land_building',   'Rent on land, building, or furniture',                10.00, 20.00,   240000,   240000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 10'),
-    ('194-I',  'plant_machinery', 'Rent on plant, machinery, or equipment',               2.00, 20.00,   240000,   240000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 10'),
-    # 194-IB FY2024-25: rate 5% (closes 2024-09-30; 2% row below from 1-Oct-2024)
-    ('194-IB', None,          'Rent paid by Individual / HUF (monthly rent > Rs 50,000)',  5.00, 20.00,   600000,   600000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 10B'),
-    ('194-IA', None,          'Payment on transfer of immovable property',                1.00, 20.00,  5000000,  5000000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 10A'),
-    ('194-IC', None,          'Monetary payment under Joint Development Agreement',      10.00, 20.00,        0,        0, '2024-04-01', 'IT1961', 'Sec 393(1) Table 10C'),
-    ('194J',   'technical',   'Technical fees, royalty, call centre operator',            2.00, 20.00,    50000,    50000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 11'),
-    ('194J',   'professional','Professional fees, director fees, non-compete',           10.00, 20.00,    50000,    50000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 11'),
-    ('194K',   None,          'Income in respect of mutual fund units',                  10.00, 20.00,     5000,     5000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 12'),
-    ('194M',   None,          'Contract/professional fees paid by Individual/HUF',        2.00, 20.00,  5000000,  5000000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 13'),
-    ('194N',   None,          'Cash withdrawals from banking company/co-op bank',         2.00, 20.00, 10000000, 10000000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 14'),
-    ('194-O',  None,          'E-commerce operator on sale of goods/services',            0.10, 20.00,   500000,   500000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 15'),
-    ('194Q',   None,          'Purchase of goods exceeding specified limit',              0.10, 20.00,  5000000,  5000000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 16'),
-    ('194R',   None,          'Benefit or perquisite arising from business/profession',  10.00, 20.00,    20000,    20000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 17'),
-    ('194S',   None,          'Transfer of Virtual Digital Assets (Crypto, NFT)',         1.00, 20.00,    10000,    10000, '2024-04-01', 'IT1961', 'Sec 393(1) Table 18'),
+    ('194-I',  'land_building',   'Rent on land, building, or furniture',                10.00, 20.00,   240000,   240000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 2(ii) [D(b)]'),
+    ('194-I',  'plant_machinery', 'Rent on plant, machinery, or equipment',               2.00, 20.00,   240000,   240000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 2(ii) [D(a)]'),
+    # 194-IB FY2024-25: rate 5% (closed 2024-09-30 by seed_tds_section_rates; 2% row below from 1-Oct-2024)
+    ('194-IB', None,          'Rent paid by Individual / HUF (monthly rent > Rs 50,000)',  5.00, 20.00,   600000,   600000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 2(i)'),
+    ('194-IA', None,          'Payment on transfer of immovable property',                1.00, 20.00,  5000000,  5000000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 3(i)'),
+    ('194-IC', None,          'Monetary payment under Joint Development Agreement',      10.00, 20.00,        0,        0, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 3(ii)'),
+    ('194J',   'technical',   'Technical fees, royalty, call centre operator',            2.00, 20.00,    50000,    50000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 6(iii) [D(a)]'),
+    ('194J',   'professional','Professional fees, director fees, non-compete',           10.00, 20.00,    50000,    50000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 6(iii) [D(b)]'),
+    ('194K',   None,          'Income in respect of mutual fund units',                  10.00, 20.00,     5000,     5000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 4(i)'),
+    ('194M',   None,          'Contract/professional fees paid by Individual/HUF',        2.00, 20.00,  5000000,  5000000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 6(ii)'),
+    ('194N',   None,          'Cash withdrawals from banking company/co-op bank',         2.00, 20.00, 10000000, 10000000, '2024-04-01', 'IT1961', 'Sec 393(3) Sl. 5'),
+    ('194-O',  None,          'E-commerce operator on sale of goods/services',            0.10, 20.00,   500000,   500000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 8(v)'),
+    ('194Q',   None,          'Purchase of goods exceeding specified limit',              0.10, 20.00,  5000000,  5000000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 8(ii)'),
+    ('194R',   None,          'Benefit or perquisite arising from business/profession',  10.00, 20.00,    20000,    20000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 8(iv)'),
+    ('194S',   None,          'Transfer of Virtual Digital Assets (Crypto, NFT)',         1.00, 20.00,    10000,    10000, '2024-04-01', 'IT1961', 'Sec 393(1) Sl. 8(vi)'),
     ('195',    None,          'Payments to Non-Resident / Foreign Company',              20.00, 20.00,        0,        0, '2024-04-01', 'IT1961', 'Sec 393(2)'),
-    ('206AA',  None,          'Higher rate for failure to furnish PAN',                  20.00, 20.00,        0,        0, '2024-04-01', 'IT1961', 'Sec 395 (carried forward)'),
-    # 206AB: omitted by Finance Act 2025 from 1-Apr-2025; row closes via migration
+    ('206AA',  None,          'Higher rate for failure to furnish PAN',                  20.00, 20.00,        0,        0, '2024-04-01', 'IT1961', 'Sec 397(2)'),
+    # 206AB: omitted by Finance Act 2025 from 1-Apr-2025; row is closed by seed_tds_section_rates
     ('206AB',  None,          'Higher rate for non-filers of specified tax returns',      5.00, 20.00,        0,        0, '2024-04-01', 'IT1961', None),
 
     # ── Finance Act 2025 corrections (effective 2025-04-01) — T-01 ──────────
     # 194H threshold raised ₹15,000 → ₹20,000 [Finance Act 2025, w.e.f. 1-Apr-2025]
-    ('194H',   None,          'Brokerage or commission',                                  2.00, 20.00,    20000,    20000, '2025-04-01', 'IT1961', 'Sec 393(1) Table 9'),
+    ('194H',   None,          'Brokerage or commission',                                  2.00, 20.00,    20000,    20000, '2025-04-01', 'IT1961', 'Sec 393(1) Sl. 1(ii)'),
 
     # ── Finance Act 2024 correction (effective 2024-10-01) — T-01 ───────────
     # 194-IB rate reduced 5% → 2% [Finance Act 2024, w.e.f. 1-Oct-2024]
-    ('194-IB', None,          'Rent paid by Individual / HUF (monthly rent > Rs 50,000)',  2.00, 20.00,   600000,   600000, '2024-10-01', 'IT1961', 'Sec 393(1) Table 10B'),
+    ('194-IB', None,          'Rent paid by Individual / HUF (monthly rent > Rs 50,000)',  2.00, 20.00,   600000,   600000, '2024-10-01', 'IT1961', 'Sec 393(1) Sl. 2(i)'),
 
     # ── Income-tax Act 2025 rows (effective 2026-04-01) — T-02 ──────────────
     # The TDS engine must select by effective_from AND act_version='IT2025'
     # when the transaction date >= 2026-04-01.
-    ('192',    None,          'Salary income',                                            0.00, 20.00,        0,        0, '2026-04-01', 'IT2025', 'Sec 393(1) Table 1'),
-    ('194',    None,          'Dividend on shares/mutual funds',                         10.00, 20.00,     5000,     5000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 3'),
-    ('194A',   None,          'Interest other than securities',                          10.00, 20.00,    40000,    40000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 4'),
-    ('194B',   None,          'Winnings from lottery, puzzles, crossword',               30.00, 30.00,    10000,    10000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 5(i)'),
-    ('194C',   'ind_huf',     'Payments to contractors / subcontractors (Ind/HUF)',       1.00, 20.00,    30000,   100000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 6(i)'),
-    ('194C',   'other',       'Payments to contractors / subcontractors (Others)',        2.00, 20.00,    30000,   100000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 6(i)'),
-    ('194D',   'ind_huf',     'Insurance commission (Ind/HUF)',                           2.00, 20.00,    20000,    20000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 7'),
-    ('194D',   'company',     'Insurance commission (Company)',                          10.00, 20.00,    20000,    20000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 7'),
-    ('194G',   None,          'Commission on sale of lottery tickets',                   5.00, 20.00,    15000,    15000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 8'),
-    ('194H',   None,          'Brokerage or commission',                                  2.00, 20.00,    20000,    20000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 9'),
-    ('194-I',  'land_building',   'Rent on land, building, or furniture',                10.00, 20.00,   240000,   240000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 10'),
-    ('194-I',  'plant_machinery', 'Rent on plant, machinery, or equipment',               2.00, 20.00,   240000,   240000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 10'),
-    ('194-IB', None,          'Rent paid by Individual / HUF (monthly rent > Rs 50,000)',  2.00, 20.00,   600000,   600000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 10B'),
-    ('194-IA', None,          'Payment on transfer of immovable property',                1.00, 20.00,  5000000,  5000000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 10A'),
-    ('194-IC', None,          'Monetary payment under Joint Development Agreement',      10.00, 20.00,        0,        0, '2026-04-01', 'IT2025', 'Sec 393(1) Table 10C'),
-    ('194J',   'technical',   'Technical fees, royalty, call centre operator',            2.00, 20.00,    50000,    50000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 11'),
-    ('194J',   'professional','Professional fees, director fees, non-compete',           10.00, 20.00,    50000,    50000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 11'),
-    ('194K',   None,          'Income in respect of mutual fund units',                  10.00, 20.00,     5000,     5000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 12'),
-    ('194M',   None,          'Contract/professional fees paid by Individual/HUF',        2.00, 20.00,  5000000,  5000000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 13'),
-    ('194N',   None,          'Cash withdrawals from banking company/co-op bank',         2.00, 20.00, 10000000, 10000000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 14'),
-    ('194-O',  None,          'E-commerce operator on sale of goods/services',            0.10, 20.00,   500000,   500000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 15'),
-    ('194Q',   None,          'Purchase of goods exceeding specified limit',              0.10, 20.00,  5000000,  5000000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 16'),
-    ('194R',   None,          'Benefit or perquisite arising from business/profession',  10.00, 20.00,    20000,    20000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 17'),
-    ('194S',   None,          'Transfer of Virtual Digital Assets (Crypto, NFT)',         1.00, 20.00,    10000,    10000, '2026-04-01', 'IT2025', 'Sec 393(1) Table 18'),
-    ('195',    None,          'Payments to Non-Resident / Foreign Company',              20.00, 20.00,        0,        0, '2026-04-01', 'IT2025', 'Sec 393(2)'),
-    ('206AA',  None,          'Higher rate for failure to furnish PAN',                  20.00, 20.00,        0,        0, '2026-04-01', 'IT2025', 'Sec 395 (carried forward)'),
     # 206AB is NOT seeded for IT2025 — omitted by Finance Act 2025 from 1-Apr-2025.
 ]
 
 
-def seed_tds_section_rates(cur, conn, society_id: int):
-    """Seed TDS section rates for a society.
+# ── Income-tax Act 2025 rows (effective 2026-04-01) — ER.md T-02 ─────────────
+# Tuple: (section, discriminator, nature, rate, rate_no_pan, single_bill_threshold,
+#         annual_aggregate_threshold, threshold_inclusive, threshold_basis, section_2025)
+# Source: s.393 Income-tax Act 2025 (Income-tax Department text). Thresholds are
+# 'exceeds' tests except threshold_inclusive rows (194-IA). Rent is Rs 50,000 per
+# month (threshold_basis='month'), not per year.
+TDS_IT2025_EFFECTIVE_FROM = '2026-04-01'
+TDS_IT2025_SEED = [
+    ('192', None, 'Salary income (Sec 392, not the Sec 393 table)', 0.00, 20.00, 0, 0, False, 'bill', 'Sec 392'),
+    ('194', None, 'Dividend declared by a domestic company', 10.00, 20.00, 0, 0, False, 'bill', 'Sec 393(1) Sl. 7'),
+    ('194A', None, 'Interest other than on securities (specified person)', 10.00, 20.00, 10000, 10000, False, 'bill', 'Sec 393(1) Sl. 5(iii)'),
+    ('194B', None, 'Winnings from lottery, crossword, card/other game, betting', 30.00, 30.00, 10000, 0, False, 'transaction', 'Sec 393(3) Sl. 1'),
+    ('194BA', None, 'Net winnings from online games', 30.00, 30.00, 0, 0, False, 'bill', 'Sec 393(3) Sl. 2'),
+    ('194BB', None, 'Winnings from horse races', 30.00, 30.00, 10000, 0, False, 'transaction', 'Sec 393(3) Sl. 3'),
+    ('194C', 'ind_huf', 'Contractor / sub-contractor (individual or HUF)', 1.00, 20.00, 30000, 100000, False, 'bill', 'Sec 393(1) Sl. 6(i) [D(a)]'),
+    ('194C', 'other', 'Contractor / sub-contractor (other than individual or HUF)', 2.00, 20.00, 30000, 100000, False, 'bill', 'Sec 393(1) Sl. 6(i) [D(b)]'),
+    ('194D', 'ind_huf', 'Insurance commission (individual / HUF payee)', 2.00, 20.00, 20000, 20000, False, 'bill', 'Sec 393(1) Sl. 1(i)'),
+    ('194D', 'company', 'Insurance commission (company payee)', 10.00, 20.00, 20000, 20000, False, 'bill', 'Sec 393(1) Sl. 1(i)'),
+    ('194DA', None, 'Life insurance policy payout (tax on the income comprised in it)', 2.00, 20.00, 100000, 100000, False, 'bill', 'Sec 393(1) Sl. 8(i)'),
+    ('194EE', None, 'Payment of amount referred to in s.80CCA(2)(a) (NSS)', 10.00, 20.00, 2500, 2500, False, 'bill', 'Sec 393(3) Sl. 6'),
+    ('194G', None, 'Commission / prize on lottery tickets', 2.00, 20.00, 20000, 20000, False, 'bill', 'Sec 393(3) Sl. 4'),
+    ('194H', None, 'Commission or brokerage (not insurance commission)', 2.00, 20.00, 20000, 20000, False, 'bill', 'Sec 393(1) Sl. 1(ii)'),
+    ('194-I', 'land_building', 'Rent: land, building, furniture or fittings', 10.00, 20.00, 50000, 0, False, 'month', 'Sec 393(1) Sl. 2(ii) [D(b)]'),
+    ('194-I', 'plant_machinery', 'Rent: machinery, plant or equipment', 2.00, 20.00, 50000, 0, False, 'month', 'Sec 393(1) Sl. 2(ii) [D(a)]'),
+    ('194-IB', None, 'Rent paid by a person who is not a specified person', 2.00, 20.00, 50000, 0, False, 'month', 'Sec 393(1) Sl. 2(i)'),
+    ('194-IA', None, 'Transfer of immovable property (1% of higher of price / stamp-duty value)', 1.00, 20.00, 5000000, 0, True, 'bill', 'Sec 393(1) Sl. 3(i)'),
+    ('194-IC', None, 'Consideration under a joint development agreement', 10.00, 20.00, 0, 0, False, 'bill', 'Sec 393(1) Sl. 3(ii)'),
+    ('194J', 'technical', 'Technical services, film royalty, call-centre operator', 2.00, 20.00, 50000, 50000, False, 'bill', 'Sec 393(1) Sl. 6(iii) [D(a)]'),
+    ('194J', 'professional', 'Professional fees, other royalty, non-compete fees', 10.00, 20.00, 50000, 50000, False, 'bill', 'Sec 393(1) Sl. 6(iii) [D(b)]'),
+    ('194J', 'director', 'Remuneration / fees / commission to a company director (not salary)', 10.00, 20.00, 0, 0, False, 'bill', 'Sec 393(1) Sl. 6(iii) [D(b), nil threshold]'),
+    ('194K', None, 'Income from mutual fund / specified undertaking / specified company units', 10.00, 20.00, 10000, 10000, False, 'bill', 'Sec 393(1) Sl. 4(i)'),
+    ('194M', None, 'Contract / professional / commission paid by individual or HUF', 2.00, 20.00, 5000000, 5000000, False, 'bill', 'Sec 393(1) Sl. 6(ii)'),
+    ('194N', None, 'Cash withdrawal from bank / co-op bank / post office (Rs 1 cr; Rs 3 cr for co-op recipient)', 2.00, 20.00, 10000000, 10000000, False, 'bill', 'Sec 393(3) Sl. 5'),
+    ('194-O', None, 'E-commerce operator: sale of goods / services by participant', 0.10, 5.00, 0, 0, False, 'bill', 'Sec 393(1) Sl. 8(v)'),
+    ('194Q', None, 'Purchase of goods above Rs 50 lakh (flat rate; tax is on the excess)', 0.10, 5.00, 5000000, 5000000, False, 'bill', 'Sec 393(1) Sl. 8(ii)'),
+    ('194R', None, 'Benefit or perquisite from business / profession', 10.00, 20.00, 20000, 20000, False, 'bill', 'Sec 393(1) Sl. 8(iv)'),
+    ('194S', None, 'Transfer of virtual digital asset (exemption proxy: Rs 10,000)', 1.00, 20.00, 10000, 10000, False, 'bill', 'Sec 393(1) Sl. 8(vi)'),
+    ('194T', None, 'Remuneration / interest paid by a firm to a partner', 10.00, 20.00, 20000, 20000, False, 'bill', 'Sec 393(3) Sl. 7'),
+    ('195', None, 'Payments to non-residents', 20.00, 20.00, 0, 0, False, 'bill', 'Sec 393(2)'),
+    ('206AA', None, 'Higher rate where PAN is not furnished', 20.00, 20.00, 0, 0, False, 'bill', 'Sec 397(2)'),
+]
 
-    The TDS_SECTION_RATE_SEED list carries 10 fields including
-    effective_from, act_version and section_2025 (ER.md T-01, T-02).
-    Inserts with ON CONFLICT DO NOTHING; re-runs are idempotent.
+def seed_tds_section_rates(cur, conn, society_id: int):
+    """Seed TDS section rates for a society (ER.md T-01, T-02).
+
+    Inserts the IT1961 history (TDS_SECTION_RATE_SEED) and the Income-tax Act
+    2025 rows (TDS_IT2025_SEED). Idempotent: an existing
+    (section, discriminator, effective_from, act_version) row is left alone.
     """
+    all_rows = []
+    for (section, disc, nature, rate, rate_no_pan, single_thr, annual_thr,
+         eff_from, act_version, section_2025) in TDS_SECTION_RATE_SEED:
+        all_rows.append((section, disc, nature, rate, rate_no_pan, single_thr,
+                         annual_thr, eff_from, act_version, section_2025,
+                         False, "bill"))
+    for (section, disc, nature, rate, rate_no_pan, single_thr, annual_thr,
+         inclusive, basis, section_2025) in TDS_IT2025_SEED:
+        all_rows.append((section, disc, nature, rate, rate_no_pan, single_thr,
+                         annual_thr, TDS_IT2025_EFFECTIVE_FROM, "IT2025",
+                         section_2025, inclusive, basis))
+
     inserted = 0
-    for (
-        section, discriminator, nature, rate, rate_no_pan,
-        single_thr, annual_thr, eff_from, act_version, section_2025
-    ) in TDS_SECTION_RATE_SEED:
+    for (section, discriminator, nature, rate, rate_no_pan, single_thr,
+         annual_thr, eff_from, act_version, section_2025,
+         inclusive, basis) in all_rows:
         row = _one(
             cur,
             "SELECT 1 FROM tds_section_rates "
@@ -1676,14 +1706,37 @@ def seed_tds_section_rates(cur, conn, society_id: int):
             """INSERT INTO tds_section_rates
                (society_id, section, discriminator, nature_of_income, rate, rate_no_pan,
                 single_bill_threshold, annual_aggregate_threshold, effective_from,
-                act_version, section_2025)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                act_version, section_2025, threshold_inclusive, threshold_basis)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT DO NOTHING""",
             (society_id, section, discriminator, nature, rate, rate_no_pan,
-             single_thr, annual_thr, eff_from, act_version, section_2025),
+             single_thr, annual_thr, eff_from, act_version, section_2025,
+             inclusive, basis),
         )
         conn.commit()
         inserted += 1
+    # 206AB was omitted by the Finance Act 2025 from 1-Apr-2025: keep the row for
+    # look-backs only, so it must not stay open-ended.
+    # Close each superseded row on the day before its replacement starts, so the
+    # history reads as a clean timeline rather than overlapping open-ended rows.
+    for section, eff_from, eff_to in (
+        ('206AB', None,         '2025-03-31'),   # omitted by Finance Act 2025
+        ('194H',  '2024-04-01', '2025-03-31'),   # threshold 15,000 -> 20,000
+        ('194-IB', '2024-04-01', '2024-09-30'),  # rate 5% -> 2% from 1-Oct-2024
+    ):
+        cur.execute(
+            "UPDATE tds_section_rates SET effective_to = %s::date "
+            "WHERE society_id=%s AND section=%s AND act_version='IT1961' "
+            "AND effective_to IS NULL AND (%s::date IS NULL OR effective_from = %s::date)",
+            (eff_to, society_id, section, eff_from, eff_from),
+        )
+    # The Income-tax Act 1961 stops governing on 31-Mar-2026; the IT2025 rows take over.
+    cur.execute(
+        "UPDATE tds_section_rates SET effective_to = DATE '2026-03-31' "
+        "WHERE society_id=%s AND act_version='IT1961' AND effective_to IS NULL",
+        (society_id,),
+    )
+    conn.commit()
     if inserted:
         print(f"  \u2713 TDS section rates seeded ({inserted} rows, IT1961 + IT2025 effective-dated)")
 

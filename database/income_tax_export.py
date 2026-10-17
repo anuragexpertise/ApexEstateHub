@@ -14,9 +14,11 @@ What this report does:
 
 What the CA must do before filing:
   1. Verify apportionment of common expenses between mutual/non-mutual income.
-  2. Add depreciation per the CA's schedule (IT Act 2025 s.19 / Sch II).
+  2. Add depreciation per the CA's schedule (IT Act 2025 s.33; rates under the
+     Income-tax Rules, 2026 — s.32 of the 1961 Act).
   3. Check brought-forward losses (if any).
-  4. Confirm Sec 269ST cash receipt compliance.
+  4. Confirm cash-receipt compliance under s.186 of the Income-tax Act 2025
+     (Rs 2,00,000 or more; s.269ST of the 1961 Act).
   5. Confirm interest from non-co-operative banks is treated as taxable
      non-mutual income (doctrine of mutuality; Bangalore Club v CIT, SC 2013).
   6. File ITR-5 with the correct tax regime.
@@ -74,9 +76,12 @@ def _write_mutuality_sheet(ws, rows: list[dict], fy: int) -> None:
         cell.alignment = _ALIGN_C
         cell.border = _BORDER_ALL
 
+    # Decimal throughout: a float seed plus a Decimal amount raises TypeError.
+    # fn_income_tax_summary_fy emits the category 'Expense'; normalise it (and
+    # 'Expenses' / 'Expenditure') to one key so the summary lines below find it.
     totals = {
-        ("Income", "mutual"): 0.0, ("Income", "non_mutual"): 0.0,
-        ("Expense", "mutual"): 0.0, ("Expense", "non_mutual"): 0.0,
+        ("Income", "mutual"): Decimal(0), ("Income", "non_mutual"): Decimal(0),
+        ("Expenditure", "mutual"): Decimal(0), ("Expenditure", "non_mutual"): Decimal(0),
     }
     r = 3
     for row in rows:
@@ -84,7 +89,8 @@ def _write_mutuality_sheet(ws, rows: list[dict], fy: int) -> None:
         nature = row.get("nature") or ""
         # A-03 / Hygiene: use Decimal so statement totals match SQL NUMERIC to the paisa.
         amount = Decimal(str(row.get("total_amount") or "0"))
-        totals[(category, nature)] = totals.get((category, nature), 0.0) + amount
+        key_cat = "Expenditure" if category.strip().lower() in ("expense", "expenses", "expenditure") else category
+        totals[(key_cat, nature)] = totals.get((key_cat, nature), Decimal(0)) + amount
 
         values = [category, nature.replace("_", " ").title(), amount]
         for col, val in enumerate(values, start=1):
@@ -99,7 +105,6 @@ def _write_mutuality_sheet(ws, rows: list[dict], fy: int) -> None:
         r += 1
 
     r += 1
-    # A-03: category is now 'Expenditure' (not 'Expense') matching statement_section
     taxable_estimate = (
         totals.get(("Income", "non_mutual"), Decimal(0))
         - totals.get(("Expenditure", "non_mutual"), Decimal(0))
@@ -134,8 +139,8 @@ def _write_mutuality_sheet(ws, rows: list[dict], fy: int) -> None:
             "fund appropriations and liability legs. It is NOT a taxable-income computation "
             "and MUST NOT be used as a substitute for ITR-5 preparation by a qualified CA. "
             "The CA must additionally consider: (1) apportionment of common expenses between "
-            "mutual/non-mutual income; (2) depreciation per IT Act 2025 s.19/Sch II; "
-            "(3) brought-forward losses; (4) Sec 269ST cash receipt compliance; "
+            "mutual/non-mutual income; (2) depreciation per IT Act 2025 s.33 (was s.32 of the 1961 Act); "
+            "(3) brought-forward losses; (4) cash-receipt compliance under s.186 of the IT Act 2025 (was s.269ST); "
             "(5) interest income from non-cooperative banks (taxable regardless of mutuality). "
             "Source: fn_income_tax_summary_fy — see ER.md A-03."
         ),

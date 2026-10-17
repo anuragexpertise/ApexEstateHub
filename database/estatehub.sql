@@ -189,10 +189,10 @@ CREATE TABLE accounts (
     -- Fund that accrues is still fully locked, while a fund an admin
     -- deliberately unlocks just sets 0.
     statutory_lock_pct NUMERIC(5,2) NOT NULL DEFAULT 0
-        CHECK (statutory_lock_pct >= 0 AND statutory_lock_pct <= 100)
+        CHECK (statutory_lock_pct >= 0 AND statutory_lock_pct <= 100),
+    is_gst_exempt_supply BOOLEAN DEFAULT FALSE
 );
 
-ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_gst_exempt_supply BOOLEAN DEFAULT FALSE;
 
 CREATE TABLE apartments (
     id SERIAL PRIMARY KEY,
@@ -343,7 +343,8 @@ CREATE TABLE deposits (
     FOREIGN KEY (society_id, sale_acc_id) REFERENCES accounts (society_id, id), -- Cash/Bank account credited on maturity/sale
     disposed_by INT REFERENCES users (id),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP
+    updated_at TIMESTAMP,
+    institution_type VARCHAR(50)  -- classifies the holding for fn_investment_check
 );
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1449,8 +1450,10 @@ CREATE TABLE payables (
 -- for double-entry bookkeeping.
 CREATE TABLE transactions (
     id SERIAL PRIMARY KEY,
-    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    entry_side VARCHAR(2),
+    -- A-01: a ledger must outlive the society record it hangs off (was CASCADE).
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    -- A-01/A-02: a NULL side would silently fall out of every Dr/Cr sum.
+    entry_side VARCHAR(2) NOT NULL CHECK (entry_side IN ('Dr', 'Cr')),
     trx_date DATE NOT NULL,
     acc_id INT,
     FOREIGN KEY (society_id, acc_id) REFERENCES accounts (society_id, id),
@@ -1500,8 +1503,26 @@ CREATE TABLE transactions (
     transaction_number VARCHAR(64) UNIQUE,
     bank_reconciled BOOLEAN NOT NULL DEFAULT TRUE,
     bank_line_id INT REFERENCES bank_statement_lines (id),
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    -- A-01: corrections are reversal journals, never edits. A reversal leg
+    -- points at the leg it cancels (at most one reversal per leg).
+    reverses_id INT REFERENCES transactions (id) ON DELETE RESTRICT,
+    reversal_reason TEXT,
+    is_reversal BOOLEAN NOT NULL DEFAULT FALSE,
+    -- A-01: tamper-evident hash chain per society (see fn_verify_ledger_chain).
+    -- ledger_seq gaps mean a row was removed.
+    ledger_seq BIGINT,
+    ledger_hash VARCHAR(64),
+    prev_ledger_hash VARCHAR(64),
+    CONSTRAINT ck_transactions_reversal_shape CHECK (
+        (is_reversal = FALSE AND reverses_id IS NULL)
+        OR (is_reversal = TRUE AND reverses_id IS NOT NULL
+            AND NULLIF(BTRIM(reversal_reason), '') IS NOT NULL))
 );
+CREATE UNIQUE INDEX uq_transactions_one_reversal_per_leg
+    ON transactions (reverses_id) WHERE reverses_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_transactions_ledger_seq
+    ON transactions (society_id, ledger_seq) WHERE ledger_seq IS NOT NULL;
 
 -- ── Vendor passes ─────────────────────────────────────────────
 CREATE TABLE vendor_passes (
@@ -2030,7 +2051,17 @@ CREATE TABLE society_compliance_settings (
             'undivided_interest'
         )
     ),
-    fund_gst_exempt BOOLEAN DEFAULT FALSE,
+    -- X-01: default FALSE (sinking/repair contributions are IN the GST base).
+    -- TRUE excludes them, which is only defensible with an authority on file,
+    -- so the CHECK below demands a resolution reference and a CA/advocate
+    -- opinion reference. Print both on every invoice that relies on it.
+    fund_gst_exempt BOOLEAN NOT NULL DEFAULT FALSE,
+    fund_gst_exempt_resolution_ref VARCHAR(100),
+    fund_gst_exempt_opinion_ref VARCHAR(100),
+    CONSTRAINT ck_fund_gst_exempt_authority CHECK (
+        NOT fund_gst_exempt
+        OR (NULLIF(BTRIM(fund_gst_exempt_resolution_ref), '') IS NOT NULL
+            AND NULLIF(BTRIM(fund_gst_exempt_opinion_ref), '') IS NOT NULL)),
     fund_charges_interest BOOLEAN DEFAULT TRUE,
     gst_filing_cadence VARCHAR(20) DEFAULT 'monthly' CHECK (
         gst_filing_cadence IN ('monthly', 'qrmp')
@@ -2657,6 +2688,13 @@ CREATE TABLE tds_section_rates (
     act_version VARCHAR(10) NOT NULL DEFAULT 'IT1961'
         CHECK (act_version IN ('IT1961', 'IT2025')),
     section_2025 VARCHAR(50),
+    -- ER Phase 2: TRUE only where the Act says "equal to or greater than"
+    -- (194-IA); otherwise TDS applies only when the amount EXCEEDS the threshold.
+    threshold_inclusive BOOLEAN NOT NULL DEFAULT FALSE,
+    -- What single_bill_threshold is measured over (rent: per month).
+    threshold_basis VARCHAR(12) NOT NULL DEFAULT 'bill'
+        CONSTRAINT chk_tds_threshold_basis
+        CHECK (threshold_basis IN ('bill', 'month', 'transaction')),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_tds_section_rate UNIQUE (
         society_id,
@@ -3758,7 +3796,7 @@ BEGIN
     SELECT calc_start_date INTO v_society_calc_start FROM societies WHERE id = p_society_id;
     IF NOT FOUND THEN RETURN; END IF;
 
-    -- Read fund_gst_exempt setting (default TRUE = exempt)
+    -- Read fund_gst_exempt setting (default FALSE = funds are in the GST base; X-01)
     SELECT fund_gst_exempt INTO v_fund_gst_exempt FROM society_compliance_settings WHERE society_id = p_society_id;
     v_fund_gst_exempt := COALESCE(v_fund_gst_exempt, FALSE);
 
@@ -6576,14 +6614,17 @@ BEGIN
     IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
     IF p_particulars IS NULL OR TRIM(p_particulars) = '' THEN RAISE EXCEPTION 'particulars is required'; END IF;
 
-    -- C-01: 269ST check for cash receipts >= Rs 2,00,000
-    -- fn_check_269st should be called by posting functions; here we just warn
-    IF p_mode = 'cash' AND p_amount >= 200000 THEN
-        v_cash_warning := 'WARNING: Cash receipt ≥ ₹2,00,000 may attract penalty under Section 269ST.';
-    ELSIF p_mode = 'cash' AND p_amount >= 20000 THEN
-        v_cash_warning := 'Cash receipt ≥ ₹20,000 — Sec 269SS/269T may apply for loan/deposit transactions (penalty = amount).';
-    ELSE
-        v_cash_warning := NULL;
+    -- C-01: Income-tax Act 2025 s.186 (s.269ST of the 1961 Act): a cash
+    -- receipt of Rs 2,00,000 or more from one person in a day / for one
+    -- transaction / for one event is prohibited; the penalty equals the amount.
+    -- Refused in 'block' mode (the default), flagged in 'warn' mode.
+    v_cash_warning := fn_check_cash_receipt_limit(p_society_id, p_amount, p_mode);
+    IF v_cash_warning IS NOT NULL AND fn_cash_limit_mode(p_society_id) = 'block' THEN
+        RAISE EXCEPTION '%', v_cash_warning USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_cash_warning IS NULL AND p_mode = 'cash' AND p_amount >= 20000 THEN
+        -- Loans/deposits (s.269SS / s.269T of the 1961 Act) carry their own cash limit.
+        v_cash_warning := 'Cash receipt >= Rs 20,000 - if this is a loan or deposit, the cash-acceptance limit for loans/deposits may apply.';
     END IF;
 
     SELECT drcr_account INTO v_drcr FROM accounts WHERE id = p_acc_id AND society_id = p_society_id;
@@ -12754,14 +12795,19 @@ RETURNS TABLE (
     single_bill_threshold NUMERIC(12, 2),
     annual_aggregate_threshold NUMERIC(12, 2),
     act_version VARCHAR(10),
-    section_2025 VARCHAR(50)
+    section_2025 VARCHAR(50),
+    threshold_inclusive BOOLEAN,
+    threshold_basis VARCHAR(12)
 ) LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_act VARCHAR(10);
+    v_as_of DATE := COALESCE(p_as_of, CURRENT_DATE);
 BEGIN
     v_act := p_act_version;
     IF v_act IS NULL THEN
-        IF p_as_of >= '2026-04-01' THEN
+        -- The Income-tax Act, 2025 governs a payment whose earlier of
+        -- credit/payment falls on or after 1-Apr-2026.
+        IF v_as_of >= DATE '2026-04-01' THEN
             v_act := 'IT2025';
         ELSE
             v_act := 'IT1961';
@@ -12773,13 +12819,15 @@ BEGIN
            r.single_bill_threshold,
            r.annual_aggregate_threshold,
            r.act_version,
-           r.section_2025
+           r.section_2025,
+           r.threshold_inclusive,
+           r.threshold_basis
       FROM tds_section_rates r
      WHERE r.society_id = p_society_id
        AND r.section = p_section
        AND (r.discriminator = p_discriminator OR (r.discriminator IS NULL AND p_discriminator IS NULL))
-       AND r.effective_from <= p_as_of
-       AND (r.effective_to IS NULL OR r.effective_to >= p_as_of)
+       AND r.effective_from <= v_as_of
+       AND (r.effective_to IS NULL OR r.effective_to >= v_as_of)
        AND r.act_version = v_act
      ORDER BY r.effective_from DESC
      LIMIT 1;
@@ -12853,16 +12901,18 @@ DECLARE
     v_rate_nopan NUMERIC(5, 2);
     v_single   NUMERIC(12, 2);
     v_annual   NUMERIC(12, 2);
+    v_incl     BOOLEAN;
     v_cum      NUMERIC(15, 2);
     v_act VARCHAR(10);
     v_sec2025 VARCHAR(50);
+    v_as_of    DATE := COALESCE(p_as_of, CURRENT_DATE);
 BEGIN
     IF p_section IS NULL OR p_amount IS NULL OR p_amount <= 0 THEN
         RETURN QUERY SELECT 0::NUMERIC(5, 2), FALSE, 'no-section-or-zero-amount'::TEXT, NULL::VARCHAR, NULL::VARCHAR;
         RETURN;
     END IF;
 
-    IF p_as_of >= '2026-04-01' THEN
+    IF v_as_of >= DATE '2026-04-01' THEN
         v_act := 'IT2025';
     ELSE
         v_act := 'IT1961';
@@ -12870,14 +12920,14 @@ BEGIN
 
     SELECT r.rate, COALESCE(r.rate_no_pan, r.rate),
            r.single_bill_threshold, r.annual_aggregate_threshold,
-           r.act_version, r.section_2025
-      INTO v_rate, v_rate_nopan, v_single, v_annual, v_act, v_sec2025
+           r.threshold_inclusive, r.act_version, r.section_2025
+      INTO v_rate, v_rate_nopan, v_single, v_annual, v_incl, v_act, v_sec2025
       FROM tds_section_rates r
      WHERE r.society_id = p_society_id
        AND r.section = p_section
        AND (r.discriminator = p_discriminator OR (r.discriminator IS NULL AND p_discriminator IS NULL))
-       AND r.effective_from <= p_as_of
-       AND (r.effective_to IS NULL OR r.effective_to >= p_as_of)
+       AND r.effective_from <= v_as_of
+       AND (r.effective_to IS NULL OR r.effective_to >= v_as_of)
        AND r.act_version = v_act
      ORDER BY r.effective_from DESC
      LIMIT 1;
@@ -12891,16 +12941,20 @@ BEGIN
         v_rate := v_rate_nopan;
     END IF;
 
-    -- Single-bill test: threshold 0 means "no minimum single bill" (e.g. 194J).
-    -- Annual-aggregate test: threshold 0 means "aggregate test disabled".
-    IF p_amount >= v_single THEN
+    -- Both the 1961 Act and s.393(1)(a) of the 2025 Act deduct only where the
+    -- amount or aggregate EXCEEDS the threshold, so the test is strict '>'.
+    -- The one exception is s.393(1) Sl. 3(i) (194-IA), whose Note 3 says
+    -- "equal to or greater than" — those rows set threshold_inclusive = TRUE.
+    -- Threshold 0 means "no minimum" (any positive amount exceeds it).
+    IF p_amount > v_single OR (v_incl AND p_amount = v_single) THEN
         RETURN QUERY SELECT v_rate, TRUE, 'single-bill'::TEXT, v_act, v_sec2025;
         RETURN;
     END IF;
 
+    -- Aggregate test: threshold 0 means "aggregate test disabled".
     IF v_annual > 0 THEN
         v_cum := fn_vendor_tds_cumulative_fy(p_society_id, p_vendor_id, p_section, p_fy);
-        IF (v_cum + p_amount) >= v_annual THEN
+        IF (v_cum + p_amount) > v_annual OR (v_incl AND (v_cum + p_amount) = v_annual) THEN
             RETURN QUERY SELECT v_rate, TRUE, 'annual-aggregate'::TEXT, v_act, v_sec2025;
             RETURN;
         END IF;
@@ -13574,44 +13628,35 @@ CREATE OR REPLACE FUNCTION fn_income_tax_summary_fy(
     p_society_id INT,
     p_fy         INT
 ) RETURNS TABLE (
-    category VARCHAR, -- 'Income' or 'Expense'
+    category VARCHAR, -- 'Income' or 'Expenditure' (same labels as fn_income_expenditure_fy)
     nature VARCHAR,   -- 'mutual' or 'non_mutual'
     total_amount NUMERIC
-) LANGUAGE plpgsql AS $$
-DECLARE
-    v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
-    v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
+) LANGUAGE plpgsql STABLE AS $$
 BEGIN
+    -- WORKING PAPER FOR THE SOCIETY'S CA — not a taxable-income computation.
+    --
+    -- Rebuilt on fn_income_expenditure_fy. The previous body filtered on
+    -- accounts.statement_section, a column that does not exist (it belongs to
+    -- statutory_head_catalog), so the function raised
+    -- 'column a.statement_section does not exist' on every call and the
+    -- Income-Tax export could never run. Classifying through the same
+    -- Income/Expenditure statement the society already publishes also means
+    -- this paper cannot disagree with it: P&L accounts only (balance-sheet
+    -- items, capital receipts and fund transfers are never in the Inc/Exp
+    -- blocks), signed amounts so a reversal reduces its line, and the
+    -- 'Surplus/Deficit' summary row is dropped.
+    --
+    -- The category label is 'Expenditure' (previously the Python export looked
+    -- for 'Expense' while ER_remediation emitted 'Expenditure'; one label now).
     RETURN QUERY
-    SELECT 
-        'Income'::VARCHAR as category,
-        a.mutuality_nature as nature,
-        SUM(t.amount) as total_amount
-    FROM transactions t
-    JOIN accounts a ON t.acc_id = a.id AND a.society_id = t.society_id
-    WHERE t.society_id = p_society_id
-      AND t.trx_date BETWEEN v_fy_start AND v_fy_end
-      AND t.entry_side = 'Cr'
-      AND t.status = 'paid'
-      AND (t.bank_reconciled = TRUE OR t.bank_reconciled IS NULL)
-      AND (a.statement_section IN ('Income') OR a.statement_section ILIKE 'income')
-    GROUP BY a.mutuality_nature
-    
-    UNION ALL
-    
-    SELECT 
-        'Expense'::VARCHAR as category,
-        a.mutuality_nature as nature,
-        SUM(t.amount) as total_amount
-    FROM transactions t
-    JOIN accounts a ON t.acc_id = a.id AND a.society_id = t.society_id
-    WHERE t.society_id = p_society_id
-      AND t.trx_date BETWEEN v_fy_start AND v_fy_end
-      AND t.entry_side = 'Dr'
-      AND t.status = 'paid'
-      AND (t.bank_reconciled = TRUE OR t.bank_reconciled IS NULL)
-      AND (a.statement_section IN ('Expenditure', 'Expense', 'Expenses') OR a.statement_section ILIKE 'expen%')
-    GROUP BY a.mutuality_nature;
+    SELECT ie.statement_section::VARCHAR,
+           ie.mutuality_nature::VARCHAR,
+           SUM(ie.amount)::NUMERIC
+      FROM fn_income_expenditure_fy(p_society_id, p_fy) ie
+     WHERE ie.statement_section IN ('Income', 'Expenditure')
+       AND ie.mutuality_nature IS NOT NULL
+     GROUP BY ie.statement_section, ie.mutuality_nature
+     ORDER BY ie.statement_section, ie.mutuality_nature;
 END;
 $$;
 
@@ -13879,7 +13924,7 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_apt_interest      NUMERIC DEFAULT 0,
     p_sinking_fund_basis VARCHAR(30) DEFAULT 'per_sq_ft',
     p_repair_fund_basis VARCHAR(30) DEFAULT 'per_sq_ft',
-    p_fund_gst_exempt   BOOLEAN DEFAULT TRUE,
+    p_fund_gst_exempt   BOOLEAN DEFAULT FALSE,
     p_fund_charges_int  BOOLEAN DEFAULT TRUE,
     p_gst_cadence       VARCHAR(20) DEFAULT 'monthly',
     p_gst_registered    BOOLEAN DEFAULT FALSE,
@@ -14277,7 +14322,7 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
 ON CONFLICT DO NOTHING;
 
 INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference, effective_from) VALUES
- ('GENERIC', 'cash_limit_default_mode', NULL, 'warn', NULL, 'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting', DATE '2000-01-01'),
+ ('GENERIC', 'cash_limit_default_mode', NULL, 'block', NULL, 'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting', DATE '2000-01-01'),
  ('GENERIC', 'reserve_appropriation_pct', 25, NULL, '%', 'Engine policy: share of net surplus moved to the Reserve Fund at FY close. No state statute is loaded for this scheme; the society sets it by resolution', DATE '2000-01-01'),
  ('GENERIC', 'fund_collection_mode', NULL, 'on_bill', NULL, 'Engine policy: no state statute is loaded for this scheme, so a fund with a rate is added to the monthly bill (the behaviour before the regime parameter existed). Set fy_close or none by resolution, or load the state''s scheme pack.', DATE '2000-01-01'),
  ('GENERIC', 'fund_allocation_basis', NULL, 'per_sq_ft', NULL, 'Engine policy: per sq ft of apartment area, as before. A state with a prescribed basis (for example % of construction cost) should say so in its own scheme pack.', DATE '2000-01-01'),
@@ -14297,7 +14342,7 @@ INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, un
  ('UP_AOA_2010', 'authority_copy_due_day', 15, NULL, 'day', 'Model Bye-Laws 2011, bye-law 49', DATE '2011-11-16'),
  ('UP_AOA_2010', 'owner_summary_days', 15, NULL, 'days', 'Model Bye-Laws 2011, bye-law 49: summary to every owner within 15 days of publication', DATE '2011-11-16'),
  ('UP_AOA_2010', 'bye_law7_year_basis', NULL, 'financial_year', NULL, 'Bye-law 7 says "the year preceding the election". Whether that is the financial or the calendar year is contested (advocate commentary differs); default financial_year, overridable per call', DATE '2011-11-16'),
- ('UP_AOA_2010', 'cash_limit_default_mode', NULL, 'warn', NULL, 'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting. Override per society in societies.cash_limit_mode', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'cash_limit_default_mode', NULL, 'block', NULL, 'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting. Override per society in societies.cash_limit_mode', DATE '2011-11-16'),
  ('UP_AOA_2010', 'owner_loan_blocks_nodues', 1, NULL, '0/1', 'Engine policy (not statute): a loan outstanding from the association is a due to it, so the No Dues Certificate is not issued until it is recovered; the Board may instead record a refusal', DATE '2011-11-16'),
  ('UP_AOA_2010', 'owner_loan_counts_bye_law7', 0, NULL, '0/1', 'Engine policy (not statute): OFF by default - bye-law 7 speaks only of arrears of contributions for common expenses, so an overdue owner loan is not counted unless the society opts in on advice', DATE '2011-11-16'),
  ('UP_AOA_2010', 'owner_loan_counts_s22', 0, NULL, '0/1', 'Engine policy (not statute): off by default - s.22 concerns unpaid charges, so an overdue loan does not by itself justify cutting a service; enable only on advice', DATE '2011-11-16'),
@@ -14433,6 +14478,7 @@ BEGIN
                 WHERE x.society_id = p_society_id AND x.rule_key = p_key AND x.layer < p_below_layer
                   AND x.status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted')
                   AND x.resolution_id IS NOT NULL AND x.review_status <> 'flagged'
+                  AND EXISTS (SELECT 1 FROM resolutions rs WHERE rs.id = x.resolution_id AND rs.status = 'passed' AND rs.passed)
                   AND x.effective_from <= p_on AND (x.effective_to IS NULL OR x.effective_to >= p_on)
                   -- Exclude Layer 3 decisions that are pending/expired/rejected ratification:
                   -- the Board is acting within delegated powers, but until the GBM ratifies,
@@ -14720,6 +14766,87 @@ BEGIN
     RETURN NEXT; RETURN;
 END $$;
 
+-- Governance tables are declared here, ahead of every table with a resolution_id
+-- column, so those foreign keys can be declared inline.
+-- 1. decision_types — whitelisted decision codes (seeded below)
+CREATE TABLE decision_types (
+    id                  SERIAL PRIMARY KEY,
+    code                VARCHAR(40) NOT NULL UNIQUE,
+    label               VARCHAR(120) NOT NULL,
+    required_body       VARCHAR(10) NOT NULL CHECK (required_body IN ('GBM', 'MC')),
+    majority_pct        NUMERIC(5, 2) NOT NULL DEFAULT 51.00 CHECK (majority_pct > 0 AND majority_pct <= 100),
+    -- Authority and majority are different questions. authority_layer says WHICH LAYER a decision of this type
+    -- creates or changes (1 society bye-law, 2 society policy / ordinary General Body resolution, 3 Board);
+    -- majority_pct / majority_basis say HOW MANY must agree. 'all_votes' = share of ALL votes, each weighted by the
+    -- owner's undivided interest (Model Bye-Laws 2011, bye-laws 2(e) and 8), not of those present or one per head;
+    -- 'committee' = simple majority of the committee members.
+    authority_layer     SMALLINT NOT NULL DEFAULT 2 CHECK (authority_layer BETWEEN 1 AND 3),
+    majority_basis      VARCHAR(12) NOT NULL DEFAULT 'all_votes' CHECK (majority_basis IN ('all_votes', 'committee')),
+    -- A decision that departs from the Model Bye-Laws needs a written advocate's opinion on file before it can be
+    -- recorded as passed (e.g. a clause recorded as 'not adopted').
+    needs_advocate_opinion BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Same meaning as the scheme packs: provisional = reading not checked against the gazette text; checked =
+    -- matches the text of an adopted copy; verified = advocate signed off. Provisional thresholds take effect for
+    -- a society only once its General Body ratifies them (decision type RATIFY_VOTING_THRESHOLDS).
+    verification        VARCHAR(12) NOT NULL DEFAULT 'provisional' CHECK (verification IN ('provisional', 'checked', 'verified')),
+    source_provision    TEXT,
+    description         TEXT,
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- 2. meetings — GBM / EGM / MC records
+CREATE TABLE meetings (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    type                VARCHAR(10) NOT NULL CHECK (type IN ('GBM', 'EGM', 'MC')),
+    held_on             DATE NOT NULL,
+    quorum_met          BOOLEAN NOT NULL DEFAULT FALSE,
+    minutes_pdf         VARCHAR(255),
+    notice_date         DATE,
+    notice_sent_date    DATE,
+    agenda              TEXT,
+    venue               VARCHAR(255),
+    chaired_by          INT REFERENCES users (id) ON DELETE SET NULL,
+    adjourned_from      INT REFERENCES meetings (id) ON DELETE SET NULL,
+    minutes_signed_by   VARCHAR(255),
+    minutes_signed_date DATE,
+    requisition_ref     VARCHAR(255),
+    created_by          INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_meetings_society ON meetings (society_id, held_on DESC);
+
+-- 3. resolutions — Decisions linked to meetings and bye-law clauses
+CREATE TABLE resolutions (
+    id                  SERIAL PRIMARY KEY,
+    meeting_id          INT NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
+    clause_id           VARCHAR(30),
+    decision_type_id    INT NOT NULL REFERENCES decision_types (id),
+    body                TEXT NOT NULL,
+    majority_required   NUMERIC(5, 2) NOT NULL,           -- the threshold that applied when this was recorded
+    votes_for_pct       NUMERIC(5, 2) CHECK (votes_for_pct BETWEEN 0 AND 100),        -- share of ALL votes (by undivided interest) in favour
+    owners_present_pct  NUMERIC(5, 2) CHECK (owners_present_pct BETWEEN 0 AND 100),   -- share of owners present in person (quorum)
+    advocate_opinion_ref VARCHAR(255),                       -- reference to the written advocate's opinion, where the decision type needs one
+    passed              BOOLEAN NOT NULL DEFAULT FALSE,
+    passed_on           DATE,
+    text                TEXT,
+    resolution_type     VARCHAR(50),
+    reference_id        INT,
+    status              VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'passed', 'rejected')),
+    created_by          INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    -- G-01: `passed` and `status` can no longer disagree, and a passed
+    -- resolution must have reached its majority. (Quorum lives on the
+    -- meeting row; trg_resolutions_validity checks it.)
+    CONSTRAINT ck_resolution_passed_consistency CHECK (
+        (passed = (status = 'passed'))
+        AND (NOT passed OR (passed_on IS NOT NULL
+                            AND votes_for_pct IS NOT NULL
+                            AND votes_for_pct >= majority_required)))
+);
+CREATE INDEX idx_resolutions_meeting ON resolutions (meeting_id);
+CREATE INDEX idx_resolutions_clause ON resolutions (clause_id);
+
 -- 4. Investment Register (bye-law 47)
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE investment_register (
@@ -14732,7 +14859,7 @@ CREATE TABLE investment_register (
     maturity_date   DATE,
     rate_pct        NUMERIC(6,3),
     purpose         VARCHAR(200),
-    resolution_id   INT,
+    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
     created_by      INT REFERENCES users (id),
     created_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -14787,7 +14914,7 @@ CREATE TABLE affiliation_register (
     affiliation_date    DATE NOT NULL,
     affiliation_number  VARCHAR(50),
     expiry_date         DATE,
-    resolution_id       INT,
+    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
     is_active           BOOLEAN NOT NULL DEFAULT TRUE,
     created_by          INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
@@ -14926,7 +15053,7 @@ CREATE TABLE auditor_appointments (
     financial_year_from INT NOT NULL,
     financial_year_to   INT NOT NULL,
     remuneration        NUMERIC(12,2),
-    resolution_id       INT,
+    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
     created_by          INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -15184,7 +15311,7 @@ CREATE TABLE bye_law_amendments (
     bye_law_number      VARCHAR(20) NOT NULL,
     old_text            TEXT,
     new_text            TEXT,
-    gbm_resolution_id   INT,
+    gbm_resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
     ca_approval_ref     VARCHAR(100),
     ca_approval_date    DATE,
     effective_date      DATE,
@@ -15580,7 +15707,7 @@ CREATE INDEX idx_compliance_flags_society ON compliance_flags (society_id, rule_
 CREATE OR REPLACE FUNCTION fn_cash_limit_mode(p_society_id INT)
 RETURNS TEXT LANGUAGE sql STABLE AS $$
     SELECT COALESCE((SELECT cash_limit_mode FROM societies WHERE id = p_society_id),
-                    fn_regime_param_text(p_society_id, 'cash_limit_default_mode'), 'warn')
+                    fn_regime_param_text(p_society_id, 'cash_limit_default_mode'), 'block')
 $$;
 
 CREATE OR REPLACE FUNCTION fn_check_cash_payment_limit(p_society_id INT, p_amount NUMERIC, p_mode VARCHAR)
@@ -15684,7 +15811,7 @@ CREATE TABLE owner_loans (
     -- Bye-law 3(1)(f): a loan needs "the consent of the apartment owners". resolution_id points at the passed
     -- Approve Owner Loan resolution that records it (FK added after the resolutions table, below);
     -- resolution_ref stays as free text for loans entered before this link existed.
-    resolution_id     INT,
+    resolution_id     INT REFERENCES resolutions (id) ON DELETE SET NULL,
     repaid_amount     NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (repaid_amount >= 0),
     -- Bye-law 3(1)(f) lets the association lend to an owner. The register row
     -- alone is not a money movement: ledger_posted records whether the
@@ -16018,7 +16145,7 @@ CREATE TABLE society_policy_settings (
     society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     policy_key      VARCHAR(40) NOT NULL,
     value_text      VARCHAR(40) NOT NULL,
-    resolution_id   INT,
+    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
     effective_from  DATE NOT NULL DEFAULT CURRENT_DATE,
     created_by      INT REFERENCES users (id),
     created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -16398,7 +16525,6 @@ $$;
 -- Bye-law 45 limits investments to co-operative banks, Trust Act securities, or
 -- banks approved by the Competent Authority. The `deposits` table (added in the main schema)
 -- holds investments; the new `institution_type` column classifies them for the check.
-ALTER TABLE deposits ADD COLUMN IF NOT EXISTS institution_type VARCHAR(50);
 CREATE OR REPLACE FUNCTION fn_investment_check(p_society_id INT, p_institution_type TEXT)
 RETURNS TABLE (allowed BOOLEAN, message TEXT)
 LANGUAGE plpgsql STABLE AS $$
@@ -16431,7 +16557,7 @@ CREATE TABLE borrowing_approvals (
     purpose         TEXT,
     ca_approval_ref VARCHAR(100),              -- Competent Authority approval reference
     ca_approved_on  DATE,
-    resolution_id   INT,
+    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
     created_by      INT REFERENCES users (id),
     created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_borrowing_approval UNIQUE (society_id, loan_source, principal)
@@ -16928,112 +17054,6 @@ SELECT fn_sync_society_regime(id) FROM societies;
 -- Phase 0: Core tables for clause-level bye-law register + governance workflow
 -- ═══════════════════════════════════════════════════════════════════════════════
 
--- 1. decision_types — whitelisted decision codes (seeded below)
-CREATE TABLE decision_types (
-    id                  SERIAL PRIMARY KEY,
-    code                VARCHAR(40) NOT NULL UNIQUE,
-    label               VARCHAR(120) NOT NULL,
-    required_body       VARCHAR(10) NOT NULL CHECK (required_body IN ('GBM', 'MC')),
-    majority_pct        NUMERIC(5, 2) NOT NULL DEFAULT 51.00 CHECK (majority_pct > 0 AND majority_pct <= 100),
-    -- Authority and majority are different questions. authority_layer says WHICH LAYER a decision of this type
-    -- creates or changes (1 society bye-law, 2 society policy / ordinary General Body resolution, 3 Board);
-    -- majority_pct / majority_basis say HOW MANY must agree. 'all_votes' = share of ALL votes, each weighted by the
-    -- owner's undivided interest (Model Bye-Laws 2011, bye-laws 2(e) and 8), not of those present or one per head;
-    -- 'committee' = simple majority of the committee members.
-    authority_layer     SMALLINT NOT NULL DEFAULT 2 CHECK (authority_layer BETWEEN 1 AND 3),
-    majority_basis      VARCHAR(12) NOT NULL DEFAULT 'all_votes' CHECK (majority_basis IN ('all_votes', 'committee')),
-    -- A decision that departs from the Model Bye-Laws needs a written advocate's opinion on file before it can be
-    -- recorded as passed (e.g. a clause recorded as 'not adopted').
-    needs_advocate_opinion BOOLEAN NOT NULL DEFAULT FALSE,
-    -- Same meaning as the scheme packs: provisional = reading not checked against the gazette text; checked =
-    -- matches the text of an adopted copy; verified = advocate signed off. Provisional thresholds take effect for
-    -- a society only once its General Body ratifies them (decision type RATIFY_VOTING_THRESHOLDS).
-    verification        VARCHAR(12) NOT NULL DEFAULT 'provisional' CHECK (verification IN ('provisional', 'checked', 'verified')),
-    source_provision    TEXT,
-    description         TEXT,
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
--- 2. meetings — GBM / EGM / MC records
-CREATE TABLE meetings (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    type                VARCHAR(10) NOT NULL CHECK (type IN ('GBM', 'EGM', 'MC')),
-    held_on             DATE NOT NULL,
-    quorum_met          BOOLEAN NOT NULL DEFAULT FALSE,
-    minutes_pdf         VARCHAR(255),
-    notice_date         DATE,
-    notice_sent_date    DATE,
-    agenda              TEXT,
-    venue               VARCHAR(255),
-    chaired_by          INT REFERENCES users (id) ON DELETE SET NULL,
-    adjourned_from      INT REFERENCES meetings (id) ON DELETE SET NULL,
-    minutes_signed_by   VARCHAR(255),
-    minutes_signed_date DATE,
-    requisition_ref     VARCHAR(255),
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
-);
-CREATE INDEX idx_meetings_society ON meetings (society_id, held_on DESC);
-
--- 3. resolutions — Decisions linked to meetings and bye-law clauses
-CREATE TABLE resolutions (
-    id                  SERIAL PRIMARY KEY,
-    meeting_id          INT NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
-    clause_id           VARCHAR(30),
-    decision_type_id    INT NOT NULL REFERENCES decision_types (id),
-    body                TEXT NOT NULL,
-    majority_required   NUMERIC(5, 2) NOT NULL,           -- the threshold that applied when this was recorded
-    votes_for_pct       NUMERIC(5, 2) CHECK (votes_for_pct BETWEEN 0 AND 100),        -- share of ALL votes (by undivided interest) in favour
-    owners_present_pct  NUMERIC(5, 2) CHECK (owners_present_pct BETWEEN 0 AND 100),   -- share of owners present in person (quorum)
-    advocate_opinion_ref VARCHAR(255),                       -- reference to the written advocate's opinion, where the decision type needs one
-    passed              BOOLEAN NOT NULL DEFAULT FALSE,
-    passed_on           DATE,
-    text                TEXT,
-    resolution_type     VARCHAR(50),
-    reference_id        INT,
-    status              VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'passed', 'rejected')),
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
-);
-ALTER TABLE owner_loans
-    ADD CONSTRAINT owner_loans_resolution_id_fkey
-    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
-CREATE INDEX idx_resolutions_meeting ON resolutions (meeting_id);
-CREATE INDEX idx_resolutions_clause ON resolutions (clause_id);
-
--- society_policy_settings is defined earlier in this file than the governance
--- tables, so its resolution_id FK cannot be declared inline — the same single
--- forward reference as societies.fk_primary_bank_account above.
-ALTER TABLE society_policy_settings
-    ADD CONSTRAINT society_policy_settings_resolution_id_fkey
-    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
-
--- investment_register was defined earlier than resolutions table
-ALTER TABLE investment_register
-    ADD CONSTRAINT investment_register_resolution_id_fkey
-    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
-
--- affiliation_register was defined earlier than resolutions table
-ALTER TABLE affiliation_register
-    ADD CONSTRAINT affiliation_register_resolution_id_fkey
-    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
-
--- auditor_appointments was defined earlier than resolutions table
-ALTER TABLE auditor_appointments
-    ADD CONSTRAINT auditor_appointments_resolution_id_fkey
-    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
-
--- bye_law_amendments was defined earlier than resolutions table
-ALTER TABLE bye_law_amendments
-    ADD CONSTRAINT bye_law_amendments_gbm_resolution_id_fkey
-    FOREIGN KEY (gbm_resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
-
--- borrowing_approvals was defined earlier than resolutions table
-ALTER TABLE borrowing_approvals
-    ADD CONSTRAINT borrowing_approvals_resolution_id_fkey
-    FOREIGN KEY (resolution_id) REFERENCES resolutions (id) ON DELETE SET NULL;
-
 -- 4. resolution_effects — Enactment queue (whitelisted handlers only)
 CREATE TABLE resolution_effects (
     id                  SERIAL PRIMARY KEY,
@@ -17133,6 +17153,9 @@ CREATE TABLE loa_ratification (
     rejected_by     INT REFERENCES users (id),
     rejected_resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
     rejection_reason TEXT,
+    -- G-04: set when a rejected/expired decision's postings were reversed.
+    reversal_journal_id INT,
+    reversal_note   TEXT,
     created_by      INT REFERENCES users (id),
     created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
@@ -17249,17 +17272,7 @@ BEGIN
 END $$;
 
 -- Auto-expire ratifications that miss the deadline (called by a scheduled job or on read).
-CREATE OR REPLACE FUNCTION fn_expire_overdue_ratifications()
-RETURNS INT
-LANGUAGE plpgsql AS $$
-DECLARE v_count INT;
-BEGIN
-    UPDATE loa_ratification lr
-       SET status = 'expired'
-     WHERE status = 'pending' AND ratify_by < CURRENT_DATE;
-    GET DIAGNOSTICS v_count = ROW_COUNT;
-    RETURN v_count;
-END $$;
+
 
 
 INSERT INTO decision_types (code, label, required_body, majority_pct, authority_layer, majority_basis,
@@ -17960,3 +17973,682 @@ CREATE INDEX IF NOT EXISTS idx_resolution_votes_ap ON resolution_votes (apartmen
 COMMENT ON TABLE resolution_votes IS
     'Vote register per apartment per resolution. Votes_for_pct must be computed '
     'from these weighted votes, not self-attested.';
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ER.md REMEDIATION LAYER — ledger integrity, period locks, governance, cash rules
+-- (Everything below used to live in database/upgrades/*.sql. estatehub.sql is the
+--  single source of truth: tables carry their own columns and constraints inline;
+--  this section holds only the functions and triggers that need every table above.)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ---------------------------------------------------------------------------
+-- A-04  FINANCIAL-YEAR PERIOD LOCKS
+-- ---------------------------------------------------------------------------
+-- locked_through is the START year of the last locked FY (same convention as
+-- fy_closures.financial_year: 2025 = 1-Apr-2025 .. 31-Mar-2026). Locking FY n
+-- locks every FY up to and including n.
+
+CREATE TABLE fy_locks (
+    id             SERIAL PRIMARY KEY,
+    society_id     INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    locked_through SMALLINT NOT NULL CHECK (locked_through BETWEEN 2000 AND 2200),
+    locked_by      INT REFERENCES users (id),
+    resolution_id  INT REFERENCES resolutions (id),
+    notes          TEXT,
+    locked_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_fy_lock UNIQUE (society_id, locked_through)
+);
+CREATE INDEX idx_fy_locks_society
+    ON fy_locks (society_id, locked_through DESC);
+
+COMMENT ON TABLE fy_locks IS
+    'A-04: append-only period locks. A row means no ledger line may be dated in '
+    'that FY or any earlier one; correct a locked year with a reversal dated in '
+    'an open period. Rows cannot be updated or deleted (trg_fy_locks_append_only).';
+
+CREATE OR REPLACE FUNCTION trg_fy_locks_append_only() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION
+        'fy_locks is append-only (attempted % on lock id=%). A period lock can '
+        'only be lifted by a database administrator, deliberately.', TG_OP, OLD.id
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+CREATE TRIGGER trg_fy_locks_append_only
+    BEFORE UPDATE OR DELETE ON fy_locks
+    FOR EACH ROW EXECUTE FUNCTION trg_fy_locks_append_only();
+
+
+-- FY start-year of a date (Indian FY: 1 April - 31 March).
+CREATE OR REPLACE FUNCTION fn_fy_of(p_date DATE) RETURNS INT
+LANGUAGE sql IMMUTABLE AS $$
+    SELECT CASE WHEN EXTRACT(MONTH FROM p_date) >= 4
+                THEN EXTRACT(YEAR FROM p_date)::INT
+                ELSE EXTRACT(YEAR FROM p_date)::INT - 1 END;
+$$;
+
+
+-- NULL when the date is open; otherwise a human-readable refusal.
+CREATE OR REPLACE FUNCTION fn_check_fy_lock(p_society_id INT, p_trx_date DATE)
+RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_locked INT;
+    v_fy     INT := fn_fy_of(p_trx_date);
+BEGIN
+    SELECT MAX(locked_through) INTO v_locked
+      FROM fy_locks WHERE society_id = p_society_id;
+    IF v_locked IS NOT NULL AND v_fy <= v_locked THEN
+        RETURN format(
+            'Posting date %s falls in FY %s-%s, which is locked (locked through FY %s-%s). '
+            'Post a reversal or adjustment dated in an open period instead.',
+            p_trx_date, v_fy, v_fy + 1, v_locked, v_locked + 1);
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+-- Preventive: enforced in the database, so no posting function can forget it.
+CREATE OR REPLACE FUNCTION trg_transactions_fy_lock() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE v_msg TEXT;
+BEGIN
+    v_msg := fn_check_fy_lock(NEW.society_id, NEW.trx_date);
+    IF v_msg IS NOT NULL THEN
+        RAISE EXCEPTION '%', v_msg USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_transactions_fy_lock
+    BEFORE INSERT ON transactions
+    FOR EACH ROW EXECUTE FUNCTION trg_transactions_fy_lock();
+
+
+-- ---------------------------------------------------------------------------
+-- A-01  LEDGER STRUCTURE: reversal linkage, hash chain, constraints
+-- ---------------------------------------------------------------------------
+-- ---------------------------------------------------------------------------
+-- A-01  HASH CHAIN
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_ledger_row_hash(
+    p_prev TEXT, p_society INT, p_seq BIGINT, p_journal INT,
+    p_side TEXT, p_acc INT, p_amount NUMERIC, p_date DATE
+) RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
+    SELECT encode(sha256(convert_to(
+        COALESCE(p_prev, '0') || '|' || p_society::TEXT || '|' || p_seq::TEXT || '|' ||
+        COALESCE(p_journal::TEXT, '') || '|' || COALESCE(p_side, '') || '|' ||
+        COALESCE(p_acc::TEXT, '') || '|' || p_amount::NUMERIC(15,2)::TEXT || '|' ||
+        p_date::TEXT, 'UTF8')), 'hex');
+$$;
+
+-- Serialised per society with an advisory lock, and chained on ledger_seq
+-- rather than on id: two concurrent postings otherwise both pick the same
+-- predecessor and fork the chain.
+CREATE OR REPLACE FUNCTION trg_transactions_ledger_chain() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_prev_seq  BIGINT;
+    v_prev_hash VARCHAR(64);
+BEGIN
+    PERFORM pg_advisory_xact_lock(1818, NEW.society_id);
+    SELECT ledger_seq, ledger_hash INTO v_prev_seq, v_prev_hash
+      FROM transactions
+     WHERE society_id = NEW.society_id AND ledger_seq IS NOT NULL
+     ORDER BY ledger_seq DESC LIMIT 1;
+    NEW.ledger_seq       := COALESCE(v_prev_seq, 0) + 1;
+    NEW.prev_ledger_hash := v_prev_hash;
+    NEW.ledger_hash      := fn_ledger_row_hash(
+        v_prev_hash, NEW.society_id, NEW.ledger_seq, NEW.journal_id,
+        NEW.entry_side, NEW.acc_id, NEW.amount, NEW.trx_date);
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_transactions_ledger_chain
+    BEFORE INSERT ON transactions
+    FOR EACH ROW EXECUTE FUNCTION trg_transactions_ledger_chain();
+
+
+-- Rebuilds (or first-time backfills) the chain in id order. Not a routine
+-- operation: without p_force it only chains societies that have no chain yet,
+-- so it cannot be used to quietly re-sign a ledger that has been altered.
+CREATE OR REPLACE FUNCTION fn_rebuild_ledger_chain(
+    p_society_id INT DEFAULT NULL,
+    p_force      BOOLEAN DEFAULT FALSE
+) RETURNS BIGINT LANGUAGE plpgsql AS $$
+DECLARE
+    v_soc  INT;
+    v_prev TEXT;
+    v_seq  BIGINT;
+    v_n    BIGINT := 0;
+    r      RECORD;
+BEGIN
+    PERFORM set_config('estatehub.chain_rebuild', 'on', TRUE);
+    FOR v_soc IN
+        SELECT DISTINCT society_id FROM transactions
+         WHERE (p_society_id IS NULL OR society_id = p_society_id)
+         ORDER BY 1
+    LOOP
+        PERFORM pg_advisory_xact_lock(1818, v_soc);
+        IF NOT p_force AND EXISTS (
+            SELECT 1 FROM transactions WHERE society_id = v_soc AND ledger_seq IS NOT NULL) THEN
+            RAISE NOTICE 'society %: chain already exists; skipped (pass p_force => TRUE to rebuild).', v_soc;
+            CONTINUE;
+        END IF;
+        v_prev := NULL; v_seq := 0;
+        FOR r IN SELECT id, journal_id, entry_side, acc_id, amount, trx_date
+                   FROM transactions WHERE society_id = v_soc ORDER BY id
+        LOOP
+            v_seq := v_seq + 1;
+            v_prev := fn_ledger_row_hash(v_prev, v_soc, v_seq, r.journal_id,
+                                         r.entry_side, r.acc_id, r.amount, r.trx_date);
+            UPDATE transactions
+               SET ledger_seq = v_seq, ledger_hash = v_prev,
+                   prev_ledger_hash = CASE WHEN v_seq = 1 THEN NULL
+                        ELSE (SELECT t2.ledger_hash FROM transactions t2
+                               WHERE t2.society_id = v_soc AND t2.ledger_seq = v_seq - 1) END
+             WHERE id = r.id;
+            v_n := v_n + 1;
+        END LOOP;
+    END LOOP;
+    PERFORM set_config('estatehub.chain_rebuild', 'off', TRUE);
+    RETURN v_n;
+END;
+$$;
+
+-- Empty result = the chain is intact.
+CREATE OR REPLACE FUNCTION fn_verify_ledger_chain(p_society_id INT DEFAULT NULL)
+RETURNS TABLE (society_id INT, ledger_seq BIGINT, transaction_id INT, problem TEXT)
+LANGUAGE sql STABLE AS $$
+    WITH c AS (
+        SELECT t.id, t.society_id AS soc, t.ledger_seq AS seq, t.ledger_hash AS h,
+               t.prev_ledger_hash AS ph, t.journal_id, t.entry_side, t.acc_id,
+               t.amount, t.trx_date,
+               LAG(t.ledger_hash) OVER w AS lag_h,
+               LAG(t.ledger_seq)  OVER w AS lag_seq
+          FROM transactions t
+         WHERE t.ledger_seq IS NOT NULL
+           AND (p_society_id IS NULL OR t.society_id = p_society_id)
+        WINDOW w AS (PARTITION BY t.society_id ORDER BY t.ledger_seq)
+    )
+    SELECT soc, seq, id, 'row content does not match its hash (altered after posting)'
+      FROM c WHERE h IS DISTINCT FROM
+           fn_ledger_row_hash(ph, soc, seq, journal_id, entry_side, acc_id, amount, trx_date)
+    UNION ALL
+    SELECT soc, seq, id, 'link to previous row broken (earlier row altered or removed)'
+      FROM c WHERE ph IS DISTINCT FROM lag_h
+    UNION ALL
+    SELECT soc, seq, id, 'sequence gap (a row was removed)'
+      FROM c WHERE seq <> COALESCE(lag_seq, 0) + 1
+    UNION ALL
+    SELECT t.society_id, NULL::BIGINT, t.id, 'row is not in the chain'
+      FROM transactions t
+     WHERE t.ledger_seq IS NULL
+       AND (p_society_id IS NULL OR t.society_id = p_society_id)
+    ORDER BY 1, 2 NULLS LAST, 3;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- A-01  IMMUTABILITY of posted ledger lines
+-- ---------------------------------------------------------------------------
+-- Allow-list, not block-list: only these columns may change after posting.
+-- Everything else (amount, side, account, date, journal, mode, source, status,
+-- entity, particulars, creator ...) is frozen. The chain columns are writable
+-- only inside fn_rebuild_ledger_chain.
+CREATE OR REPLACE FUNCTION trg_transactions_immutable() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_mutable TEXT[] := ARRAY['bank_reconciled', 'bank_line_id'];
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION
+            'transactions is append-only: line id=% (journal %) cannot be deleted. '
+            'Correct it with fn_post_reversal_journal().', OLD.id, OLD.journal_id
+            USING ERRCODE = 'restrict_violation';
+    END IF;
+    IF current_setting('estatehub.chain_rebuild', TRUE) = 'on' THEN
+        v_mutable := v_mutable || ARRAY['ledger_seq', 'ledger_hash', 'prev_ledger_hash'];
+    END IF;
+    IF (to_jsonb(NEW) - v_mutable) IS DISTINCT FROM (to_jsonb(OLD) - v_mutable) THEN
+        RAISE EXCEPTION
+            'transactions line id=% (journal %) is frozen after posting; only % may change. '
+            'Correct it with fn_post_reversal_journal().', OLD.id, OLD.journal_id, v_mutable
+            USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_transactions_immutable
+    BEFORE UPDATE OR DELETE ON transactions
+    FOR EACH ROW EXECUTE FUNCTION trg_transactions_immutable();
+
+
+-- ---------------------------------------------------------------------------
+-- A-01  REVERSAL — the only way to correct a posted journal
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_post_reversal_journal(
+    p_society_id    INT,
+    p_journal_id    INT,
+    p_reason        TEXT,
+    p_reversed_by   INT,
+    p_reversal_date DATE DEFAULT CURRENT_DATE
+) RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE
+    v_new_jid INT;
+    v_leg     RECORD;
+    v_count   INT;
+    v_maxdate DATE;
+    v_already INT;
+BEGIN
+    IF NULLIF(BTRIM(p_reason), '') IS NULL THEN
+        RAISE EXCEPTION 'fn_post_reversal_journal: a reason is required.';
+    END IF;
+    PERFORM pg_advisory_xact_lock(1819, p_journal_id);
+
+    SELECT COUNT(*), MAX(trx_date) INTO v_count, v_maxdate
+      FROM transactions WHERE journal_id = p_journal_id AND society_id = p_society_id;
+    IF v_count = 0 THEN
+        RAISE EXCEPTION 'Journal % not found for society %.', p_journal_id, p_society_id;
+    END IF;
+    IF p_reversal_date < v_maxdate THEN
+        RAISE EXCEPTION 'Reversal date % is earlier than the journal''s own date %.',
+            p_reversal_date, v_maxdate;
+    END IF;
+
+    SELECT r.journal_id INTO v_already
+      FROM transactions r JOIN transactions o ON o.id = r.reverses_id
+     WHERE o.journal_id = p_journal_id AND o.society_id = p_society_id LIMIT 1;
+    IF FOUND THEN
+        RAISE EXCEPTION 'Journal % has already been reversed (by journal %).', p_journal_id, v_already;
+    END IF;
+
+    -- The period-lock trigger would refuse this too; checking here gives the
+    -- caller the message before any row is written.
+    IF fn_check_fy_lock(p_society_id, p_reversal_date) IS NOT NULL THEN
+        RAISE EXCEPTION '%', fn_check_fy_lock(p_society_id, p_reversal_date);
+    END IF;
+
+    v_new_jid := NEXTVAL('seq_transaction_number');
+    FOR v_leg IN
+        SELECT * FROM transactions
+         WHERE journal_id = p_journal_id AND society_id = p_society_id ORDER BY id
+    LOOP
+        INSERT INTO transactions (
+            society_id, entry_side, trx_date, acc_id, entity_id, role,
+            acc_particulars, amount, mode, status, source_table, source_id,
+            created_by, journal_id, bank_reconciled,
+            reverses_id, reversal_reason, is_reversal
+        ) VALUES (
+            p_society_id,
+            CASE v_leg.entry_side WHEN 'Dr' THEN 'Cr' ELSE 'Dr' END,
+            p_reversal_date, v_leg.acc_id, v_leg.entity_id, v_leg.role,
+            LEFT('REVERSAL of txn#' || v_leg.id || ': ' || COALESCE(v_leg.acc_particulars, ''), 200),
+            v_leg.amount,
+            v_leg.mode,                 -- preserved: see design note 2
+            'paid', v_leg.source_table, v_leg.source_id,
+            p_reversed_by, v_new_jid, v_leg.bank_reconciled,
+            v_leg.id, p_reason, TRUE
+        );
+    END LOOP;
+    RETURN v_new_jid;
+END;
+$$;
+
+COMMENT ON FUNCTION fn_post_reversal_journal(INT, INT, TEXT, INT, DATE) IS
+    'The ONLY authorised way to correct a posted ledger journal (A-01). Posts a '
+    'mirror-image journal dated p_reversal_date (default today, so it lands in an '
+    'open period), keeps each leg''s mode, and refuses a second reversal.';
+
+
+-- ---------------------------------------------------------------------------
+-- A-02  PREVENTIVE DOUBLE-ENTRY
+-- ---------------------------------------------------------------------------
+-- NULL = the journal is acceptable; otherwise the reason it is not.
+--
+-- Cash vouchers are single-sided BY DESIGN: fn_resolve_bank_leg returns NULL for
+-- mode 'cash' and Cash-in-Hand is DERIVED from cash-mode legs (fn_cih_balance_asof),
+-- never posted. A plain Dr = Cr rule would therefore reject every cash receipt and
+-- expense, so a journal whose legs are ALL mode='cash' is exempt from exact balance.
+-- The missing contra is the implicit Cash-in-Hand movement = |Dr - Cr|.
+-- What that exemption must NOT do is let the amount go unchecked, so the implied
+-- movement is tested against the voucher's own source document:
+--   * direction : a cash receipt brings cash in (Cr > Dr); a cash expense pays it out.
+--   * ceiling   : the movement can never exceed the document amount (TDS / GST
+--                 legs may reduce it, never increase it).
+--   * exactness : a voucher with a single leg must equal the document amount.
+-- Reversal journals mirror their original and are exempt (the original was checked).
+-- Source tables other than receipts/expenses keep the shape-only exemption; they
+-- are listed by fn_cash_voucher_report so a CA can see exactly what is unchecked.
+-- Making Cash-in-Hand an explicit ledger leg would replace this control, but it
+-- reverses the 2026-08 design (explicit CiH rows caused double-sided cashbook
+-- display bugs) and touches every cash reader and ~66 posting sites; see ER.md §9.
+CREATE OR REPLACE FUNCTION fn_journal_balance_problem(p_society_id INT, p_journal_id INT)
+RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_dr NUMERIC; v_cr NUMERIC; v_all_cash BOOLEAN; v_legs INT;
+    v_rev BOOLEAN; v_src TEXT; v_srcid INT; v_srcs INT; v_doc NUMERIC; v_move NUMERIC;
+BEGIN
+    SELECT COALESCE(SUM(amount) FILTER (WHERE entry_side = 'Dr'), 0),
+           COALESCE(SUM(amount) FILTER (WHERE entry_side = 'Cr'), 0),
+           COALESCE(BOOL_AND(mode = 'cash'), FALSE),
+           COUNT(*), BOOL_OR(is_reversal),
+           MIN(source_table), MIN(source_id),
+           COUNT(DISTINCT COALESCE(source_table, '') || '#' || COALESCE(source_id::text, ''))
+      INTO v_dr, v_cr, v_all_cash, v_legs, v_rev, v_src, v_srcid, v_srcs
+      FROM transactions WHERE society_id = p_society_id AND journal_id = p_journal_id;
+    IF v_dr = v_cr THEN RETURN NULL; END IF;
+    IF NOT v_all_cash THEN
+        RETURN format('journal %s is out of balance: Dr %s, Cr %s (difference %s)',
+                      p_journal_id, v_dr, v_cr, v_dr - v_cr);
+    END IF;
+    IF v_rev OR v_src IS NULL OR v_srcid IS NULL OR v_srcs <> 1
+       OR v_src NOT IN ('receipts', 'expenses') THEN
+        RETURN NULL;                                  -- shape-only exemption
+    END IF;
+    v_move := ABS(v_dr - v_cr);
+    IF v_src = 'receipts' AND v_cr <= v_dr THEN
+        RETURN format('cash receipt journal %s must bring cash in (Cr %s, Dr %s)', p_journal_id, v_cr, v_dr);
+    END IF;
+    IF v_src = 'expenses' AND v_dr <= v_cr THEN
+        RETURN format('cash expense journal %s must pay cash out (Dr %s, Cr %s)', p_journal_id, v_dr, v_cr);
+    END IF;
+    EXECUTE format('SELECT amount FROM %I WHERE id = $1 AND society_id = $2', v_src)
+       INTO v_doc USING v_srcid, p_society_id;
+    IF v_doc IS NULL THEN RETURN NULL; END IF;        -- document not visible yet
+    IF v_move > v_doc OR (v_legs = 1 AND v_move <> v_doc) THEN
+        RETURN format('cash voucher journal %s moves %s of cash but %s #%s is for %s',
+                      p_journal_id, v_move, v_src, v_srcid, v_doc);
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+-- Every all-cash journal with the Cash-in-Hand movement the schema infers for it,
+-- and whether the amount is checked against a source document. For CA review.
+CREATE OR REPLACE FUNCTION fn_cash_voucher_report(p_society_id INT DEFAULT NULL)
+RETURNS TABLE (society_id INT, journal_id INT, source_table VARCHAR, legs BIGINT,
+               implied_cash_movement NUMERIC, direction TEXT, amount_checked BOOLEAN)
+LANGUAGE sql STABLE AS $$
+    SELECT t.society_id, t.journal_id, MIN(t.source_table)::VARCHAR, COUNT(*),
+           ABS(SUM(CASE t.entry_side WHEN 'Dr' THEN t.amount ELSE -t.amount END)),
+           CASE WHEN SUM(CASE t.entry_side WHEN 'Dr' THEN t.amount ELSE -t.amount END) < 0
+                THEN 'cash in' ELSE 'cash out' END,
+           (MIN(t.source_table) IN ('receipts', 'expenses') AND NOT BOOL_OR(t.is_reversal))
+      FROM transactions t
+     WHERE (p_society_id IS NULL OR t.society_id = p_society_id)
+     GROUP BY t.society_id, t.journal_id
+    HAVING BOOL_AND(t.mode = 'cash')
+     ORDER BY t.society_id, t.journal_id;
+$$;
+
+CREATE OR REPLACE FUNCTION trg_transactions_balance() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE v_problem TEXT;
+BEGIN
+    IF NEW.journal_id IS NULL THEN
+        RAISE EXCEPTION 'ledger line id=% has no journal_id, so its balance cannot be verified', NEW.id
+            USING ERRCODE = 'check_violation';
+    END IF;
+    v_problem := fn_journal_balance_problem(NEW.society_id, NEW.journal_id);
+    IF v_problem IS NOT NULL THEN
+        RAISE EXCEPTION 'Double-entry violated: %. Post all legs of a voucher in one transaction, '
+                        'with Dr = Cr (only all-cash vouchers may omit the Cash-in-Hand leg).', v_problem
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER trg_transactions_balance
+    AFTER INSERT ON transactions
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION trg_transactions_balance();
+
+-- Existing data is not re-checked by the trigger (it fires on new rows). This
+-- lists journals that are out of balance today, for correction by reversal.
+CREATE OR REPLACE FUNCTION fn_ledger_integrity_report(p_society_id INT DEFAULT NULL)
+RETURNS TABLE (society_id INT, journal_id INT, legs BIGINT, dr NUMERIC, cr NUMERIC, problem TEXT)
+LANGUAGE sql STABLE AS $$
+    SELECT t.society_id, t.journal_id, COUNT(*),
+           SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr'),
+           SUM(t.amount) FILTER (WHERE t.entry_side = 'Cr'),
+           fn_journal_balance_problem(t.society_id, t.journal_id)
+      FROM transactions t
+     WHERE t.journal_id IS NOT NULL AND (p_society_id IS NULL OR t.society_id = p_society_id)
+     GROUP BY t.society_id, t.journal_id
+    HAVING fn_journal_balance_problem(t.society_id, t.journal_id) IS NOT NULL
+     ORDER BY 1, 2;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- A-04  fn_lock_fy — the supported way to close a year
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_lock_fy(
+    p_society_id    INT,
+    p_fy            INT,
+    p_locked_by     INT,
+    p_resolution_id INT  DEFAULT NULL,
+    p_notes         TEXT DEFAULT NULL
+) RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE
+    v_id INT; v_bad INT;
+BEGIN
+    IF MAKE_DATE(p_fy + 1, 3, 31) >= CURRENT_DATE THEN
+        RAISE EXCEPTION 'FY %-% has not ended yet (it ends 31-Mar-%); it cannot be locked.',
+            p_fy, p_fy + 1, p_fy + 1;
+    END IF;
+    SELECT COUNT(*) INTO v_bad FROM fn_ledger_integrity_report(p_society_id) r
+     WHERE EXISTS (SELECT 1 FROM transactions t
+                    WHERE t.society_id = r.society_id AND t.journal_id = r.journal_id
+                      AND fn_fy_of(t.trx_date) <= p_fy);
+    IF v_bad > 0 THEN
+        RAISE EXCEPTION 'Cannot lock FY %-%: % journal(s) dated up to that year are out of balance. '
+                        'See fn_ledger_integrity_report(%).', p_fy, p_fy + 1, v_bad, p_society_id;
+    END IF;
+    IF p_resolution_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM resolutions WHERE id = p_resolution_id AND passed) THEN
+        RAISE EXCEPTION 'Resolution % is not a passed resolution.', p_resolution_id;
+    END IF;
+    INSERT INTO fy_locks (society_id, locked_through, locked_by, resolution_id, notes)
+    VALUES (p_society_id, p_fy, p_locked_by, p_resolution_id, p_notes)
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- A-01  SOURCE DOCUMENTS: receipts and expenses
+-- ---------------------------------------------------------------------------
+-- Once a receipt/expense has ledger postings it may not be deleted, and its
+-- money fields are frozen. Cancelling it now reverses its postings (before,
+-- the UI flipped status to 'cancelled' and left the income/expense in the
+-- books). Receivables/payables are NOT covered here: a part-paid receivable
+-- shares source_id with its payment journals, so "cancel = reverse all" would
+-- be wrong for them and needs its own design.
+CREATE OR REPLACE FUNCTION trg_source_doc_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_frozen TEXT[];
+    v_jid    INT;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM transactions
+                    WHERE source_table = TG_TABLE_NAME AND source_id = OLD.id) THEN
+        RETURN CASE TG_OP WHEN 'DELETE' THEN OLD ELSE NEW END;     -- never posted
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION '% id=% has ledger postings and cannot be deleted; cancel it instead '
+                        '(which posts a reversal).', TG_TABLE_NAME, OLD.id
+            USING ERRCODE = 'restrict_violation';
+    END IF;
+
+    v_frozen := ARRAY['amount', 'acc_id', 'society_id', 'entity_id', 'role',
+                      CASE TG_TABLE_NAME WHEN 'receipts' THEN 'receipt_date' ELSE 'expense_date' END];
+    IF (SELECT jsonb_object_agg(k, to_jsonb(NEW) -> k) FROM unnest(v_frozen) AS k)
+       IS DISTINCT FROM
+       (SELECT jsonb_object_agg(k, to_jsonb(OLD) -> k) FROM unnest(v_frozen) AS k) THEN
+        RAISE EXCEPTION '% id=% is posted to the ledger; % are frozen. Cancel it (posts a reversal) '
+                        'and enter a corrected one.', TG_TABLE_NAME, OLD.id, v_frozen
+            USING ERRCODE = 'restrict_violation';
+    END IF;
+
+    IF NEW.status = 'cancelled' AND OLD.status IS DISTINCT FROM 'cancelled' THEN
+        FOR v_jid IN
+            SELECT DISTINCT t.journal_id FROM transactions t
+             WHERE t.source_table = TG_TABLE_NAME AND t.source_id = OLD.id
+               AND NOT t.is_reversal
+               AND NOT EXISTS (SELECT 1 FROM transactions r WHERE r.reverses_id = t.id)
+        LOOP
+            PERFORM fn_post_reversal_journal(
+                OLD.society_id, v_jid,
+                format('%s #%s cancelled', TG_TABLE_NAME, OLD.id), NULL);
+        END LOOP;
+    ELSIF OLD.status = 'confirmed' AND NEW.status IS DISTINCT FROM 'confirmed' THEN
+        RAISE EXCEPTION '% id=% is confirmed and posted; it can only move to cancelled.',
+            TG_TABLE_NAME, OLD.id USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_receipts_source_guard
+    BEFORE UPDATE OR DELETE ON receipts
+    FOR EACH ROW EXECUTE FUNCTION trg_source_doc_guard();
+
+CREATE TRIGGER trg_expenses_source_guard
+    BEFORE UPDATE OR DELETE ON expenses
+    FOR EACH ROW EXECUTE FUNCTION trg_source_doc_guard();
+
+
+-- ---------------------------------------------------------------------------
+-- Backfill the hash chain for ledgers that predate this migration, and report
+-- anything already out of balance. Both are informational: nothing here fails.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE v_n BIGINT; v_bad BIGINT;
+BEGIN
+    v_n := fn_rebuild_ledger_chain(NULL, FALSE);
+    SELECT COUNT(*) INTO v_bad FROM fn_ledger_integrity_report(NULL);
+    RAISE NOTICE 'ER phase 1: % ledger line(s) chained; % journal(s) currently out of balance (see fn_ledger_integrity_report()).', v_n, v_bad;
+END;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- C-01  Cash-receipt limit — Income-tax Act 2025 s.186 (s.269ST of the 1961 Act)
+-- ---------------------------------------------------------------------------
+-- NULL = fine; otherwise the reason the receipt is not allowed. Rs 2,00,000 is the
+-- statutory figure (not a society policy), so it is a constant, not a regime
+-- parameter. Whether the posting is refused or only flagged follows
+-- fn_cash_limit_mode (default 'block').
+CREATE OR REPLACE FUNCTION fn_check_cash_receipt_limit(p_society_id INT, p_amount NUMERIC, p_mode VARCHAR)
+RETURNS TEXT LANGUAGE plpgsql IMMUTABLE AS $$
+BEGIN
+    IF p_mode IS DISTINCT FROM 'cash' OR p_amount < 200000 THEN RETURN NULL; END IF;
+    RETURN format('Cash receipt of Rs %s is Rs 2,00,000 or more: s.186 of the Income-tax Act 2025 '
+                  '(s.269ST of the 1961 Act) prohibits receiving it in cash from one person in a '
+                  'day, for one transaction or for one event. Use an account-payee cheque, '
+                  'bank transfer or UPI.', p_amount);
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- G-01  A resolution's validity is enforced in the database
+-- ---------------------------------------------------------------------------
+-- ck_resolution_passed_consistency (on the table) ties passed <-> status and the
+-- majority; this trigger adds what a CHECK cannot see (the meeting's quorum) and
+-- freezes a passed resolution, as regime_rule_audit already is.
+CREATE OR REPLACE FUNCTION trg_resolutions_validity() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE v_quorum BOOLEAN;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.passed THEN
+            RAISE EXCEPTION 'Passed resolution % is a governance record and cannot be deleted.', OLD.id;
+        END IF;
+        RETURN OLD;
+    END IF;
+    IF TG_OP = 'UPDATE' AND OLD.passed THEN
+        IF ROW(NEW.meeting_id, NEW.decision_type_id, NEW.clause_id, NEW.body, NEW.majority_required,
+               NEW.votes_for_pct, NEW.owners_present_pct, NEW.passed, NEW.passed_on, NEW.status)
+           IS DISTINCT FROM
+           ROW(OLD.meeting_id, OLD.decision_type_id, OLD.clause_id, OLD.body, OLD.majority_required,
+               OLD.votes_for_pct, OLD.owners_present_pct, OLD.passed, OLD.passed_on, OLD.status) THEN
+            RAISE EXCEPTION 'Passed resolution % is frozen: meeting, wording, tallies and status cannot change.', OLD.id;
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF NEW.passed THEN
+        SELECT quorum_met INTO v_quorum FROM meetings WHERE id = NEW.meeting_id;
+        IF NOT COALESCE(v_quorum, FALSE) THEN
+            RAISE EXCEPTION 'Resolution cannot be passed: meeting % did not have a quorum.', NEW.meeting_id
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_resolutions_validity
+    BEFORE INSERT OR UPDATE OR DELETE ON resolutions
+    FOR EACH ROW EXECUTE FUNCTION trg_resolutions_validity();
+
+-- ---------------------------------------------------------------------------
+-- G-02  Tallies derived from the registers, not typed
+-- ---------------------------------------------------------------------------
+-- Compare against resolutions.votes_for_pct / owners_present_pct before relying on
+-- a typed figure. Weights are undivided-interest percentages.
+CREATE OR REPLACE FUNCTION fn_resolution_vote_summary(p_resolution_id INT)
+RETURNS TABLE (weight_for NUMERIC, weight_against NUMERIC, weight_abstain NUMERIC,
+               weight_cast NUMERIC, weight_present NUMERIC, weight_registered NUMERIC,
+               votes_for_pct_of_cast NUMERIC, owners_present_pct NUMERIC)
+LANGUAGE sql STABLE AS $$
+    WITH r AS (SELECT id, meeting_id FROM resolutions WHERE id = p_resolution_id),
+    v AS (SELECT COALESCE(SUM(weight) FILTER (WHERE vote = 'FOR'), 0)     AS f,
+                 COALESCE(SUM(weight) FILTER (WHERE vote = 'AGAINST'), 0) AS a,
+                 COALESCE(SUM(weight) FILTER (WHERE vote = 'ABSTAIN'), 0) AS ab,
+                 COALESCE(SUM(weight), 0)                                 AS c
+            FROM resolution_votes WHERE resolution_id = p_resolution_id),
+    m AS (SELECT COALESCE(SUM(undivided_interest_pct) FILTER (WHERE present_in_person), 0) AS p,
+                 COALESCE(SUM(undivided_interest_pct), 0)                                  AS t
+            FROM meeting_attendance ma JOIN r ON ma.meeting_id = r.meeting_id)
+    SELECT v.f, v.a, v.ab, v.c, m.p, m.t,
+           CASE WHEN v.c > 0 THEN ROUND(v.f / v.c * 100, 2) ELSE 0 END,
+           CASE WHEN m.t > 0 THEN ROUND(m.p / m.t * 100, 2) ELSE 0 END
+      FROM v, m;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- G-04  A ratification that expires leaves a trace
+-- ---------------------------------------------------------------------------
+-- Flipping the status is not enough: postings made under the decision stay in the
+-- books. Each expiry raises a compliance flag naming the decision; the postings
+-- themselves are reversed by fn_post_reversal_journal (A-01), after which
+-- loa_ratification.reversal_journal_id records the journal that did it.
+CREATE OR REPLACE FUNCTION fn_expire_overdue_ratifications()
+RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE v_count INT;
+BEGIN
+    WITH expired AS (
+        UPDATE loa_ratification SET status = 'expired', updated_at = NOW()
+         WHERE status = 'pending' AND ratify_by < CURRENT_DATE
+        RETURNING id, society_id, rule_key, decision_id, ratify_by)
+    INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
+    SELECT society_id, 'RATIFICATION_EXPIRED', 'loa_ratification', id,
+           format('Board decision %s (rule %s) was not ratified by the General Body by %s. '
+                  'Reverse any postings made under it with fn_post_reversal_journal.',
+                  decision_id, rule_key, ratify_by)
+      FROM expired
+    ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    RETURN v_count;
+END $$;
+

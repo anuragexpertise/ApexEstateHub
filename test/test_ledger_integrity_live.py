@@ -2,9 +2,8 @@
 ER.md Phase 1 — ledger integrity (A-01 immutable ledger, A-02 preventive
 double-entry, A-04 FY period locks), against a REAL Postgres.
 
-Setup: load database/estatehub.sql, apply
-database/upgrades/ER_phase1_ledger_integrity_2026_10.sql, run database/seed.py,
-then ESTATEHUB_LIVE_TESTS=1 with PGHOST/PGDATABASE/PGUSER (see live_db_gate.py).
+Setup: `python3 database/migrate.py --seed` (estatehub.sql already contains the
+ER.md controls), then ESTATEHUB_LIVE_TESTS=1 with PGHOST/PGDATABASE/PGUSER (see live_db_gate.py).
 Every test runs in a transaction that is rolled back; the demo data is untouched.
 
 The deferred balance trigger only fires at COMMIT, which a rolled-back test never
@@ -154,7 +153,7 @@ def test_entry_side_must_be_dr_or_cr(cur):
     a, _ = _accounts(cur)
     _expect_error(cur, lambda: cur.execute(
         "INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, amount, mode, status, journal_id) "
-        "VALUES (%s,NULL,CURRENT_DATE,%s,10,'cash','paid',1)", (SOC, a)), "ck_transactions_entry_side")
+        "VALUES (%s,NULL,CURRENT_DATE,%s,10,'cash','paid',1)", (SOC, a)), "entry_side")
 
 
 # ── A-01: reversal ────────────────────────────────────────────────────────────
