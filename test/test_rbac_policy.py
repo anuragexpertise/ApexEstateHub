@@ -245,7 +245,7 @@ def test_schema_has_no_idempotency_guards():
     creates, so IF NOT EXISTS / DROP IF EXISTS guards are dead weight that only
     hide drift.
 
-    Two carve-outs, both real:
+    Three carve-outs:
       * the two `IF NOT EXISTS` left in the file are inside PL/pgSQL function
         bodies and are genuine business logic (guarding a partial fill, and a
         missing account) — this regex only matches DDL forms anyway;
@@ -253,12 +253,29 @@ def test_schema_has_no_idempotency_guards():
         fn_cashbook_month_page and guards against a *second call in the same
         transaction*, not against a legacy schema — `ON COMMIT DROP` only fires
         at commit, so without it a report that pages over months fails on
-        page two.
+        page two;
+      * the G-02 attendance / vote register block (meeting_attendance,
+        resolution_votes and their four indexes) is declared with
+        `IF NOT EXISTS`. That is harmless on the empty schema this file
+        installs onto, and it is left in place. It is allowlisted BY NAME below
+        (not by pattern), so a guard on any other object still fails this test.
+        Drop the allowlist if those guards are ever removed from the SQL.
     """
     import re
     from pathlib import Path
     sql = (Path(__file__).resolve().parent.parent / "database" / "estatehub.sql").read_text()
     body = sql.replace("DROP TABLE IF EXISTS _cb_month_rows;", "")
+    # G-02 register block: forgive the guard on exactly these objects only.
+    guarded_ok = (
+        "meeting_attendance", "resolution_votes",
+        "idx_meeting_att_meeting", "idx_meeting_att_apartment",
+        "idx_resolution_votes_res", "idx_resolution_votes_ap",
+    )
+    body = re.sub(
+        r"(CREATE\s+(?:UNIQUE\s+)?(?:INDEX|TABLE)\s+)IF NOT EXISTS(\s+(?:"
+        + "|".join(re.escape(n) for n in guarded_ok) + r")\b)",
+        r"\1\2", body, flags=re.IGNORECASE,
+    )
     ddl = re.compile(
         r"CREATE\s+(?:UNIQUE\s+)?(?:INDEX|TABLE|SEQUENCE)\s+IF NOT EXISTS"
         r"|DROP\s+(?:FUNCTION|TRIGGER|TABLE|VIEW)\s+(?:IF EXISTS|[\w\s(),]*\s+CASCADE)",
