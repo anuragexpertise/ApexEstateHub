@@ -26,12 +26,18 @@ def cur_runner(cur):
 def approved_loan_resolution(run, society_id=1, on=DEFAULT_RESOLUTION_DATE, *, mtype="GBM", quorum=True,
                              passed=True, dcode="APPROVE_LOAN"):
     """A meeting plus a resolution that fn_check_loan_resolution accepts (by default). Returns the resolution id."""
+    from test import resolution_fixtures as rf
+    # Build a genuinely passed resolution (from the registers), then alter the meeting to the variant the test wants
+    # (no quorum, a committee meeting): those cases can no longer be inserted directly.
     mid = run("""INSERT INTO meetings (society_id, type, held_on, quorum_met, minutes_pdf)
-                 VALUES (%s, %s, %s, %s, 'minutes.pdf') RETURNING id""", (society_id, mtype, on, quorum))["id"]
+                 VALUES (%s, 'GBM', %s, TRUE, 'minutes.pdf') RETURNING id""", (society_id, on))["id"]
     dt = run("SELECT id, majority_pct FROM decision_types WHERE code = %s", (dcode,))
-    return run("""INSERT INTO resolutions (meeting_id, clause_id, decision_type_id, body, majority_required, passed, passed_on)
-                  VALUES (%s, 'BL_03', %s, 'Approve an owner loan', %s, %s, %s) RETURNING id""",
-               (mid, dt["id"], dt["majority_pct"], passed, on))["id"]
+    if not passed:                         # an unpassed (draft) resolution
+        return rf.insert_resolution(run, mid, "BL_03", dt["id"], "Approve an owner loan")
+    rid = rf.pass_for_code(run, mid, "BL_03", dcode, body="Approve an owner loan", passed_on=on)
+    if mtype != "GBM" or not quorum:
+        rf.set_meeting(run, mid, quorum=quorum, mtype=mtype)
+    return rid
 
 
 def disburse(run, apt, loan_date, principal, rate, mode, purpose, admin_id, *, society_id=1, due=None, resolution_id=None):

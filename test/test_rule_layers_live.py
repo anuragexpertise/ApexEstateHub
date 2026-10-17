@@ -48,14 +48,17 @@ def rule(cur, key, society=SOC, on=None):
 def backed_decision(cur, key, layer, status, value=None, text=None, dt="SET_SOCIETY_POLICY", minutes="m.pdf", quorum=True,
                     mtype="GBM", start=None):
     """Insert a decision directly, backed by a real passed resolution, bypassing the service (resolver tests)."""
-    cur.execute("INSERT INTO meetings (society_id,type,held_on,quorum_met,minutes_pdf) VALUES (%s,%s,%s,%s,%s) RETURNING id",
-                (SOC, mtype, date.today(), quorum, minutes))
+    from test import resolution_fixtures as rf
+    # The meeting is created as the right kind for the decision type so the resolution can genuinely pass (a General
+    # Body decision from its registers); the meeting is then altered to the variant the test wants (no quorum, a
+    # committee meeting, no minutes), which can no longer be inserted directly.
+    body = rf._runner(cur)("SELECT required_body AS v FROM decision_types WHERE code=%s", (dt,))["v"]
+    cur.execute("INSERT INTO meetings (society_id,type,held_on,quorum_met,minutes_pdf) VALUES (%s,%s,%s,TRUE,'m.pdf') RETURNING id",
+                (SOC, "GBM" if body == "GBM" else "MC", date.today()))
     m = cur.fetchone()["id"]
-    cur.execute("SELECT id, majority_pct FROM decision_types WHERE code=%s", (dt,))
-    d = cur.fetchone()
-    cur.execute("""INSERT INTO resolutions (meeting_id,clause_id,decision_type_id,body,majority_required,passed,passed_on)
-                   VALUES (%s,%s,%s,'test',%s,TRUE,%s) RETURNING id""", (m, key, d["id"], d["majority_pct"], date.today()))
-    res = cur.fetchone()["id"]
+    res = rf.pass_for_code(cur, m, key, dt, body="test")
+    rf.set_meeting(cur, m, quorum=quorum, mtype=mtype, minutes=minutes)
+    cur.execute("UPDATE meetings SET minutes_pdf = %s WHERE id = %s", (minutes, m))
     cur.execute("""INSERT INTO society_rule_decisions (society_id,rule_key,layer,status,value,value_text,resolution_id,effective_from)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""", (SOC, key, layer, status, value, text, res, start or date.today()))
     return cur.fetchone()["id"]
@@ -181,6 +184,17 @@ def _meeting_and_resolution(minutes="minutes.pdf", dt="SET_SOCIETY_POLICY", key=
     return mid, dt_row
 
 
+def _register(pg):
+    """Every flat present and voting FOR: a General Body resolution is passed from the registers (G-02), so the
+    tests that go through rra.create_resolution name the flats instead of typing percentages. (A committee
+    decision ignores them and takes votes_for_pct.)"""
+    pg.execute("SELECT fn_backfill_undivided_interest(%s)", (SOC,))
+    pg.execute("SELECT string_agg(flat_number, ',' ORDER BY id) AS f FROM apartments WHERE society_id=%s AND active", (SOC,))
+    flats = pg.fetchone()["f"]
+    return dict(present_flats=flats, for_flats=flats)
+
+
+
 def test_save_is_provisional_then_activated_by_a_passed_resolution(pg):
     ok, msg = rp.save_decision(5, "admin", SOC, "arrears_disqualify_days", 2, "adopted_with_variation", 45, TOMORROW,
                                "General Body resolved to shorten the arrears margin", actor_society_id=SOC)
@@ -189,7 +203,7 @@ def test_save_is_provisional_then_activated_by_a_passed_resolution(pg):
     mid, dt = _meeting_and_resolution()
     ok, msg = rra.create_resolution(5, "admin", SOC, mid, dt["id"], "arrears_disqualify_days", "Shorten the arrears margin to 45 days",
                                     float(dt["majority_pct"]), True, date.today(), "Recording the passed resolution", actor_society_id=SOC,
-                                    votes_for_pct=100, owners_present_pct=100)
+                                    votes_for_pct=100, **_register(pg))
     assert ok and "now active" in msg, msg
     r = rule(pg, "arrears_disqualify_days", on=TOMORROW)
     assert float(r["value"]) == 45 and r["layer"] == 2
@@ -219,7 +233,7 @@ def test_resolution_without_minutes_does_not_activate(pg):
     mid, dt = _meeting_and_resolution(minutes=None)
     ok, msg = rra.create_resolution(5, "admin", SOC, mid, dt["id"], "petty_cash_limit", "Lower the ceiling to 10000",
                                     float(dt["majority_pct"]), True, date.today(), "Recording the passed resolution", actor_society_id=SOC,
-                                    votes_for_pct=100, owners_present_pct=100)
+                                    votes_for_pct=100, **_register(pg))
     assert ok and "now active" not in msg
     assert float(rule(pg, "petty_cash_limit", on=TOMORROW)["value"]) == 20000
     err = rp._resolution_ok(SOC, "petty_cash_limit", 2, "adopted_with_variation", int(msg.split("#")[1].split(" ")[0].rstrip(".")))
@@ -232,7 +246,7 @@ def test_wrong_decision_type_or_layer_does_not_activate(pg):
     mid, dt = _meeting_and_resolution(dt="SET_SOCIETY_POLICY")          # a GBM policy resolution cannot back a Layer 3 decision
     ok, msg = rra.create_resolution(5, "admin", SOC, mid, dt["id"], "petty_cash_limit", "Lower ceiling", float(dt["majority_pct"]),
                                     True, date.today(), "Recording the passed resolution", actor_society_id=SOC,
-                                    votes_for_pct=100, owners_present_pct=100)
+                                    votes_for_pct=100, **_register(pg))
     assert ok and "now active" not in msg
     assert float(rule(pg, "petty_cash_limit", on=TOMORROW)["value"]) == 20000
 

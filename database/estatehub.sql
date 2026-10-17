@@ -4556,6 +4556,17 @@ BEGIN
     IF v_rec.acc_id IS NULL        THEN receipt_id := p_receipt_id; receipt_number := v_rec.receipt_number; msg := 'Error: No income account on this receipt'; RETURN NEXT; RETURN; END IF;
 
     v_mode := COALESCE(p_mode, v_rec.mode);
+    -- C-01: a receipt entered as UPI/cheque but confirmed as cash never met the
+    -- insert-time check, so test it here (excluding the receipt itself).
+    IF v_mode = 'cash' AND v_rec.mode IS DISTINCT FROM 'cash'
+       AND fn_cash_limit_mode(v_rec.society_id) = 'block'
+       AND fn_check_cash_receipt_limit(v_rec.society_id, v_rec.amount, v_mode, v_rec.entity_id,
+                                       v_rec.role, v_rec.receipt_date, v_rec.id) IS NOT NULL THEN
+        receipt_id := p_receipt_id; receipt_number := v_rec.receipt_number;
+        msg := 'Error: ' || fn_check_cash_receipt_limit(v_rec.society_id, v_rec.amount, v_mode,
+                   v_rec.entity_id, v_rec.role, v_rec.receipt_date, v_rec.id);
+        RETURN NEXT; RETURN;
+    END IF;
     -- Pass v_rec.acc_id as the credit account so a fund-specific bank
     -- mapping (fund_bank_account_map) can route this receipt's money into
     -- a dedicated account (e.g. a separate Corpus Fund account) instead of
@@ -6618,7 +6629,7 @@ BEGIN
     -- receipt of Rs 2,00,000 or more from one person in a day / for one
     -- transaction / for one event is prohibited; the penalty equals the amount.
     -- Refused in 'block' mode (the default), flagged in 'warn' mode.
-    v_cash_warning := fn_check_cash_receipt_limit(p_society_id, p_amount, p_mode);
+    v_cash_warning := fn_check_cash_receipt_limit(p_society_id, p_amount, p_mode, p_entity_id, p_role, p_receipt_date);
     IF v_cash_warning IS NOT NULL AND fn_cash_limit_mode(p_society_id) = 'block' THEN
         RAISE EXCEPTION '%', v_cash_warning USING ERRCODE = 'check_violation';
     END IF;
@@ -14318,7 +14329,8 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
  ('UP_AOA_2010', 'arrears_interest_pct', 'Bye-law 46(a) arrears interest rate (per month)', 'UP Model Bye-Laws, 2011', 'bye-law 46(a)', 'BL_46', 'non_statutory', 'model_bye_law', 'num', '%/month', 0, 100, 0, 100, ARRAY[]::TEXT[], ARRAY[2]::INT[], 'none', FALSE, 'gated', ARRAY[]::TEXT[], 'checked', DATE '2026-10-07', FALSE, FALSE, NULL),
  ('UP_AOA_2010', 'billing_basis_required', 'UP AOA society must bill common expenses by undivided interest (s.18(1))', 'UP Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010', 's.18(1)', NULL, 'statutory', 'state_act_rules', 'int', '0/1', 0, 1, 0, 1, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'hard_wired', ARRAY['fn_auto_generate_receivables']::TEXT[], 'checked', DATE '2026-10-07', FALSE, TRUE, NULL),
  ('UP_AOA_2010', 'fund_collection_mode', 'Sinking / Repair fund: when it is collected', 'UP Model Bye-Laws, 2011', 'bye-law 46; bye-law 3(1)(d)', 'BL_46', 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['on_bill', 'fy_close', 'none']::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_fund_rule', 'fn_auto_generate_receivables']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
- ('UP_AOA_2010', 'fund_allocation_basis', 'Sinking / Repair fund: how it is shared between flats', 'UP Model Bye-Laws, 2011', 'bye-law 46; Act s.18', 'BL_46', 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['per_sq_ft', 'construction_cost', 'undivided_interest', 'none']::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_fund_rule', 'fn_fund_levy_amount']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL)
+ ('UP_AOA_2010', 'fund_allocation_basis', 'Sinking / Repair fund: how it is shared between flats', 'UP Model Bye-Laws, 2011', 'bye-law 46; Act s.18', 'BL_46', 'non_statutory', 'engine_default', 'text', NULL, NULL, NULL, NULL, NULL, ARRAY['per_sq_ft', 'construction_cost', 'undivided_interest', 'none']::TEXT[], ARRAY[1, 2]::INT[], 'none', FALSE, 'policy', ARRAY['fn_fund_rule', 'fn_fund_levy_amount']::TEXT[], 'provisional', NULL, TRUE, TRUE, NULL),
+ ('UP_AOA_2010', 'cash_receipt_limit', 'Cash receipt ceiling per person per day (INR)', 'Income-tax Act, 2025 (s.269ST of the Income-tax Act, 1961)', 's.186 (1961 Act: s.269ST)', NULL, 'statutory', 'central', 'num', 'INR', 1, 100000000, 1, 100000000, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_check_cash_receipt_limit']::TEXT[], 'provisional', NULL, FALSE, TRUE, NULL)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference, effective_from) VALUES
@@ -14377,7 +14389,8 @@ INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, un
  ('UP_AOA_2010', 'arrears_interest_pct', 1.75, NULL, '%/month', 'SUPERSEDED (Oct 2026): the interest engine now reads apt_charges_fines_basis.apt_interest_pct, the rate the admin records on Apartment Charges, which is the General Body resolved rate under bye-law 46(a). This row is kept for reference only and is no longer read by any function.', DATE '2011-11-16'),
  ('UP_AOA_2010', 'billing_basis_required', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(1): common expenses are charged by percentage of undivided interest; for a UP AOA society this is the statutory basis, not an optional toggle.', DATE '2011-11-16'),
  ('UP_AOA_2010', 'fund_collection_mode', NULL, 'fy_close', NULL, 'Engine default for UP, not a statutory rate. Bye-law 46 lists the ways funds MAY be raised (shares, contributions and donations, common profits forming the nucleus of the reserve funds, loans); bye-law 3(1)(d) sends rent from common areas to a reserve for major repairs. No fixed sinking-fund rate was found, so by default no fund is added to the monthly bill and the reserve is built from surplus at FY close. A General Body resolution to levy a fund switches that fund to on_bill. Provisional: have an advocate confirm against the full Act, Rules and bye-laws.', DATE '2011-11-16'),
- ('UP_AOA_2010', 'fund_allocation_basis', NULL, 'undivided_interest', NULL, 'Engine default: owners share common expenses by their undivided interest (Act s.18(1), as used for maintenance billing), so a fund is shared the same way. Applies when a fund is billed on_bill; at FY close the reserve is one collective pool (fy_close does not allocate to flats).', DATE '2011-11-16')
+ ('UP_AOA_2010', 'fund_allocation_basis', NULL, 'undivided_interest', NULL, 'Engine default: owners share common expenses by their undivided interest (Act s.18(1), as used for maintenance billing), so a fund is shared the same way. Applies when a fund is billed on_bill; at FY close the reserve is one collective pool (fy_close does not allocate to flats).', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'cash_receipt_limit', 200000, NULL, 'INR', 'Central law, not a society choice: receiving Rs 2,00,000 or more in cash from one person in a day, for one transaction, or for one event is prohibited; penalty equals the amount. The 1961-to-2025 section mapping (269ST -> 186) rests on secondary tax-publisher sources; the bare Act text has not been checked, so this stays provisional until the society''s CA confirms it. The engine tests the day''s total from one person; ''one event'' cannot be known to it.', DATE '2011-11-16')
 ON CONFLICT DO NOTHING;
 -- <<< END GENERATED
 
@@ -17945,7 +17958,7 @@ CREATE TABLE IF NOT EXISTS meeting_attendance (
     apartment_id        INT NOT NULL REFERENCES apartments (id) ON DELETE RESTRICT,
     present_in_person   BOOLEAN NOT NULL DEFAULT FALSE,
     proxy_holder        VARCHAR(255),
-    undivided_interest_pct NUMERIC(5,2),
+    undivided_interest_pct NUMERIC(9,6),     -- same precision as apartments: rounded weights would not add up to 100
     attended_on         TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_meeting_att UNIQUE (meeting_id, apartment_id)
 );
@@ -17962,7 +17975,7 @@ CREATE TABLE IF NOT EXISTS resolution_votes (
     resolution_id       INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
     apartment_id        INT NOT NULL REFERENCES apartments (id) ON DELETE RESTRICT,
     vote                VARCHAR(10) NOT NULL CHECK (vote IN ('FOR','AGAINST','ABSTAIN')),
-    weight              NUMERIC(5,2),
+    weight              NUMERIC(9,6),   -- same precision as apartments.undivided_interest_pct
     voted_at            TIMESTAMP,
     CONSTRAINT uq_resolution_vote UNIQUE (resolution_id, apartment_id)
 );
@@ -18543,22 +18556,89 @@ $$;
 
 
 -- ---------------------------------------------------------------------------
--- C-01  Cash-receipt limit — Income-tax Act 2025 s.186 (s.269ST of the 1961 Act)
+-- C-01  Cash-receipt limit -- Income-tax Act 2025 s.186 (s.269ST of the 1961 Act)
 -- ---------------------------------------------------------------------------
--- NULL = fine; otherwise the reason the receipt is not allowed. Rs 2,00,000 is the
--- statutory figure (not a society policy), so it is a constant, not a regime
--- parameter. Whether the posting is refused or only flagged follows
--- fn_cash_limit_mode (default 'block').
-CREATE OR REPLACE FUNCTION fn_check_cash_receipt_limit(p_society_id INT, p_amount NUMERIC, p_mode VARCHAR)
-RETURNS TEXT LANGUAGE plpgsql IMMUTABLE AS $$
+-- NULL = fine; otherwise the reason the receipt is not allowed.
+--
+-- The figure is the regime parameter `cash_receipt_limit` (Rs 2,00,000), read through
+-- fn_regime_param_num so it is a dated, cited row like every other threshold. It is
+-- central law, so it applies to every society whatever its regime: when a society's
+-- regime defines no row, the statutory figure is used rather than "rule not
+-- applicable". The 269ST -> s.186 mapping rests on secondary sources and the bare Act
+-- has not been read, so the parameter is marked provisional (see schemes/*.toml).
+--
+-- The law tests the TOTAL received from one person in a day (or for one transaction
+-- or event), so the amount already received in cash from the same person on the same
+-- date is added. 'One event' cannot be known to the engine and is not modelled.
+-- Whether a breach is refused or only flagged follows fn_cash_limit_mode (default
+-- 'block').
+CREATE OR REPLACE FUNCTION fn_check_cash_receipt_limit(
+    p_society_id         INT,
+    p_amount             NUMERIC,
+    p_mode               VARCHAR,
+    p_entity_id          INT     DEFAULT NULL,
+    p_role               VARCHAR DEFAULT NULL,
+    p_receipt_date       DATE    DEFAULT NULL,
+    p_exclude_receipt_id INT     DEFAULT NULL
+) RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_limit   NUMERIC;
+    v_earlier NUMERIC := 0;
+    v_total   NUMERIC;
 BEGIN
-    IF p_mode IS DISTINCT FROM 'cash' OR p_amount < 200000 THEN RETURN NULL; END IF;
-    RETURN format('Cash receipt of Rs %s is Rs 2,00,000 or more: s.186 of the Income-tax Act 2025 '
-                  '(s.269ST of the 1961 Act) prohibits receiving it in cash from one person in a '
-                  'day, for one transaction or for one event. Use an account-payee cheque, '
-                  'bank transfer or UPI.', p_amount);
+    IF p_mode IS DISTINCT FROM 'cash' THEN RETURN NULL; END IF;
+    v_limit := COALESCE(fn_regime_param_num(p_society_id, 'cash_receipt_limit',
+                                            COALESCE(p_receipt_date, CURRENT_DATE)), 200000);
+    IF p_entity_id IS NOT NULL AND p_role IS NOT NULL AND p_receipt_date IS NOT NULL THEN
+        SELECT COALESCE(SUM(r.amount), 0) INTO v_earlier
+          FROM receipts r
+         WHERE r.society_id   = p_society_id
+           AND r.entity_id    = p_entity_id
+           AND r.role         = p_role
+           AND r.receipt_date = p_receipt_date
+           AND r.mode         = 'cash'
+           AND r.status      <> 'cancelled'
+           AND r.id IS DISTINCT FROM p_exclude_receipt_id;
+    END IF;
+    v_total := p_amount + v_earlier;
+    IF v_total < v_limit THEN RETURN NULL; END IF;
+    RETURN format('Cash receipt of Rs %s%s reaches Rs %s: s.186 of the Income-tax Act 2025 '
+                  '(s.269ST of the 1961 Act) prohibits receiving that much in cash from one person '
+                  'in a day, for one transaction or for one event. Use an account-payee cheque, '
+                  'bank transfer or UPI.',
+                  p_amount,
+                  CASE WHEN v_earlier > 0
+                       THEN format(' (Rs %s already received in cash from the same person on %s, Rs %s in all)',
+                                   v_earlier, p_receipt_date, v_total)
+                       ELSE '' END,
+                  to_char(v_limit, 'FM9999999990'));
 END;
 $$;
+
+-- Database-level enforcement: every code path that INSERTs into receipts passes
+-- through here, so none can forget the check. 'block' refuses the receipt; 'warn'
+-- records a compliance flag and lets it through.
+CREATE OR REPLACE FUNCTION trg_receipts_cash_limit() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE v_msg TEXT;
+BEGIN
+    IF NEW.mode IS DISTINCT FROM 'cash' OR NEW.status = 'cancelled' THEN RETURN NEW; END IF;
+    v_msg := fn_check_cash_receipt_limit(NEW.society_id, NEW.amount, NEW.mode,
+                                         NEW.entity_id, NEW.role, NEW.receipt_date, NEW.id);
+    IF v_msg IS NULL THEN RETURN NEW; END IF;
+    IF fn_cash_limit_mode(NEW.society_id) = 'block' THEN
+        RAISE EXCEPTION '%', v_msg USING ERRCODE = 'check_violation';
+    END IF;
+    INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
+    VALUES (NEW.society_id, 'CASH_RECEIPT_LIMIT', 'receipts', NEW.id, v_msg)
+    ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_receipts_cash_limit
+    BEFORE INSERT ON receipts
+    FOR EACH ROW EXECUTE FUNCTION trg_receipts_cash_limit();
 
 -- ---------------------------------------------------------------------------
 -- G-01  A resolution's validity is enforced in the database
@@ -18568,7 +18648,7 @@ $$;
 -- freezes a passed resolution, as regime_rule_audit already is.
 CREATE OR REPLACE FUNCTION trg_resolutions_validity() RETURNS trigger
 LANGUAGE plpgsql AS $$
-DECLARE v_quorum BOOLEAN;
+DECLARE v_quorum BOOLEAN; v_tally RECORD;
 BEGIN
     IF TG_OP = 'DELETE' THEN
         IF OLD.passed THEN
@@ -18591,6 +18671,26 @@ BEGIN
         IF NOT COALESCE(v_quorum, FALSE) THEN
             RAISE EXCEPTION 'Resolution cannot be passed: meeting % did not have a quorum.', NEW.meeting_id
                 USING ERRCODE = 'check_violation';
+        END IF;
+        -- G-02: a General Body resolution passes only on figures the registers add up to.
+        IF (SELECT required_body FROM decision_types WHERE id = NEW.decision_type_id) = 'GBM' THEN
+            SELECT * INTO v_tally FROM fn_resolution_tally(NEW.meeting_id, NEW.id);
+            IF v_tally.attendance_rows = 0 OR v_tally.vote_rows = 0 THEN
+                RAISE EXCEPTION 'A General Body resolution cannot be passed without its attendance and vote registers (use fn_pass_resolution).'
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            IF v_tally.votes_for_pct IS NULL
+               OR ABS(COALESCE(NEW.votes_for_pct, -1) - v_tally.votes_for_pct) > 0.01
+               OR ABS(COALESCE(NEW.owners_present_pct, -1) - v_tally.owners_present_pct) > 0.01 THEN
+                RAISE EXCEPTION 'Typed tallies (for % %%, present % %%) differ from the registers (for % %%, present % %%).',
+                    NEW.votes_for_pct, NEW.owners_present_pct, v_tally.votes_for_pct, v_tally.owners_present_pct
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            IF v_tally.owners_present_pct < fn_gbm_quorum_floor(
+                   (SELECT society_id FROM meetings WHERE id = NEW.meeting_id)) THEN
+                RAISE EXCEPTION 'Quorum not met on the attendance register (% %% present).', v_tally.owners_present_pct
+                    USING ERRCODE = 'check_violation';
+            END IF;
         END IF;
     END IF;
     RETURN NEW;
@@ -18625,6 +18725,198 @@ LANGUAGE sql STABLE AS $$
            CASE WHEN m.t > 0 THEN ROUND(m.p / m.t * 100, 2) ELSE 0 END
       FROM v, m;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- G-02 (completed)  A General Body resolution is passed FROM the registers
+-- ---------------------------------------------------------------------------
+-- The percentages that decide quorum (bye-law 9) and the majority (bye-laws 2(e), 8)
+-- are no longer typed in. For a decision type whose required body is the General
+-- Body, a resolution can be passed only if its stored votes_for_pct and
+-- owners_present_pct equal what the attendance and vote registers add up to, and the
+-- quorum floor is met on that derived figure. The weights are snapshotted from
+-- apartments.undivided_interest_pct when a flat is entered, so they are not typed
+-- either, and both registers are frozen once a resolution passed on them.
+-- Committee (MC) decisions are not covered: they rest on the committee minutes.
+
+-- Both percentages are shares of the society's TOTAL undivided interest (all owners),
+-- NOT of the votes cast: that is the legal denominator. (fn_resolution_vote_summary
+-- above reports for/cast, which is a different figure.)
+CREATE OR REPLACE FUNCTION fn_resolution_tally(p_meeting_id INT, p_resolution_id INT)
+RETURNS TABLE (total_interest NUMERIC, unweighted_flats INT, present_interest NUMERIC, for_interest NUMERIC,
+               owners_present_pct NUMERIC, votes_for_pct NUMERIC, attendance_rows INT, vote_rows INT)
+LANGUAGE sql STABLE AS $$
+    WITH m AS (SELECT society_id FROM meetings WHERE id = p_meeting_id),
+    a AS (SELECT COALESCE(SUM(undivided_interest_pct), 0) AS tot,
+                 COUNT(*) FILTER (WHERE undivided_interest_pct IS NULL)::INT AS missing
+            FROM apartments, m WHERE apartments.society_id = m.society_id AND apartments.active),
+    p AS (SELECT COALESCE(SUM(undivided_interest_pct) FILTER (WHERE present_in_person), 0) AS pres,
+                 COUNT(*)::INT AS n
+            FROM meeting_attendance WHERE meeting_id = p_meeting_id),
+    v AS (SELECT COALESCE(SUM(weight) FILTER (WHERE vote = 'FOR'), 0) AS f, COUNT(*)::INT AS n
+            FROM resolution_votes WHERE resolution_id = p_resolution_id)
+    SELECT a.tot, a.missing, p.pres, v.f,
+           CASE WHEN a.tot > 0 AND a.missing = 0 THEN LEAST(100, ROUND(p.pres / a.tot * 100, 2)) END,
+           CASE WHEN a.tot > 0 AND a.missing = 0 THEN LEAST(100, ROUND(v.f   / a.tot * 100, 2)) END,
+           p.n, v.n
+      FROM a, p, v;
+$$;
+
+-- The quorum floor: the Model Bye-Laws' 30% (bye-law 9); a society may raise it, never lower it.
+CREATE OR REPLACE FUNCTION fn_gbm_quorum_floor(p_society_id INT) RETURNS NUMERIC
+LANGUAGE sql STABLE AS $$
+    SELECT GREATEST(30, COALESCE(fn_regime_param_num(p_society_id, 'poll_quorum_pct'), 30));
+$$;
+
+-- Enter (or replace) the registers for a DRAFT resolution. Arguments are apartment ids.
+-- p_present / p_proxy NULL means "leave the meeting's attendance register as it is".
+-- A flat that votes must be present in person or by proxy, and may vote only once.
+CREATE OR REPLACE FUNCTION fn_record_resolution_register(
+    p_resolution_id INT, p_present INT[], p_proxy INT[],
+    p_for INT[], p_against INT[], p_abstain INT[]
+) RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_res resolutions%ROWTYPE;
+    v_soc INT;
+    v_all INT[];
+    v_bad INT;
+BEGIN
+    SELECT * INTO v_res FROM resolutions WHERE id = p_resolution_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Resolution % not found', p_resolution_id; END IF;
+    IF v_res.status <> 'draft' THEN
+        RAISE EXCEPTION 'Resolution % is %: its registers can no longer be changed.', p_resolution_id, v_res.status;
+    END IF;
+    SELECT society_id INTO v_soc FROM meetings WHERE id = v_res.meeting_id;
+
+    v_all := COALESCE(p_present, '{}') || COALESCE(p_proxy, '{}') || COALESCE(p_for, '{}')
+          || COALESCE(p_against, '{}') || COALESCE(p_abstain, '{}');
+    SELECT COUNT(*) INTO v_bad FROM unnest(v_all) AS x(id)
+     WHERE NOT EXISTS (SELECT 1 FROM apartments ap WHERE ap.id = x.id AND ap.society_id = v_soc AND ap.active);
+    IF v_bad > 0 THEN RAISE EXCEPTION 'The register names % flat(s) that are not active flats of this society.', v_bad; END IF;
+    IF (SELECT COUNT(*) FROM unnest(COALESCE(p_for, '{}') || COALESCE(p_against, '{}') || COALESCE(p_abstain, '{}')) x)
+       <> (SELECT COUNT(DISTINCT x) FROM unnest(COALESCE(p_for, '{}') || COALESCE(p_against, '{}') || COALESCE(p_abstain, '{}')) x) THEN
+        RAISE EXCEPTION 'A flat appears more than once in the vote lists: one vote per flat.';
+    END IF;
+    IF EXISTS (SELECT 1 FROM unnest(COALESCE(p_present, '{}')) a JOIN unnest(COALESCE(p_proxy, '{}')) b ON a = b) THEN
+        RAISE EXCEPTION 'A flat cannot be both present in person and by proxy.';
+    END IF;
+
+    IF p_present IS NOT NULL OR p_proxy IS NOT NULL THEN
+        IF EXISTS (SELECT 1 FROM resolutions WHERE meeting_id = v_res.meeting_id AND passed) THEN
+            RAISE EXCEPTION 'Attendance for meeting % is frozen: a resolution has already passed on it.', v_res.meeting_id;
+        END IF;
+        DELETE FROM meeting_attendance WHERE meeting_id = v_res.meeting_id;
+        INSERT INTO meeting_attendance (meeting_id, apartment_id, present_in_person, proxy_holder, undivided_interest_pct)
+        SELECT v_res.meeting_id, ap.id, (ap.id = ANY(COALESCE(p_present, '{}'))),
+               CASE WHEN ap.id = ANY(COALESCE(p_proxy, '{}')) THEN 'proxy' END, ap.undivided_interest_pct
+          FROM apartments ap
+         WHERE ap.id = ANY(COALESCE(p_present, '{}') || COALESCE(p_proxy, '{}'));
+    END IF;
+
+    -- Whatever the attendance register now holds, a flat that votes must be on it
+    -- (present in person or by proxy).
+    IF EXISTS (SELECT 1 FROM unnest(COALESCE(p_for, '{}') || COALESCE(p_against, '{}') || COALESCE(p_abstain, '{}')) x(id)
+                WHERE NOT EXISTS (SELECT 1 FROM meeting_attendance ma
+                                   WHERE ma.meeting_id = v_res.meeting_id AND ma.apartment_id = x.id)) THEN
+        RAISE EXCEPTION 'A flat that votes must be present in person or by proxy.';
+    END IF;
+
+    DELETE FROM resolution_votes WHERE resolution_id = p_resolution_id;
+    INSERT INTO resolution_votes (resolution_id, apartment_id, vote, weight, voted_at)
+    SELECT p_resolution_id, ap.id,
+           CASE WHEN ap.id = ANY(COALESCE(p_for, '{}')) THEN 'FOR'
+                WHEN ap.id = ANY(COALESCE(p_against, '{}')) THEN 'AGAINST' ELSE 'ABSTAIN' END,
+           ap.undivided_interest_pct, NOW()
+      FROM apartments ap
+     WHERE ap.id = ANY(COALESCE(p_for, '{}') || COALESCE(p_against, '{}') || COALESCE(p_abstain, '{}'));
+    RETURN 'Register recorded.';
+END;
+$$;
+
+-- Pass (or reject) a draft General Body resolution from its registers.
+-- Returns the outcome in words; the resolution row is changed only when the outcome is
+-- 'Passed' (status 'passed') or 'Not carried' (status 'rejected'). A missed quorum
+-- leaves it a draft: the meeting can be adjourned and the register re-entered.
+CREATE OR REPLACE FUNCTION fn_pass_resolution(p_resolution_id INT, p_passed_on DATE, p_user INT DEFAULT NULL)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_res resolutions%ROWTYPE;
+    v_dt  decision_types%ROWTYPE;
+    v_mt  meetings%ROWTYPE;
+    t     RECORD;
+    v_floor NUMERIC;
+BEGIN
+    SELECT * INTO v_res FROM resolutions WHERE id = p_resolution_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Resolution % not found', p_resolution_id; END IF;
+    IF v_res.status <> 'draft' THEN RAISE EXCEPTION 'Resolution % is already %.', p_resolution_id, v_res.status; END IF;
+    SELECT * INTO v_dt FROM decision_types WHERE id = v_res.decision_type_id;
+    IF v_dt.required_body <> 'GBM' THEN
+        RAISE EXCEPTION 'Decision type % is decided by the committee, not the General Body: record it from the committee minutes.', v_dt.code;
+    END IF;
+    SELECT * INTO v_mt FROM meetings WHERE id = v_res.meeting_id;
+    IF v_mt.type NOT IN ('GBM', 'EGM') THEN RAISE EXCEPTION 'This decision type needs a General Body meeting (GBM/EGM).'; END IF;
+    IF p_passed_on IS NULL THEN RAISE EXCEPTION 'Give the date the resolution was passed.'; END IF;
+    IF v_dt.needs_advocate_opinion AND LENGTH(COALESCE(TRIM(v_res.advocate_opinion_ref), '')) < 5 THEN
+        RAISE EXCEPTION 'This decision departs from the Model Bye-Laws or ratifies the software''s thresholds, so it needs a reference to the written advocate''s opinion.';
+    END IF;
+
+    SELECT * INTO t FROM fn_resolution_tally(v_res.meeting_id, v_res.id);
+    IF t.total_interest = 0 THEN
+        RAISE EXCEPTION 'No flat has an undivided-interest percentage, so votes cannot be weighted (Act s.5(2); run fn_backfill_undivided_interest or key in the Declaration figures).';
+    END IF;
+    IF t.unweighted_flats > 0 THEN
+        RAISE EXCEPTION '% active flat(s) have no undivided-interest percentage, so the tally cannot be computed.', t.unweighted_flats;
+    END IF;
+    IF t.attendance_rows = 0 OR t.vote_rows = 0 THEN
+        RAISE EXCEPTION 'Record the attendance and vote registers before passing a General Body resolution.';
+    END IF;
+
+    v_floor := fn_gbm_quorum_floor(v_mt.society_id);
+    IF t.owners_present_pct < v_floor THEN
+        RETURN format('Quorum not met: %s%% of owners (by undivided interest) present in person, %s%% needed. The resolution stays a draft; adjourn and re-enter the register.',
+                      t.owners_present_pct, v_floor);
+    END IF;
+
+    UPDATE meetings SET quorum_met = TRUE WHERE id = v_mt.id AND NOT quorum_met;
+
+    IF t.votes_for_pct < v_res.majority_required THEN
+        UPDATE resolutions SET status = 'rejected', votes_for_pct = t.votes_for_pct,
+               owners_present_pct = t.owners_present_pct WHERE id = v_res.id;
+        RETURN format('Not carried: %s%% of ALL votes (by undivided interest) in favour, %s%% needed.',
+                      t.votes_for_pct, v_res.majority_required);
+    END IF;
+
+    UPDATE resolutions SET status = 'passed', passed = TRUE, passed_on = p_passed_on,
+           votes_for_pct = t.votes_for_pct, owners_present_pct = t.owners_present_pct
+     WHERE id = v_res.id;
+    RETURN format('Passed: %s%% of owners present in person, %s%% of ALL votes in favour (needed %s%%).',
+                  t.owners_present_pct, t.votes_for_pct, v_res.majority_required);
+END;
+$$;
+
+-- Registers are frozen once a resolution has passed on them.
+CREATE OR REPLACE FUNCTION trg_register_freeze() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE v_locked BOOLEAN;
+BEGIN
+    IF TG_TABLE_NAME = 'resolution_votes' THEN
+        SELECT passed INTO v_locked FROM resolutions
+         WHERE id = COALESCE(NEW.resolution_id, OLD.resolution_id);
+    ELSE
+        SELECT EXISTS (SELECT 1 FROM resolutions
+                        WHERE meeting_id = COALESCE(NEW.meeting_id, OLD.meeting_id) AND passed) INTO v_locked;
+    END IF;
+    IF COALESCE(v_locked, FALSE) THEN
+        RAISE EXCEPTION 'The % register is frozen: a resolution has already passed on it.', TG_TABLE_NAME
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+CREATE TRIGGER trg_resolution_votes_freeze BEFORE INSERT OR UPDATE OR DELETE ON resolution_votes
+    FOR EACH ROW EXECUTE FUNCTION trg_register_freeze();
+CREATE TRIGGER trg_meeting_attendance_freeze BEFORE INSERT OR UPDATE OR DELETE ON meeting_attendance
+    FOR EACH ROW EXECUTE FUNCTION trg_register_freeze();
 
 -- ---------------------------------------------------------------------------
 -- G-04  A ratification that expires leaves a trace

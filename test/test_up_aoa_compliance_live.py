@@ -195,7 +195,8 @@ def _pending_expense(cur, amount, mode):
 
 
 def test_cash_over_limit_is_flagged_in_warn_mode_and_still_posts(cur):
-    cur.execute("UPDATE societies SET cash_limit_mode=NULL WHERE id=%s", (SOC,))
+    # The engine default is 'block' (see schemes/*.toml); warn is a society's own relaxation.
+    cur.execute("UPDATE societies SET cash_limit_mode='warn' WHERE id=%s", (SOC,))
     exp = _pending_expense(cur, 5000, "cash")
     admin = one(cur, "SELECT id FROM users WHERE role='admin' LIMIT 1")[0]
     msg = one(cur, "SELECT msg FROM fn_verify_expense(%s,%s,'cash')", (exp, admin))[0]
@@ -556,7 +557,7 @@ def _make_layer3_decision(cur, rule_key="petty_cash_limit", value=15000):
     m_id = cur.fetchone()[0]
     cur.execute("SELECT id, majority_pct FROM decision_types WHERE code='SET_BOARD_PARAM'")
     d = cur.fetchone()
-    cur.execute("INSERT INTO resolutions (meeting_id,clause_id,decision_type_id,body,majority_required,passed,passed_on) VALUES (%s,%s,%s,'test',%s,TRUE,%s) RETURNING id",
+    cur.execute("INSERT INTO resolutions (meeting_id,clause_id,decision_type_id,body,majority_required,votes_for_pct,passed,status,passed_on) VALUES (%s,%s,%s,'test',%s,100,TRUE,'passed',%s) RETURNING id",
                 (m_id, rule_key, d[0], d[1], date.today()))
     r_id = cur.fetchone()[0]
     cur.execute("INSERT INTO society_rule_decisions (society_id,rule_key,layer,status,value,resolution_id,effective_from) VALUES (%s,%s,3,'adopted_with_variation',%s,%s,%s) RETURNING id",

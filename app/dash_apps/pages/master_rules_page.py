@@ -368,13 +368,27 @@ def render_resolution_form(society_id: int | None, p: str = "mrl") -> html.Div:
             className="mb-2"),
         _label("Resolution Body"),
         dbc.Textarea(id=f"{p}-res-body", rows=4, size="sm", className="mb-2", placeholder="Full text of the resolution..."),
+        html.Div(
+            html.Small("General Body decisions are passed from the registers, not from typed percentages. List the flat numbers "
+                       "(separated by commas or spaces); each flat is weighted by its undivided interest and the quorum and "
+                       "majority are worked out for you.", className="text-muted"),
+            className="mb-2"),
         dbc.Row([
-            dbc.Col([_label("Owners present in person (%) - quorum"),
-                     dbc.Input(id=f"{p}-res-present", type="number", min=0, max=100, step="0.01", size="sm")], md=4),
-            dbc.Col([_label("Votes in favour (% of ALL votes, by undivided interest)"),
-                     dbc.Input(id=f"{p}-res-votes-for", type="number", min=0, max=100, step="0.01", size="sm")], md=4),
+            dbc.Col([_label("Flats present IN PERSON (counts toward quorum)"),
+                     dbc.Textarea(id=f"{p}-res-present", rows=2, size="sm", placeholder="A-101, A-102, B-201 ...")], md=6),
+            dbc.Col([_label("Flats present by PROXY (may vote; not counted for quorum)"),
+                     dbc.Textarea(id=f"{p}-res-proxy", rows=2, size="sm")], md=6),
+        ], className="mb-2"),
+        dbc.Row([
+            dbc.Col([_label("Voted FOR"), dbc.Textarea(id=f"{p}-res-for", rows=2, size="sm")], md=4),
+            dbc.Col([_label("Voted AGAINST"), dbc.Textarea(id=f"{p}-res-against", rows=2, size="sm")], md=4),
+            dbc.Col([_label("ABSTAINED"), dbc.Textarea(id=f"{p}-res-abstain", rows=2, size="sm")], md=4),
+        ], className="mb-2"),
+        dbc.Row([
+            dbc.Col([_label("Managing Committee decisions only: votes in favour (%) from the minutes"),
+                     dbc.Input(id=f"{p}-res-votes-for", type="number", min=0, max=100, step="0.01", size="sm")], md=6),
             dbc.Col([_label("Advocate's opinion reference (if the decision type needs one)"),
-                     dbc.Input(id=f"{p}-res-advocate", type="text", maxLength=255, size="sm")], md=4),
+                     dbc.Input(id=f"{p}-res-advocate", type="text", maxLength=255, size="sm")], md=6),
         ], className="mb-2"),
         dbc.Row([
             dbc.Col([_label("Passed"), dbc.Checkbox(id=f"{p}-res-passed", label="Mark as passed", value=False)], md=4),

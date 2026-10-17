@@ -293,7 +293,9 @@ def _meeting(cur, quorum):
 
 
 def _resolution(cur, meeting, **kw):
-    cols = dict(meeting_id=meeting, decision_type_id=one(cur, "SELECT MIN(id) FROM decision_types"),
+    # A committee (MC) decision type: these tests cover the generic CHECK / quorum / freeze rules. A
+    # General Body decision is passed from the registers (test_resolution_registers_live.py).
+    cols = dict(meeting_id=meeting, decision_type_id=one(cur, "SELECT id FROM decision_types WHERE code='SET_BOARD_PARAM'"),
                 body="test", majority_required=66.67, votes_for_pct=80, passed=False, status="draft",
                 passed_on=None)
     cols.update(kw)
