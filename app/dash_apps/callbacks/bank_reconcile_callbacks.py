@@ -55,6 +55,7 @@ import base64
 import io
 import uuid
 from datetime import timedelta
+from decimal import Decimal
 
 import pandas as pd
 from dash import Input, Output, State, ALL, ctx, no_update, html, dcc
@@ -440,73 +441,106 @@ def _resolve_account_id(sid, nature):
 
 def post_unmatched_bank_lines(sid, actor_id):
     """Admin-only: post all unmatched bank_statement_lines (no match, not
-    yet reconciled) as transactions so they appear in the Balance Sheet.
-    Returns the count of transactions created."""
+    yet reconciled) to the ledger so they appear in the Balance Sheet.
+    Returns the count of lines posted.
+
+    Each line becomes ONE balanced journal — the statement's own bank account
+    against the counter account — written, together with the "this line is now
+    posted" flag, in a single SQL statement (ER.md A-02: a half-written voucher
+    is rejected at commit, and a crash between the posting and the flag would
+    otherwise let the next run post the same line twice).
+
+    A statement DEBIT is money leaving the bank (Dr counter / Cr bank); a
+    CREDIT is money arriving (Dr bank / Cr counter).
+    """
     lines = db.execute(
-        """SELECT id, txn_date, description, debit, credit, reference_no,
-                  balance FROM bank_statement_lines
-           WHERE society_id=%s AND matched_id IS NULL AND reconciled=FALSE""",
+        """SELECT id, txn_date, description, debit, credit, bank_acc_id
+           FROM bank_statement_lines
+           WHERE society_id=%s AND matched_id IS NULL AND reconciled=FALSE
+           ORDER BY id""",
         (sid,), fetch_all=True,
     ) or []
+    primary = get_primary_bank_account_id(sid)
     created = 0
     for line in lines:
-        desc = line.get("description") or ("Bank Charge" if debit else "Bank Credit")
-        amt = float(debit) if debit else float(credit)
-        side = "Dr" if debit else "Cr"
-        nature = "expense" if debit else "income"
-        # Post the unmatched bank line through a single disciplined transaction
-        # path. Bank-reconciled behaviour is unchanged (mode="bank" keeps these
-        # rows out of the cashbook / CiH logic). We do not re-apply the cash-limit
-        # guard here because a bank statement line is the bank's own record of
-        # money already moved; any cash-limit issue belongs on the underlying
-        # receipt/expense row, not on the statement posting.
-        acc_id = _resolve_account_id(sid, nature)
-        if acc_id is None:
-            continue
-        db.execute(
-            """INSERT INTO transactions
-               (society_id, entry_side, trx_date, acc_id, entity_id, role,
-                acc_particulars, amount, mode, status, created_by,
-                bank_reconciled, bank_line_id, source_table, source_id)
-               VALUES (%s,%s,%s,%s,NULL,%s,%s,%s,%s,%s,%s,FALSE,%s,%s,%s)""",
-            (sid, side, line["txn_date"], acc_id, nature, desc, amt, "bank", "paid", actor_id,
-             line["id"], "bank_statement_lines", line["id"]),
+        debit, credit = line.get("debit"), line.get("credit")
+        is_debit = bool(debit)
+        amt = Decimal(str(debit if is_debit else credit))
+        counter_acc = _resolve_account_id(sid, "expense" if is_debit else "income")
+        bank_acc = line.get("bank_acc_id") or primary
+        if counter_acc is None or bank_acc is None or amt <= 0:
+            continue    # left unposted and visible in the unreconciled list
+        desc = (line.get("description") or ("Bank Charge" if is_debit else "Bank Credit"))[:200]
+        counter_side, bank_side = ("Dr", "Cr") if is_debit else ("Cr", "Dr")
+        jid = db.execute("SELECT NEXTVAL('seq_transaction_number') AS jid", fetch_one=True)["jid"]
+        # Bank-reconciled behaviour is unchanged: mode="bank" keeps these rows
+        # out of the cashbook / CiH logic, and bank_reconciled stays FALSE until
+        # matched. The cash-limit guard is not re-applied: a statement line is
+        # the bank's own record of money already moved.
+        row = db.execute(
+            """WITH claim AS (
+                   UPDATE bank_statement_lines SET reconciled=TRUE
+                   WHERE id=%s AND reconciled=FALSE AND matched_id IS NULL
+                   RETURNING id
+               )
+               INSERT INTO transactions
+                   (society_id, entry_side, trx_date, acc_id, entity_id, role,
+                    acc_particulars, amount, mode, status, created_by,
+                    bank_reconciled, bank_line_id, source_table, source_id, journal_id)
+               SELECT %s, v.side, %s, v.acc, NULL, 'other', %s, %s, 'bank', 'paid', %s,
+                      FALSE, claim.id, 'bank_statement_lines', claim.id, %s
+               FROM claim, (VALUES (%s::varchar, %s::int), (%s::varchar, %s::int)) AS v(side, acc)
+               RETURNING id""",
+            (line["id"], sid, line["txn_date"], desc, amt, actor_id, jid,
+             counter_side, counter_acc, bank_side, bank_acc),
             fetch_one=True,
         )
-        created += 1
-        # Mark line as reconciled (posted as transaction)
-        db.execute(
-            "UPDATE bank_statement_lines SET reconciled=TRUE WHERE id=%s",
-            (line["id"],),
-        )
+        if row:
+            created += 1
     return created
 
 
 def delete_unreconciled_bank_txns(sid, actor_id):
-    """Admin-only: delete bank-import draft transactions that have NOT been
-    reconciled (bank_reconciled=FALSE and status='pending'). Returns count.
+    """Admin-only: withdraw bank-import postings that have NOT been reconciled
+    to a receipt/expense (bank_reconciled=FALSE, source bank_statement_lines).
+    Returns the number of journals reversed.
 
-    A-01 (ER.md): the trg_transactions_immutable trigger on transactions
-    explicitly permits deletion of rows where status='pending' AND
-    source_table='bank_statement_lines'.  These are pre-posting placeholders,
-    not confirmed ledger entries.  Confirmed (status='paid') rows are
-    protected — correct those via fn_post_reversal_journal instead.
-    The AND status='pending' clause below is intentional and required by the
-    immutable-ledger constraint.
+    ER.md A-01: posted ledger lines are never deleted (trg_transactions_immutable
+    refuses it). Each such journal is cancelled by posting a reversing journal
+    through fn_post_reversal_journal, which keeps the audit trail intact; the
+    statement lines those postings came from stay (the ledger references them)
+    and remain marked posted, so they cannot be posted a second time. Only
+    statement lines that never reached the ledger are removed.
+
+    Before this change the function ran DELETE ... AND status='pending', but
+    post_unmatched_bank_lines posts status='paid', so it never matched anything.
     """
-    result = db.execute(
-        """DELETE FROM transactions
-           WHERE society_id=%s
-             AND bank_reconciled=FALSE
-             AND source_table='bank_statement_lines'
-             AND status='pending'""",
-        (sid,),
-    )
+    jids = db.execute(
+        """SELECT DISTINCT t.journal_id
+           FROM transactions t
+           WHERE t.society_id=%s
+             AND t.source_table='bank_statement_lines'
+             AND t.bank_reconciled=FALSE
+             AND NOT t.is_reversal
+             AND NOT EXISTS (SELECT 1 FROM transactions r WHERE r.reverses_id = t.id)
+           ORDER BY t.journal_id""",
+        (sid,), fetch_all=True,
+    ) or []
+    reversed_count = 0
+    for r in jids:
+        db.execute(
+            "SELECT fn_post_reversal_journal(%s, %s, %s, %s)",
+            (sid, r["journal_id"], "Unreconciled bank-import posting withdrawn", actor_id),
+            fetch_one=True,
+        )
+        reversed_count += 1
     db.execute(
-        "DELETE FROM bank_statement_lines WHERE society_id=%s AND matched_id IS NULL AND reconciled=FALSE",
+        """DELETE FROM bank_statement_lines l
+           WHERE l.society_id=%s AND l.matched_id IS NULL AND l.reconciled=FALSE
+             AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.bank_line_id = l.id)""",
         (sid,),
     )
-    return result
+    return reversed_count
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -922,6 +956,6 @@ def register_bank_reconcile_callbacks(app):
         deleted = delete_unreconciled_bank_txns(sid, actor_id)
         invalidate_kpi_cache()
         return html.Div(
-            f"Deleted {deleted} unreconciled transaction(s) and their bank lines.",
+            f"Withdrew {deleted} unreconciled bank-import posting(s) by reversing journal; unposted bank lines were removed.",
             style={"color": "#de5c52", "fontWeight": "600"},
         )

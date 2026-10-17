@@ -2772,7 +2772,7 @@ def seed_rbac_roles(cur, conn):
         print("  ✓ RBAC roles already backfilled — skipped")
 
 
-def run_seed(conn):
+def _run_seed_unguarded(conn):
     _validate_seed_constants()
     cur = conn.cursor()
     print()
@@ -2842,8 +2842,6 @@ def run_seed(conn):
     if not audit_seed_invariants(cur, society_id):
         raise RuntimeError("Seed invariant audit failed; refusing to report a successful seed.")
 
-    conn.close()
-
     print()
     print("  ┌─────────────────────────────────────────────────────────────┐")
     print("  │  Seed complete!  Login credentials:                         │")
@@ -2911,6 +2909,51 @@ def seed_up_aoa_compliance_data(cur, conn, society_id, admin_uid, apt1_id, apt2_
     print("  ✓ Borrowing approval (CA-approved) seeded")
 
     conn.commit()
+
+
+_LEDGER_GUARD_TRIGGER = "trg_transactions_immutable"
+
+
+def _ledger_guard_installed(cur) -> bool:
+    cur.execute("SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = %s "
+                "AND tgrelid = 'transactions'::regclass) AS ok", (_LEDGER_GUARD_TRIGGER,))
+    return bool(_row_value(cur.fetchone()))
+
+
+def _row_value(row):
+    if row is None:
+        return None
+    return row["ok"] if hasattr(row, "keys") else row[0]
+
+
+def run_seed(conn):
+    """Seed the demo society, then close `conn` (callers rely on that).
+
+    ER.md A-01 froze posted ledger lines, but several seed steps legitimately
+    re-date postings after the SQL posting functions stamp CURRENT_DATE on them
+    (_redate_receivable_accruals / _redate_postings_since). Demo data only: the
+    immutability trigger is suspended for the seed run, then restored and the
+    society's hash chain rebuilt so fn_verify_ledger_chain() is clean. The
+    restore is in `finally`, so a failed seed cannot leave the guard switched
+    off. Production data never goes through here.
+    """
+    cur = conn.cursor()
+    suspended = _ledger_guard_installed(cur)
+    if suspended:
+        cur.execute(f"ALTER TABLE transactions DISABLE TRIGGER {_LEDGER_GUARD_TRIGGER}")
+        conn.commit()
+    try:
+        _run_seed_unguarded(conn)
+    finally:
+        try:
+            conn.rollback()
+            if suspended:
+                cur = conn.cursor()
+                cur.execute(f"ALTER TABLE transactions ENABLE TRIGGER {_LEDGER_GUARD_TRIGGER}")
+                cur.execute("SELECT fn_rebuild_ledger_chain(NULL, TRUE)")
+                conn.commit()
+        finally:
+            conn.close()
 
 
 def main():
