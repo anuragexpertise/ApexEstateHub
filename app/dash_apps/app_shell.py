@@ -94,6 +94,7 @@ ROLE_CONFIG = {
             {"label": "Societies",      "href": "/dashboard/master-societies",   "icon": "fa-building"},
             {"label": "RWA Compliance (UP)", "href": "/dashboard/master-compliance-up", "icon": "fa-gavel"},
             {"label": "AOA Rule Editor", "href": "/dashboard/master-aoa-rules", "icon": "fa-sliders-h"},
+            {"label": "Tests",          "href": "/dashboard/master-tests",   "icon": "fa-flask"},
             {"label": "Settings",       "href": "/dashboard/master-settings", "icon": "fa-cog"},
         ],
     },

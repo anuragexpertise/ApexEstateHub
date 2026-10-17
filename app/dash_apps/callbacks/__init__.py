@@ -50,7 +50,8 @@ def register_callbacks(app):
         "fund_management_callbacks",     # 13f. Fund Management (admin only)
         "up_compliance_callbacks",       # 13g. UP AOA Compliance (admin only)
         "master_rules_callbacks",        # 13h. AOA Rule Editor (master only)
-        "governance_callbacks",          # 13i. Settings governance tabs (admin, own society)
+        "master_tests_callbacks",        # 13i. Master Tests tab (run test files)
+        "governance_callbacks",          # 13j. Settings governance tabs (admin, own society)
         "bulk_enroll_callbacks",      # 14. Bulk Enroll
         "bank_reconcile_callbacks",   # 14a2. Bank Reconcile
         "assign_to_callbacks",        # 14b. Assign-To
