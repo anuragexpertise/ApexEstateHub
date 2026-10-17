@@ -745,6 +745,9 @@ def master_portal_page(active_tab="dashboard", sid=None) -> html.Div:
             ),
         ], className="portal-page")
 
+    if active_tab == "tests":
+        return master_tests_page(c)
+
     return html.Div([
         _page_title("fa-crown", c, "Societies", "Manage all societies on this platform"),
         _sec_hdr("Platform Overview", "click any card to drill down", "fa-chart-bar"),
@@ -756,7 +759,86 @@ def master_portal_page(active_tab="dashboard", sid=None) -> html.Div:
     ], className="portal-page")
 
 
-# ════════════════════════════════════════════════════════════════════════════
+def _discover_tests():
+    """List discoverable test files under the project test/ directory."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[3]  # app/dash_apps/pages/ -> project root
+    test_dir = root / "test"
+    tests = []
+    if test_dir.is_dir():
+        for f in sorted(test_dir.glob("test_*.py")):
+            tests.append({"name": f.name, "file": f.name})
+    return tests
+
+
+def master_tests_page(c) -> html.Div:
+    """Master portal Tests tab — list test files with Run buttons + output pane."""
+    tests = _discover_tests()
+    rows = []
+    for t in tests:
+        rows.append(
+            html.Tr([
+                html.Td(t["name"], style={"fontSize": "12px", "fontWeight": "600", "color": "#15304f"}),
+                html.Td(t["file"], style={"fontSize": "11px", "color": "#666", "fontFamily": "monospace"}),
+                html.Td(
+                    dbc.Button(
+                        "Run",
+                        id={"type": "run-test-btn", "test": t["file"]},
+                        n_clicks=0,
+                        color="primary", size="sm",
+                        style={"borderRadius": "6px", "fontSize": "11px", "fontWeight": "600"},
+                    ),
+                    style={"textAlign": "center"},
+                ),
+                html.Td(
+                    html.Span("Pending", id={"type": "test-status", "test": t["file"]},
+                              style={"fontSize": "11px", "color": "#999"}),
+                    style={"textAlign": "center"},
+                ),
+            ])
+        )
+
+    return html.Div([
+        _page_title("fa-flask", c, "Tests", "Run platform test suites from the master portal"),
+        _sec_hdr("Test Suites", "click Run to execute a test file; output appears below", "fa-flask"),
+        dbc.Row([
+            dbc.Col(
+                dbc.Button("Run All", id="run-all-tests-btn", n_clicks=0,
+                           color="success", size="sm",
+                           style={"borderRadius": "6px", "fontWeight": "600"}),
+                width="auto",
+            ),
+        ], className="mb-2"),
+        html.Hr(style={"margin": "8px 0 14px 0"}),
+        dbc.Table([
+            html.Thead(html.Tr([
+                html.Th("Test", style={"fontSize": "11px", "fontWeight": "700"}),
+                html.Th("File", style={"fontSize": "11px", "fontWeight": "700"}),
+                html.Th("Action", style={"fontSize": "11px", "fontWeight": "700"}),
+                html.Th("Status", style={"fontSize": "11px", "fontWeight": "700"}),
+            ])),
+            html.Tbody(id="tests-table-body", children=rows),
+        ], bordered=True, hover=True, responsive=True, size="sm",
+           style={"fontSize": "12px", "marginBottom": "20px"}) if rows else html.Div(
+            "No test files found.", className="text-muted text-center"),
+        _sec_hdr("Output", "stdout/stderr from the selected test run", "fa-terminal"),
+        dcc.Loading(
+            html.Div(
+                id="tests-output",
+                children=html.Small("No test has been run yet.", className="text-muted"),
+                style={"fontSize": "12px", "fontFamily": "monospace",
+                       "backgroundColor": "#f5f7fa", "border": "1px solid #cdd5df",
+                       "borderRadius": "8px", "padding": "12px", "minHeight": "260px",
+                       "maxHeight": "520px", "overflowY": "auto", "whiteSpace": "pre-wrap",
+                       "color": "#2c3e50"},
+            ),
+            type="circle", color="#c96a19",
+        ),
+        dcc.Store(id="tests-list-store", data=tests),
+    ], className="portal-page")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # ADMIN PORTAL
 # ════════════════════════════════════════════════════════════════════════════
 
