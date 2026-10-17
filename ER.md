@@ -141,3 +141,28 @@ Add one generic **"Ratification of Irregular Item"** record that every exception
 - [ClearTax: TDS and TCS changes from April 2025](https://cleartax.in/s/tds-and-tcs-changes-from-april-2025)
 - [CBIC Circular 109/28/2019-GST (RWA)](https://cbic-gst.gov.in/pdf/circular-cgst-109n.pdf)
 - [Taxscan: GST on RWA maintenance charges](https://www.taxscan.in/top-stories/gst-on-rwa-maintenance-charges-threshold-exemption-itc-rules-1448115)
+
+## 9. Remediation status (implemented in `database/estatehub.sql`)
+
+`estatehub.sql` is now the only SQL in the repository. Tables carry their columns and
+constraints inline; the only `ALTER TABLE` left is `societies.fk_primary_bank_account`
+(societies and accounts reference each other, so one side cannot be declared inline).
+`database/migrate.py` applies the file as one transaction onto an empty database.
+
+| Finding | Status | Notes |
+|---|---|---|
+| A-01 immutable ledger | **Done** | `trg_transactions_immutable`, reversal-only correction (`fn_post_reversal_journal`), society FK `RESTRICT`, per-society hash chain (`fn_verify_ledger_chain`). Source-document guard covers `receipts` and `expenses`; `payables`/`receivables` are not yet guarded. The hash chain is tamper-*evident*, not tamper-proof. |
+| A-02 preventive double-entry | **Done** | Deferred constraint trigger. All-cash journals are exempt from exact balance (Cash-in-Hand is implicit) but are now checked against the source receipt/expense for direction and amount (`fn_journal_balance_problem`); `fn_cash_voucher_report` lists every cash voucher and whether its amount is checked. **Not done:** making Cash-in-Hand an explicit ledger leg — it reverses the 2026-08 design (explicit CiH rows caused double-sided cashbook bugs) and touches ~66 posting sites and every cash reader; needs its own project and a decision. Cash vouchers from sources other than receipts/expenses stay shape-only. |
+| A-03 income-tax working paper | **Partly done** | Rebuilt on `fn_income_expenditure_fy` (P&L accounts only, accrual). The old function referenced a non-existent column and could never run. Export fixed (Decimal, one `Expenditure` label). **Not done:** expense-apportionment rule (needs a resolution-approved assumption), depreciation, brought-forward losses. |
+| A-04 period locks | **Done** | `fy_locks`, `fn_lock_fy`, enforced by trigger on `transactions`. |
+| T-01 / T-02 TDS & Income-tax Act 2025 | **Done, with limits** | Effective-dated rows, `act_version`/`section_2025`, strict "exceeds" test (194-IA inclusive), IT1961 rows end 31-Mar-2026. Limits: IT1961 rows for 1-Apr-2025..31-Mar-2026 were re-derived only for 194H and 194-IB; 192A has no IT2025 row; rent is per *month* in the 2025 Act but the engine tests one bill at a time; 194-IA/194Q need inputs the engine lacks. Confirm every figure with your CA. |
+| X-01 GST fund toggle | **Done** | Default FALSE; TRUE requires a resolution reference and a CA/advocate opinion reference (`ck_fund_gst_exempt_authority`). **Not done:** printing the authority on invoices. |
+| X-02 turnover / 0% GST | **Partly done** | Billing already raises when no GST rate exists. **Not done:** the Sec 2(6) aggregate-turnover definition and dated worksheet. |
+| G-01 resolution validity | **Done** | CHECK (`passed` ⇔ `status`, majority reached), quorum check and freeze trigger, and `fn_rule` now requires the linked resolution to have *passed*. |
+| G-02 vote registers | **Partly done** | Registers already existed; `fn_resolution_vote_summary` derives the tallies. The typed `votes_for_pct` is still accepted — it is not yet forced to equal the register. |
+| G-03 meeting record | **Already in base** | `meetings` already had notice, agenda, chair, adjournment, sign-off fields. |
+| G-04 ratification expiry | **Partly done** | Expiry raises a `RATIFICATION_EXPIRED` compliance flag. **Not done:** automatic reversal — nothing links a posting to the decision that authorised it. |
+| C-01 cash rules | **Done** | s.186 (was s.269ST) enforced for cash receipts ≥ ₹2,00,000 (refused in `block` mode, flagged in `warn`); engine default is now `block`. The 40A(3) message is on the expense side only. |
+| I-02 arrears interest | **Already in base** | No silent default. **Not done:** cap check, simple/compound declaration. |
+| G-05, G-06, I-01, X-03, §7, §8-item 7 | **Not done** | Need advocate/CA input (G-05), a policy decision (G-06 approval ladder), or are new modules (ratification-of-irregular-item register, rule-application register, compliance certificate). |
+| Hygiene | **Partly done** | `income_tax_export.py` uses `Decimal`. About 95 `float()` conversions remain in the other exports and have not been audited. |

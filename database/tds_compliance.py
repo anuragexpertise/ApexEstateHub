@@ -93,24 +93,36 @@ def vendor_cumulative_tds(
 
 def compute_tds_pct(
     db, society_id: int, vendor_id: int | None, section: str | None, discriminator: str | None, fy: str,
-    amount: float, pan_captured: bool = True,
+    amount: float, pan_captured: bool = True, as_of=None,
 ) -> dict:
     """Decide whether TDS applies to one bill and at what rate.
 
-    Returns {tds_pct, applies, basis} — mirrors fn_compute_tds_pct exactly.
-    `basis` is one of: 'single-bill', 'annual-aggregate', 'below-threshold',
-    'section-not-configured', 'no-section-or-zero-amount'.
+    `as_of` is the date that decides WHICH ACT governs (the earlier of credit
+    and payment; the expense date is the usual stand-in). Payments on or after
+    1-Apr-2026 are governed by the Income-tax Act 2025 (s.393). If it is None
+    the database uses today's date — callers that know the bill date must pass
+    it, or a back-dated bill entered after 1-Apr-2026 is priced under the wrong Act.
+
+    Returns {tds_pct, applies, basis, act_version, section_2025} — mirrors
+    fn_compute_tds_pct exactly. `basis` is one of: 'single-bill',
+    'annual-aggregate', 'below-threshold', 'section-not-configured',
+    'no-section-or-zero-amount'. TDS applies only where the amount EXCEEDS the
+    threshold (s.393(1)(a)); 194-IA is the one inclusive row.
     """
     if not section or not amount:
-        return {"tds_pct": 0.0, "applies": False, "basis": "no-section-or-zero-amount"}
+        return {"tds_pct": 0.0, "applies": False, "basis": "no-section-or-zero-amount",
+                "act_version": None, "section_2025": None}
     row = db._execute(
-        "SELECT * FROM fn_compute_tds_pct(%s,%s,%s,%s,%s,%s,%s)",
-        (society_id, vendor_id, section, discriminator, fy, amount, pan_captured), fetch_one=True,
+        "SELECT * FROM fn_compute_tds_pct(%s,%s,%s,%s,%s,%s,%s,%s)",
+        (society_id, vendor_id, section, discriminator, fy, amount, pan_captured, as_of),
+        fetch_one=True,
     ) or {}
     return {
         "tds_pct": float(row.get("tds_pct", 0) or 0),
         "applies": bool(row.get("applies", False)),
         "basis": row.get("basis", "below-threshold"),
+        "act_version": row.get("act_version"),
+        "section_2025": row.get("section_2025"),
     }
 
 
@@ -181,6 +193,8 @@ def suggest_expense_tax_fields(
           "tds_section": str|None,    # inherited from the account
           "tds_applies": bool,
           "tds_basis": str,
+          "tds_act_version": str|None,   # 'IT1961' / 'IT2025' — the Act the date falls under
+          "tds_section_2025": str|None,  # e.g. 'Sec 393(1) Sl. 6(i) [D(a)]'
           "pan_captured": bool,
           "pan_action": "warn"|"block",
           "pan_warning": str|None,    # populated when TDS applies & no PAN
@@ -219,13 +233,16 @@ def suggest_expense_tax_fields(
         discriminator = payment_nature
 
     pan_captured = vendor_has_pan(db, vendor_id) if vendor_id else False
-    comp = compute_tds_pct(db, society_id, vendor_id, section, discriminator, fy, amount, pan_captured)
+    comp = compute_tds_pct(db, society_id, vendor_id, section, discriminator, fy, amount, pan_captured,
+                           as_of=expense_date)
 
     result = {
         "tds_pct": comp["tds_pct"],
         "tds_section": section,
         "tds_applies": comp["applies"],
         "tds_basis": comp["basis"],
+        "tds_act_version": comp.get("act_version"),
+        "tds_section_2025": comp.get("section_2025"),
         "pan_captured": pan_captured,
         "pan_action": no_pan_action(db, society_id),
         "pan_warning": None,
@@ -237,7 +254,10 @@ def suggest_expense_tax_fields(
     # No-PAN warning/block only matters when TDS actually applies.
     if comp["applies"] and not pan_captured:
         action = result["pan_action"]
-        rate_note = f"Section 206AA higher rate applies (no PAN on file)."
+        if comp.get("act_version") == "IT2025":
+            rate_note = "Section 397(2) higher rate applies (no PAN on file)."
+        else:
+            rate_note = "Section 206AA higher rate applies (no PAN on file)."
         if action == "block":
             result["pan_warning"] = (
                 f"BLOCKED: vendor has no PAN and society policy is 'block'. "
