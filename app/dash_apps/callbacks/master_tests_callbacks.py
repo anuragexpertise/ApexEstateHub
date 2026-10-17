@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from dash import MATCH, Input, Output, State, ctx, html
+from dash import ALL, Input, Output, State, ctx, html, no_update
 from dash.exceptions import PreventUpdate
 
 from app.security.guards import require_session
@@ -53,19 +53,25 @@ def register_master_tests_callbacks(app):
     print("  → Registering master tests callbacks…")
 
     # ── Run a single test file ──────────────────────────────────────────
+    # ALL (not MATCH) wildcards: this callback also writes the plain
+    # "tests-output" Output, and dash-renderer rejects any callback whose
+    # Outputs carry MATCH wildcards on different keys — and when it finds one
+    # invalid callback it discards the WHOLE callback graph in the browser, so
+    # nothing else (e.g. the login society dropdown) ever fires.
     @app.callback(
         Output("tests-output", "children", allow_duplicate=True),
-        Output({"type": "test-status", "test": MATCH}, "children"),
-        Input({"type": "run-test-btn", "test": MATCH}, "n_clicks"),
+        Output({"type": "test-status", "test": ALL}, "children"),
+        Input({"type": "run-test-btn", "test": ALL}, "n_clicks"),
         State("tests-list-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def run_single_test(n_clicks, tests):
-        if not n_clicks:
-            raise PreventUpdate
+    def run_single_test(n_clicks_list, tests):
         triggered = ctx.triggered_id
-        if not triggered or "test" not in triggered:
+        if not isinstance(triggered, dict) or "test" not in triggered:
+            raise PreventUpdate
+        # ALL delivers every button's n_clicks; act only on a real click.
+        if not ctx.triggered or not ctx.triggered[0].get("value"):
             raise PreventUpdate
         test_file = triggered["test"]
 
@@ -80,7 +86,12 @@ def register_master_tests_callbacks(app):
             style={"fontSize": "11px", "fontFamily": "monospace", "whiteSpace": "pre-wrap",
                    "color": "#2c3e50", "margin": 0},
         )
-        return output_el, status_el
+        # Update only the clicked row's status; leave the other rows alone.
+        statuses = [
+            status_el if (o["id"] or {}).get("test") == test_file else no_update
+            for o in ctx.outputs_list[1]
+        ]
+        return output_el, statuses
 
     # ── Run all test files ──────────────────────────────────────────────
     @app.callback(
