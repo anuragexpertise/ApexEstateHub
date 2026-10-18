@@ -65,6 +65,9 @@ class Cap:
     FINANCE_POST            = "finance.post"
     FINANCE_REVERSE         = "finance.reverse"
     FINANCE_RECONCILE       = "finance.reconcile"
+    # Locking a financial year is irreversible, so it is its own power and is held by the Treasurer ALONE:
+    # not the admin / secretary (no finance powers), not the accountant (the maker).
+    FINANCE_PERIOD_CLOSE    = "finance.period.close"
     REPORT_EXPORT           = "report.export"
     PLATFORM_RULES_MANAGE   = "platform.rules.manage"
     # Master-portal inspectors that execute or expose raw SQL (RWA3 WP4 item 1:
@@ -108,6 +111,7 @@ _RES: dict[str, frozenset[str]] = {
     Cap.FINANCE_POST:            frozenset({"journal_entry", "receipt", "payment"}),
     Cap.FINANCE_REVERSE:         frozenset({"journal_entry"}),
     Cap.FINANCE_RECONCILE:       frozenset({"bank_line"}),
+    Cap.FINANCE_PERIOD_CLOSE:    frozenset({"fy_lock"}),
     Cap.REPORT_EXPORT:           frozenset({"financial_report"}),
     Cap.PLATFORM_RULES_MANAGE:   frozenset({"platform_rule"}),
     Cap.PLATFORM_SQL_INSPECT:    frozenset({"platform_console"}),
@@ -161,7 +165,7 @@ DEFAULT_CAPABILITIES: dict[str, frozenset[str]] = {
     "committee_member": frozenset({Cap.CONCERN_TRIAGE, Cap.CONCERN_ASSIGN}),
     "treasurer": frozenset({
         Cap.FINANCE_PAYMENT_APPROVE, Cap.FINANCE_REVERSE,
-        Cap.FINANCE_RECONCILE, Cap.REPORT_EXPORT,
+        Cap.FINANCE_RECONCILE, Cap.FINANCE_PERIOD_CLOSE, Cap.REPORT_EXPORT,
     }),
     "accountant": frozenset({
         Cap.FINANCE_RECEIPT_PREPARE, Cap.FINANCE_PAYMENT_PREPARE,
