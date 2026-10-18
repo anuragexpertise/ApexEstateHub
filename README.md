@@ -207,6 +207,7 @@ Until these are built, the society should adopt a written privacy notice and ret
 | DPDP rights, consent, retention, breach workflow | Statutory obligations of the Data Fiduciary | See §6 |
 | EPF / ESI / contract-labour challan gate on manpower-agency invoices | Internal-audit checklist item | New hold-until-verified step before TDS |
 | Delegation-of-powers ladder; irregular-item register; rule-application register; compliance certificate | Items the review recommends that need a policy decision or a new module | After advocate and CA input |
+| Eight Dash callbacks (setup wizard, master test runner) are not classified in `docs/authz_manifest.json`, and two setup-wizard callbacks lack `@require_session` | Found while checking the lock screen; the endpoint-inventory and callback-guard tests report them. They predate this work and are not part of it | Classify or guard them, then run `python scripts/inventory_endpoints.py --write` |
 | Full audit-log coverage of every write path and read access | Completeness of the trail | Ongoing |
 
 

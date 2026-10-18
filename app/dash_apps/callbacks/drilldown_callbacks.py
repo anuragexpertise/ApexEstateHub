@@ -6317,8 +6317,9 @@ def register_fy_close_callbacks(app):
     # Irreversible, so: the Treasurer's capability (finance.period.close) is checked by the policy engine, role
     # and society come from the server-side session, the year is the card's selected year, and the service
     # re-checks every condition before anything is written.
-    from app.security.authorization import Cap as _Cap
-    from app.security.service_guard import require_action as _require_action
+    # Named plainly (no aliases): scripts/inventory_endpoints.py recognises the guard by these exact names.
+    from app.security.authorization import Cap
+    from app.security.service_guard import require_action
 
     def _lock_resolve(*_a, **_k):
         return {"resource_id": None, "target_society_id": get_current_society_id()}
@@ -6341,7 +6342,7 @@ def register_fy_close_callbacks(app):
         prevent_initial_call=True,
     )
     @require_session
-    @_require_action(_Cap.FINANCE_PERIOD_CLOSE, "fy_lock", resolve=_lock_resolve, on_deny=_lock_denied)
+    @require_action(Cap.FINANCE_PERIOD_CLOSE, "fy_lock", resolve=_lock_resolve, on_deny=_lock_denied)
     def lock_financial_year(n_clicks, reason, resolution, understood, store, auth):
         if not ctx.triggered or not n_clicks:
             return no_update, no_update, no_update, no_update
