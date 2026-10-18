@@ -8650,29 +8650,29 @@ BEGIN
     -- an actual remittance, unlike the accrual legs in fn_post_rcm_liability)
     IF v_cgst_due > 0 AND v_cgst_acc IS NOT NULL THEN
         INSERT INTO transactions(society_id, entry_side, trx_date, acc_id, mode, status,
-            acc_particulars, amount, created_by, created_at, journal_id)
+            acc_particulars, amount, created_by, created_at, journal_id, source_table, source_id)
         VALUES (p_society_id, 'Dr', p_month, v_cgst_acc, p_mode, 'paid',
-            'RCM CGST remittance' || COALESCE(' — Ref ' || p_bank_ref, ''), v_cgst_due, p_paid_by, NOW(), v_journal_id);
+            'RCM CGST remittance' || COALESCE(' — Ref ' || p_bank_ref, ''), v_cgst_due, p_paid_by, NOW(), v_journal_id, 'rcm_remittance', v_journal_id);
     END IF;
     IF v_sgst_due > 0 AND v_sgst_acc IS NOT NULL THEN
         INSERT INTO transactions(society_id, entry_side, trx_date, acc_id, mode, status,
-            acc_particulars, amount, created_by, created_at, journal_id)
+            acc_particulars, amount, created_by, created_at, journal_id, source_table, source_id)
         VALUES (p_society_id, 'Dr', p_month, v_sgst_acc, p_mode, 'paid',
-            'RCM SGST remittance' || COALESCE(' — Ref ' || p_bank_ref, ''), v_sgst_due, p_paid_by, NOW(), v_journal_id);
+            'RCM SGST remittance' || COALESCE(' — Ref ' || p_bank_ref, ''), v_sgst_due, p_paid_by, NOW(), v_journal_id, 'rcm_remittance', v_journal_id);
     END IF;
     IF v_igst_due > 0 AND v_igst_acc IS NOT NULL THEN
         INSERT INTO transactions(society_id, entry_side, trx_date, acc_id, mode, status,
-            acc_particulars, amount, created_by, created_at, journal_id)
+            acc_particulars, amount, created_by, created_at, journal_id, source_table, source_id)
         VALUES (p_society_id, 'Dr', p_month, v_igst_acc, p_mode, 'paid',
-            'RCM IGST remittance' || COALESCE(' — Ref ' || p_bank_ref, ''), v_igst_due, p_paid_by, NOW(), v_journal_id);
+            'RCM IGST remittance' || COALESCE(' — Ref ' || p_bank_ref, ''), v_igst_due, p_paid_by, NOW(), v_journal_id, 'rcm_remittance', v_journal_id);
     END IF;
 
     -- Cr: bank/cash leg for the total actually remitted
     INSERT INTO transactions(society_id, entry_side, trx_date, acc_id, mode, status,
-        acc_particulars, amount, created_by, created_at, journal_id)
+        acc_particulars, amount, created_by, created_at, journal_id, source_table, source_id)
     VALUES (p_society_id, 'Cr', p_month, v_bank_acc, p_mode, 'paid',
         'RCM GST paid to government' || COALESCE(' — Ref ' || p_bank_ref, ''),
-        v_cgst_due + v_sgst_due + v_igst_due, p_paid_by, NOW(), v_journal_id)
+        v_cgst_due + v_sgst_due + v_igst_due, p_paid_by, NOW(), v_journal_id, 'rcm_remittance', v_journal_id)
     RETURNING id INTO v_tid;
 
     UPDATE rcm_liability
@@ -16692,6 +16692,9 @@ CREATE TABLE cashbook_signatures (
     signed_by       VARCHAR(100),            -- name/title of the signer (Secretary + 1 Board member)
     signed_at       TIMESTAMP,
     notes           TEXT,
+    -- The closing cash actually counted when the book was signed (Job 5): the physical control that an all-cash
+    -- voucher, which has no ledger leg, cannot give by arithmetic. Reconciled by fn_cashbook_reconciliation.
+    closing_cash_declared NUMERIC(15,2),
     created_by      INT REFERENCES users (id),
     created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_cashbook_day UNIQUE (society_id, day)
@@ -18569,85 +18572,159 @@ COMMENT ON FUNCTION fn_post_reversal_journal(INT, INT, TEXT, INT, DATE) IS
 
 
 -- ---------------------------------------------------------------------------
--- A-02  PREVENTIVE DOUBLE-ENTRY
+-- A-02 (completed)  All-cash vouchers: no Cash-in-Hand leg, so what do they balance against?
 -- ---------------------------------------------------------------------------
--- NULL = the journal is acceptable; otherwise the reason it is not.
---
--- Cash vouchers are single-sided BY DESIGN: fn_resolve_bank_leg returns NULL for
--- mode 'cash' and Cash-in-Hand is DERIVED from cash-mode legs (fn_cih_balance_asof),
--- never posted. A plain Dr = Cr rule would therefore reject every cash receipt and
--- expense, so a journal whose legs are ALL mode='cash' is exempt from exact balance.
--- The missing contra is the implicit Cash-in-Hand movement = |Dr - Cr|.
--- What that exemption must NOT do is let the amount go unchecked, so the implied
--- movement is tested against the voucher's own source document:
---   * direction : a cash receipt brings cash in (Cr > Dr); a cash expense pays it out.
---   * ceiling   : the movement can never exceed the document amount (TDS / GST
---                 legs may reduce it, never increase it).
---   * exactness : a voucher with a single leg must equal the document amount.
--- Reversal journals mirror their original and are exempt (the original was checked).
--- Source tables other than receipts/expenses keep the shape-only exemption; they
--- are listed by fn_cash_voucher_report so a CA can see exactly what is unchecked.
--- Making Cash-in-Hand an explicit ledger leg would replace this control, but it
--- reverses the 2026-08 design (explicit CiH rows caused double-sided cashbook
--- display bugs) and touches every cash reader and ~66 posting sites; see ER.md §9.
+-- An all-cash voucher has no explicit Cash-in-Hand leg: the cash side is derived (fn_cih_balance_asof) and wired
+-- into the balance sheet and cash book, so it cannot be an ordinary ledger leg without rewriting those. A voucher
+-- with no cash leg cannot be balanced by arithmetic alone, so it is checked against something INDEPENDENT of it:
+--   1. Provenance (fail closed): every leg must name the document it is for (source_table + source_id). An
+--      unattributed one-sided cash voucher is refused; it used to be exempt.
+--   2. Amount: the cash that moved must not exceed the amount on the source document(s), where the document
+--      carries a usable amount (fn_cash_source_amount). A single-leg receipt or expense must equal it exactly.
+--   3. Direction: a cash receipt brings cash in, a cash expense pays it out.
+--   4. Physically: the signed daily cash book carries the closing cash actually counted
+--      (cashbook_signatures.closing_cash_declared), reconciled against the derived balance
+--      (fn_cashbook_reconciliation).
+-- Sources whose documents carry no usable amount (assets, deposits, fund journals, bank transfers, RCM
+-- remittances) get checks 1 and 4 only, and fn_cash_voucher_report says so per voucher (check_basis).
+
+-- The amount on the document a voucher is for; NULL when the source is not one whose amount can be compared.
+CREATE OR REPLACE FUNCTION fn_cash_source_amount(p_src TEXT, p_id INT, p_society_id INT) RETURNS NUMERIC
+LANGUAGE sql STABLE AS $$
+    SELECT CASE p_src
+        WHEN 'receipts'               THEN (SELECT amount FROM receipts   WHERE id = p_id AND society_id = p_society_id)
+        WHEN 'expenses'               THEN (SELECT amount FROM expenses   WHERE id = p_id AND society_id = p_society_id)
+        WHEN 'receivables'            THEN (SELECT amount FROM receivables WHERE id = p_id AND society_id = p_society_id)
+        WHEN 'payables'               THEN (SELECT amount FROM payables   WHERE id = p_id AND society_id = p_society_id)
+        WHEN 'owner_loans'            THEN (SELECT principal FROM owner_loans WHERE id = p_id AND society_id = p_society_id)
+        WHEN 'owner_loan_repayments'  THEN (SELECT principal_amount + interest_amount FROM owner_loan_repayments
+                                             WHERE id = p_id AND society_id = p_society_id)
+        ELSE NULL END;
+$$;
+
+-- How a cash voucher was checked: 'reversal', 'UNATTRIBUTED', 'amount equals document', 'amount within document'
+-- or 'provenance only'. Used by the balance trigger's wording and by fn_cash_voucher_report.
+CREATE OR REPLACE FUNCTION fn_cash_voucher_basis(p_society_id INT, p_journal_id INT) RETURNS TEXT
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_legs INT; v_rev BOOLEAN; v_srcs INT; v_src TEXT; v_unattr INT; v_known BOOLEAN; v_n_src INT;
+BEGIN
+    SELECT COUNT(*), BOOL_OR(is_reversal), MIN(source_table),
+           COUNT(*) FILTER (WHERE source_table IS NULL OR source_id IS NULL),
+           COUNT(DISTINCT COALESCE(source_table, '') || '#' || COALESCE(source_id::text, ''))
+      INTO v_legs, v_rev, v_src, v_unattr, v_srcs
+      FROM transactions WHERE society_id = p_society_id AND journal_id = p_journal_id;
+    IF v_rev THEN RETURN 'reversal'; END IF;
+    IF v_unattr > 0 THEN RETURN 'UNATTRIBUTED'; END IF;
+    SELECT BOOL_AND(fn_cash_source_amount(s.source_table, s.source_id, p_society_id) IS NOT NULL), COUNT(*)
+      INTO v_known, v_n_src
+      FROM (SELECT DISTINCT source_table, source_id FROM transactions
+             WHERE society_id = p_society_id AND journal_id = p_journal_id) s;
+    IF NOT COALESCE(v_known, FALSE) THEN RETURN 'provenance only'; END IF;
+    IF v_legs = 1 AND v_n_src = 1 AND v_src IN ('receipts', 'expenses') THEN RETURN 'amount equals document'; END IF;
+    RETURN 'amount within document';
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION fn_journal_balance_problem(p_society_id INT, p_journal_id INT)
 RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
 DECLARE
-    v_dr NUMERIC; v_cr NUMERIC; v_all_cash BOOLEAN; v_legs INT;
-    v_rev BOOLEAN; v_src TEXT; v_srcid INT; v_srcs INT; v_doc NUMERIC; v_move NUMERIC;
+    v_dr NUMERIC; v_cr NUMERIC; v_all_cash BOOLEAN; v_src TEXT; v_srcs INT;
+    v_doc NUMERIC; v_move NUMERIC; v_basis TEXT;
 BEGIN
     SELECT COALESCE(SUM(amount) FILTER (WHERE entry_side = 'Dr'), 0),
            COALESCE(SUM(amount) FILTER (WHERE entry_side = 'Cr'), 0),
            COALESCE(BOOL_AND(mode = 'cash'), FALSE),
-           COUNT(*), BOOL_OR(is_reversal),
-           MIN(source_table), MIN(source_id),
+           MIN(source_table),
            COUNT(DISTINCT COALESCE(source_table, '') || '#' || COALESCE(source_id::text, ''))
-      INTO v_dr, v_cr, v_all_cash, v_legs, v_rev, v_src, v_srcid, v_srcs
+      INTO v_dr, v_cr, v_all_cash, v_src, v_srcs
       FROM transactions WHERE society_id = p_society_id AND journal_id = p_journal_id;
     IF v_dr = v_cr THEN RETURN NULL; END IF;
     IF NOT v_all_cash THEN
         RETURN format('journal %s is out of balance: Dr %s, Cr %s (difference %s)',
                       p_journal_id, v_dr, v_cr, v_dr - v_cr);
     END IF;
-    IF v_rev OR v_src IS NULL OR v_srcid IS NULL OR v_srcs <> 1
-       OR v_src NOT IN ('receipts', 'expenses') THEN
-        RETURN NULL;                                  -- shape-only exemption
+
+    v_basis := fn_cash_voucher_basis(p_society_id, p_journal_id);
+    IF v_basis = 'reversal' THEN RETURN NULL; END IF;       -- mirrors a voucher that was itself checked
+    IF v_basis = 'UNATTRIBUTED' THEN
+        RETURN format('cash voucher journal %s has a leg that names no source document: an all-cash voucher has '
+                      'no Cash-in-Hand leg to balance against, so every leg must say what it is for', p_journal_id);
     END IF;
+
     v_move := ABS(v_dr - v_cr);
-    IF v_src = 'receipts' AND v_cr <= v_dr THEN
+    IF v_srcs = 1 AND v_src = 'receipts' AND v_cr <= v_dr THEN
         RETURN format('cash receipt journal %s must bring cash in (Cr %s, Dr %s)', p_journal_id, v_cr, v_dr);
     END IF;
-    IF v_src = 'expenses' AND v_dr <= v_cr THEN
+    IF v_srcs = 1 AND v_src = 'expenses' AND v_dr <= v_cr THEN
         RETURN format('cash expense journal %s must pay cash out (Dr %s, Cr %s)', p_journal_id, v_dr, v_cr);
     END IF;
-    EXECUTE format('SELECT amount FROM %I WHERE id = $1 AND society_id = $2', v_src)
-       INTO v_doc USING v_srcid, p_society_id;
-    IF v_doc IS NULL THEN RETURN NULL; END IF;        -- document not visible yet
-    IF v_move > v_doc OR (v_legs = 1 AND v_move <> v_doc) THEN
-        RETURN format('cash voucher journal %s moves %s of cash but %s #%s is for %s',
-                      p_journal_id, v_move, v_src, v_srcid, v_doc);
+    IF v_basis = 'provenance only' THEN RETURN NULL; END IF;
+
+    SELECT SUM(fn_cash_source_amount(s.source_table, s.source_id, p_society_id)) INTO v_doc
+      FROM (SELECT DISTINCT source_table, source_id FROM transactions
+             WHERE society_id = p_society_id AND journal_id = p_journal_id) s;
+    IF v_doc IS NULL THEN RETURN NULL; END IF;               -- document not visible yet
+    IF v_move > v_doc OR (v_basis = 'amount equals document' AND v_move <> v_doc) THEN
+        RETURN format('cash voucher journal %s moves %s of cash but its source document is for %s',
+                      p_journal_id, v_move, v_doc);
     END IF;
     RETURN NULL;
 END;
 $$;
 
--- Every all-cash journal with the Cash-in-Hand movement the schema infers for it,
--- and whether the amount is checked against a source document. For CA review.
 CREATE OR REPLACE FUNCTION fn_cash_voucher_report(p_society_id INT DEFAULT NULL)
 RETURNS TABLE (society_id INT, journal_id INT, source_table VARCHAR, legs BIGINT,
-               implied_cash_movement NUMERIC, direction TEXT, amount_checked BOOLEAN)
+               implied_cash_movement NUMERIC, direction TEXT, amount_checked BOOLEAN, check_basis TEXT)
 LANGUAGE sql STABLE AS $$
-    SELECT t.society_id, t.journal_id, MIN(t.source_table)::VARCHAR, COUNT(*),
-           ABS(SUM(CASE t.entry_side WHEN 'Dr' THEN t.amount ELSE -t.amount END)),
-           CASE WHEN SUM(CASE t.entry_side WHEN 'Dr' THEN t.amount ELSE -t.amount END) < 0
-                THEN 'cash in' ELSE 'cash out' END,
-           (MIN(t.source_table) IN ('receipts', 'expenses') AND NOT BOOL_OR(t.is_reversal))
-      FROM transactions t
-     WHERE (p_society_id IS NULL OR t.society_id = p_society_id)
-     GROUP BY t.society_id, t.journal_id
-    HAVING BOOL_AND(t.mode = 'cash')
-     ORDER BY t.society_id, t.journal_id;
+    SELECT v.society_id, v.journal_id, v.source_table, v.legs, v.implied_cash_movement, v.direction,
+           v.check_basis IN ('amount equals document', 'amount within document') AS amount_checked, v.check_basis
+      FROM (
+        SELECT t.society_id, t.journal_id, MIN(t.source_table)::VARCHAR AS source_table, COUNT(*) AS legs,
+               ABS(SUM(CASE t.entry_side WHEN 'Dr' THEN t.amount ELSE -t.amount END)) AS implied_cash_movement,
+               CASE WHEN SUM(CASE t.entry_side WHEN 'Dr' THEN t.amount ELSE -t.amount END) < 0
+                    THEN 'cash in' ELSE 'cash out' END AS direction,
+               fn_cash_voucher_basis(t.society_id, t.journal_id) AS check_basis
+          FROM transactions t
+         WHERE (p_society_id IS NULL OR t.society_id = p_society_id)
+         GROUP BY t.society_id, t.journal_id
+        HAVING BOOL_AND(t.mode = 'cash')
+      ) v
+     ORDER BY v.society_id, v.journal_id;
 $$;
+
+-- The daily physical control: the closing cash counted at the signing of the cash book against the derived balance.
+CREATE OR REPLACE FUNCTION fn_cashbook_reconciliation(p_society_id INT, p_day DATE)
+RETURNS TABLE (derived_closing NUMERIC, declared_closing NUMERIC, difference NUMERIC, status TEXT)
+LANGUAGE sql STABLE AS $$
+    SELECT fn_cih_balance_asof(p_society_id, p_day), cs.closing_cash_declared,
+           cs.closing_cash_declared - fn_cih_balance_asof(p_society_id, p_day),
+           CASE WHEN cs.id IS NULL THEN 'cash book not signed for the day'
+                WHEN cs.closing_cash_declared IS NULL THEN 'signed, but no closing cash counted'
+                WHEN cs.closing_cash_declared = fn_cih_balance_asof(p_society_id, p_day) THEN 'agrees'
+                ELSE 'DIFFERS: cash in hand does not match the books' END
+      FROM (SELECT 1) x
+      LEFT JOIN cashbook_signatures cs ON cs.society_id = p_society_id AND cs.day = p_day;
+$$;
+
+-- A count that does not match the books is raised where the Secretary and auditors will see it, at the moment of signing.
+CREATE OR REPLACE FUNCTION trg_cashbook_count_flag() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_derived NUMERIC;
+BEGIN
+    IF NEW.closing_cash_declared IS NULL THEN RETURN NEW; END IF;
+    v_derived := fn_cih_balance_asof(NEW.society_id, NEW.day);
+    IF NEW.closing_cash_declared <> v_derived THEN
+        INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
+        VALUES (NEW.society_id, 'CASH_COUNT_DIFFERS', 'cashbook_signatures', NEW.id,
+                format('Cash book of %s signed with Rs %s counted in hand, but the books show Rs %s (difference Rs %s).',
+                       NEW.day, NEW.closing_cash_declared, v_derived, NEW.closing_cash_declared - v_derived))
+        ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_cashbook_count_flag AFTER INSERT OR UPDATE OF closing_cash_declared ON cashbook_signatures
+    FOR EACH ROW EXECUTE FUNCTION trg_cashbook_count_flag();
 
 CREATE OR REPLACE FUNCTION trg_transactions_balance() RETURNS trigger
 LANGUAGE plpgsql AS $$

@@ -53,17 +53,18 @@ def _accounts(cur):
     return a, b
 
 
-def _post(cur, legs, journal=None, when=None):
-    """Insert all legs of one voucher in ONE statement. legs = [(side, acc, amount, mode)]."""
+def _post(cur, legs, journal=None, when=None, source=None):
+    """Insert all legs of one voucher in ONE statement. legs = [(side, acc, amount, mode)].
+    source = (source_table, source_id): an all-cash voucher must name the document it is for."""
     jid = journal if journal is not None else _one(cur, "SELECT NEXTVAL('seq_transaction_number')")
     when = when or datetime.date.today()
     args = []
     for side, acc, amt, mode in legs:
-        args += [SOC, side, when, acc, amt, mode, jid]
-    cur.execute(
-        "INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, amount, mode, "
-        "acc_particulars, status, journal_id) VALUES " +
-        ",".join(["(%s,%s,%s,%s,%s,%s,'test leg','paid',%s)"] * len(legs)), args)
+        args += [SOC, side, when, acc, amt, mode, jid] + (list(source) if source else [])
+    cols = "society_id, entry_side, trx_date, acc_id, amount, mode, acc_particulars, status, journal_id"
+    row = "(%s,%s,%s,%s,%s,%s,'test leg','paid',%s" + (",%s,%s" if source else "") + ")"
+    cur.execute(f"INSERT INTO transactions ({cols}{', source_table, source_id' if source else ''}) VALUES " +
+                ",".join([row] * len(legs)), args)
     return jid
 
 
@@ -137,8 +138,10 @@ def test_mixed_cash_and_bank_must_still_balance(cur):
 def test_balanced_journal_and_all_cash_voucher_are_accepted(cur):
     a, b = _accounts(cur)
     _post(cur, [("Dr", a, 100, "bank"), ("Cr", b, 100, "bank")])
-    _post(cur, [("Cr", b, 250, "cash")])                     # implicit Cash-in-Hand contra
-    _post(cur, [("Dr", a, 40, "cash"), ("Cr", b, 10, "cash")])
+    # An all-cash voucher has an implicit Cash-in-Hand contra, so it must name the document it is for
+    # (a deposit, whose amount is not comparable: provenance only). Unattributed ones are refused.
+    _post(cur, [("Cr", b, 250, "cash")], source=("deposits", 1))
+    _post(cur, [("Dr", a, 40, "cash"), ("Cr", b, 10, "cash")], source=("deposits", 2))
     cur.execute("SET CONSTRAINTS ALL IMMEDIATE")
 
 
@@ -169,7 +172,7 @@ def test_reversal_nets_to_zero_and_preserves_mode(cur):
 
 def test_cash_voucher_reversal_stays_cash_and_valid(cur):
     _, b = _accounts(cur)
-    jid = _post(cur, [("Cr", b, 250, "cash")])
+    jid = _post(cur, [("Cr", b, 250, "cash")], source=("deposits", 1))
     rid = _one(cur, "SELECT fn_post_reversal_journal(%s,%s,'duplicate entry',NULL)", (SOC, jid))
     cur.execute("SELECT entry_side, mode FROM transactions WHERE journal_id=%s", (rid,))
     assert cur.fetchall() == [("Dr", "cash")]
