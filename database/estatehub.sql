@@ -190,7 +190,13 @@ CREATE TABLE accounts (
     -- deliberately unlocks just sets 0.
     statutory_lock_pct NUMERIC(5,2) NOT NULL DEFAULT 0
         CHECK (statutory_lock_pct >= 0 AND statutory_lock_pct <= 100),
-    is_gst_exempt_supply BOOLEAN DEFAULT FALSE
+    is_gst_exempt_supply BOOLEAN DEFAULT FALSE,   -- legacy: superseded by gst_supply_class (X-02)
+    -- X-02: the society's classification for the s.2(6) aggregate-turnover worksheet. NULL = use the default by
+    -- ledger head where the head is unambiguous, otherwise unclassified.
+    gst_supply_class VARCHAR(14) CHECK (gst_supply_class IN ('taxable', 'exempt', 'not_a_supply', 'tax')),
+    gst_class_ref TEXT,
+    CONSTRAINT ck_gst_class_ref CHECK (gst_supply_class IS NULL OR gst_supply_class = 'taxable'
+        OR LENGTH(BTRIM(COALESCE(gst_class_ref, ''))) >= 5)
 );
 
 
@@ -3774,7 +3780,8 @@ DECLARE
     v_repair_acc_id       INT;
     v_cgst_acc_id         INT;
     v_sgst_acc_id         INT;
-    v_society_turnover    NUMERIC(15,2);
+    v_society_turnover    NUMERIC(15,2);   -- (kept for readers of older revisions; the gate is v_gate_state)
+    v_gate_state          TEXT;
     v_current_fy          INT;
     v_cached_fy           INT := -1;
     v_new_rec_id          INT;  -- id of the row just inserted (NULL if ON CONFLICT skipped it — idempotent re-runs must not double-accrue)
@@ -4063,7 +4070,10 @@ BEGIN
             -- GST threshold check (per-apartment maintenance > threshold AND society turnover > turnover_threshold)
             v_current_fy := CASE WHEN EXTRACT(MONTH FROM v_month) >= 4 THEN EXTRACT(YEAR FROM v_month)::INT ELSE (EXTRACT(YEAR FROM v_month)::INT - 1) END;
             IF v_current_fy != v_cached_fy THEN
-                SELECT fn_society_turnover_fy(p_society_id, v_current_fy) INTO v_society_turnover;
+                SELECT state INTO v_gate_state FROM fn_gst_turnover_gate(p_society_id, v_current_fy);
+                IF v_gate_state = 'indeterminate' THEN
+                    PERFORM fn_flag_gst_turnover_indeterminate(p_society_id, v_current_fy);
+                END IF;
                 v_cached_fy := v_current_fy;
             END IF;
 
@@ -4076,7 +4086,7 @@ BEGIN
                 v_total_taxable := v_base_maint + v_base_sinking + v_base_repair;
             END IF;
 
-            IF v_total_taxable > v_gst_threshold AND COALESCE(v_society_turnover, 0) > v_turnover_threshold THEN
+            IF v_total_taxable > v_gst_threshold AND v_gate_state = 'above' THEN
                 v_gst_cgst := ROUND(v_total_taxable * (v_cgst_rate / 100.0), 2);
                 v_gst_sgst := ROUND(v_total_taxable * (v_sgst_rate / 100.0), 2);
             ELSE
@@ -8356,6 +8366,7 @@ DECLARE
     v_interstate    BOOLEAN;
     v_turnover_threshold NUMERIC;
     v_society_turnover   NUMERIC;
+    v_gate_state         TEXT;
     v_current_fy    INT;
 BEGIN
     SELECT * INTO v_expense
@@ -8379,9 +8390,11 @@ BEGIN
     v_current_fy := CASE WHEN EXTRACT(MONTH FROM v_expense.expense_date) >= 4
         THEN EXTRACT(YEAR FROM v_expense.expense_date)::INT
         ELSE EXTRACT(YEAR FROM v_expense.expense_date)::INT - 1 END;
-    SELECT fn_society_turnover_fy(p_society_id, v_current_fy) INTO v_society_turnover;
+    SELECT state INTO v_gate_state FROM fn_gst_turnover_gate(p_society_id, v_current_fy);
 
-    IF COALESCE(v_society_turnover, 0) <= v_turnover_threshold THEN
+    -- Only a society whose classified supplies alone exceed the threshold is treated as a registered person;
+    -- 'indeterminate' is flagged by billing and handled by the CA, never resolved here by guessing.
+    IF v_gate_state IS DISTINCT FROM 'above' THEN
         RETURN QUERY SELECT 0::NUMERIC(15,2), 0::NUMERIC(15,2), 0::NUMERIC(15,2),
             0::NUMERIC(15,2), NULL::INT, NULL::INT, NULL::INT, NULL::INT, FALSE;
         RETURN;
@@ -10676,29 +10689,200 @@ $$;
 -- Used for the GST threshold check (society-level ₹20L) and for
 -- determining filing cadence. Computed on demand, never stored.
 
-CREATE OR REPLACE FUNCTION fn_society_turnover_fy(
-    p_society_id INT,
-    p_fy         INT
-)
-RETURNS NUMERIC(15,2) LANGUAGE plpgsql STABLE AS $$
-DECLARE
-    v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
-    v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
-    v_total    NUMERIC(15,2);
-BEGIN
-    SELECT COALESCE(SUM(t.amount), 0)::NUMERIC(15,2)
-      INTO v_total
-      FROM transactions t
-      JOIN accounts a ON a.id = t.acc_id AND a.society_id = t.society_id
-     WHERE t.society_id = p_society_id
-       AND t.status = 'paid'
-       AND t.trx_date BETWEEN v_fy_start AND v_fy_end
-       AND t.entry_side = 'Cr'
-       AND a.drcr_account = 'Cr'
-       AND a.tab_name NOT IN ('BkAc', 'CiH', 'Dp', 'SCr')
-       AND COALESCE(a.is_gst_exempt_supply, FALSE) = FALSE;
+-- ---------------------------------------------------------------------------
+-- X-02  GST "aggregate turnover" (CGST Act s.2(6)) -- a classified worksheet, not a credit-side sum
+-- ---------------------------------------------------------------------------
+-- The gate that decides whether a society charges GST (s.22 / Notification 12/2017-CT(R), Entry 77: the
+-- society's aggregate turnover in the FY must exceed Rs 20 lakh) used to be "every credit posted to every
+-- credit-natured account", which counted GST payable (tax is EXCLUDED by s.2(6)), funds, capital and
+-- liabilities (not supplies at all), and dropped exempt supplies (which s.2(6) INCLUDES).
+--
+-- It is now built from the society's own accounts. Every credit-natured account is classified:
+--   taxable       -- outward supply on which tax is chargeable            (counts)
+--   exempt        -- exempt / nil-rated / non-taxable supply              (counts: s.2(6) includes it)
+--   not_a_supply  -- capital, liability, fund-reserve or other non-supply (does not count)
+--   tax           -- GST payable / RCM payable (CGST, SGST, IGST)         (does not count: s.2(6) excludes tax)
+--   NULL          -- UNCLASSIFIED: the software does not guess.
+-- accounts.gst_supply_class is the society's classification (exempt / not_a_supply / tax need a reference to
+-- the CA's or advocate's advice in gst_class_ref); where it is empty a default by ledger head is used for the
+-- unambiguous heads only (fn_gst_default_supply_class). Interest, rent, tickets, fines and the sinking /
+-- repair / corpus funds are contested, so they stay unclassified until the society's CA decides.
+--
+-- Because unclassified amounts are real, the gate has THREE states instead of two:
+--   above          the classified supplies ALONE exceed the threshold          -> GST is charged
+--   below          even counting every unclassified amount, turnover is within it -> GST is not charged
+--   indeterminate  the threshold falls between the two bounds                    -> GST is NOT charged,
+--                  a GST_TURNOVER_INDETERMINATE compliance flag is raised, and the CA classifies the
+--                  open accounts. Charging tax that may not be due is the worse error, so the engine
+--                  never resolves doubt in that direction.
+-- Amounts are posted ledger movements in the FY (accrual postings at billing plus direct receipts), net of
+-- reversals, on the account's own postings (no parent roll-up, so nothing is counted twice). Turnover under
+-- s.2(6) is PAN-wide and all-India; this is the society's own books only (one PAN, one state), and the
+-- classification is the CA's. It is a worksheet, not a determination.
+CREATE OR REPLACE FUNCTION fn_gst_default_supply_class(p_tab_name TEXT) RETURNS TEXT
+LANGUAGE sql IMMUTABLE AS $$
+    SELECT CASE
+        WHEN p_tab_name IN ('CGST','SGST','IGST','CGSTRCM','SGSTRCM','IGSTRCM') THEN 'tax'
+        WHEN p_tab_name IN ('CL','CapAc','Eq','Res','Lb','NCL','LAT','Prov','SCr','DepFund','InExp') THEN 'not_a_supply'
+        WHEN p_tab_name IN ('SocM','SocC') THEN 'taxable'      -- the member maintenance / society charges
+        WHEN p_tab_name = 'IncExmpt' THEN 'exempt'
+        ELSE NULL END;
+$$;
 
-    RETURN COALESCE(v_total, 0);
+-- One row per credit-natured account that moved in the FY.
+CREATE OR REPLACE FUNCTION fn_gst_turnover_lines(p_society_id INT, p_fy INT)
+RETURNS TABLE (account_id INT, account_name VARCHAR, tab_name VARCHAR, supply_class TEXT,
+               class_source TEXT, amount NUMERIC(15,2))
+LANGUAGE sql STABLE AS $$
+    WITH mv AS (
+        SELECT t.acc_id,
+               SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount ELSE -t.amount END)::NUMERIC(15,2) AS net
+          FROM transactions t
+         WHERE t.society_id = p_society_id AND t.status = 'paid'
+           AND t.trx_date BETWEEN MAKE_DATE(p_fy, 4, 1) AND MAKE_DATE(p_fy + 1, 3, 31)
+         GROUP BY t.acc_id
+    )
+    SELECT a.id, a.name::VARCHAR, a.tab_name::VARCHAR,
+           COALESCE(a.gst_supply_class,
+                    CASE WHEN a.is_gst_exempt_supply THEN 'exempt' END,
+                    fn_gst_default_supply_class(a.tab_name)) AS supply_class,
+           CASE WHEN a.gst_supply_class IS NOT NULL THEN 'society'
+                WHEN a.is_gst_exempt_supply THEN 'legacy flag'
+                WHEN fn_gst_default_supply_class(a.tab_name) IS NOT NULL THEN 'default'
+                ELSE 'unclassified' END AS class_source,
+           mv.net
+      FROM mv
+      JOIN accounts a ON a.society_id = p_society_id AND a.id = mv.acc_id
+     WHERE a.drcr_account = 'Cr' AND mv.net <> 0
+     ORDER BY a.tab_name, a.id;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_gst_turnover_gate(p_society_id INT, p_fy INT)
+RETURNS TABLE (taxable NUMERIC, exempt NUMERIC, unclassified NUMERIC, not_a_supply NUMERIC, tax NUMERIC,
+               lower_bound NUMERIC, upper_bound NUMERIC, threshold NUMERIC, state TEXT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_thr NUMERIC;
+    r     RECORD;
+BEGIN
+    SELECT value INTO v_thr FROM state_compliance_thresholds
+     WHERE threshold_key = 'gst_turnover_lakh' AND is_active = TRUE LIMIT 1;
+    v_thr := COALESCE(v_thr, 20) * 100000;
+    SELECT COALESCE(SUM(l.amount) FILTER (WHERE l.supply_class = 'taxable'), 0)       AS tx,
+           COALESCE(SUM(l.amount) FILTER (WHERE l.supply_class = 'exempt'), 0)        AS ex,
+           COALESCE(SUM(l.amount) FILTER (WHERE l.supply_class IS NULL), 0)           AS un,
+           COALESCE(SUM(l.amount) FILTER (WHERE l.supply_class = 'not_a_supply'), 0)  AS ns,
+           COALESCE(SUM(l.amount) FILTER (WHERE l.supply_class = 'tax'), 0)           AS tg
+      INTO r FROM fn_gst_turnover_lines(p_society_id, p_fy) l;
+    taxable := r.tx; exempt := r.ex; unclassified := r.un; not_a_supply := r.ns; tax := r.tg;
+    lower_bound := GREATEST(r.tx + r.ex, 0);
+    upper_bound := GREATEST(r.tx + r.ex + GREATEST(r.un, 0), 0);
+    threshold := v_thr;
+    state := CASE WHEN lower_bound > v_thr THEN 'above'
+                  WHEN upper_bound <= v_thr THEN 'below'
+                  ELSE 'indeterminate' END;
+    RETURN NEXT;
+END;
+$$;
+
+-- Kept for callers and tests that still ask for one number: the classified aggregate turnover (the lower
+-- bound). Billing and the RCM gate use fn_gst_turnover_gate, which also reports the unclassified amount.
+CREATE OR REPLACE FUNCTION fn_society_turnover_fy(p_society_id INT, p_fy INT)
+RETURNS NUMERIC(15,2) LANGUAGE sql STABLE AS $$
+    SELECT lower_bound::NUMERIC(15,2) FROM fn_gst_turnover_gate(p_society_id, p_fy);
+$$;
+
+-- The year's worksheet, kept for the auditor. A confirmed worksheet is a record and cannot be changed.
+CREATE TABLE gst_turnover_worksheets (
+    id               SERIAL PRIMARY KEY,
+    society_id       INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    financial_year   INT NOT NULL,
+    prepared_on      TIMESTAMP NOT NULL DEFAULT NOW(),
+    prepared_by      INT REFERENCES users (id),
+    taxable_value    NUMERIC(15,2) NOT NULL,
+    exempt_value     NUMERIC(15,2) NOT NULL,
+    unclassified_value NUMERIC(15,2) NOT NULL,
+    not_a_supply_value NUMERIC(15,2) NOT NULL,
+    tax_value        NUMERIC(15,2) NOT NULL,
+    lower_bound      NUMERIC(15,2) NOT NULL,
+    upper_bound      NUMERIC(15,2) NOT NULL,
+    threshold        NUMERIC(15,2) NOT NULL,
+    gate_state       VARCHAR(14) NOT NULL CHECK (gate_state IN ('above','below','indeterminate')),
+    lines            JSONB NOT NULL,
+    status           VARCHAR(10) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','confirmed')),
+    confirmed_by     INT REFERENCES users (id),
+    confirmed_on     TIMESTAMP,
+    confirmation_ref VARCHAR(255),           -- the CA's / advocate's reference
+    CONSTRAINT ck_gst_ws_confirmed CHECK (status = 'draft'
+        OR (confirmed_by IS NOT NULL AND confirmed_on IS NOT NULL AND LENGTH(BTRIM(COALESCE(confirmation_ref, ''))) >= 5))
+);
+CREATE INDEX idx_gst_ws_society_fy ON gst_turnover_worksheets (society_id, financial_year, prepared_on DESC);
+
+CREATE OR REPLACE FUNCTION trg_gst_ws_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' AND OLD.status = 'confirmed' THEN
+        RAISE EXCEPTION 'A confirmed GST turnover worksheet is a record and cannot be deleted.';
+    END IF;
+    IF TG_OP = 'UPDATE' AND OLD.status = 'confirmed' THEN
+        RAISE EXCEPTION 'A confirmed GST turnover worksheet is a record and cannot be changed.';
+    END IF;
+    RETURN COALESCE(NEW, OLD);
+END;
+$$;
+CREATE TRIGGER trg_gst_ws_immutable BEFORE UPDATE OR DELETE ON gst_turnover_worksheets
+    FOR EACH ROW EXECUTE FUNCTION trg_gst_ws_immutable();
+
+CREATE OR REPLACE FUNCTION fn_save_gst_turnover_worksheet(p_society_id INT, p_fy INT, p_user INT DEFAULT NULL)
+RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE g RECORD; v_id INT;
+BEGIN
+    SELECT * INTO g FROM fn_gst_turnover_gate(p_society_id, p_fy);
+    INSERT INTO gst_turnover_worksheets (society_id, financial_year, prepared_by, taxable_value, exempt_value,
+        unclassified_value, not_a_supply_value, tax_value, lower_bound, upper_bound, threshold, gate_state, lines)
+    VALUES (p_society_id, p_fy, p_user, g.taxable, g.exempt, g.unclassified, g.not_a_supply, g.tax,
+            g.lower_bound, g.upper_bound, g.threshold, g.state,
+            COALESCE((SELECT jsonb_agg(to_jsonb(l)) FROM fn_gst_turnover_lines(p_society_id, p_fy) l), '[]'::jsonb))
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_confirm_gst_turnover_worksheet(p_id INT, p_user INT, p_ref TEXT)
+RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+    IF LENGTH(BTRIM(COALESCE(p_ref, ''))) < 5 THEN
+        RAISE EXCEPTION 'Confirming the worksheet needs a reference to the CA''s or advocate''s advice.';
+    END IF;
+    UPDATE gst_turnover_worksheets SET status = 'confirmed', confirmed_by = p_user,
+           confirmed_on = NOW(), confirmation_ref = p_ref
+     WHERE id = p_id AND status = 'draft';
+    IF NOT FOUND THEN RAISE EXCEPTION 'Worksheet % not found or already confirmed.', p_id; END IF;
+END;
+$$;
+
+-- Classify an account. exempt / not_a_supply / tax need a reference; NULL clears it (back to the default).
+CREATE OR REPLACE FUNCTION fn_set_gst_supply_class(p_society_id INT, p_acc_id INT, p_class TEXT, p_ref TEXT)
+RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE accounts SET gst_supply_class = p_class, gst_class_ref = NULLIF(BTRIM(p_ref), ''), updated_at = NOW()
+     WHERE society_id = p_society_id AND id = p_acc_id AND drcr_account = 'Cr';
+    IF NOT FOUND THEN RAISE EXCEPTION 'No credit-natured account % in society %.', p_acc_id, p_society_id; END IF;
+END;
+$$;
+
+-- Raise (once per society and FY) the flag that GST charging is on hold for want of a classification.
+CREATE OR REPLACE FUNCTION fn_flag_gst_turnover_indeterminate(p_society_id INT, p_fy INT) RETURNS VOID
+LANGUAGE plpgsql AS $$
+DECLARE g RECORD;
+BEGIN
+    SELECT * INTO g FROM fn_gst_turnover_gate(p_society_id, p_fy);
+    INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail)
+    VALUES (p_society_id, 'GST_TURNOVER_INDETERMINATE', 'gst_turnover_fy', p_society_id * 10000 + p_fy,
+            format('FY %s-%s: classified supplies Rs %s, unclassified credits Rs %s, threshold Rs %s. The threshold '
+                   'falls between the two, so GST has NOT been charged to members. Have the CA classify the '
+                   'unclassified income and fund accounts (fn_set_gst_supply_class); the worksheet is in the GST export.',
+                   p_fy, p_fy + 1, g.lower_bound, g.unclassified, g.threshold))
+    ON CONFLICT (source_table, source_id, rule_code) DO NOTHING;
 END;
 $$;
 

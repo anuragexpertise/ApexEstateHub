@@ -4,10 +4,12 @@ GST Summary Excel Generator — EstateHub
 ========================================
 Produces a structured GST summary report for one financial year.
 
-Two sheets:
+Sheets (the third is new):
   * "Taxable Supplies" — month-by-month (GSTR-1 Table 4/5 shape)
   * "Summary" — one FY-total row: taxable value, tax collected, exempt value,
-                total turnover
+                and the value of supplies EXCLUDING GST (s.2(6): tax is not turnover)
+  * "Aggregate Turnover" — the s.2(6) worksheet behind the GST gate (classified accounts,
+                unclassified credits, the bounds and the gate state)
 
 Data source: fn_gst_summary_fy(p_society_id, p_fy)
 """
@@ -139,7 +141,7 @@ def _write_summary_sheet(ws, rows: list[dict], fy: int) -> None:
     headers = [
         "Financial Year", "Taxable Value", "CGST Collected",
         "SGST Collected", "Total GST Collected", "Exempt Value",
-        "Total Turnover", "GST Bills", "Exempt Bills",
+        "Value of Supplies (excl. GST)", "GST Bills", "Exempt Bills",
     ]
     for col, hdr in enumerate(headers, start=1):
         cell = ws.cell(row=2, column=col, value=hdr)
@@ -162,7 +164,7 @@ def _write_summary_sheet(ws, rows: list[dict], fy: int) -> None:
         t_sgst,
         t_cgst + t_sgst,
         t_exempt,
-        t_taxable + t_cgst + t_sgst + t_exempt,
+        t_taxable + t_exempt,        # s.2(6): aggregate turnover EXCLUDES central and state tax
         t_gst_bills,
         t_exempt_bills,
     ]
@@ -177,6 +179,54 @@ def _write_summary_sheet(ws, rows: list[dict], fy: int) -> None:
             cell.number_format = _FMT_AMT
         else:
             cell.alignment = _ALIGN_C
+
+
+def _write_turnover_sheet(ws, gate: dict | None, lines: list[dict], fy: int) -> None:
+    """The s.2(6) aggregate-turnover worksheet: every credit-natured account that moved, its class and where the
+    class came from, then the bounds and the gate state. A worksheet for the society's CA, not a determination."""
+    ws.cell(row=1, column=1, value=f"Aggregate turnover worksheet (CGST Act s.2(6)) — FY {fy}-{fy+1}")
+    ws.cell(row=1, column=1).font = _FONT_TITLE
+    headers = ["Account", "Ledger head", "Class", "Class set by", "Amount (net credit)"]
+    for col, hdr in enumerate(headers, start=1):
+        cell = ws.cell(row=2, column=col, value=hdr)
+        cell.font, cell.fill, cell.alignment, cell.border = _FONT_HEADER, _FILL_HEADER, _ALIGN_C, _BORDER_ALL
+    row = 3
+    for ln in lines:
+        vals = [ln.get("account_name"), ln.get("tab_name"), ln.get("supply_class") or "UNCLASSIFIED",
+                ln.get("class_source"), float(ln.get("amount") or 0)]
+        for col, v in enumerate(vals, start=1):
+            c = ws.cell(row=row, column=col, value=v)
+            c.font, c.border = _FONT_BODY, _BORDER_ALL
+            if col == 5:
+                c.alignment, c.number_format = _ALIGN_R, _FMT_AMT
+        row += 1
+    row += 1
+    if gate:
+        notes = [
+            ("Taxable supplies", gate.get("taxable")), ("Exempt supplies (counted by s.2(6))", gate.get("exempt")),
+            ("Classified aggregate turnover (lower bound)", gate.get("lower_bound")),
+            ("Unclassified credits (CA to decide)", gate.get("unclassified")),
+            ("Upper bound if all unclassified counted", gate.get("upper_bound")),
+            ("Not a supply (capital / liabilities / funds): excluded", gate.get("not_a_supply")),
+            ("GST payable accounts: excluded (tax is not turnover)", gate.get("tax")),
+            ("Threshold", gate.get("threshold")),
+        ]
+        for label, v in notes:
+            ws.cell(row=row, column=1, value=label).font = _FONT_HEADER
+            c = ws.cell(row=row, column=5, value=float(v or 0))
+            c.font, c.alignment, c.number_format = _FONT_TOTAL, _ALIGN_R, _FMT_AMT
+            row += 1
+        state = gate.get("state")
+        meaning = {"above": "ABOVE: classified supplies alone exceed the threshold; GST is charged on member bills.",
+                   "below": "BELOW: even counting every unclassified credit, turnover is within the threshold; GST is not charged.",
+                   "indeterminate": "INDETERMINATE: the threshold lies between the two bounds. GST is NOT being charged to members "
+                                    "and a compliance flag is raised. Have the CA classify the unclassified accounts."}.get(state, "")
+        ws.cell(row=row + 1, column=1, value="Gate state").font = _FONT_HEADER
+        ws.cell(row=row + 1, column=2, value=f"{(state or '').upper()} — {meaning}").font = _FONT_BODY
+    ws.cell(row=row + 3, column=1, value=("Society's own books only (one PAN, one state); s.2(6) is PAN-wide and all-India. "
+                                          "Classification is the society's CA's responsibility.")).font = _FONT_BODY
+    for col, w in zip("ABCDE", (38, 14, 16, 14, 20)):
+        ws.column_dimensions[col].width = w
 
 
 def generate_gst_summary_excel(
@@ -204,6 +254,16 @@ def generate_gst_summary_excel(
 
     ws_sum = wb.create_sheet(title="Summary")
     _write_summary_sheet(ws_sum, rows, fy)
+
+    # s.2(6) aggregate-turnover worksheet. Read defensively: an older database without the worksheet functions
+    # still gets the two original sheets.
+    try:
+        gate = db._execute("SELECT * FROM fn_gst_turnover_gate(%s,%s)", (society_id, fy), fetch_one=True)
+        lines = db._execute("SELECT * FROM fn_gst_turnover_lines(%s,%s)", (society_id, fy), fetch_all=True) or []
+    except Exception:
+        gate, lines = None, []
+    if gate or lines:
+        _write_turnover_sheet(wb.create_sheet(title="Aggregate Turnover"), gate, lines, fy)
 
     filename = f"{filename_prefix}_FY{fy}-{fy+1}.xlsx"
     wb._gst_filename = filename  # type: ignore[attr-defined]
