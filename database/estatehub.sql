@@ -18357,6 +18357,51 @@ BEGIN
 END;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- Ledger anchors: an external check on the hash chain
+-- ---------------------------------------------------------------------------
+-- A hash chain is tamper-EVIDENT, not tamper-proof: anyone who can rewrite the table can also recompute
+-- every hash. An anchor records the chain's head (sequence, hash, row count) at a moment in time and is
+-- signed by the APPLICATION with an HMAC key the database never holds (app/security/ledger_anchor.py).
+-- The signed certificate is also printed and filed with the society's CA. Rebuilding the chain afterwards
+-- produces different hashes, which no longer match what was signed and filed, and the database owner
+-- cannot forge the signature. fn_verify_ledger_chain checks every anchor.
+CREATE TABLE ledger_chain_anchors (
+    id           SERIAL PRIMARY KEY,
+    society_id   INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    anchored_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    ledger_seq   BIGINT NOT NULL CHECK (ledger_seq >= 1),
+    head_hash    VARCHAR(64) NOT NULL,
+    row_count    BIGINT NOT NULL CHECK (row_count >= 1),
+    anchored_by  INT REFERENCES users (id),
+    method       VARCHAR(10) NOT NULL DEFAULT 'manual' CHECK (method IN ('manual', 'scheduled', 'fy_lock')),
+    signature    VARCHAR(64),       -- HMAC-SHA256 by the application; set once
+    external_ref TEXT,              -- where the signed certificate was filed (CA's letter, locker, ...); set once
+    CONSTRAINT uq_anchor_society_seq UNIQUE (society_id, ledger_seq)
+);
+CREATE INDEX idx_anchor_society ON ledger_chain_anchors (society_id, ledger_seq DESC);
+
+-- Append-only. The only changes ever allowed are filling signature and external_ref once each.
+CREATE OR REPLACE FUNCTION trg_anchor_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'ledger_chain_anchors is append-only (attempted DELETE)';
+    END IF;
+    IF ROW(NEW.society_id, NEW.anchored_at, NEW.ledger_seq, NEW.head_hash, NEW.row_count, NEW.anchored_by, NEW.method)
+       IS DISTINCT FROM
+       ROW(OLD.society_id, OLD.anchored_at, OLD.ledger_seq, OLD.head_hash, OLD.row_count, OLD.anchored_by, OLD.method) THEN
+        RAISE EXCEPTION 'ledger_chain_anchors is append-only: an anchor cannot be changed';
+    END IF;
+    IF (OLD.signature IS NOT NULL AND NEW.signature IS DISTINCT FROM OLD.signature)
+       OR (OLD.external_ref IS NOT NULL AND NEW.external_ref IS DISTINCT FROM OLD.external_ref) THEN
+        RAISE EXCEPTION 'ledger_chain_anchors: the signature and the filing reference are set once';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_anchor_immutable BEFORE UPDATE OR DELETE ON ledger_chain_anchors
+    FOR EACH ROW EXECUTE FUNCTION trg_anchor_immutable();
+
 -- Empty result = the chain is intact.
 CREATE OR REPLACE FUNCTION fn_verify_ledger_chain(p_society_id INT DEFAULT NULL)
 RETURNS TABLE (society_id INT, ledger_seq BIGINT, transaction_id INT, problem TEXT)
@@ -18386,6 +18431,26 @@ LANGUAGE sql STABLE AS $$
       FROM transactions t
      WHERE t.ledger_seq IS NULL
        AND (p_society_id IS NULL OR t.society_id = p_society_id)
+    UNION ALL
+    SELECT a.society_id, a.ledger_seq, NULL::INT,
+           format('anchor #%s: the anchored row no longer exists (rows removed below an anchored point)', a.id)
+      FROM ledger_chain_anchors a
+     WHERE (p_society_id IS NULL OR a.society_id = p_society_id)
+       AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.society_id = a.society_id AND t.ledger_seq = a.ledger_seq)
+    UNION ALL
+    SELECT a.society_id, a.ledger_seq, t.id,
+           format('anchor #%s: the chain no longer matches what was signed and filed (rebuilt or altered since)', a.id)
+      FROM ledger_chain_anchors a
+      JOIN transactions t ON t.society_id = a.society_id AND t.ledger_seq = a.ledger_seq
+     WHERE (p_society_id IS NULL OR a.society_id = p_society_id)
+       AND t.ledger_hash IS DISTINCT FROM a.head_hash
+    UNION ALL
+    SELECT a.society_id, a.ledger_seq, NULL::INT,
+           format('anchor #%s: the number of rows below the anchored point has changed', a.id)
+      FROM ledger_chain_anchors a
+     WHERE (p_society_id IS NULL OR a.society_id = p_society_id)
+       AND (SELECT COUNT(*) FROM transactions t
+             WHERE t.society_id = a.society_id AND t.ledger_seq <= a.ledger_seq) <> a.row_count
     ORDER BY 1, 2 NULLS LAST, 3;
 $$;
 
@@ -19128,3 +19193,80 @@ BEGIN
     RETURN v_count;
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- Job 4: anchoring functions, TRUNCATE guards
+-- ---------------------------------------------------------------------------
+-- The exact text the application signs. Fixed format, versioned.
+CREATE OR REPLACE FUNCTION fn_anchor_message(p_anchor_id INT) RETURNS TEXT
+LANGUAGE sql STABLE AS $$
+    SELECT format('estatehub-ledger-anchor|v1|society=%s|seq=%s|hash=%s|rows=%s|at=%s',
+                  society_id, ledger_seq, head_hash, row_count, to_char(anchored_at, 'YYYY-MM-DD"T"HH24:MI:SS'))
+      FROM ledger_chain_anchors WHERE id = p_anchor_id;
+$$;
+
+-- Record the chain's current head. Refuses to anchor a chain that does not verify (never sign a bad ledger).
+-- Anchoring the same head twice returns the existing anchor.
+CREATE OR REPLACE FUNCTION fn_anchor_ledger_chain(p_society_id INT, p_user INT DEFAULT NULL,
+                                                  p_method TEXT DEFAULT 'manual')
+RETURNS TABLE (anchor_id INT, ledger_seq BIGINT, head_hash VARCHAR, row_count BIGINT,
+               anchored_at TIMESTAMP, message TEXT)
+LANGUAGE plpgsql AS $$
+#variable_conflict use_column
+DECLARE
+    v_seq BIGINT; v_hash VARCHAR; v_n BIGINT; v_id INT;
+BEGIN
+    PERFORM pg_advisory_xact_lock(1818, p_society_id);       -- same lock the chain trigger takes
+    IF EXISTS (SELECT 1 FROM fn_verify_ledger_chain(p_society_id)) THEN
+        RAISE EXCEPTION 'The ledger chain of society % does not verify; it will not be anchored until that is resolved.', p_society_id;
+    END IF;
+    SELECT t.ledger_seq, t.ledger_hash INTO v_seq, v_hash
+      FROM transactions t WHERE t.society_id = p_society_id AND t.ledger_seq IS NOT NULL
+     ORDER BY t.ledger_seq DESC LIMIT 1;
+    IF v_seq IS NULL THEN RAISE EXCEPTION 'Society % has no ledger entries to anchor.', p_society_id; END IF;
+    SELECT COUNT(*) INTO v_n FROM transactions t WHERE t.society_id = p_society_id AND t.ledger_seq <= v_seq;
+    INSERT INTO ledger_chain_anchors (society_id, ledger_seq, head_hash, row_count, anchored_by, method)
+    VALUES (p_society_id, v_seq, v_hash, v_n, p_user, p_method)
+    ON CONFLICT ON CONSTRAINT uq_anchor_society_seq DO NOTHING
+    RETURNING id INTO v_id;
+    IF v_id IS NULL THEN
+        SELECT a.id INTO v_id FROM ledger_chain_anchors a WHERE a.society_id = p_society_id AND a.ledger_seq = v_seq;
+    END IF;
+    RETURN QUERY SELECT a.id, a.ledger_seq, a.head_hash, a.row_count, a.anchored_at, fn_anchor_message(a.id)
+                   FROM ledger_chain_anchors a WHERE a.id = v_id;
+END;
+$$;
+
+-- The application's signature, set once.
+CREATE OR REPLACE FUNCTION fn_set_anchor_signature(p_anchor_id INT, p_signature TEXT) RETURNS VOID
+LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE ledger_chain_anchors SET signature = p_signature WHERE id = p_anchor_id AND signature IS NULL;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Anchor % not found or already signed.', p_anchor_id; END IF;
+END;
+$$;
+
+-- Where the signed certificate was filed, set once.
+CREATE OR REPLACE FUNCTION fn_file_anchor_certificate(p_anchor_id INT, p_ref TEXT) RETURNS VOID
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF LENGTH(BTRIM(COALESCE(p_ref, ''))) < 5 THEN
+        RAISE EXCEPTION 'Say where the signed certificate was filed (at least 5 characters).';
+    END IF;
+    UPDATE ledger_chain_anchors SET external_ref = p_ref WHERE id = p_anchor_id AND external_ref IS NULL;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Anchor % not found or already filed.', p_anchor_id; END IF;
+END;
+$$;
+
+-- TRUNCATE bypasses every row-level trigger, so the append-only and immutability triggers above did not stop
+-- it. A statement-level trigger does.
+CREATE OR REPLACE FUNCTION trg_no_truncate() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION '% is a protected record and cannot be truncated', TG_TABLE_NAME;
+END;
+$$;
+CREATE TRIGGER trg_transactions_no_truncate      BEFORE TRUNCATE ON transactions            FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+CREATE TRIGGER trg_audit_events_no_truncate      BEFORE TRUNCATE ON audit_events            FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+CREATE TRIGGER trg_regime_audit_no_truncate      BEFORE TRUNCATE ON regime_rule_audit       FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+CREATE TRIGGER trg_fy_locks_no_truncate          BEFORE TRUNCATE ON fy_locks                FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+CREATE TRIGGER trg_anchors_no_truncate           BEFORE TRUNCATE ON ledger_chain_anchors    FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+CREATE TRIGGER trg_gst_ws_no_truncate            BEFORE TRUNCATE ON gst_turnover_worksheets FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
