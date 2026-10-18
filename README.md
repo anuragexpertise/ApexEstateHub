@@ -4,7 +4,7 @@
 > **Multi-tenant · Role-aware · Real-time · Zero-reload**
 > Built on Python Dash + Flask + PostgreSQL (Aiven) · Hosted on Render
 
-> ⚖️ **Secretaries, auditors, CAs, tax officers:** start at [Statutory Compliance & Audit Assurance](#statutory-compliance--audit-assurance) — what is enforced, where, how to verify it, and what is *not* yet built.
+> ⚖️ **Secretaries, auditors, CAs, tax officers:** start at [At a glance](#at-a-glance-for-secretaries-auditors-cas-and-tax-officers) — what is enforced, how to check it yourself, and what is *not* claimed. Detail: [Statutory Compliance & Audit Assurance](#statutory-compliance--audit-assurance).
 
 > 📌 **Schema source of truth:** `database/estatehub.sql` — see [§22 Database Migrations](#22-deployment--utility-notes) for details.
 
@@ -21,6 +21,63 @@
 
 ---
 
+## At a glance: for Secretaries, auditors, CAs and tax officers
+
+EstateHub is built for **Uttar Pradesh Apartment Owners' Associations** (UP Apartment Act, 2010; UP Apartment Rules, 2011; Model Bye-Laws, 2011), with the Central tax laws layered on top. This page says, in plain words, what the software **enforces**, how you can **check** it, and what it deliberately **does not** do. The detail, with the code that does each thing, follows in [Statutory Compliance & Audit Assurance](#statutory-compliance--audit-assurance).
+
+**How to read the claims.** Where a control is described, it is enforced **inside the database**, so a screen, a bug or a hurried user cannot get round it. Where something is only partly done, or not done, it is said in the same breath. The software prepares and protects the society's books; it does **not** file returns, give legal or tax opinions, or replace the society's CA and advocate.
+
+### Six things the software will not let anyone do
+
+1. **Quietly change the books.** A posted ledger line cannot be edited or deleted. A mistake is corrected only by a visible *reversal* entry that carries a reason. Each society's ledger is a hash chain, and its head is *anchored* with a signature the database itself does not hold, on a certificate the Secretary and Treasurer sign and file with the CA. So a rewrite after the fact shows.
+2. **Post a voucher that does not balance, or that says nothing about what it is for.** An unbalanced voucher cannot be committed. A cash voucher, which has no cash leg by design, must name its source document and cannot exceed that document's amount. The signed daily cash book can record the cash actually counted, and a difference is flagged (there is no screen for entering the count yet).
+3. **Reopen a year that has been locked.** After a year is closed, the Treasurer alone can lock it, with a written reason. From then on nothing can be posted into that year or any earlier one, and a signed ledger anchor is taken first.
+4. **Apply a rule without showing its authority.** Each of the **53 UP rules** carries its source text and a status: **38 checked** against public sources by the maintainers, **13 provisional** and **2 disputed**; **none is yet marked verified by an advocate**, and the software says so. A rule change is dated and never retroactive, a lower layer (society, board) can tighten a rule but never loosen it, and every change is recorded. Eight of the 53 are statutory; the other 45 are bye-law, policy or engine defaults and are labelled as such.
+5. **Pass a General Body resolution on a number someone typed.** Quorum and majority are worked out from the attendance and vote registers, each flat weighted by its undivided interest, against the **30% quorum floor** and the majority the decision type requires, measured against *all* owners, not only those who voted. The registers are frozen once a resolution passes.
+6. **Hide a tax assumption.** A cash receipt of **₹2,00,000 or more from one payer in a day** is refused. TDS sections and rates are dated rows. **GST is charged only when the society's turnover under s.2(6) clearly exceeds ₹20 lakh** and a member's monthly charge exceeds ₹7,500. Where the books cannot tell (contested heads such as deposit interest or sinking funds), GST is **held and flagged for the CA**, never charged on a guess.
+
+### What each reader can check
+
+| If you are the… | You will want to see | Where |
+|---|---|---|
+| **Secretary / Managing Committee** | Who can do what: the admin and secretary hold no finance powers, the accountant prepares and posts, the Treasurer approves, reverses and locks. Arrears and defaulter lists, the bye-law 49 filing calendar, and open compliance flags. | §5 Governance; §4 Audit readiness |
+| **Legal auditor** | The catalogue of Acts, Rules and Bye-laws (10 instruments in the catalogue), each rule's source and status, the append-only record of rule changes, and the register behind every resolution. The s.22 service cut-off check advises only and never cuts a service itself. | *How the rules are followed*; §5 |
+| **Chartered Accountant** | Ledger integrity and cash-voucher reports, the year-end closing report, the GST aggregate-turnover worksheet, the TDS quarterly workbook, the mutuality working paper, and the anchor certificates. | §1, §2, §3, §4 |
+| **Income-tax officer** | Income tagged *mutual* or *non-mutual*; the cash-receipt ceiling; TDS thresholds and PAN rules; the audit trail of who changed what. And, plainly, what is **not** computed (below). | §2 |
+
+### Check it yourself in fifteen minutes
+
+With read access to a society's database (a read-only account is enough), run these. An empty result is the good answer for the first three.
+
+```sql
+SELECT * FROM fn_verify_ledger_chain(<society_id>);              -- is the ledger chain intact, and does it match every signed anchor?
+SELECT * FROM fn_ledger_integrity_report(<society_id>);          -- any voucher out of balance?
+SELECT * FROM fn_cash_voucher_report(<society_id>) WHERE NOT amount_checked;   -- which cash vouchers are not amount-checked?
+SELECT * FROM fn_gst_turnover_gate(<society_id>, <financial_year>);            -- GST gate: bounds and state
+```
+
+On a **test** copy, try to alter a posted entry (`UPDATE transactions SET amount = amount + 1 …`, or `TRUNCATE transactions`): the database refuses both. The full list of checks is in [*Verify it yourself*](#verify-it-yourself).
+
+### What we do not claim
+
+- **Not a return filer.** No income-tax computation, no return, no TRACES filing, no GST return. Exports are working papers for the CA.
+- **Section 80P / 80AC, Form 26AS reconciliation and e-invoicing are not built.** The mutuality summary does not apportion common expenses, and takes no account of depreciation or carried-forward losses.
+- **Not yet DPDP Act, 2023 compliant.** There is no consent record, erasure or retention workflow, or breach procedure (see §6).
+- **Provisional citations stay provisional** until an advocate confirms each against the gazette text.
+- **Some inputs are still typed by people.** The attendance register is keyed in by the Secretary, and Managing Committee decisions rest on the minutes. TDS rates and thresholds must be re-confirmed by the CA each year.
+- **A database owner holding the signing key is outside these controls.** Against anyone with the owner login alone, the signed and filed anchors catch a rewrite, but only up to the last anchor, so anchoring must be scheduled and the application deployed on its restricted login. The repository does neither for you.
+- **Several screens are not built yet:** classifying accounts for the GST worksheet, and recording the cash counted at the cash-book signing. Both exist in the database only.
+
+The complete, itemised list is [*Gaps we are open about*](#gaps-we-are-open-about).
+
+### Evidence, and its limits
+
+- **A critical review.** [`ER.md`](ER.md) is a first-person, **unsigned** review of this codebase dated 16 Oct 2026. It says itself that it did not examine the user-interface code, the full SQL line by line, or the exact bye-law text. It is a list of places where a CA or advocate would push back, **not an audit opinion**. Its findings and what has been done about each are in [*Review findings and remediation status*](#review-findings-and-remediation-status). A **signed** review by the society's own CA or advocate is the step that would carry weight, and this repository is arranged so that they can run every check above themselves.
+- **Automated tests.** 855 test functions in 60 files. At the last full run on a clean database **1,130 passed and 16 failed**. The 16 are older failures, in the setup wizard, the fund-controls and rule-layer ratification tests, endpoint-classification checks and a few others. They are listed and not hidden, and because fund controls and ratification are governance features, treat those two areas as **not yet fully proven**.
+- **Honesty about status.** Every control below is marked ✅ implemented and tested, 🟡 partial, or ⬜ not yet built, and the ⬜ and 🟡 rows state the limit.
+
+---
+
 ## Statutory Compliance & Audit Assurance
 
 > **For Society Secretaries, Managing Committees, statutory / legal auditors, Chartered Accountants and Income-tax officers.**
@@ -30,7 +87,7 @@
 >
 > Nothing here is legal, tax or audit advice. The society's own advocate and CA remain the authority on interpretation; the software's job is to make their decisions enforceable, visible and reproducible.
 >
-> **Independently reviewed.** [`ER.md`](ER.md) is a critical statutory-and-financial accuracy review of this codebase (16 Oct 2026). Its findings, and what has and has not been fixed since, are listed in [*Independent review and remediation status*](#independent-review-and-remediation-status) below. The review was a focused first pass, **not a certification**.
+> **Reviewed, not certified.** [`ER.md`](ER.md) is a critical, unsigned review of this codebase (16 Oct 2026) that lists where a CA, advocate or tax officer would push back; it is a focused first pass, **not an audit opinion**. Its findings, and what has and has not been fixed since, are in [*Review findings and remediation status*](#review-findings-and-remediation-status).
 
 ### How the rules are followed — in spirit, not just in letter
 
@@ -164,7 +221,7 @@ Until these are built, the society should adopt a written privacy notice and ret
 
 ---
 
-### Independent review and remediation status
+### Review findings and remediation status
 
 [`ER.md`](ER.md) is a critical review of this codebase written to find the places where a CA, advocate, auditor or tax officer would push back. It is reproduced in the repository unedited so you can read the findings in full. The table shows what has been done about each one. Statutory figures in the review are marked *Verified*, *Verify* or *Code-only*; **please treat anything marked *Verify* as unconfirmed until your CA or advocate confirms it.**
 
@@ -260,6 +317,7 @@ Relevant suites include `test_accounting_integrity_live`, `test_scenario_b_recei
 
 ## Table of Contents
 
+0. [At a glance: for Secretaries, auditors, CAs and tax officers](#at-a-glance-for-secretaries-auditors-cas-and-tax-officers)
 0. [Statutory Compliance & Audit Assurance](#statutory-compliance--audit-assurance)
 1. [What is EstateHub?](#1-what-is-estatehub)
 2. [Feature Highlights](#2-feature-highlights)
