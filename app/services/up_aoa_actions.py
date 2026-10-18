@@ -317,21 +317,42 @@ def pay_admission_fee(society_id: int, user_id: int, apartment_id: int,
 
 
 # ── cashbook signature (bye-law 23(f)) ─────────────────────────────────────────────
-def sign_cashbook(society_id: int, user_id: int, day: str, signer_name: str):
-    """Record a daily cashbook signature."""
+def sign_cashbook(society_id: int, user_id: int, day: str, signer_name: str, closing_cash=None):
+    """Record a daily cashbook signature (bye-law 23(f)).
+
+    `closing_cash` is the cash actually counted in hand when the book is signed. It is the physical control that an
+    all-cash voucher, which has no ledger leg, cannot give by arithmetic: it is reconciled against the derived
+    Cash-in-Hand balance (fn_cashbook_reconciliation) and a difference raises a CASH_COUNT_DIFFERS compliance flag.
+    It is optional, so a signature can still be recorded without it, but the cash book is then signed without a count.
+    """
     d = _d(day)
     if not d:
         return False, "Enter the cashbook day."
+    counted = None
+    if closing_cash not in (None, ""):
+        counted = _num(closing_cash)
+        if counted is None or counted < 0:
+            return False, "Enter the cash counted in hand as a number (not negative), or leave it blank."
     db._execute(
-        """INSERT INTO cashbook_signatures (society_id, day, signed_by, signed_at, created_by)
-           VALUES (%s, %s, %s, NOW(), %s)
+        """INSERT INTO cashbook_signatures (society_id, day, signed_by, signed_at, created_by, closing_cash_declared)
+           VALUES (%s, %s, %s, NOW(), %s, %s)
            ON CONFLICT (society_id, day) DO UPDATE SET
-           signed_by = EXCLUDED.signed_by, signed_at = EXCLUDED.signed_at""",
-        (society_id, d, (signer_name or "").strip() or None, user_id))
-    return True, f"Cashbook signed for {d.isoformat()} by {signer_name or 'the Secretary / Board member'}."
+           signed_by = EXCLUDED.signed_by, signed_at = EXCLUDED.signed_at,
+           closing_cash_declared = COALESCE(EXCLUDED.closing_cash_declared, cashbook_signatures.closing_cash_declared)""",
+        (society_id, d, (signer_name or "").strip() or None, user_id, counted))
+    msg = f"Cashbook signed for {d.isoformat()} by {signer_name or 'the Secretary / Board member'}."
+    rec = db._execute("SELECT * FROM fn_cashbook_reconciliation(%s, %s)", (society_id, d), fetch_one=True)
+    if rec and counted is not None:
+        if rec["status"] == "agrees":
+            msg += f" Cash counted (Rs {counted:,.2f}) agrees with the books."
+        else:
+            msg += (f" WARNING: cash counted is Rs {counted:,.2f} but the books show Rs {float(rec['derived_closing']):,.2f} "
+                    f"(difference Rs {float(rec['difference']):,.2f}); this has been flagged for the committee and auditors.")
+    elif counted is None:
+        msg += " No closing cash count was recorded."
+    return True, msg
 
 
-# ── investment (bye-law 45) ────────────────────────────────────────────────────────
 def record_investment(society_id: int, user_id: int, institution_type: str, amount: float,
                       deposit_name: str, acc_id: int | None = None):
     """Check and record an investment in the deposits table; flagged if it violates bye-law 45."""
