@@ -18195,6 +18195,10 @@ CREATE TABLE fy_locks (
     locked_by      INT REFERENCES users (id),
     resolution_id  INT REFERENCES resolutions (id),
     notes          TEXT,
+    -- The signed ledger anchor taken just before the lock (ledger_chain_anchors.id): the evidence of what the
+    -- ledger held when the year was frozen. Not a foreign key because the anchors table is declared later;
+    -- fn_lock_fy checks it belongs to the same society.
+    anchor_id      INT,
     locked_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_fy_lock UNIQUE (society_id, locked_through)
 );
@@ -18231,6 +18235,53 @@ $$;
 
 
 -- NULL when the date is open; otherwise a human-readable refusal.
+-- Read-only: everything the lock screen needs to say, and every reason the lock would be refused. The screen
+-- shows this; fn_lock_fy re-checks the hard conditions itself.
+CREATE OR REPLACE FUNCTION fn_fy_lock_preview(p_society_id INT, p_fy INT)
+RETURNS TABLE (financial_year INT, ends_on DATE, year_ended BOOLEAN, year_closed BOOLEAN,
+               already_locked BOOLEAN, locked_through INT, earlier_unlocked_years INT,
+               unbalanced_journals INT, chain_problems INT, pending_documents INT,
+               can_lock BOOLEAN, blockers TEXT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_end DATE := MAKE_DATE(p_fy + 1, 3, 31);
+    v_ended BOOLEAN; v_closed BOOLEAN; v_locked INT; v_unbal INT; v_chain INT; v_pending INT; v_earlier INT;
+    v_block TEXT[] := '{}';
+BEGIN
+    v_ended := v_end < CURRENT_DATE;
+    SELECT EXISTS (SELECT 1 FROM fy_closures c WHERE c.society_id = p_society_id AND c.financial_year = p_fy
+                      AND c.status IN ('closed', 'no_surplus')) INTO v_closed;
+    SELECT MAX(l.locked_through) INTO v_locked FROM fy_locks l WHERE l.society_id = p_society_id;
+    SELECT COUNT(*) INTO v_unbal FROM fn_ledger_integrity_report(p_society_id) r
+     WHERE EXISTS (SELECT 1 FROM transactions t WHERE t.society_id = r.society_id AND t.journal_id = r.journal_id
+                      AND fn_fy_of(t.trx_date) <= p_fy);
+    SELECT COUNT(*) INTO v_chain FROM fn_verify_ledger_chain(p_society_id);
+    SELECT (SELECT COUNT(*) FROM receipts r WHERE r.society_id = p_society_id AND r.status = 'pending'
+               AND fn_fy_of(r.receipt_date) <= p_fy)
+         + (SELECT COUNT(*) FROM expenses e WHERE e.society_id = p_society_id AND e.status = 'pending'
+               AND fn_fy_of(e.expense_date) <= p_fy) INTO v_pending;
+    -- Locking FY n locks every year up to n (fn_check_fy_lock compares against the highest lock).
+    SELECT COUNT(DISTINCT fn_fy_of(t.trx_date)) INTO v_earlier FROM transactions t
+     WHERE t.society_id = p_society_id AND fn_fy_of(t.trx_date) < p_fy
+       AND fn_fy_of(t.trx_date) > COALESCE(v_locked, 0);
+
+    IF v_locked IS NOT NULL AND v_locked >= p_fy THEN v_block := v_block || ARRAY['this year is already locked']; END IF;
+    IF NOT v_ended THEN
+        v_block := v_block || ARRAY[format('FY %s-%s has not ended yet (it ends %s)', p_fy, p_fy + 1, to_char(v_end, 'DD-Mon-YYYY'))];
+    END IF;
+    IF v_ended AND NOT v_closed THEN
+        v_block := v_block || ARRAY['close the year first (the reserve appropriation is posted at close, and a locked year accepts no posting)'];
+    END IF;
+    IF v_unbal > 0 THEN v_block := v_block || ARRAY[format('%s journal(s) dated up to this year are out of balance', v_unbal)]; END IF;
+    IF v_chain > 0 THEN v_block := v_block || ARRAY[format('the ledger hash chain has %s problem(s) (fn_verify_ledger_chain)', v_chain)]; END IF;
+
+    RETURN QUERY SELECT p_fy, v_end, v_ended, v_closed, (v_locked IS NOT NULL AND v_locked >= p_fy), v_locked,
+                        v_earlier, v_unbal, v_chain, v_pending,
+                        (COALESCE(array_length(v_block, 1), 0) = 0),
+                        NULLIF(array_to_string(v_block, '; '), '');
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION fn_check_fy_lock(p_society_id INT, p_trx_date DATE)
 RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
 DECLARE
@@ -18774,7 +18825,8 @@ CREATE OR REPLACE FUNCTION fn_lock_fy(
     p_fy            INT,
     p_locked_by     INT,
     p_resolution_id INT  DEFAULT NULL,
-    p_notes         TEXT DEFAULT NULL
+    p_notes         TEXT DEFAULT NULL,
+    p_anchor_id     INT  DEFAULT NULL
 ) RETURNS INT LANGUAGE plpgsql AS $$
 DECLARE
     v_id INT; v_bad INT;
@@ -18791,12 +18843,20 @@ BEGIN
         RAISE EXCEPTION 'Cannot lock FY %-%: % journal(s) dated up to that year are out of balance. '
                         'See fn_ledger_integrity_report(%).', p_fy, p_fy + 1, v_bad, p_society_id;
     END IF;
+    IF EXISTS (SELECT 1 FROM fn_verify_ledger_chain(p_society_id)) THEN
+        RAISE EXCEPTION 'Cannot lock FY %-%: the ledger hash chain does not verify. See fn_verify_ledger_chain(%).',
+                        p_fy, p_fy + 1, p_society_id;
+    END IF;
     IF p_resolution_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM resolutions WHERE id = p_resolution_id AND passed) THEN
         RAISE EXCEPTION 'Resolution % is not a passed resolution.', p_resolution_id;
     END IF;
-    INSERT INTO fy_locks (society_id, locked_through, locked_by, resolution_id, notes)
-    VALUES (p_society_id, p_fy, p_locked_by, p_resolution_id, p_notes)
+    IF p_anchor_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM ledger_chain_anchors a WHERE a.id = p_anchor_id AND a.society_id = p_society_id) THEN
+        RAISE EXCEPTION 'Anchor % does not belong to society %.', p_anchor_id, p_society_id;
+    END IF;
+    INSERT INTO fy_locks (society_id, locked_through, locked_by, resolution_id, notes, anchor_id)
+    VALUES (p_society_id, p_fy, p_locked_by, p_resolution_id, p_notes, p_anchor_id)
     RETURNING id INTO v_id;
     RETURN v_id;
 END;

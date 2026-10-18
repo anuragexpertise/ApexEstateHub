@@ -3266,6 +3266,20 @@ def _render_card(
             if sid_val and selected_fy:
                 reserve_preview, reserve_err = loaders.get_fy_close_preview(sid_val, selected_fy)
                 reserve_history = loaders.get_fy_closure_history(sid_val)
+            # The lock panel. The state is read-only and harmless for any role; whether the button is live depends
+            # on the capability finance.period.close (the Treasurer), asked of the server-side policy engine.
+            lock_state, can_lock = None, False
+            if sid_val and selected_fy:
+                try:
+                    from app.services import fy_lock_service
+                    from app.security import service_guard as _sg
+                    from app.security.authorization import Cap as _LockCap
+                    lock_state = fy_lock_service.get_lock_state(sid_val, selected_fy)
+                    can_lock = _sg.check(_LockCap.FINANCE_PERIOD_CLOSE, "fy_lock", target_society_id=sid_val,
+                                         audit_denials=False).allowed
+                except Exception:  # noqa: BLE001 - the panel is optional; the card must still render
+                    import logging as _lg
+                    _lg.getLogger(__name__).exception("FY lock panel unavailable")
             return renderers.render_fy_closing_card(
                 rows=rows, error=err,
                 fy_options=fy_options, selected_fy=selected_fy,
@@ -3275,6 +3289,7 @@ def _render_card(
                 reserve_history=reserve_history,
                 reserve_error=reserve_err,
                 can_post_reserve=(get_current_user_role() == "admin"),
+                lock_state=lock_state, can_lock=can_lock,
             )
 
 # ── 6 Statements Financial Report — custom card
@@ -6296,3 +6311,63 @@ def register_fy_close_callbacks(app):
         toast = {"_toast": {"type": "success" if banner_color == "success" else "error",
                              "message": message}}
         return store, content, bc, toast
+
+
+    # -- Lock a financial year ------------------------------------------------
+    # Irreversible, so: the Treasurer's capability (finance.period.close) is checked by the policy engine, role
+    # and society come from the server-side session, the year is the card's selected year, and the service
+    # re-checks every condition before anything is written.
+    from app.security.authorization import Cap as _Cap
+    from app.security.service_guard import require_action as _require_action
+
+    def _lock_resolve(*_a, **_k):
+        return {"resource_id": None, "target_society_id": get_current_society_id()}
+
+    def _lock_denied(_decision):
+        return (no_update, no_update, no_update,
+                {"_toast": {"type": "error", "message": "Only the Treasurer can lock a financial year."}})
+
+    @app.callback(
+        Output("drilldown-store", "data", allow_duplicate=True),
+        Output("drill-content", "children", allow_duplicate=True),
+        Output("drill-breadcrumb", "children", allow_duplicate=True),
+        Output("profile-action-trigger", "data", allow_duplicate=True),
+        Input("fy-lock-submit", "n_clicks"),
+        State("fy-lock-reason", "value"),
+        State("fy-lock-resolution", "value"),
+        State("fy-lock-understood", "value"),
+        State("drilldown-store", "data"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    @_require_action(_Cap.FINANCE_PERIOD_CLOSE, "fy_lock", resolve=_lock_resolve, on_deny=_lock_denied)
+    def lock_financial_year(n_clicks, reason, resolution, understood, store, auth):
+        if not ctx.triggered or not n_clicks:
+            return no_update, no_update, no_update, no_update
+        store = store or {}
+        society_id = get_current_society_id()
+        if not society_id:
+            return no_update, no_update, no_update, {"_toast": {"type": "error", "message": "Society not resolved."}}
+        filters = dict(nav_state.get_filters(store))
+        fy = filters.get("financial_year") or filters.get("fy")
+        try:
+            fy = int(str(fy).split("-")[0])
+        except (TypeError, ValueError):
+            return no_update, no_update, no_update, {"_toast": {"type": "error",
+                                                                "message": "No financial year is selected on this card."}}
+        try:
+            res_id = int(resolution) if resolution not in (None, "") else None
+        except (TypeError, ValueError):
+            return no_update, no_update, no_update, {"_toast": {"type": "error",
+                                                                "message": "The resolution number must be a whole number."}}
+        from app.services import fy_lock_service
+        ok, message, _details = fy_lock_service.lock_fy(
+            society_id, fy, get_current_user_id(), reason, bool(understood), res_id)
+        if not ok:
+            return no_update, no_update, no_update, {"_toast": {"type": "error", "message": message}}
+        store["trigger"] = store.get("trigger", 0) + 1
+        content, bc, db_err = _render_current(store, auth)
+        if db_err:
+            message = f"{message} ({db_err})"
+        return store, content, bc, {"_toast": {"type": "success", "message": message}}

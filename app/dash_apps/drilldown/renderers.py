@@ -4091,7 +4091,9 @@ def render_fy_closing_card(rows: list, error: str | None,
                             reserve_preview: dict | None = None,
                             reserve_history: list[dict] | None = None,
                             reserve_error: str | None = None,
-                            can_post_reserve: bool = False) -> html.Div:
+                            can_post_reserve: bool = False,
+                            lock_state: dict | None = None,
+                            can_lock: bool = False) -> html.Div:
     """
     Read-only FY Closing Report — same account-by-account detail for every
     role that can reach it (Admin/Owner/Vendor/Security all confirmed the
@@ -4110,6 +4112,10 @@ def render_fy_closing_card(rows: list, error: str | None,
     writing action on this card. All three are optional so the existing
     read-only callers and tests keep working unchanged; the panel is simply
     omitted when no preview is supplied.
+
+    lock_state / can_lock feed the financial-year lock panel (render_fy_lock_panel): the read-only preview, the
+    locks to date and the lock's ledger anchor, and whether the viewer holds finance.period.close (the Treasurer).
+    Both optional, so existing callers are unchanged.
     """
     color = "#17976e"
 
@@ -4277,6 +4283,8 @@ def render_fy_closing_card(rows: list, error: str | None,
         else None
     )
 
+    lock_panel = render_fy_lock_panel(lock_state, selected_fy, can_lock) if lock_state else None
+
     if error:
         return html.Div([
             header,
@@ -4287,6 +4295,7 @@ def render_fy_closing_card(rows: list, error: str | None,
                 style={"padding": "16px"},
             ),
             html.Div(reserve_panel, style={"padding": "0 0 4px"}) if reserve_panel else None,
+            html.Div(lock_panel, style={"padding": "0 0 4px"}) if lock_panel else None,
         ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
                   "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
 
@@ -4335,6 +4344,8 @@ def render_fy_closing_card(rows: list, error: str | None,
         # the reserve is a destination for the year's result — the reader has
         # just seen the closing figures that produce the surplus.
         html.Div(reserve_panel, style={"padding": "0 0 4px"}) if reserve_panel else None,
+        # Locking comes last: it is the final, irreversible step, after the figures and the reserve above.
+        html.Div(lock_panel, style={"padding": "0 0 4px"}) if lock_panel else None,
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
 
@@ -4595,6 +4606,132 @@ def render_reserve_appropriation_panel(
     ], style={"margin": "0 16px 16px", "padding": "14px 16px",
               "background": "#f8f9fb", "borderRadius": "10px",
               "border": f"1px solid {color}1a"})
+
+
+def render_fy_lock_panel(state: dict | None, fy, can_lock: bool = False) -> html.Div:
+    """
+    The financial-year lock panel. Locking is irreversible: once a year is locked, no entry can be posted into it or
+    any earlier year (fy_locks is append-only; corrections are reversals dated in an open period).
+
+    `state` is fy_lock_service.get_lock_state(): the read-only fn_fy_lock_preview row, the locks to date, this
+    year's lock (if any) and the signed ledger anchor taken for it. `can_lock` is the role gate (the Treasurer holds
+    finance.period.close); the callback re-checks it, and the database re-checks the hard conditions, so this only
+    keeps the card honest about who may press the button.
+    """
+    color = "#7a4b00"
+    pv = (state or {}).get("preview") or {}
+    this_lock = (state or {}).get("this_lock")
+    anchor = (state or {}).get("anchor")
+    label = _fin_fy_label(fy)
+
+    def _title(icon="fa-lock"):
+        return html.Div([html.I(className=f"fas {icon} me-2", style={"color": color, "fontSize": "14px"}),
+                         html.Strong(f"Lock FY {label}")],
+                        style={"fontSize": "13px", "fontWeight": "700", "color": color, "marginBottom": "10px"})
+
+    wrap = {"margin": "0 16px 16px", "padding": "14px 16px", "background": "#fffaf2",
+            "borderRadius": "10px", "border": f"1px solid {color}33"}
+
+    if not pv:
+        return html.Div([_title(), dbc.Alert("The lock status of this year could not be read.", color="secondary",
+                                             style={"borderRadius": "8px", "fontSize": "11px"})], style=wrap)
+
+    def _check(ok, text, warn=False):
+        icon, c = (("fa-check-circle", _FIN_GREEN) if ok
+                   else ("fa-exclamation-triangle", _FIN_AMBER) if warn else ("fa-times-circle", _FIN_DR))
+        return html.Div([html.I(className=f"fas {icon} me-2", style={"color": c, "fontSize": "11px"}),
+                         html.Span(text)], style={"fontSize": "11px", "color": "#444", "marginBottom": "3px"})
+
+    ends = _fin_date(pv.get("ends_on")) if pv.get("ends_on") else "?"
+    checks = html.Div([
+        _check(bool(pv.get("year_ended")), f"The year has ended ({ends})"),
+        _check(bool(pv.get("year_closed")), "The year is closed (reserve appropriation done)"),
+        _check(not pv.get("unbalanced_journals"),
+               "Every journal dated up to this year balances" if not pv.get("unbalanced_journals")
+               else f"{pv.get('unbalanced_journals')} journal(s) are out of balance"),
+        _check(not pv.get("chain_problems"),
+               "The ledger hash chain verifies" if not pv.get("chain_problems")
+               else f"The ledger hash chain has {pv.get('chain_problems')} problem(s)"),
+        _check(not pv.get("pending_documents"),
+               "No receipt or expense is waiting to be confirmed" if not pv.get("pending_documents")
+               else (f"{pv.get('pending_documents')} receipt/expense(s) dated up to this year are still pending; "
+                     "they cannot be confirmed once the year is locked, so confirm or cancel them first"),
+               warn=True),
+    ], style={"marginBottom": "10px"})
+
+    history = (state or {}).get("locks") or []
+    hist = html.Div()
+    if history:
+        hist = html.Div([
+            html.Div("Locks to date", style={"fontSize": "11px", "fontWeight": "700", "color": "#444",
+                                             "margin": "12px 0 4px"}),
+            html.Ul([html.Li(f"Through FY {_fin_fy_label(h.get('locked_through'))}, locked "
+                             f"{_fin_date(h.get('locked_at')) if h.get('locked_at') else '?'}"
+                             f"{' by ' + h['locked_by_name'] if h.get('locked_by_name') else ''}",
+                             style={"fontSize": "10.5px", "color": "#555"}) for h in history],
+                    style={"paddingLeft": "18px", "marginBottom": "0"}),
+        ])
+
+    toast = html.Div(id="fy-lock-toast", style={"marginTop": "10px"})
+
+    if this_lock or pv.get("already_locked"):
+        when = ""
+        if this_lock and this_lock.get("locked_at"):
+            who = f", by {this_lock['locked_by_name']}" if this_lock.get("locked_by_name") else ""
+            when = f" ({_fin_date(this_lock['locked_at'])}{who})"
+        parts = [_title(), dbc.Alert(
+            [html.I(className="fas fa-lock me-2"),
+             f"FY {label} is locked{when}. No entry can be posted into it; a correction is a reversal "
+             "dated in an open period."], color="success", style={"borderRadius": "8px", "fontSize": "11px"})]
+        if this_lock and this_lock.get("notes"):
+            parts.append(html.Div(f"Reason recorded: {this_lock['notes']}",
+                                  style={"fontSize": "10.5px", "color": "#555", "marginBottom": "6px"}))
+        if anchor:
+            from app.security import ledger_anchor
+            parts.append(html.Details([
+                html.Summary("Ledger anchor taken for this lock (print, sign and file with the CA)",
+                             style={"fontSize": "11px", "fontWeight": "600", "cursor": "pointer"}),
+                html.Pre(ledger_anchor.certificate_text(anchor),
+                         style={"fontSize": "10px", "whiteSpace": "pre-wrap", "background": "#fff", "padding": "8px",
+                                "border": "1px solid #ddd", "borderRadius": "6px"}),
+            ], style={"marginTop": "6px"}))
+        elif this_lock:
+            parts.append(html.Div("No ledger anchor was recorded for this lock.",
+                                  style={"fontSize": "10.5px", "color": _FIN_NIL, "fontStyle": "italic"}))
+        parts += [hist, toast]
+        return html.Div(parts, style=wrap)
+
+    parts = [_title(), checks]
+    n_earlier = int(pv.get("earlier_unlocked_years") or 0)
+    if n_earlier:
+        parts.append(dbc.Alert(f"Locking this year also locks the {n_earlier} earlier year(s) that are not yet locked.",
+                               color="warning", style={"borderRadius": "8px", "fontSize": "11px"}))
+    if not pv.get("can_lock"):
+        parts.append(dbc.Alert([html.I(className="fas fa-ban me-2"), f"Cannot be locked yet: {pv.get('blockers')}."],
+                               color="secondary", style={"borderRadius": "8px", "fontSize": "11px"}))
+    if not can_lock:
+        parts.append(html.Div("Only the Treasurer can lock a financial year.",
+                              style={"fontSize": "10.5px", "color": _FIN_NIL, "fontStyle": "italic"}))
+    open_ = bool(pv.get("can_lock")) and bool(can_lock)
+    parts += [
+        dbc.Textarea(id="fy-lock-reason", rows=2, size="sm", disabled=not open_,
+                     placeholder="Why the year is being locked now (kept in the audit trail)",
+                     style={"fontSize": "11px", "marginBottom": "6px"}),
+        dbc.Input(id="fy-lock-resolution", type="number", min=1, step=1, size="sm", disabled=not open_,
+                  placeholder="Resolution no. (optional; must be a passed resolution)",
+                  style={"fontSize": "11px", "maxWidth": "320px", "marginBottom": "8px"}),
+        dbc.Checkbox(id="fy-lock-understood", value=False, disabled=not open_,
+                     label="I understand that a locked year can never be reopened.",
+                     style={"fontSize": "11px", "marginBottom": "8px"}),
+        dbc.Button([html.I(className="fas fa-lock me-2"), f"Lock FY {label}"], id="fy-lock-submit", n_clicks=0,
+                   color="danger", outline=True, disabled=not open_,
+                   style={"borderRadius": "8px", "fontWeight": "600", "fontSize": "11px"}),
+        html.Div("A signed ledger anchor is taken first, so the society holds evidence of what the ledger contained "
+                 "when the year was frozen.",
+                 style={"fontSize": "9.5px", "color": _FIN_NIL, "fontStyle": "italic", "marginTop": "6px"}),
+        toast, hist,
+    ]
+    return html.Div(parts, style=wrap)
 
 
 def _fin_fy_label(fy):
