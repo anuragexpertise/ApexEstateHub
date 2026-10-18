@@ -57,7 +57,7 @@ def test_the_lock_callback_is_declared_with_the_capability():
     src = inspect.getsource(__import__("app.dash_apps.callbacks.drilldown_callbacks", fromlist=["x"]))
     i = src.index("def lock_financial_year")
     head = src[src.rindex("@app.callback", 0, i):i]
-    assert "@require_session" in head and "FINANCE_PERIOD_CLOSE" in head and "_require_action" in head
+    assert "@require_session" in head and "FINANCE_PERIOD_CLOSE" in head and "@require_action(" in head
 
 
 # ---- panel rendering -------------------------------------------------------------------------------------------
@@ -295,3 +295,11 @@ def test_a_passed_resolution_can_be_cited_and_an_unpassed_one_cannot(cur, monkey
     make_entry(cur, PAST_FY)
     ok, msg, _ = svc.lock_fy(SOC, PAST_FY, None, "A perfectly good reason", True, 987654, Shim(cur))
     assert not ok and "not a passed resolution" in msg
+
+
+def test_the_lock_callback_is_classified_in_the_authorization_manifest():
+    import json, pathlib
+    root = pathlib.Path(__file__).resolve().parents[1]
+    m = json.loads((root / "docs" / "authz_manifest.json").read_text(encoding="utf-8"))
+    entry = m["endpoints"]["callback:drilldown_callbacks.py::lock_financial_year"]
+    assert entry == {"classification": "action", "actions": [Cap.FINANCE_PERIOD_CLOSE]}

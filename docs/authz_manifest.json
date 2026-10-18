@@ -239,6 +239,12 @@
         "poll.vote"
       ]
     },
+    "callback:drilldown_callbacks.py::lock_financial_year": {
+      "classification": "action",
+      "actions": [
+        "finance.period.close"
+      ]
+    },
     "callback:drilldown_callbacks.py::mark_rcm_gstr_filed": {
       "classification": "unclassified"
     },
