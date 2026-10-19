@@ -92,7 +92,11 @@ CREATE TABLE users (
             'admin',
             'apartment',
             'vendor',
-            'security'
+            'security',
+            'accountant',
+            'supervisor',
+            'staff',
+            'auditor'
         )
     ),
     linked_id INT,
@@ -1822,6 +1826,7 @@ CREATE INDEX idx_sm_active   ON societies_memberships (society_id, user_id, stat
 
 INSERT INTO role_definitions (code, scope, name, description) VALUES
     ('platform_operator',  'platform', 'Platform Operator',  'System-wide operator (migrated master_admin).'),
+    ('society_president',  'society',  'Society President',  'AOA president: chairs the committee; assigns concerns, declares poll results, approves (never prepares) payments.'),
     ('society_secretary',  'society',  'Society Secretary',  'AOA secretary: assign concerns, declare poll results, approve payments.'),
     ('treasurer',          'society',  'Treasurer',          'AOA treasurer: view receipts, approve payments, close periods.'),
     ('committee_member',   'society',  'Committee Member',   'MC member: declare poll results.'),
@@ -1853,6 +1858,10 @@ SELECT rd.id, p.id, NULL, NULL, NULL
 FROM role_definitions rd, permissions p
 WHERE (rd.code = 'platform_operator' AND p.resource = 'role' AND p.action = 'grant')
    OR (rd.code = 'platform_operator' AND p.resource = 'finance' AND p.action = 'period.close')
+   OR (rd.code = 'society_president' AND p.resource = 'concern' AND p.action = 'assign')
+   OR (rd.code = 'society_president' AND p.resource = 'concern' AND p.action = 'resolve')
+   OR (rd.code = 'society_president' AND p.resource = 'poll' AND p.action = 'declare_results')
+   OR (rd.code = 'society_president' AND p.resource = 'finance' AND p.action = 'payment.approve')
    OR (rd.code = 'society_secretary' AND p.resource = 'concern' AND p.action = 'assign')
    OR (rd.code = 'society_secretary' AND p.resource = 'concern' AND p.action = 'resolve')
    OR (rd.code = 'society_secretary' AND p.resource = 'poll' AND p.action = 'declare_results')

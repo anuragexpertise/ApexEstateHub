@@ -303,6 +303,7 @@ def register_setup_wizard_callbacks(app):
         Input("sw-apt-billing-basis", "value"),
         prevent_initial_call=True,
     )
+    @require_session
     def update_basis_hint(basis):
         return basis_hint(basis)
 
@@ -525,6 +526,7 @@ def register_setup_wizard_callbacks(app):
                 State({"type": "sw-pol-choice", "key": f"{_f}_fund_collection"}, "value"),
                 prevent_initial_call=True,
             )
+            @require_session
             def sync_collection_with_levy(levy, current):
                 if levy == "no":
                     return "none" if current != "none" else no_update

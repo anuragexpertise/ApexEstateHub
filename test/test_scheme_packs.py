@@ -109,7 +109,9 @@ def test_every_implemented_rule_is_actually_read_by_the_sql():
         if p.implemented:
             assert re.search(rf"'{p.key}'", SQL_OUTSIDE_GENERATED), f"{p.key} is never read by any function"
     # a rule marked implemented = false is a known gap and must be named here, so it cannot linger unnoticed
-    assert [p.key for p in UP.params if not p.implemented] == []
+    # arrears_interest_pct is superseded (Oct 2026): the interest engine reads apt_charges_fines_basis.apt_interest_pct,
+    # so the row is kept for reference only. Any OTHER unimplemented rule is still a failure.
+    assert [p.key for p in UP.params if not p.implemented] == ["arrears_interest_pct"]
 
 
 def test_every_rule_the_sql_reads_has_a_definition():

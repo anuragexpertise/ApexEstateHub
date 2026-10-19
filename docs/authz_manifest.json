@@ -46,6 +46,12 @@
     "callback:assign_to_callbacks.py::toggle_selection": {
       "classification": "unclassified"
     },
+    "callback:auditor_callbacks.py::load_resolutions": {
+      "classification": "legacy-gated"
+    },
+    "callback:auditor_callbacks.py::run_checks": {
+      "classification": "legacy-gated"
+    },
     "callback:bank_reconcile_callbacks.py::close_bank_reconcile_modal": {
       "classification": "exempt",
       "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
@@ -492,6 +498,18 @@
         "platform.rules.manage"
       ]
     },
+    "callback:master_tests_callbacks.py::run_all_run_one": {
+      "classification": "legacy-gated"
+    },
+    "callback:master_tests_callbacks.py::run_all_tick": {
+      "classification": "legacy-gated"
+    },
+    "callback:master_tests_callbacks.py::run_single_test": {
+      "classification": "legacy-gated"
+    },
+    "callback:master_tests_callbacks.py::start_run_all": {
+      "classification": "legacy-gated"
+    },
     "callback:noc_callbacks.py::_stamp_noc_emailed": {
       "classification": "unclassified"
     },
@@ -574,6 +592,12 @@
     "callback:setup_wizard_callbacks.py::handle_wizard_navigation": {
       "classification": "unclassified"
     },
+    "callback:setup_wizard_callbacks.py::refresh_legal_regime_step": {
+      "classification": "legacy-gated"
+    },
+    "callback:setup_wizard_callbacks.py::refresh_review": {
+      "classification": "legacy-gated"
+    },
     "callback:setup_wizard_callbacks.py::refresh_state_dependent_steps": {
       "classification": "exempt",
       "reason": "Session-guarded (@require_session). Read-only: re-renders the Setup Wizard's State-dependent step bodies from the State dropdown; the society is taken from the server session (get_current_society_id), not the browser-side sw-society-id store. Writes nothing."
@@ -587,12 +611,20 @@
     "callback:setup_wizard_callbacks.py::submit_setup_wizard": {
       "classification": "unclassified"
     },
+    "callback:setup_wizard_callbacks.py::sync_collection_with_levy": {
+      "classification": "exempt",
+      "reason": "Session-guarded (@require_session). Pure UI helper: derives a hint / dependent form value from the other form inputs; reads and writes no server data."
+    },
     "callback:setup_wizard_callbacks.py::toggle_fund_fields": {
       "classification": "exempt",
       "reason": "Session-guarded (@require_session). Read-only: shows/hides the Sinking/Repair fund inputs from the State dropdown and the bye-law opt-ins; the society is taken from the server session, not the browser store. Writes nothing."
     },
     "callback:setup_wizard_callbacks.py::trigger_setup_wizard": {
       "classification": "unclassified"
+    },
+    "callback:setup_wizard_callbacks.py::update_basis_hint": {
+      "classification": "exempt",
+      "reason": "Session-guarded (@require_session). Pure UI helper: derives a hint / dependent form value from the other form inputs; reads and writes no server data."
     },
     "callback:setup_wizard_callbacks.py::validate_setup_fields": {
       "classification": "unclassified"

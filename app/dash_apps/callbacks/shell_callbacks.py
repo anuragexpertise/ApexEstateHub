@@ -107,6 +107,25 @@ _SEARCH_TAB_ROUTES = {
         "dashboard": "/dashboard/master-societies",
         "tests":     "/dashboard/master-tests",
     },
+    "accountant": {
+        "dashboard": "/dashboard/accountant-portal", "receipts": "/dashboard/accountant-receipts",
+        "expenses": "/dashboard/accountant-expenses", "dues": "/dashboard/accountant-dues",
+        "cashbook": "/dashboard/accountant-cashbook", "financials": "/dashboard/accountant-financials",
+    },
+    "supervisor": {
+        "dashboard": "/dashboard/supervisor-portal", "gate": "/dashboard/supervisor-gate",
+        "users": "/dashboard/supervisor-users", "concerns": "/dashboard/supervisor-concerns",
+        "events": "/dashboard/supervisor-events", "channels": "/dashboard/supervisor-channels",
+    },
+    "staff": {
+        "dashboard": "/dashboard/staff-portal", "concerns": "/dashboard/staff-concerns",
+        "events": "/dashboard/staff-events",
+    },
+    "auditor": {
+        "dashboard": "/dashboard/auditor-portal", "books": "/dashboard/auditor-books",
+        "receipts": "/dashboard/auditor-receipts", "expenses": "/dashboard/auditor-expenses",
+        "financials": "/dashboard/auditor-financials",
+    },
 }
 
 _SEARCH_SYNONYMS = {
@@ -390,6 +409,13 @@ _PATH_LABELS = {
     "security-receipts":  "Receipts",
     "security-receipt":   "New Receipt",
     "security-users":    "Users",
+    "accountant-portal": "Dashboard", "accountant-receipts": "Receipts", "accountant-expenses": "Expenses",
+    "accountant-dues": "Dues", "accountant-cashbook": "Cashbook", "accountant-financials": "Financials",
+    "supervisor-portal": "Dashboard", "supervisor-gate": "Gate & Security", "supervisor-users": "Users",
+    "supervisor-concerns": "Concerns", "supervisor-events": "Events", "supervisor-channels": "Channels",
+    "staff-portal": "Dashboard", "staff-concerns": "Concerns", "staff-events": "Events",
+    "auditor-portal": "Verify", "auditor-books": "Books", "auditor-receipts": "Receipts",
+    "auditor-expenses": "Expenses", "auditor-financials": "Financials",
 }
 
 
@@ -553,16 +579,40 @@ def _portal_content(role, society_id, pathname, auth=None):
         )
         return security_portal_page(tab, sid=society_id)
     if role == "accountant":
-        tab = "dashboard"
+        tab = (
+            "receipts"   if "/accountant-receipts"   in p else
+            "expenses"   if "/accountant-expenses"   in p else
+            "dues"       if "/accountant-dues"       in p else
+            "cashbook"   if "/accountant-cashbook"   in p else
+            "financials" if "/accountant-financials" in p else
+            "dashboard"
+        )
         return accountant_portal_page(tab, sid=society_id)
     if role == "supervisor":
-        tab = "dashboard"
+        tab = (
+            "gate"     if "/supervisor-gate"     in p else
+            "users"    if "/supervisor-users"    in p else
+            "concerns" if "/supervisor-concerns" in p else
+            "events"   if "/supervisor-events"   in p else
+            "channels" if "/supervisor-channels" in p else
+            "dashboard"
+        )
         return supervisor_portal_page(tab, sid=society_id)
     if role == "staff":
-        tab = "dashboard"
+        tab = (
+            "concerns" if "/staff-concerns" in p else
+            "events"   if "/staff-events"   in p else
+            "dashboard"
+        )
         return staff_portal_page(tab, sid=society_id)
     if role == "auditor":
-        tab = "dashboard"
+        tab = (
+            "books"      if "/auditor-books"      in p else
+            "receipts"   if "/auditor-receipts"   in p else
+            "expenses"   if "/auditor-expenses"   in p else
+            "financials" if "/auditor-financials" in p else
+            "dashboard"
+        )
         return auditor_portal_page(tab, sid=society_id)
     return html.Div("Page not found", className="text-muted text-center p-5 mt-5")
 
@@ -1006,7 +1056,7 @@ def register_shell_callbacks(app):
 
         portal_style = {
             "fontWeight": "700", "fontSize": "20px",
-            "color": role_cfg["color"], "minWidth": "160px", "textAlign": "center",
+            "color": role_cfg.get("label_color", role_cfg["color"]), "minWidth": "160px", "textAlign": "center",
         }
         avatar = (user_name or "?")[0].upper()
 

@@ -86,6 +86,57 @@ ROLE_CONFIG = {
             {"label": "Settings",    "href": "/dashboard/security-settings",   "icon": "fa-cog"},
         ],
     },
+    "accountant": {
+        "color": "#7c3aed",
+        "label": "Accountant Portal",
+        "icon": "fa-calculator",
+        "tabs": [
+            {"label": "Dashboard",  "href": "/dashboard/accountant-portal",     "icon": "fa-th-large"},
+            {"label": "Receipts",   "href": "/dashboard/accountant-receipts",   "icon": "fa-receipt"},
+            {"label": "Expenses",   "href": "/dashboard/accountant-expenses",   "icon": "fa-file-invoice"},
+            {"label": "Dues",       "href": "/dashboard/accountant-dues",       "icon": "fa-hand-holding-usd"},
+            {"label": "Cashbook",   "href": "/dashboard/accountant-cashbook",   "icon": "fa-book"},
+            {"label": "Financials", "href": "/dashboard/accountant-financials", "icon": "fa-balance-scale"},
+        ],
+    },
+    "supervisor": {
+        "color": "#ea580c",
+        "label": "Supervisor Portal",
+        "icon": "fa-user-tie",
+        "tabs": [
+            {"label": "Dashboard",       "href": "/dashboard/supervisor-portal",   "icon": "fa-th-large"},
+            {"label": "Gate & Security", "href": "/dashboard/supervisor-gate",     "icon": "fa-shield-alt"},
+            {"label": "Users",           "href": "/dashboard/supervisor-users",    "icon": "fa-users"},
+            {"label": "Concerns",        "href": "/dashboard/supervisor-concerns", "icon": "fa-hand-point-up"},
+            {"label": "Events",          "href": "/dashboard/supervisor-events",   "icon": "fa-calendar-alt"},
+            {"label": "Channels",        "href": "/dashboard/supervisor-channels", "icon": "fa-bullhorn"},
+        ],
+    },
+    "staff": {
+        # White theme: the sidebar is dark, so the white accent reads there; label_color is the readable
+        # slate used where the accent would otherwise sit on a light background (portal name in the header).
+        "color": "#ffffff",
+        "label_color": "#475569",
+        "label": "Staff Portal",
+        "icon": "fa-id-badge",
+        "tabs": [
+            {"label": "Dashboard", "href": "/dashboard/staff-portal",   "icon": "fa-th-large"},
+            {"label": "Concerns",  "href": "/dashboard/staff-concerns", "icon": "fa-hand-point-up"},
+            {"label": "Events",    "href": "/dashboard/staff-events",   "icon": "fa-calendar-alt"},
+        ],
+    },
+    "auditor": {
+        "color": "#dc2626",
+        "label": "Auditor Portal",
+        "icon": "fa-search",
+        "tabs": [
+            {"label": "Verify",     "href": "/dashboard/auditor-portal",     "icon": "fa-check-double"},
+            {"label": "Books",      "href": "/dashboard/auditor-books",      "icon": "fa-book"},
+            {"label": "Receipts",   "href": "/dashboard/auditor-receipts",   "icon": "fa-receipt"},
+            {"label": "Expenses",   "href": "/dashboard/auditor-expenses",   "icon": "fa-file-invoice"},
+            {"label": "Financials", "href": "/dashboard/auditor-financials", "icon": "fa-balance-scale"},
+        ],
+    },
     "master": {
         "color": "#c96a19",
         "label": "Master Admin",

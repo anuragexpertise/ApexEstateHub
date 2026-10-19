@@ -52,6 +52,7 @@ def register_callbacks(app):
         "master_rules_callbacks",        # 13h. AOA Rule Editor (master only)
         "master_tests_callbacks",        # 13i. Master Tests tab (run test files)
         "governance_callbacks",          # 13j. Settings governance tabs (admin, own society)
+        "auditor_callbacks",             # 13k. Auditor portal (read-only verification)
         "bulk_enroll_callbacks",      # 14. Bulk Enroll
         "bank_reconcile_callbacks",   # 14a2. Bank Reconcile
         "assign_to_callbacks",        # 14b. Assign-To

@@ -69,6 +69,11 @@ class Cap:
     # not the admin / secretary (no finance powers), not the accountant (the maker).
     FINANCE_PERIOD_CLOSE    = "finance.period.close"
     REPORT_EXPORT           = "report.export"
+    # Read-only verification of a society's books (hash chains, journal balance, cash vouchers, ...).
+    # Held by the auditor ONLY: no preparing, posting or approving capability sits beside it.
+    AUDIT_VIEW              = "audit.view"
+    # Rostering and supervising the society's own staff / security. Does not include any finance power.
+    STAFF_ROSTER_MANAGE     = "staff.roster.manage"
     PLATFORM_RULES_MANAGE   = "platform.rules.manage"
     # Master-portal inspectors that execute or expose raw SQL (RWA3 WP4 item 1:
     # "database/report inspection" is a platform action, separate from society
@@ -113,6 +118,8 @@ _RES: dict[str, frozenset[str]] = {
     Cap.FINANCE_RECONCILE:       frozenset({"bank_line"}),
     Cap.FINANCE_PERIOD_CLOSE:    frozenset({"fy_lock"}),
     Cap.REPORT_EXPORT:           frozenset({"financial_report"}),
+    Cap.AUDIT_VIEW:              frozenset({"audit_report"}),
+    Cap.STAFF_ROSTER_MANAGE:     frozenset({"staff_roster"}),
     Cap.PLATFORM_RULES_MANAGE:   frozenset({"platform_rule"}),
     Cap.PLATFORM_SQL_INSPECT:    frozenset({"platform_console"}),
 }
@@ -128,9 +135,16 @@ RESIDENT_FAMILY = "resident_family"
 RESIDENT_VISITOR = "resident_visitor"
 VENDOR = "vendor"
 SECURITY_STAFF = "security_staff"
+# Society employees who log in through their own portal (users.role). `accountant` is ALSO an assignable post, and
+# both routes resolve to the same capability set below, so there is one definition of what an accountant may do.
+SUPERVISOR = "supervisor"
+STAFF = "staff"
+AUDITOR = "auditor"
 
 # Scoped, time-bounded assignments (user_role_assignments.role_definition.code).
-ASSIGNABLE_ROLES = ("society_secretary", "committee_member", "treasurer", "accountant")
+# Office-bearer posts (President, Secretary, Treasurer, committee) are rows in role_definitions held through
+# user_role_assignments - effective-dated, several per society, several per person - NOT a users column.
+ASSIGNABLE_ROLES = ("society_president", "society_secretary", "committee_member", "treasurer", "accountant")
 
 # users.user_type -> resident role. Unknown/None resolves to NOTHING: a legacy
 # role='apartment' must never silently become owner (RWA3 §3.2).
@@ -162,6 +176,11 @@ DEFAULT_CAPABILITIES: dict[str, frozenset[str]] = {
         Cap.CONCERN_TRIAGE, Cap.CONCERN_ASSIGN, Cap.POLL_MANAGE,
         Cap.CHANNEL_MANAGE, Cap.EVENT_MANAGE,
     }),
+    # Chairs the Managing Committee: runs concerns, polls, events and channels and approves (never prepares) payments.
+    "society_president": frozenset({
+        Cap.CONCERN_TRIAGE, Cap.CONCERN_ASSIGN, Cap.POLL_MANAGE, Cap.CHANNEL_MANAGE,
+        Cap.EVENT_MANAGE, Cap.FINANCE_PAYMENT_APPROVE, Cap.REPORT_EXPORT,
+    }),
     "committee_member": frozenset({Cap.CONCERN_TRIAGE, Cap.CONCERN_ASSIGN}),
     "treasurer": frozenset({
         Cap.FINANCE_PAYMENT_APPROVE, Cap.FINANCE_REVERSE,
@@ -171,6 +190,13 @@ DEFAULT_CAPABILITIES: dict[str, frozenset[str]] = {
         Cap.FINANCE_RECEIPT_PREPARE, Cap.FINANCE_PAYMENT_PREPARE,
         Cap.FINANCE_POST, Cap.REPORT_EXPORT,
     }),
+    # Supervises gate, security and housekeeping staff and the concerns they work. No finance powers.
+    SUPERVISOR: frozenset({Cap.CONCERN_TRIAGE, Cap.GATE_VISITOR_PROCESS, Cap.STAFF_ROSTER_MANAGE}),
+    # Day-to-day employee: read-only today (concerns, events, alert channels). Staff-specific write workflows get
+    # their own capability here when they exist; nothing is granted speculatively.
+    STAFF: frozenset(),
+    # Independent reviewer: reads the books and reports, changes nothing.
+    AUDITOR: frozenset({Cap.AUDIT_VIEW, Cap.REPORT_EXPORT}),
     RESIDENT_OWNER: _RESIDENT_COMMON | {Cap.FINANCE_SELF_VIEW, Cap.POLL_VOTE},
     RESIDENT_TENANT: _RESIDENT_COMMON,
     RESIDENT_FAMILY: _RESIDENT_COMMON,
@@ -252,6 +278,8 @@ def effective_roles(principal: Principal, now: Optional[datetime] = None) -> fro
         roles.add(VENDOR)
     elif base == "security" and principal.society_id is not None:
         roles.add(SECURITY_STAFF)
+    elif base in ("accountant", SUPERVISOR, STAFF, AUDITOR) and principal.society_id is not None:
+        roles.add(base)
 
     if principal.society_id is not None and base != "master":
         for a in principal.assignments:

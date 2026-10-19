@@ -106,13 +106,19 @@ def _kpi(card_id: str, icon: str, color: str, label: str, subtitle: str = "",
     )
 
 
+def _is_white(color: str) -> bool:
+    return str(color).strip().lower() in ("#fff", "#ffffff", "white")
+
+
 def _page_title(icon: str, color: str, title: str, sub: str = "") -> html.Div:
+    white = _is_white(color)   # the Staff theme: a white badge needs a dark glyph and an edge to be visible
     return html.Div([
         html.Div(
-            html.I(className=f"fas {icon}", style={"color": "#fff", "fontSize": "17px"}),
+            html.I(className=f"fas {icon}", style={"color": "#475569" if white else "#fff", "fontSize": "17px"}),
             style={
                 "width": "42px", "height": "42px", "borderRadius": "12px",
-                "background": f"linear-gradient(135deg,{color},{color}99)",
+                "background": "#ffffff" if white else f"linear-gradient(135deg,{color},{color}99)",
+                "border": "1.5px solid #cbd5e1" if white else "none",
                 "display": "flex", "alignItems": "center", "justifyContent": "center",
                 "marginRight": "14px", "flexShrink": "0",
             },
@@ -1632,42 +1638,73 @@ def _customize_page(c: str) -> html.Div:
     ], className="portal-page")
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# SOCIETY-EMPLOYEE PORTALS: Accountant (purple), Supervisor (orange), Staff (white), Auditor (red)
+#
+# Each tab is a KPI row (DEFAULT_LAYOUTS[portal][tab] in card_catalogue.py) plus the shared drill-down panel.
+# What a role may DO inside the drill-down is decided server-side by renderers._PORTAL_PERMS (and, for the
+# capability policy, app/security/authorization.py) - not by what these pages show.
+# ════════════════════════════════════════════════════════════════════════════
+
+# portal -> tab -> (icon, title, subtitle)
+_EMPLOYEE_TABS = {
+    "accountant": {
+        "dashboard":  ("fa-th-large", "Accountant Dashboard", "money in, money out, cash at hand"),
+        "receipts":   ("fa-receipt", "Receipts", "collections - you prepare, the Treasurer / Admin verifies"),
+        "expenses":   ("fa-file-invoice", "Expenses", "payments you prepare for approval"),
+        "dues":       ("fa-hand-holding-usd", "Dues", "receivables and payables (read-only)"),
+        "cashbook":   ("fa-book", "Cashbook", "cash and bank movements"),
+        "financials": ("fa-balance-scale", "Financials", "FY closing report and the 6 statements"),
+    },
+    "supervisor": {
+        "dashboard": ("fa-th-large", "Supervisor Dashboard", "gate, security staff and open issues"),
+        "gate":      ("fa-shield-alt", "Gate & Security", "who is on duty, gate logs, shift roster"),
+        "users":     ("fa-users", "Users", "security staff, vendors and apartments (read-only)"),
+        "concerns":  ("fa-hand-point-up", "Concerns", "open and unresolved concerns"),
+        "events":    ("fa-calendar-alt", "Events", "upcoming events and tickets"),
+        "channels":  ("fa-bullhorn", "Alert Channels", "bus, taxi and visitor alerts"),
+    },
+    "staff": {
+        "dashboard": ("fa-th-large", "Staff Dashboard", "what is going on today"),
+        "concerns":  ("fa-hand-point-up", "Concerns", "open concerns (read-only)"),
+        "events":    ("fa-calendar-alt", "Events", "upcoming events (read-only)"),
+    },
+    "auditor": {
+        "books":      ("fa-book", "Books", "cash, bank and ledger - read-only"),
+        "receipts":   ("fa-receipt", "Receipts", "receipts and receivables - read-only"),
+        "expenses":   ("fa-file-invoice", "Expenses", "expenses and payables - read-only"),
+        "financials": ("fa-balance-scale", "Financials", "FY closing report and the 6 statements"),
+    },
+}
+
+
+def _employee_tab_page(portal: str, tab: str, sid) -> html.Div:
+    c = _C[portal]
+    tabs = _EMPLOYEE_TABS[portal]
+    icon, title, sub = tabs.get(tab) or tabs.get("dashboard") or next(iter(tabs.values()))
+    tab = tab if tab in tabs else next(iter(tabs))
+    return html.Div([
+        _page_title(icon, c, title, sub),
+        _kpi_row_dynamic(portal, tab, sid, cols=KPI_GRID_COLS),
+        _divider(), _drill_panel(),
+    ], className="portal-page")
+
+
 def accountant_portal_page(active_tab="dashboard", sid=None):
-    c = _C["accountant"]
-    if active_tab == "dashboard":
-        return html.Div([_page_title("fa-calculator", c, "Accountant Dashboard"), _drill_panel()], className="portal-page")
-    return html.Div([_page_title("fa-calculator", c, active_tab.replace("_"," ").title()), _drill_panel()], className="portal-page")
+    return _employee_tab_page("accountant", active_tab, sid)
+
 
 def supervisor_portal_page(active_tab="dashboard", sid=None):
-    c = _C["supervisor"]
-    if active_tab == "dashboard":
-        return html.Div([_page_title("fa-user-tie", c, "Supervisor Dashboard"), _drill_panel()], className="portal-page")
-    return html.Div([_page_title("fa-user-tie", c, active_tab.replace("_"," ").title()), _drill_panel()], className="portal-page")
+    return _employee_tab_page("supervisor", active_tab, sid)
+
 
 def staff_portal_page(active_tab="dashboard", sid=None):
-    c = _C["staff"]
-    if active_tab == "dashboard":
-        return html.Div([_page_title("fa-users", c, "Staff Dashboard"), _drill_panel()], className="portal-page")
-    return html.Div([_page_title("fa-users", c, active_tab.replace("_"," ").title()), _drill_panel()], className="portal-page")
+    return _employee_tab_page("staff", active_tab, sid)
+
 
 def auditor_portal_page(active_tab="dashboard", sid=None):
-    c = _C["auditor"]
-    verify_text = """Verify it yourself
-You do not have to take any of this on trust.
-1. Run the automated suite...
-SELECT * FROM fn_verify_ledger_chain(<society_id>);
-SELECT * FROM fn_ledger_integrity_report(<society_id>);
-SELECT * FROM fn_cash_voucher_report(<society_id>) WHERE NOT amount_checked;
-SELECT * FROM fn_cashbook_reconciliation(<society_id>, CURRENT_DATE);
-SELECT * FROM fn_verify_receipt_chain(<society_id>, <acc_id>);
-SELECT * FROM fn_verify_all_receipt_chains(<society_id>);
-UPDATE transactions SET amount = amount + 1 WHERE id = 1;
-DELETE FROM transactions WHERE id = 1;
-TRUNCATE transactions;
-UPDATE audit_events SET reason = 'x' WHERE id = 1;
-SELECT * FROM fn_resolution_vote_summary(<resolution_id>);
-SELECT instrument_type, title, status, last_verified_on FROM legal_instrument_catalog;"""
-    if active_tab == "dashboard":
-        return html.Div([_page_title("fa-search", c, "Auditor Portal", "Verification checklist"),
-                         html.Pre(verify_text, style={"whiteSpace":"pre-wrap","fontSize":"12px"})], className="portal-page")
-    return html.Div([_page_title("fa-search", c, active_tab.replace("_"," ").title()), _drill_panel()], className="portal-page")
+    """'dashboard' is the Verify page (live read-only checks); the other tabs are view-only drill-downs."""
+    if active_tab in _EMPLOYEE_TABS["auditor"]:
+        return _employee_tab_page("auditor", active_tab, sid)
+    from app.dash_apps.pages.auditor_page import render_auditor_body
+    return render_auditor_body(sid, _C["auditor"], _page_title)

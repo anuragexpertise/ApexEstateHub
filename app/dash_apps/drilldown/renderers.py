@@ -204,6 +204,51 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # see card_catalogue.py / portal_pages.py / app_shell.py.
     ("security", "*"):            set(),
     ("apartment", "polls"):       {"view"},
+
+    # ── ACCOUNTANT (the MAKER): prepares receipts and expenses, reads the rest of the books ─────────────
+    # Cannot verify/reject receivables or payables, apply payments or close a year: those stay admin/treasurer
+    # (verify_receivable_amt etc. are in _SPECIAL_ENTITY_ROLES as admin-only), so maker and checker stay apart.
+    ("accountant", "receipts"):    {"view", "new"},
+    ("accountant", "expenses"):    {"view", "new"},
+    ("accountant", "cashbook"):    {"view", "new"},
+    ("accountant", "receivables"): {"view"},
+    ("accountant", "payables"):    {"view"},
+    ("accountant", "financials"):  {"view"},
+    ("accountant", "ledger"):      {"view"},
+    ("accountant", "accounts"):    {"view"},
+    ("accountant", "apartments"):  {"view"},
+    ("accountant", "vendors"):     {"view"},
+    ("accountant", "security"):    {"view"},
+    ("accountant", "tds_rates"):   {"view"},
+    ("accountant", "tds_section_rates"): {"view"},
+    ("accountant", "*"):           set(),
+
+    # ── SUPERVISOR: runs the gate / security staff and watches concerns, events and channels ───────────
+    # Roster is the one thing a supervisor writes. Everything else is read-only, and no finance entity is listed.
+    ("supervisor", "security_roster"): {"view", "new", "edit"},
+    ("supervisor", "security"):    {"view"},
+    ("supervisor", "apartments"):  {"view"},
+    ("supervisor", "vendors"):     {"view"},
+    ("supervisor", "gate_logs"):   {"view"},
+    ("supervisor", "visitors"):    {"view"},
+    ("supervisor", "patrol_locations"): {"view"},
+    ("supervisor", "concerns"):    {"view"},
+    ("supervisor", "events"):      {"view"},
+    ("supervisor", "event_ticket_items"): {"view"},
+    ("supervisor", "channels"):    {"view"},
+    ("supervisor", "*"):           set(),
+
+    # ── STAFF: read-only look at day-to-day operations; no finance, no member data ─────────────────────
+    ("staff", "concerns"):         {"view"},
+    ("staff", "events"):           {"view"},
+    ("staff", "event_ticket_items"): {"view"},
+    ("staff", "channels"):         {"view"},
+    ("staff", "*"):                set(),
+
+    # ── AUDITOR: view only, everywhere; never "new" / "edit" / "delete" ────────────────────────────────
+    # The wildcard is {"view"} on purpose: an auditor must be able to open any record, and any entity added
+    # later is read-only for them by default. Write is refused server-side too (_perms_for gate on save).
+    ("auditor", "*"):              {"view"},
 }
 
 

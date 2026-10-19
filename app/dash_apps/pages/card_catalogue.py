@@ -1265,6 +1265,43 @@ DEFAULT_LAYOUTS = {
             "kpi_events_tickets"],
         "settings": ["kpi_vendors_date"],
     },
+    # ── Accountant (maker): prepares receipts/expenses, reads dues, cash and the year-end reports ───────────
+    "accountant": {
+        "dashboard": ["kpi_receipts_month", "kpi_expenses_month", "kpi_receivables_total", "kpi_receivables_overdue",
+                      "kpi_payables_total", "kpi_cash_in_hand", "kpi_bank_balance", "kpi_receipts_pending"],
+        "receipts": ["kpi_receipts_total", "kpi_receipts_month", "kpi_receipts_pending", "kpi_advance_credits"],
+        "expenses": ["kpi_expenses_total", "kpi_expenses_month", "kpi_payables_this_month", "kpi_amc_due",
+                     "kpi_security_salaries_due"],
+        "dues": ["kpi_receivables_total", "kpi_receivables_overdue", "kpi_receivables_this_month",
+                 "kpi_payables_total", "kpi_maintenance_due", "kpi_late_fees_due"],
+        "cashbook": ["kpi_cash_in_hand", "kpi_bank_balance", "kpi_cashbook_open", "kpi_ledger_open"],
+        "financials": ["kpi_fy_closing_report", "kpi_financial_statements"],
+    },
+    # ── Supervisor: gate / security staff and day-to-day operations (no finance cards) ──────────────────────
+    "supervisor": {
+        "dashboard": ["kpi_security_on_duty", "kpi_security_off_duty", "kpi_gate_logs", "kpi_attendance_count",
+                      "kpi_concerns_not_closed", "kpi_events_total", "kpi_channels_pending"],
+        "gate": ["kpi_security_on_duty", "kpi_security_off_duty", "kpi_gate_logs", "kpi_security_roster_count",
+                 "kpi_attendance_count", "kpi_patrol_locations"],
+        "users": ["kpi_security_total", "kpi_vendors_total", "kpi_apartments_total"],
+        "concerns": ["kpi_concerns_open", "kpi_concerns_not_closed", "kpi_concerns_total"],
+        "events": ["kpi_events_total", "kpi_events_tickets"],
+        "channels": ["kpi_channels_total", "kpi_channels_active", "kpi_channels_pending"],
+    },
+    # ── Staff: read-only operations view ────────────────────────────────────────────────────────────────────
+    "staff": {
+        "dashboard": ["kpi_concerns_not_closed", "kpi_events_total", "kpi_channels_active"],
+        "concerns": ["kpi_concerns_open", "kpi_concerns_not_closed", "kpi_concerns_total"],
+        "events": ["kpi_events_total", "kpi_events_tickets"],
+    },
+    # ── Auditor: read-only books. "dashboard" is the Verify page (no cards); the rest are view-only drill-downs ─
+    "auditor": {
+        "books": ["kpi_cash_in_hand", "kpi_bank_balance", "kpi_cashbook_open", "kpi_ledger_open"],
+        "receipts": ["kpi_receipts_total", "kpi_receipts_month", "kpi_receivables_total", "kpi_receivables_overdue"],
+        "expenses": ["kpi_expenses_total", "kpi_expenses_month", "kpi_payables_total", "kpi_security_salaries_due"],
+        "financials": ["kpi_fy_closing_report", "kpi_financial_statements"],
+    },
+
     "security": {
         # NOTE: "dashboard" is what the sidebar's "Users" link renders
         # (shell_callbacks.py maps /security-users -> tab "dashboard").
