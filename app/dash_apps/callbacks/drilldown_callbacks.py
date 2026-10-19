@@ -3931,6 +3931,10 @@ def _save_entity(entity, card_id, data):
         if entity == "apt_charge":      return _save_apt_charge(db, data, sid, is_edit, pk)
         if entity == "ven_charge":      return _save_ven_charge(db, data, sid, is_edit, pk)
         if entity == "security_roster": return _save_security_roster(db, data, sid, is_edit, pk)
+        if entity == "accountant":       return _save_user_entity(db, data, sid, "accountant", is_edit, pk)
+        if entity == "supervisor":       return _save_user_entity(db, data, sid, "supervisor", is_edit, pk)
+        if entity == "staff":            return _save_user_entity(db, data, sid, "staff", is_edit, pk)
+        if entity == "committee_bearer": return _save_committee_bearer(db, data, sid, is_edit, pk)
         if entity == "tds_rate":        return _save_tds_rate(db, data, sid, is_edit, pk)
         if entity == "sec_charge":
             return False, "Security charge rules have been removed. Use manual expenses for security payables.", None
@@ -6079,6 +6083,49 @@ def _save_security_roster(db, d, sid, is_edit, pk):
             return False, "This guard already has a shift assigned on that date", None
         raise
     return True, "Shift assigned", (r or {}).get("id")
+
+def _save_committee_bearer(db, d, sid, is_edit, pk):
+    office_code = (d.get("office_code") or "").strip().lower()
+    holder_name = (d.get("holder_name") or "").strip()
+    apartment_id = d.get("apartment_id") or d.get("apt_id")
+    user_id = d.get("user_id") or None
+    term_start = d.get("term_start") or None
+    term_end = d.get("term_end") or None
+    status = (d.get("status") or "active").strip().lower()
+
+    if not office_code:
+        raise ValueError("Office code is required")
+    if not holder_name:
+        raise ValueError("Holder name is required")
+
+    # Validate office_code
+    valid = {"president", "vice_president", "secretary", "joint_secretary", "treasurer", "working_committee_member"}
+    if office_code not in valid:
+        raise ValueError("Invalid office code")
+
+    if is_edit and pk:
+        db._execute(
+            """UPDATE committee_offices
+               SET office_code=%s, holder_name=%s, apartment_id=%s, user_id=%s,
+                   term_start=%s, term_end=%s, status=%s
+               WHERE id=%s AND society_id=%s""",
+            (office_code, holder_name, apartment_id if apartment_id else None, user_id if user_id else None,
+             term_start, term_end, status, pk, sid),
+        )
+        return True, "Committee bearer updated", pk
+
+    # insert via function if available? or direct insert - fn_appoint_office_bearer exists
+    try:
+        r = db._execute(
+            "SELECT fn_appoint_office_bearer(%s,%s,%s,%s,%s,%s,%s,NULL,NULL,%s)",
+            (sid, apartment_id if apartment_id else None, office_code, holder_name, user_id if user_id else None,
+             term_start or __import__("datetime").date.today(), term_end, get_current_user_id()),
+            fetch_one=True,
+        )
+        return True, "Committee bearer added", (r or {}).get("fn_appoint_office_bearer") or None
+    except Exception:
+        raise
+
 
 def _get_account_by_name(society_id, account_name):
     try:

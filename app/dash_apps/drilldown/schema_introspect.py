@@ -46,6 +46,10 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "ven_charges":  "ven_charges_fines_basis",
     "attendance":   "gate_access",              # ← added (security shifts)
     "security_roster": "security_roster",
+    "accountants": "users",
+    "supervisors": "users",
+    "staff": "users",
+    "committee_bearers": "committee_offices",
     "ledger":       "accounts",
     "polls":        "polls",
     "visitors":     "visitors",
@@ -745,6 +749,15 @@ _MASTER_SOCIETIES_LIST_COLUMNS = [
 # double-sided ledger with BF, transaction rows, depreciation row (where
 # applicable), and closing balance — row_type distinguishes them ('bf' |
 # 'txn' | 'depreciation' | 'closing').
+_COMMITTEE_BEARERS_LIST_COLUMNS = [
+    {"name": "Office", "field": "office_code", "sortable": True},
+    {"name": "Holder", "field": "holder_name", "sortable": True},
+    {"name": "Flat No", "field": "flat_no", "sortable": True},
+    {"name": "User Email", "field": "user_email", "sortable": True},
+    {"name": "Status", "field": "status", "sortable": True},
+    {"name": "Term Start", "field": "term_start", "sortable": True, "format": "date"},
+    {"name": "Term End", "field": "term_end", "sortable": True, "format": "date"},
+]
 _LEDGER_LIST_COLUMNS = [
     {"name": "Date",         "field": "row_date",         "sortable": True},
     {"name": "Account",      "field": "account_name",     "sortable": True},
@@ -885,6 +898,8 @@ def build_entity_meta() -> dict:
         if ekey == "ledger":
             meta[ekey]["list_columns"] = _LEDGER_LIST_COLUMNS
             meta[ekey]["list_title"] = "Account Ledger"
+        if ekey == "committee_bearers":
+            meta[ekey]["list_columns"] = _COMMITTEE_BEARERS_LIST_COLUMNS
             meta[ekey]["list_icon"] = "fa-book"
 
         if ekey == "master_societies":

@@ -348,6 +348,36 @@ KPI_CARDS = {
         "title": "Security Staff", "group": "Enrolled Members",
     },
 
+    "kpi_accountant_total": {
+        "query": "SELECT COUNT(*) AS v FROM users WHERE society_id=%s AND role='accountant' AND COALESCE(active, TRUE)=TRUE",
+        "params": 1, "format": "number",
+        "icon": "fa-calculator", "color": "#7c3aed",
+        "title": "Accountant", "group": "Enrolled Members",
+    },
+
+    "kpi_supervisor_total": {
+        "query": "SELECT COUNT(*) AS v FROM users WHERE society_id=%s AND role='supervisor' AND COALESCE(active, TRUE)=TRUE",
+        "params": 1, "format": "number",
+        "icon": "fa-user-tie", "color": "#ea580c",
+        "title": "Supervisors", "group": "Enrolled Members",
+    },
+
+    "kpi_staff_total": {
+        "query": "SELECT COUNT(*) AS v FROM users WHERE society_id=%s AND role='staff' AND COALESCE(active, TRUE)=TRUE",
+        "params": 1, "format": "number",
+        "icon": "fa-users", "color": "#64748b",
+        "title": "Staff", "group": "Enrolled Members",
+    },
+
+    "kpi_committee_bearers": {
+        "query": "SELECT COUNT(DISTINCT co.id) AS v FROM committee_offices co WHERE co.society_id=%s AND co.status='active'",
+        "params": 1, "format": "number",
+        "icon": "fa-users-cog", "color": "#0f766e",
+        "title": "Committee Bearers", "group": "Enrolled Members",
+    },
+
+
+
     "kpi_security_on_duty": {
         "query": """
             SELECT COUNT(*) AS v FROM gate_access

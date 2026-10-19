@@ -422,6 +422,10 @@ DRILLDOWN_MAP: dict = {
         "target": "list_security_roster",
         "label": "Security Roster",
     },
+    "kpi_accountant_total": {"target": "list_accountants", "label": "Accountants"},
+    "kpi_supervisor_total": {"target": "list_supervisors", "label": "Supervisors"},
+    "kpi_staff_total": {"target": "list_staff", "label": "Staff"},
+    "kpi_committee_bearers": {"target": "list_committee_bearers", "label": "Committee Bearers"},
     "kpi_compliance_settings": {
         "target": "list_compliance_settings",
         "label": "Compliance Settings",
@@ -482,6 +486,11 @@ DRILLDOWN_MAP: dict = {
         "target": "profile_security_roster",
         "label": "Roster Details",
     },
+    "list_accountants": {"target": "profile_user", "label": "Accountant Details"},
+    "list_supervisors": {"target": "profile_user", "label": "Supervisor Details"},
+    "list_staff": {"target": "profile_user", "label": "Staff Details"},
+    "list_committee_bearers": {"target": "profile_committee_bearer", "label": "Committee Bearer Details"},
+
     "list_receivables": {
         "target": "profile_receivable",
         "label": "Receivable Details"

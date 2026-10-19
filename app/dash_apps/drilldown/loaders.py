@@ -1477,6 +1477,52 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
             tuple([sid] + extra_params + [page_size, offset]),
         )
 
+    if entity == "accountants":
+        base = "SELECT id, name, email, role, society_id, created_at, active FROM users WHERE society_id=%s AND role='accountant'"
+        extra = []
+        params = [sid]
+        if s:
+            extra.append("(name ILIKE %s OR email ILIKE %s)")
+            params.extend([f"%{s}%", f"%{s}%"])
+        q = base + (" AND " + " AND ".join(extra) if extra else "") + " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+        return q, tuple(params + [page_size, offset])
+
+    if entity == "supervisors":
+        base = "SELECT id, name, email, role, society_id, created_at, active FROM users WHERE society_id=%s AND role='supervisor'"
+        extra = []
+        params = [sid]
+        if s:
+            extra.append("(name ILIKE %s OR email ILIKE %s)")
+            params.extend([f"%{s}%", f"%{s}%"])
+        q = base + (" AND " + " AND ".join(extra) if extra else "") + " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+        return q, tuple(params + [page_size, offset])
+
+    if entity == "staff":
+        base = "SELECT id, name, email, role, society_id, created_at, active FROM users WHERE society_id=%s AND role='staff'"
+        extra = []
+        params = [sid]
+        if s:
+            extra.append("(name ILIKE %s OR email ILIKE %s)")
+            params.extend([f"%{s}%", f"%{s}%"])
+        q = base + (" AND " + " AND ".join(extra) if extra else "") + " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+        return q, tuple(params + [page_size, offset])
+
+    if entity == "committee_bearers":
+        base = """SELECT co.id, co.office_code, co.holder_name, co.user_id, co.apartment_id, co.status, co.term_start, co.term_end,
+                         u.email AS user_email, a.flat_no
+                  FROM committee_offices co
+                  LEFT JOIN users u ON u.id = co.user_id
+                  LEFT JOIN apartments a ON a.id = co.apartment_id
+                  WHERE co.society_id=%s"""
+        extra = []
+        params = [sid]
+        if s:
+            extra.append("(co.holder_name ILIKE %s OR u.email ILIKE %s OR co.office_code ILIKE %s)")
+            params.extend([f"%{s}%", f"%{s}%", f"%{s}%"])
+        q = base + (" AND " + " AND ".join(extra) if extra else "") + " ORDER BY co.term_start DESC, co.id DESC LIMIT %s OFFSET %s"
+        return q, tuple(params + [page_size, offset])
+
+
     # ── APARTMENT USERS ───────────────────────────────────────────────────
     if entity == "apartment_users":
         extra_sql, extra_params = "", []
@@ -2284,6 +2330,60 @@ def load_list(
                 [sid] + extra_params, fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
+
+        if entity == "accountants":
+            base = "SELECT id, name, email, role, society_id, created_at, active FROM users WHERE society_id=%s AND role='accountant'"
+            params = [sid]
+            extra = []
+            if s:
+                extra.append("(name ILIKE %s OR email ILIKE %s)")
+                params.extend([f"%{s}%", f"%{s}%"])
+            where = base + (" AND " + " AND ".join(extra) if extra else "")
+            rows = db._execute(where + " ORDER BY created_at DESC LIMIT %s OFFSET %s", params + [page_size, offset], fetch_all=True) or []
+            cnt = db._execute("SELECT COUNT(*) AS n FROM users WHERE society_id=%s AND role='accountant'" + (" AND " + " AND ".join(extra) if extra else ""), params, fetch_one=True)
+            return rows, int((cnt or {}).get("n", len(rows)))
+
+        if entity == "supervisors":
+            base = "SELECT id, name, email, role, society_id, created_at, active FROM users WHERE society_id=%s AND role='supervisor'"
+            params = [sid]
+            extra = []
+            if s:
+                extra.append("(name ILIKE %s OR email ILIKE %s)")
+                params.extend([f"%{s}%", f"%{s}%"])
+            where = base + (" AND " + " AND ".join(extra) if extra else "")
+            rows = db._execute(where + " ORDER BY created_at DESC LIMIT %s OFFSET %s", params + [page_size, offset], fetch_all=True) or []
+            cnt = db._execute("SELECT COUNT(*) AS n FROM users WHERE society_id=%s AND role='supervisor'" + (" AND " + " AND ".join(extra) if extra else ""), params, fetch_one=True)
+            return rows, int((cnt or {}).get("n", len(rows)))
+
+        if entity == "staff":
+            base = "SELECT id, name, email, role, society_id, created_at, active FROM users WHERE society_id=%s AND role='staff'"
+            params = [sid]
+            extra = []
+            if s:
+                extra.append("(name ILIKE %s OR email ILIKE %s)")
+                params.extend([f"%{s}%", f"%{s}%"])
+            where = base + (" AND " + " AND ".join(extra) if extra else "")
+            rows = db._execute(where + " ORDER BY created_at DESC LIMIT %s OFFSET %s", params + [page_size, offset], fetch_all=True) or []
+            cnt = db._execute("SELECT COUNT(*) AS n FROM users WHERE society_id=%s AND role='staff'" + (" AND " + " AND ".join(extra) if extra else ""), params, fetch_one=True)
+            return rows, int((cnt or {}).get("n", len(rows)))
+
+        if entity == "committee_bearers":
+            base = """SELECT co.id, co.office_code, co.holder_name, co.user_id, co.apartment_id, co.status, co.term_start, co.term_end,
+                             u.email AS user_email, a.flat_no
+                      FROM committee_offices co
+                      LEFT JOIN users u ON u.id = co.user_id
+                      LEFT JOIN apartments a ON a.id = co.apartment_id
+                      WHERE co.society_id=%s"""
+            params = [sid]
+            extra = []
+            if s:
+                extra.append("(co.holder_name ILIKE %s OR u.email ILIKE %s OR co.office_code ILIKE %s)")
+                params.extend([f"%{s}%", f"%{s}%", f"%{s}%"])
+            where = base + (" AND " + " AND ".join(extra) if extra else "")
+            rows = db._execute(where + " ORDER BY co.term_start DESC, co.id DESC LIMIT %s OFFSET %s", params + [page_size, offset], fetch_all=True) or []
+            cnt = db._execute("SELECT COUNT(*) AS n FROM committee_offices co LEFT JOIN users u ON u.id=co.user_id WHERE co.society_id=%s" + (" AND " + " AND ".join(extra) if extra else ""), params, fetch_one=True)
+            return rows, int((cnt or {}).get("n", len(rows)))
+
 
         # ── CHANNELS (School Bus / Taxi / Visitor alert channels) ───────
         # Was previously unhandled here (fell through to `return [],0`
