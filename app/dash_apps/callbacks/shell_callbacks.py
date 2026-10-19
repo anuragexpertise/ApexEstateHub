@@ -476,6 +476,7 @@ def _portal_content(role, society_id, pathname, auth=None):
     from app.dash_apps.pages.portal_pages import (
         master_portal_page, admin_portal_page, owner_portal_page,
         vendor_portal_page, security_portal_page,
+        accountant_portal_page, supervisor_portal_page, staff_portal_page, auditor_portal_page,
     )
     is_master = role == "master"
     p = pathname or ""
@@ -551,6 +552,18 @@ def _portal_content(role, society_id, pathname, auth=None):
             "pass_evaluation"
         )
         return security_portal_page(tab, sid=society_id)
+    if role == "accountant":
+        tab = "dashboard"
+        return accountant_portal_page(tab, sid=society_id)
+    if role == "supervisor":
+        tab = "dashboard"
+        return supervisor_portal_page(tab, sid=society_id)
+    if role == "staff":
+        tab = "dashboard"
+        return staff_portal_page(tab, sid=society_id)
+    if role == "auditor":
+        tab = "dashboard"
+        return auditor_portal_page(tab, sid=society_id)
     return html.Div("Page not found", className="text-muted text-center p-5 mt-5")
 
 
