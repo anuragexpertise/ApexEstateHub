@@ -4,7 +4,8 @@ The one place the role vocabulary is defined.
 
 Three different vocabularies were in play:
 
-  persisted   users.role CHECK constraint: admin / apartment / vendor / security
+  persisted   users.role CHECK constraint: admin / apartment / vendor / security / accountant /
+              supervisor / staff / auditor  (PERSISTED_ROLES below)
   virtual     "master" — NEVER stored in users.role. Computed as
               (role='admin' AND society_id IS NULL AND is_master_admin) and then
               handed to the session / JWT / portal router.

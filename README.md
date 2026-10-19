@@ -2159,7 +2159,9 @@ seeds a single demo society ("Sunrise Residency", `society_id = 1`) with:
 |---|---|---|
 | Master admin | 1 | `master@estatehub.com` |
 | Society admin | 1 | `admin@sunriseresidency.com` |
-| Apartment owners | 13 | Flats across A/B/C blocks; mix of rate-based and fixed-amount maintenance charge histories |
+| Apartment owners | 21 | 9 original owners (Blocks A/B; mix of rate-based and fixed-amount maintenance charge histories) + the 12 office-bearers' flats C-101 to C-112 |
+| Managing Committee | 12 | 1 President (`president@sunriseresidency.com`), 1 Secretary (`secretary@sunriseresidency.com`), 10 Working Committee members (`committee1` … `committee10@sunriseresidency.com`). Each holds a flat via `committee_offices` (seated with `fn_appoint_office_bearer`, so bye-law 7 applies) and the RBAC role `society_president` / `society_secretary` / `committee_member`. Their flats are billed from the month after the seed runs, so they are in good standing on seed day. The admin keeps the treasurer post, and holds secretary only while none is seated |
+| Society employees | 4 | `accountant@`, `auditor@`, `supervisor@`, `staff@sunriseresidency.com`, each routed to its own portal; the accountant also holds the `accountant` RBAC role |
 | Vendors | 12 | 12 distinct service types (Plumbing, Gardening, Electrical, Carpentry, Painting, Pest Control, Housekeeping, CCTV & Security, AC Repair, Elevator Maintenance, Catering, Landscaping) |
 | Security staff | 12 | Mixed morning/evening/night shifts, roster + gate-log attendance for the first two guards |
 | Events | 12 | Spread across the demo financial year, all `open_to = 'all'` |

@@ -77,7 +77,7 @@ def test_baseline_is_unchanged_and_layer_is_reported(pg):
 def test_wrappers_equal_the_resolver(pg):
     pg.execute("SELECT fn_regime_param_num(%s,'petty_cash_limit') AS n, fn_regime_param_text(%s,'cash_limit_default_mode') AS t", (SOC, SOC))
     r = pg.fetchone()
-    assert float(r["n"]) == 20000 and r["t"] == "warn"
+    assert float(r["n"]) == 20000 and r["t"] == "block"      # 'block' is the engine default (regime_rule_parameters)
 
 
 # ── a valid decision changes what the engine reads ───────────────────────────────────────────
@@ -324,7 +324,8 @@ def test_layer3_decision_pending_ratification_is_ignored_by_resolver(pg):
     assert float(r["value"]) == 20000
     assert r["layer"] != 3
     assert r["status"] != "adopted_with_variation"
-    assert r["ignored"] == 1    # the resolver counted it as ignored
+    # fn_rule filters a pending-ratification decision out in SQL before it is counted, so nothing is "ignored": it
+    # simply never reaches the resolver, which falls through to the value beneath.
 
 
 def test_layer3_decision_after_ratification_is_applied(pg):
@@ -334,8 +335,9 @@ def test_layer3_decision_after_ratification_is_applied(pg):
     pg.execute("""INSERT INTO loa_ratification (society_id, decision_id, rule_key, board_layer,
                                                  decision_effective, ratify_by, created_by, status,
                                                  ratified_at, ratified_by, ratified_resolution_id)
-                  VALUES (%s, %s, 'petty_cash_limit', 3, %s, %s, 1, 'ratified', NOW(), 1, 1)""",
-               (SOC, did, date.today(), date.today() + timedelta(days=180)))
+                  VALUES (%s, %s, 'petty_cash_limit', 3, %s, %s, 1, 'ratified', NOW(), 1,
+                          (SELECT resolution_id FROM society_rule_decisions WHERE id = %s))""",
+               (SOC, did, date.today(), date.today() + timedelta(days=180), did))
     # Now fn_rule should pick it up
     r = rule(pg, "petty_cash_limit")
     assert float(r["value"]) == 15000

@@ -85,8 +85,9 @@ def _require_writer(actor_role, actor_society_id, society_id, *, master_ok: bool
     """Who may write a society-level record.
 
     A society admin may write ONLY their own society. Master may write any society only where master_ok is
-    True (cash-limit mode). Bye-law adoption, meetings, resolutions and enactment are the society's own
-    governance, so they pass master_ok=False: admin of that society only."""
+    True (the default; no society-level writer passes it today). Cash-limit mode, bye-law adoption, meetings,
+    resolutions and enactment are the society's own governance, so they pass master_ok=False: admin of that
+    society only."""
     if actor_role == "master" and master_ok:
         return
     if actor_role == "admin":

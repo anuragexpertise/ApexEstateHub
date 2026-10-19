@@ -11991,17 +11991,19 @@ BEGIN
         'sha256'), 'hex');
     v_prev_hash := v_chain_seed;
 
+    -- Every column is qualified: receipt_number is also an OUT column of RETURNS TABLE, and an unqualified
+    -- reference raised "column reference receipt_number is ambiguous" (broke the Auditor receipt-chain checks).
     FOR r IN
-        SELECT id, receipt_number, previous_hash,
-               society_id, acc_id, amount, confirmed_at,
-               entity_id, role, particulars, mode, receipt_date,
-               source_reference
-          FROM receipts
-         WHERE society_id = p_society_id
-           AND acc_id = p_acc_id
-           AND status = 'confirmed'
-           AND receipt_number IS NOT NULL
-         ORDER BY confirmed_at ASC, id ASC
+        SELECT rc.id, rc.receipt_number, rc.previous_hash,
+               rc.society_id, rc.acc_id, rc.amount, rc.confirmed_at,
+               rc.entity_id, rc.role, rc.particulars, rc.mode, rc.receipt_date,
+               rc.source_reference
+          FROM receipts rc
+         WHERE rc.society_id = p_society_id
+           AND rc.acc_id = p_acc_id
+           AND rc.status = 'confirmed'
+           AND rc.receipt_number IS NOT NULL
+         ORDER BY rc.confirmed_at ASC, rc.id ASC
     LOOP
         v_pos := v_pos + 1;
 
@@ -16547,7 +16549,7 @@ BEGIN
         RETURN QUERY SELECT NULL::NUMERIC, FALSE, NULL::INT, 'entrance fee not configured for this society''s regime'::TEXT;
         RETURN;
     END IF;
-    SELECT o.entrance_fee_paid, o.receivable_id
+    SELECT oa.entrance_fee_paid, oa.receivable_id
       INTO v_paid, v_rec
     FROM owner_admissions oa
     JOIN apartments a ON a.id = oa.apartment_id

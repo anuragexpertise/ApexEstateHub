@@ -154,9 +154,14 @@ def test_policy_key_needs_no_confirmation_and_cash_mode(pg):
     assert rra.set_cash_limit_mode(7, "admin", SOC, "block", "Society asked for hard stop", actor_society_id=SOC)[0]
     pg.execute("SELECT cash_limit_mode FROM societies WHERE id=%s", (SOC,))
     assert pg.fetchone()["cash_limit_mode"] == "block"
-    assert rra.set_cash_limit_mode(7, "master", SOC, "", "Back to regime default")[0]
-    assert not rra.set_cash_limit_mode(7, "master", SOC, "maybe", "Back to regime default")[0]
-    assert not rra.set_cash_limit_mode(7, "master", 999999, "warn", "Unknown society id")[0]
+    # Cash-limit mode is the society's own governance: only that society's admin may change it, never Master
+    # (set_cash_limit_mode passes master_ok=False), and never another society's admin.
+    with pytest.raises(PermissionError):
+        rra.set_cash_limit_mode(7, "master", SOC, "", "Back to regime default")
+    with pytest.raises(PermissionError):
+        rra.set_cash_limit_mode(7, "admin", 999999, "warn", "Unknown society id", actor_society_id=SOC)
+    assert rra.set_cash_limit_mode(7, "admin", SOC, "", "Back to regime default", actor_society_id=SOC)[0]
+    assert not rra.set_cash_limit_mode(7, "admin", SOC, "maybe", "Back to regime default", actor_society_id=SOC)[0]
 
 
 @live
