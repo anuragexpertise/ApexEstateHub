@@ -480,7 +480,7 @@ def _render_tds_rates_table():
 
     rows = []
     for idx, item in enumerate(TDS_SECTION_RATE_SEED):
-        section, discriminator, nature, rate, rate_no_pan, single_bill, agg_bill = item
+        section, discriminator, nature, rate, rate_no_pan, single_bill, agg_bill = item[:7]  # seed rows also carry eff_from / act_version / section_2025
         rows.append(html.Div([
             html.Div(dbc.Input(id={"type": "tds-section", "index": idx}, value=section, readonly=True, size="sm")),
             html.Div(dbc.Input(id={"type": "tds-discriminator", "index": idx}, value=discriminator or "", readonly=True, size="sm")),
@@ -1463,7 +1463,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
 
         rows = []
         for idx, item in enumerate(TDS_SECTION_RATE_SEED):
-            section, discriminator, nature, rate, rate_no_pan, single_bill, agg_bill = item
+            section, discriminator, nature, rate, rate_no_pan, single_bill, agg_bill = item[:7]  # seed rows also carry eff_from / act_version / section_2025
             rows.append(html.Div([
                 html.Div(dbc.Input(id={"type": "tds-section", "index": idx}, value=section, readonly=True, size="sm")),
                 html.Div(dbc.Input(id={"type": "tds-discriminator", "index": idx}, value=discriminator or "", readonly=True, size="sm")),

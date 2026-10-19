@@ -712,9 +712,11 @@ def register_drilldown_callbacks(app):
             # the in-card FY switcher pills reuse this same click pipeline
             # with "kpi_financial_statements__<fy>" ids.
             if card_id.startswith(("kpi_financial_statements", "kpi_4_statements")):
-                if role != "admin":
+                # Read-only report (print / PDF / email run client-side; nothing is written). The accountant and
+                # the auditor both hold report.export in the capability matrix, so they may open it too.
+                if role not in ("admin", "accountant", "auditor"):
                     return no_update, no_update, no_update, no_update, {
-                        "_toast": {"type": "error", "message": "Admin only."}
+                        "_toast": {"type": "error", "message": "Admin, accountant or auditor only."}
                     }
                 store = nav_state.initial_state(role, sid)
                 fy_prefill = {}
