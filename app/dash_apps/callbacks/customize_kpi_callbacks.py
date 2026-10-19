@@ -41,6 +41,10 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_vendors_total", "admin", "enrolled", "Entities"),
     ("kpi_security_total", "admin", "enrolled", "Entities"),
     ("kpi_security_roster_count", "admin", "enrolled", "Security"),
+    ("kpi_accountant_total", "admin", "enrolled", "Entities"),
+    ("kpi_supervisor_total", "admin", "enrolled", "Entities"),
+    ("kpi_staff_total", "admin", "enrolled", "Entities"),
+    ("kpi_committee_bearers", "admin", "enrolled", "Entities"),
     # ADMIN - Cashbook tab
     ("kpi_receivables_total", "admin", "cashbook", "Cashbook"),
     ("kpi_payables_total", "admin", "cashbook", "Cashbook"),
