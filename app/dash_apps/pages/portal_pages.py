@@ -38,6 +38,10 @@ _C = {
     "apartment": "#18794e",
     "vendor":    "#b98a07",
     "security":  "#b63b3b",
+    "accountant": "#7c3aed",
+    "supervisor": "#ea580c",
+    "staff":     "#ffffff",
+    "auditor":   "#dc2626",
 }
 
 # Single source of truth for KPI card sizing. `auto-fit` + a CAPPED max track
@@ -1626,3 +1630,44 @@ def _customize_page(c: str) -> html.Div:
             style={"marginBottom": "20px"},
         ),
     ], className="portal-page")
+
+
+def accountant_portal_page(active_tab="dashboard", sid=None):
+    c = _C["accountant"]
+    if active_tab == "dashboard":
+        return html.Div([_page_title("fa-calculator", c, "Accountant Dashboard"), _drill_panel()], className="portal-page")
+    return html.Div([_page_title("fa-calculator", c, active_tab.replace("_"," ").title()), _drill_panel()], className="portal-page")
+
+def supervisor_portal_page(active_tab="dashboard", sid=None):
+    c = _C["supervisor"]
+    if active_tab == "dashboard":
+        return html.Div([_page_title("fa-user-tie", c, "Supervisor Dashboard"), _drill_panel()], className="portal-page")
+    return html.Div([_page_title("fa-user-tie", c, active_tab.replace("_"," ").title()), _drill_panel()], className="portal-page")
+
+def staff_portal_page(active_tab="dashboard", sid=None):
+    c = _C["staff"]
+    if active_tab == "dashboard":
+        return html.Div([_page_title("fa-users", c, "Staff Dashboard"), _drill_panel()], className="portal-page")
+    return html.Div([_page_title("fa-users", c, active_tab.replace("_"," ").title()), _drill_panel()], className="portal-page")
+
+def auditor_portal_page(active_tab="dashboard", sid=None):
+    c = _C["auditor"]
+    verify_text = """Verify it yourself
+You do not have to take any of this on trust.
+1. Run the automated suite...
+SELECT * FROM fn_verify_ledger_chain(<society_id>);
+SELECT * FROM fn_ledger_integrity_report(<society_id>);
+SELECT * FROM fn_cash_voucher_report(<society_id>) WHERE NOT amount_checked;
+SELECT * FROM fn_cashbook_reconciliation(<society_id>, CURRENT_DATE);
+SELECT * FROM fn_verify_receipt_chain(<society_id>, <acc_id>);
+SELECT * FROM fn_verify_all_receipt_chains(<society_id>);
+UPDATE transactions SET amount = amount + 1 WHERE id = 1;
+DELETE FROM transactions WHERE id = 1;
+TRUNCATE transactions;
+UPDATE audit_events SET reason = 'x' WHERE id = 1;
+SELECT * FROM fn_resolution_vote_summary(<resolution_id>);
+SELECT instrument_type, title, status, last_verified_on FROM legal_instrument_catalog;"""
+    if active_tab == "dashboard":
+        return html.Div([_page_title("fa-search", c, "Auditor Portal", "Verification checklist"),
+                         html.Pre(verify_text, style={"whiteSpace":"pre-wrap","fontSize":"12px"})], className="portal-page")
+    return html.Div([_page_title("fa-search", c, active_tab.replace("_"," ").title()), _drill_panel()], className="portal-page")
