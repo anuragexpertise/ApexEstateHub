@@ -71,10 +71,16 @@ def pay(cur, rec, on):
 
 # ═════════════════════════ weighted polls (bye-laws 8, 9, 2(e); Act s.12(1)(f)) ══════════════════════════════
 def _weights(cur, first_pct=60, other_pct=5):
-    """First flat carries first_pct %, every other flat other_pct %; returns the percentages' sum."""
+    """The first flat carries first_pct %, the 2nd and 3rd other_pct % each, and the rest share what is left so the
+    society always sums to exactly 100 however many flats the seed has (the last flat absorbs the rounding)."""
     ids = flats(cur)
-    cur.execute("UPDATE apartments SET undivided_interest_pct=%s WHERE society_id=%s AND active", (other_pct, SOC))
-    cur.execute("UPDATE apartments SET undivided_interest_pct=%s WHERE id=%s", (100 - other_pct * (len(ids) - 1), ids[0]))
+    assert len(ids) >= 4, "needs at least four flats"
+    rest = 100 - first_pct - 2 * other_pct
+    each = round(rest / (len(ids) - 3), 6)
+    pcts = [first_pct, other_pct, other_pct] + [each] * (len(ids) - 4)
+    pcts.append(round(100 - sum(pcts), 6))
+    for apt, pct in zip(ids, pcts):
+        cur.execute("UPDATE apartments SET undivided_interest_pct=%s WHERE id=%s", (pct, apt))
 
 
 def _poll(cur, basis="undivided_interest", open_to="all_members"):
@@ -107,13 +113,16 @@ def test_unweighted_poll_needs_no_percentages_and_unknown_basis_is_refused(cur):
 def test_weight_not_headcount_decides_and_the_result_is_not_a_resolution(cur):
     _weights(cur, 60, 5)
     pid = _poll(cur)
-    voters = _owner_users(cur, 3)            # voter 1 owns flat 1 (60%); voters 2 and 3 own 5% flats
-    for uid, choice in zip(voters, (1, 2, 2)):
+    cur.execute("SELECT count(*) AS n FROM users WHERE society_id=%s AND role='apartment' AND user_type='owner'", (SOC,))
+    need = -(-cur.fetchone()["n"] * 30 // 100) + 1          # enough owners to clear the 30% quorum
+    voters = _owner_users(cur, need)         # voter 1 owns flat 1 (60%); every other voter owns a small flat
+    for uid, choice in zip(voters, [1] + [2] * (need - 1)):
         ok = q1(cur, "SELECT * FROM fn_cast_vote(%s,%s,%s,%s::smallint)", (pid, uid, SOC, choice))
         assert ok["success"], ok
     res = q1(cur, "SELECT * FROM fn_declare_results(%s,%s,%s)", (pid, admin(cur), SOC))["results"]
-    assert res["choice_breakdown"] == {"choice_1": 1, "choice_2": 2}              # by head, choice 2 would win
-    assert float(res["weight_breakdown"]["choice_1"]) == 60.0 and float(res["weight_breakdown"]["choice_2"]) == 10.0
+    assert res["choice_breakdown"] == {"choice_1": 1, "choice_2": need - 1}       # by head, choice 2 wins
+    assert float(res["weight_breakdown"]["choice_1"]) == 60.0
+    assert float(res["weight_breakdown"]["choice_2"]) < 60.0
     assert res["winning_choice"] == 1                                              # by weight, choice 1 wins
     assert res["quorum_met"] is True and res["statutory_resolution"] is False
     assert "not a General Body resolution" in res["note"]
@@ -128,7 +137,7 @@ def test_quorum_is_a_share_of_owners_and_comes_from_the_rule(cur):
     for u in uid:
         assert q1(cur, "SELECT * FROM fn_cast_vote(%s,%s,%s,1::smallint)", (pid, u, SOC))["success"]
     r = q1(cur, "SELECT * FROM fn_declare_results(%s,%s,%s)", (pid, admin(cur), SOC))
-    assert r["success"] is False and "Quorum not met" in r["message"]             # 2 of 9 owners = 22.2% < 30%
+    assert r["success"] is False and "Quorum not met" in r["message"]             # 2 of the society's owners is well under 30%
 
 
 def test_society_can_raise_the_poll_quorum_and_new_polls_follow(cur):

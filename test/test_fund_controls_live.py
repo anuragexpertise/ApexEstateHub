@@ -23,6 +23,9 @@ def cur():
     c.execute("SELECT id FROM societies ORDER BY id LIMIT 1")
     if not c.fetchone():
         pytest.skip("database is not seeded")
+    # The seed seats a Managing Committee (one seat per single-seat office). These tests appoint their own office-bearers
+    # inside this transaction, which is rolled back, so start from an empty committee.
+    c.execute("UPDATE committee_offices SET status='ended', ended_at=NOW() WHERE society_id=%s AND status='active'", (SID,))
     yield c
     conn.rollback()
     conn.close()
@@ -43,7 +46,12 @@ def fails(c, match, sql, params=()):
 
 
 def owners(c, n=3):
-    c.execute("SELECT id, linked_id FROM users WHERE role='apartment' AND user_type='owner' AND society_id=%s ORDER BY id LIMIT %s", (SID, n))
+    """The first n owner logins whose flat may stand for office today. A flat in bye-law 7 arrears cannot be appointed, and
+    seeded bills fall overdue as the calendar moves, so eligibility is checked rather than assumed."""
+    c.execute("""SELECT u.id, u.linked_id FROM users u
+                    WHERE u.role='apartment' AND u.user_type='owner' AND u.society_id=%s
+                      AND NOT (SELECT s.ineligible_stand FROM fn_get_standing(%s, u.linked_id, CURRENT_DATE) s)
+                    ORDER BY u.id LIMIT %s""", (SID, SID, n))
     rows = c.fetchall()
     if len(rows) < n:
         pytest.skip("seed has too few owner users")

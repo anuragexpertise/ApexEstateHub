@@ -41,8 +41,17 @@ ApexEstateHub — comprehensive demo/seed data.
   outside FY 2026-27.
 
   What it seeds (society_id = 1, "Sunrise Residency"):
-    * Society (id=1) + master admin + admin/13 apartment owners/12 vendors/
-      12 security guards (from USERS below).
+    * Society (id=1) + master admin + admin, 21 apartment owners (9 original
+      + the 12 office-bearer flats in Block C), 12 vendors, 12 security guards,
+      the society's employee logins (accountant, auditor, supervisor, staff)
+      and family / tenant / visitor members (from USERS below).
+  * The Managing Committee: President, Secretary and 10 Working Committee
+    members. Each holds a flat (committee_offices, appointed through
+    fn_appoint_office_bearer so bye-law 7 is enforced) AND the matching RBAC
+    role (user_role_assignments: society_president / society_secretary /
+    committee_member). The Accountant also holds the 'accountant' assignment.
+    The admin keeps the treasurer post until a Treasurer is elected, and holds
+    secretary only while no Secretary is seated.
   * 82 chart-of-accounts rows (block scheme), has_bf/drcr_bf already
     flagged inline.
   * societies.primary_bank_account_id -> SBI (id 1311 under BkAc 1310).
@@ -514,6 +523,66 @@ USERS = [
     {"role": "security",  "email": "guard12@sunriseresidency.com",  "password": "Guard12@2024",
      "name": "Om Prakash",    "shift": "evening", "salary": 124, "mobile": "9877200010"},
 ]
+
+# ── Managing Committee (office-bearers) + society employees ──────────────────────────────────────────────────
+# Office-bearers are owners of their own flats (Block C), so nobody holds two posts and each flat's standing is its own.
+# "office" -> committee_offices.office_code; "rbac_role" -> role_definitions.code held through user_role_assignments.
+# These flats are billed from the month AFTER the seed runs (see seed_users), so on seed day they carry no arrears and
+# bye-law 7 lets them stand; their terms start with the financial year.
+OFFICE_TERM_START     = SEED_FY_START
+OFFICE_RESOLUTION_REF = "GBM/2026-27/01"
+SINGLE_SEAT_OFFICES   = ("president", "vice_president", "secretary", "joint_secretary", "treasurer")
+COMMITTEE_SIZE        = 10
+
+_OFFICE_RBAC = {"president": "society_president", "secretary": "society_secretary",
+                "working_committee_member": "committee_member"}
+
+
+def _office_owner(email, password, name, flat, size, mobile, office):
+    return {"role": "apartment", "email": email, "password": password, "name": name,
+            "flat_number": flat, "apartment_size": size, "mobile": mobile,
+            "alt_mobile": str(int(mobile) + 100),
+            "alt_address": f"{flat}, Sunrise Residency, MG Road, Agra, UP - 282001",
+            "billing_from_next_month": True,
+            "office": office, "rbac_role": _OFFICE_RBAC[office]}
+
+
+_COMMITTEE = [
+    ("Sunita Agarwal", 1000), ("Harish Chandra", 1150), ("Kavita Joshi", 950), ("Mohan Lal Gupta", 1300),
+    ("Deepa Saxena", 1050), ("Rakesh Bansal", 1200), ("Farhan Qureshi", 900), ("Lakshmi Menon", 1100),
+    ("Gurpreet Singh", 1250), ("Nisha Chaturvedi", 1000),
+]
+
+USERS += [
+    # The Secretary is the person already named on the society record (SOCIETY["secretary_*"]).
+    _office_owner("president@sunriseresidency.com", "President@2024", "Dr. Anil Mathur", "C-101", 1400,
+                  "9878000001", "president"),
+    _office_owner(SOCIETY["secretary_email"], "Secretary@2024", SOCIETY["secretary_name"], "C-102", 1200,
+                  "9878000002", "secretary"),
+] + [
+    _office_owner(f"committee{i}@sunriseresidency.com", f"Committee{i}@2024", name, f"C-{102 + i}", size,
+                  str(9878000002 + i), "working_committee_member")
+    for i, (name, size) in enumerate(_COMMITTEE, start=1)
+] + [
+    # Society employees: each logs in to its own portal (users.role). They are not residents, so no linked_id.
+    {"role": "accountant", "email": "accountant@sunriseresidency.com", "password": "Accountant@2024",
+     "name": "Sanjay Verma", "rbac_role": "accountant"},
+    {"role": "auditor",    "email": "auditor@sunriseresidency.com",    "password": "Auditor@2024",
+     "name": "CA Meenakshi Rao"},
+    {"role": "supervisor", "email": "supervisor@sunriseresidency.com", "password": "Supervisor@2024",
+     "name": "Dinesh Pandey"},
+    {"role": "staff",      "email": "staff@sunriseresidency.com",      "password": "Staff@2024",
+     "name": "Kamla Devi"},
+]
+
+STAFF_LOGIN_ROLES = ("accountant", "supervisor", "staff", "auditor")
+
+
+def _next_month_start(today=None):
+    """First day of the month after `today`: where the office-bearer flats' billing begins."""
+    d = today or date.today()
+    return (d.replace(day=1) + timedelta(days=32)).replace(day=1)
+
 
 # Event account_ids rekeyed to block IDs (SocC=4230, EventT=4240, HoliT=4241, DiwaliT=4242).
 EVENTS = [
@@ -1812,6 +1881,14 @@ def seed_master_admin(cur, conn) -> int:
     return row["id"]
 
 
+def _calc_start(u):
+    """apartments.apt_calc_start_date for a seeded owner: the explicit date, or (office-bearer flats) the first of
+    next month, which keeps them free of arrears on seed day. NULL = the society's own calc_start_date."""
+    if u.get("apt_calc_start_date"):
+        return u["apt_calc_start_date"]
+    return _next_month_start() if u.get("billing_from_next_month") else None
+
+
 def seed_users(cur, conn, society_id: int):
     """Returns dict keyed by email -> {user_id, linked_id, cfg}."""
     result = {}
@@ -1847,7 +1924,7 @@ def seed_users(cur, conn, society_id: int):
                      f"id_proofs/owner_{u['flat_number']}.jpg",
                      u.get("mobile", ""),
                      u.get("alt_mobile", ""), u.get("alt_address", ""),
-                     u.get("apartment_size", 1000), u.get("apt_calc_start_date")),
+                     u.get("apartment_size", 1000), _calc_start(u)),
                 )
             else:
                 row = _one(
@@ -1936,6 +2013,18 @@ def seed_users(cur, conn, society_id: int):
             uid = row["id"] if row else None
             if uid:
                 print(f"  ✓ Security {u['email']}  /  {u['password']}")
+
+        elif u["role"] in STAFF_LOGIN_ROLES:
+            row = _one(
+                cur,
+                """INSERT INTO users (society_id,email,password_hash,role,login_method,name)
+                   VALUES (%s,%s,%s,%s,'password',%s)
+                   ON CONFLICT (email) DO NOTHING RETURNING id""",
+                (society_id, u["email"], ph, u["role"], u["name"]),
+            )
+            conn.commit()
+            if row:
+                print(f"  ✓ {u['role'].title():10} {u['email']}  /  {u['password']}")
 
         elif u["role"] == "admin":
             row = _one(
@@ -2570,6 +2659,43 @@ def seed_polls(cur, conn, society_id: int, admin_uid: int, users: dict):
 # SEED DATA RULES — static check (before seeding) + DB audit (after seeding)
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _validate_users():
+    """Fail fast on a malformed USERS list: unknown roles, duplicate logins or flats, short passwords, and a
+    Managing Committee that is not exactly one President, one Secretary and COMMITTEE_SIZE members."""
+    try:
+        from app.security.roles import PERSISTED_ROLES
+    except Exception:  # the roles module is the source of truth; fall back to the schema's list if it cannot load
+        PERSISTED_ROLES = ("admin", "apartment", "vendor", "security", "accountant", "supervisor", "staff", "auditor")
+    emails = [u["email"].lower() for u in USERS]
+    dup = {e for e in emails if emails.count(e) > 1}
+    if dup:
+        raise ValueError(f"duplicate seed logins: {sorted(dup)}")
+    bad = [u["email"] for u in USERS if u["role"] not in PERSISTED_ROLES]
+    if bad:
+        raise ValueError(f"seed users with a role the schema does not allow: {bad}")
+    short = [u["email"] for u in USERS if len(u["password"]) < 8]
+    if short:
+        raise ValueError(f"seed passwords shorter than the 8-character minimum: {short}")
+    flats = [u["flat_number"] for u in USERS if u["role"] == "apartment" and u.get("user_type", "owner") == "owner"]
+    if len(flats) != len(set(flats)):
+        raise ValueError("two seed owners share a flat number")
+    offices = [u["office"] for u in USERS if u.get("office")]
+    for code in SINGLE_SEAT_OFFICES:
+        if offices.count(code) > 1:
+            raise ValueError(f"single-seat office '{code}' is given to more than one user")
+    if offices.count("president") != 1 or offices.count("secretary") != 1 \
+            or offices.count("working_committee_member") != COMMITTEE_SIZE:
+        raise ValueError(f"the Managing Committee must be 1 President, 1 Secretary and {COMMITTEE_SIZE} members; got "
+                         f"{offices.count('president')}/{offices.count('secretary')}/"
+                         f"{offices.count('working_committee_member')}")
+    for u in USERS:
+        if u.get("office") and u["role"] != "apartment":
+            raise ValueError(f"{u['email']}: an office-bearer must be an apartment owner (the flat holds the office)")
+    missing = [r for r in ("accountant", "auditor") if r not in {u["role"] for u in USERS}]
+    if missing:
+        raise ValueError(f"seed has no {missing} login")
+
+
 def _validate_seed_constants():
     """Fail fast, before touching the DB, if an edit to the seed data above
     breaks the financial-year window, the date cutoff or the cash limit.
@@ -2602,6 +2728,7 @@ def _validate_seed_constants():
     # predate the year they bill.
     _guard("default charge basis", SOCIETY["calc_start_date"], 0, BANK_MODE)
     _guard("B-202 charge basis", B202_CHARGE_START, 0, BANK_MODE)
+    _validate_users()
     for email, u in ((u["email"], u) for u in USERS):
         if u.get("apt_calc_start_date"):
             _guard(f"charge basis start for {email}", u["apt_calc_start_date"], 0, BANK_MODE)
@@ -2729,12 +2856,99 @@ def audit_seed_invariants(cur, society_id: int) -> bool:
     else:
         print(f"  ✓ Cash-in-Hand: opening Rs {float(cih['opening']):,.2f}, "
               f"running balance never below Rs {float(cih['lowest']):,.2f}")
+    if not audit_office_bearers(cur, society_id):
+        ok = False
     return ok
 
 
 # ═════════════════════════════════════════════════════════════════════════════
 # MAIN SEED ENTRYPOINT
 # ═════════════════════════════════════════════════════════════════════════════
+
+def _grant_role(cur, user_id: int, role_code: str, society_id: int, granted_by: int) -> bool:
+    """Give `user_id` the society role `role_code` unless they already hold it actively. True if a row was added."""
+    rd = _one(cur, "SELECT id FROM role_definitions WHERE code=%s AND scope='society'", (role_code,))
+    if not rd:
+        raise RuntimeError(f"role_definitions has no society role '{role_code}' - is estatehub.sql current?")
+    cur.execute(
+        """INSERT INTO user_role_assignments (user_id, role_definition_id, society_id, source, status, granted_by)
+           SELECT %(u)s, %(r)s, %(s)s, 'aoa', 'active', %(g)s
+            WHERE NOT EXISTS (SELECT 1 FROM user_role_assignments x
+                               WHERE x.user_id = %(u)s AND x.role_definition_id = %(r)s AND x.society_id = %(s)s
+                                 AND x.status = 'active' AND (x.effective_to IS NULL OR x.effective_to > NOW()))
+           ON CONFLICT (user_id, role_definition_id, society_id, entity_link, effective_from) DO NOTHING""",
+        {"u": user_id, "r": rd["id"], "s": society_id, "g": granted_by})
+    return cur.rowcount > 0
+
+
+def seed_office_bearers(cur, conn, society_id: int, users: dict, admin_uid: int):
+    """Seat the Managing Committee and give every office-bearer / accountant their RBAC role.
+
+    The office is recorded through fn_appoint_office_bearer, so the database applies bye-law 7 (a flat in arrears
+    cannot hold office) and the one-holder-per-seat rule. Idempotent: an office already held is left alone.
+    """
+    seated = granted = 0
+    for email, info in users.items():
+        cfg = info["cfg"]
+        office, rbac = cfg.get("office"), cfg.get("rbac_role")
+        if office:
+            if office in SINGLE_SEAT_OFFICES:
+                held = _one(cur, "SELECT 1 FROM committee_offices WHERE society_id=%s AND office_code=%s "
+                                 "AND status='active'", (society_id, office))
+            else:
+                held = _one(cur, "SELECT 1 FROM committee_offices WHERE society_id=%s AND apartment_id=%s "
+                                 "AND office_code=%s AND status='active'", (society_id, info["linked_id"], office))
+            if not held:
+                cur.execute("SELECT fn_appoint_office_bearer(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                            (society_id, info["linked_id"], office, cfg["name"], info["user_id"], OFFICE_TERM_START,
+                             None, OFFICE_RESOLUTION_REF, None, admin_uid))
+                seated += 1
+        if rbac and _grant_role(cur, info["user_id"], rbac, society_id, admin_uid):
+            granted += 1
+    conn.commit()
+    if seated or granted:
+        print(f"  ✓ Managing Committee: {seated} office(s) seated, {granted} role assignment(s) granted")
+    else:
+        print("  ✓ Managing Committee already seated — skipped.")
+
+
+def audit_office_bearers(cur, society_id: int) -> bool:
+    """The committee in the database is the committee USERS describes, in good standing, with working logins."""
+    ok = True
+    rows = _one(cur, """
+        SELECT COUNT(*) FILTER (WHERE office_code = 'president')                 AS pres,
+               COUNT(*) FILTER (WHERE office_code = 'secretary')                 AS sec,
+               COUNT(*) FILTER (WHERE office_code = 'working_committee_member')  AS wc,
+               COUNT(*) FILTER (WHERE user_id IS NULL)                           AS no_login
+          FROM committee_offices WHERE society_id = %s AND status = 'active'""", (society_id,))
+    if (rows["pres"], rows["sec"], rows["wc"]) != (1, 1, COMMITTEE_SIZE) or rows["no_login"]:
+        ok = False
+        print(f"  ⚠  Committee is {rows['pres']} president / {rows['sec']} secretary / {rows['wc']} members "
+              f"({rows['no_login']} without a login); expected 1 / 1 / {COMMITTEE_SIZE}")
+    else:
+        print(f"  ✓ Committee: 1 President, 1 Secretary, {COMMITTEE_SIZE} members, each with a login")
+    bad = _one(cur, "SELECT COUNT(*) AS n FROM fn_committee_current(%s) WHERE ineligible_stand", (society_id,))
+    if bad["n"]:
+        ok = False
+        print(f"  ⚠  {bad['n']} office-bearer flat(s) are in bye-law 7 arrears")
+    else:
+        print("  ✓ Committee: every office-bearer flat is eligible to hold office (bye-law 7)")
+    missing = _one(cur, """
+        SELECT COUNT(*) AS n FROM (VALUES ('society_president'), ('society_secretary'), ('committee_member'),
+                                          ('accountant')) v(code)
+         WHERE NOT EXISTS (SELECT 1 FROM user_role_assignments ura
+                             JOIN role_definitions rd ON rd.id = ura.role_definition_id
+                            WHERE rd.code = v.code AND ura.society_id = %s AND ura.status = 'active')""", (society_id,))
+    roles = _one(cur, "SELECT array_agg(DISTINCT role) AS r FROM users WHERE society_id = %s", (society_id,))["r"]
+    absent = [r for r in STAFF_LOGIN_ROLES if r not in roles]
+    if missing["n"] or absent:
+        ok = False
+        print(f"  ⚠  RBAC: {missing['n']} role(s) unassigned; missing logins: {absent}")
+    else:
+        print("  ✓ RBAC: president, secretary, committee and accountant assigned; "
+              "accountant / auditor / supervisor / staff logins exist")
+    return ok
+
 
 def seed_rbac_roles(cur, conn):
     """Phase 1 (D1=Option B) backfill — grant fine-grained role_definitions to the
@@ -2782,6 +2996,8 @@ def seed_rbac_roles(cur, conn):
     ss = rd.get("society_secretary")
     tr = rd.get("treasurer")
     if ss:
+        # The admin holds the secretary post only while it is vacant: once a Secretary is seated (seed_office_bearers
+        # runs first) the office belongs to them.
         cur.execute(
             """ INSERT INTO user_role_assignments
                   (user_id, role_definition_id, society_id, source, status)
@@ -2790,7 +3006,7 @@ def seed_rbac_roles(cur, conn):
                   WHERE u.role = 'admin' AND u.society_id IS NOT NULL
                     AND NOT EXISTS (
                           SELECT 1 FROM user_role_assignments ura
-                           WHERE ura.user_id = u.id AND ura.role_definition_id = %s
+                           WHERE ura.role_definition_id = %s
                              AND ura.society_id = u.society_id AND ura.status = 'active'
                              AND (ura.effective_to IS NULL OR ura.effective_to > NOW())
                     )
@@ -2840,6 +3056,7 @@ def _run_seed_unguarded(conn):
 
     seed_master_admin(cur, conn)
     users = seed_users(cur, conn, society_id)
+    seed_office_bearers(cur, conn, society_id, users, users["admin@sunriseresidency.com"]["user_id"])
     seed_rbac_roles(cur, conn)
     cur.execute("SELECT fn_backfill_undivided_interest(%s)", (society_id,))   # Act s.5(2): area share until the Declaration % is entered
     conn.commit()
@@ -2895,15 +3112,17 @@ def _run_seed_unguarded(conn):
     if not audit_seed_invariants(cur, society_id):
         raise RuntimeError("Seed invariant audit failed; refusing to report a successful seed.")
 
+    W = 74
     print()
-    print("  ┌─────────────────────────────────────────────────────────────┐")
-    print("  │  Seed complete!  Login credentials:                         │")
-    print("  ├─────────────────────────────────────────────────────────────┤")
-    print(f"  │  Master  : {MASTER['email']:<30} {MASTER['password']:<14}│")
+    print("  ┌" + "─" * W + "┐")
+    print("  │" + "  Seed complete!  Login credentials:".ljust(W) + "│")
+    print("  ├" + "─" * W + "┤")
+    print("  │" + f"  {'master':<12}: {MASTER['email']:<40} {MASTER['password']:<16}".ljust(W) + "│")
     for u in USERS:
-        tag = u["role"][:7].ljust(8)
-        print(f"  │  {tag}: {u['email']:<38} {u['password']:<14}│")
-    print("  └─────────────────────────────────────────────────────────────┘")
+        tag = u.get("office") or u.get("user_type") or u["role"]
+        tag = {"working_committee_member": "committee"}.get(tag, tag)
+        print("  │" + f"  {tag:<12}: {u['email']:<40} {u['password']:<16}".ljust(W) + "│")
+    print("  └" + "─" * W + "┘")
 
 
 def seed_up_aoa_compliance_data(cur, conn, society_id, admin_uid, apt1_id, apt2_id):
@@ -2912,7 +3131,10 @@ def seed_up_aoa_compliance_data(cur, conn, society_id, admin_uid, apt1_id, apt2_
 
     # ── Entrance fees + share capital (bye-laws 4, 5) ────────────────────────────
     # First two owners already admitted; mark their entrance fee and share capital as paid.
-    for apt_id, owner_name in [(apt1_id, "Ramesh Kumar"), (apt2_id, "Priya Sharma")]:
+    # The names are those of the flats' actual owners in USERS (they were previously two unrelated names).
+    _owner = {u["email"]: u["name"] for u in USERS}
+    for apt_id, owner_name in [(apt1_id, _owner["owner1@sunriseresidency.com"]),
+                               (apt2_id, _owner["owner3@sunriseresidency.com"])]:
         cur.execute(
             """INSERT INTO owner_admissions (society_id, apartment_id, admission_date, owner_name,
                entrance_fee, entrance_fee_paid, share_count, share_face_value, share_paid, created_by)

@@ -544,8 +544,8 @@ def test_purchaser_dues_statement_shows_unpaid_amount(cur):
     tr = one(cur, "SELECT transfer_id FROM fn_record_apartment_transfer(%s,%s,%s,1000000,'a','b',NULL)",
              (SOC, apt_id, date(2026, 8, 15)))[0]
     row = one(cur, "SELECT * FROM fn_purchaser_dues_statement(%s, %s)", (tr, date(2026, 8, 15)))
-    assert float(row[6]) == 3000.0  # common_expense_unpaid
-    assert row[4] == 'Buyer'  # transferee_name
+    assert float(row[7]) == 3000.0  # common_expense_unpaid (row[6] is `bills`, the count)
+    assert row[4] == 'b'  # transferee_name (the 6th argument of fn_record_apartment_transfer above)
 
 
 # ── LoA Workflow: pending ratification ───────────────────────────────────────────

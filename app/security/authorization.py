@@ -233,7 +233,7 @@ class Principal:
     """Immutable, SERVER-resolved identity. Never construct from browser data."""
     user_id: Optional[int]
     society_id: Optional[int]
-    base_role: Optional[str]            # admin/apartment/vendor/security/master
+    base_role: Optional[str]            # any PERSISTED_ROLES value, or master
     user_type: Optional[str] = None     # owner/family/tenant/visitor (apartment only)
     linked_unit_id: Optional[int] = None
     linked_vendor_id: Optional[int] = None
