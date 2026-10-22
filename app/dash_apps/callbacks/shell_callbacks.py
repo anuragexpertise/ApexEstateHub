@@ -70,6 +70,7 @@ _SEARCH_TAB_ROUTES = {
         "receipts": "/dashboard/receipts",
         "expenses": "/dashboard/expenses",
         "enrolled": "/dashboard/enrolled",
+        "team": "/dashboard/team-logins",
         "events": "/dashboard/events",
         "concerns": "/dashboard/concerns",
         "polls": "/dashboard/polls",
@@ -385,6 +386,7 @@ _PATH_LABELS = {
     "vendor-passes":     "Passes",
     "expenses":          "Expenses",
     "enrolled":          "Enrolled",
+    "team-logins":       "Team Logins",
     "events":            "Events",
     "owner-events":      "Events",
     "vendor-events":     "Events",
@@ -523,6 +525,7 @@ def _portal_content(role, society_id, pathname, auth=None):
             "receipts"      if "/receipts"      in p else
             "expenses"      if "/expenses"      in p else
             "enrolled"      if "/enrolled"      in p else
+            "team"          if "/team-logins"   in p else
             "events"        if "/events"        in p else
             "concerns"      if "/concerns"      in p else
             "polls"         if "/polls"         in p else

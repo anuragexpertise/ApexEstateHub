@@ -12,6 +12,28 @@ def _resolve_role(raw_role: str, society_id, is_master_admin_flag: bool) -> str:
     return resolve_role(raw_role, society_id, is_master_admin_flag)
 
 
+_ACTIVE_COL = {"has": None, "checked_at": 0.0}
+
+
+def active_select() -> str:
+    """", active" when users.active exists, else "". Lets code that ships before the migration still run: a database
+    without the column simply has no way to disable a login yet. A positive answer is cached for the process; a
+    negative one is re-checked every 60 seconds so the migration takes effect without a restart."""
+    import time
+    if _ACTIVE_COL["has"] or (_ACTIVE_COL["has"] is False and time.monotonic() - _ACTIVE_COL["checked_at"] < 60):
+        return ", active" if _ACTIVE_COL["has"] else ""
+    try:
+        row = db._execute(
+            "SELECT 1 AS x FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'active'",
+            fetch_one=True)
+        _ACTIVE_COL["has"] = bool(row)
+    except Exception:
+        _ACTIVE_COL["has"] = False
+    _ACTIVE_COL["checked_at"] = time.monotonic()
+    return ", active" if _ACTIVE_COL["has"] else ""
+
+
 class User(UserMixin):
     def __init__(self, user_id, email, role, society_id=None, linked_id=None):
         self.id = user_id
@@ -34,9 +56,12 @@ class User(UserMixin):
     def get(user_id):
         try:
             result = db._execute(
-                "SELECT id, email, role, society_id, linked_id, is_master_admin FROM users WHERE id = %s",
+                "SELECT id, email, role, society_id, linked_id, is_master_admin" + active_select() +
+                " FROM users WHERE id = %s",
                 (user_id,), fetch_one=True
             )
+            if result and result.get("active") is False:
+                return None          # disabled login: an open session ends on its next request
             if result:
                 return User(
                     user_id=result['id'],

@@ -883,6 +883,14 @@ def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
             _divider(), _drill_panel(),
         ], className="portal-page")
 
+    # ── Team Logins: create / disable / reset Accountant, Supervisor, Staff, Auditor logins ──────────────────
+    if active_tab == "team":
+        from app.dash_apps.pages.team_page import team_tab
+        return html.Div([
+            _page_title("fa-id-badge", c, "Team Logins", "accountant · supervisor · staff · auditor"),
+            team_tab("admin", sid),
+        ], className="portal-page")
+
     # ── Financials (NEW) ────────────────────────────────────────────────────────
     if active_tab == "financials":
         return html.Div([

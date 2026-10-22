@@ -51,6 +51,7 @@ def register_callbacks(app):
         "up_compliance_callbacks",       # 13g. UP AOA Compliance (admin only)
         "master_rules_callbacks",        # 13h. AOA Rule Editor (master only)
         "master_tests_callbacks",        # 13i. Master Tests tab (run test files)
+        "team_callbacks",                # 13j2. Team Logins (admin, own society)
         "governance_callbacks",          # 13j. Settings governance tabs (admin, own society)
         "committee_callbacks",           # 13j2. Managing Committee tab (admin, own society)
         "auditor_callbacks",             # 13k. Auditor portal (read-only verification)

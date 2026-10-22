@@ -734,6 +734,26 @@
     "callback:shell_callbacks.py::update_global_card_search": {
       "classification": "unclassified"
     },
+    "callback:team_callbacks.py::tm_create": {
+      "classification": "action",
+      "actions": [
+        "roles.manage"
+      ]
+    },
+    "callback:team_callbacks.py::tm_generate": {
+      "classification": "exempt",
+      "reason": "Session-guarded (@require_session). Pure UI helper: shows the role's description / fills a random temporary password into the form; reads and writes no server data."
+    },
+    "callback:team_callbacks.py::tm_manage": {
+      "classification": "action",
+      "actions": [
+        "roles.manage"
+      ]
+    },
+    "callback:team_callbacks.py::tm_role_hint": {
+      "classification": "exempt",
+      "reason": "Session-guarded (@require_session). Pure UI helper: shows the role's description / fills a random temporary password into the form; reads and writes no server data."
+    },
     "callback:up_compliance_callbacks.py::export_annexures": {
       "classification": "unclassified"
     },
