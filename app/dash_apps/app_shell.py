@@ -39,6 +39,7 @@ ROLE_CONFIG = {
             {"label": "Evaluate Pass", "href": "/dashboard/evaluate-pass",  "icon": "fa-qrcode"},
             {"label": "Enrolled",      "href": "/dashboard/enrolled",         "icon": "fa-user-plus"},
             {"label": "Team Logins",   "href": "/dashboard/team-logins",      "icon": "fa-id-badge"},
+            {"label": "Registers",     "href": "/dashboard/registers",        "icon": "fa-book-open"},
             {"label": "Customize",     "href": "/dashboard/customize",      "icon": "fa-edit"},
             {"label": "Settings",      "href": "/dashboard/settings",       "icon": "fa-cog"},
         ],

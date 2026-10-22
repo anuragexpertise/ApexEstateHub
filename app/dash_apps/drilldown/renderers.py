@@ -112,6 +112,21 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # profile actions with server-side guards (alert_service.py).
     ("admin", "channels"):     {"view", "new"},
     ("admin", "tds_rates"):    {"view"},
+    # Team logins + committee seats: create/edit through team_service / committee_service. Never deleted from a
+    # list: a login is disabled (active=false) and a seat is ended with a reason, so history stays intact.
+    ("admin", "accountants"):  {"view", "new", "edit"},
+    ("admin", "supervisors"):  {"view", "new", "edit"},
+    ("admin", "staff"):        {"view", "new", "edit"},
+    ("admin", "committee_bearers"): {"view", "new", "edit"},
+    # Registers written by their own workflows: the admin looks, nothing here edits.
+    ("admin", "tenants"):                    {"view"},
+    ("admin", "owner_loans"):                {"view"},
+    ("admin", "apartment_transfers"):        {"view"},
+    ("admin", "owner_admissions"):           {"view"},
+    ("admin", "borrowing_approvals"):        {"view"},
+    ("admin", "compliance_flags"):           {"view"},
+    ("admin", "aoa_statutory_filings"):      {"view"},
+    ("admin", "service_cutoff_proceedings"): {"view"},
     ("admin", "tds_section_rates"): {"view"},
     
     # ── MASTER: societies only (view + edit + new), no delete ─────────────

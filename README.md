@@ -1691,7 +1691,7 @@ EstateHub/
 ├── database/
 │   ├── db_manager.py                         ← db._execute() → Aiven
 │   ├── estatehub.sql                         ← Full schema + all fn_* functions (incl. the UP AOA compliance layer)
-│   ├── migrate.py                            ← Schema initialization (delegates demo seeding to seed.py)
+│   ├── migrate.py                            ← Fresh schema install (delegates demo seeding to seed.py)
 │   ├── seed.py                               ← Idempotent demo/seed data (society, users, accounts, events, concerns). Also assigns `society_legal_regime` for UP societies and the `UP_AOA_ACCOUNT_MAPPINGS` statutory heads
 │   └── reset_database.py                     ← Destructive DB reset and schema reload utility
 │
@@ -2031,12 +2031,10 @@ Dash-framework footguns.
   and free text; there is no notice generation, no minutes upload and no
   attachment storage anywhere in this feature. A loan's `resolution_ref` is a
   string, not a linked resolution.
-- **The UP AOA tables have no migration file.** `regime_rule_parameters`,
+- **The UP AOA tables live only in `estatehub.sql`.** `regime_rule_parameters`,
   `apartment_transfers`, `service_cutoff_proceedings`, `compliance_flags`,
-  `aoa_statutory_filings`, `owner_loans` and `owner_loan_repayments` exist
-  only as `CREATE TABLE IF NOT EXISTS` / guarded `ALTER` blocks in
-  `estatehub.sql`. An already-provisioned database gets them only by
-  re-running the DDL (see the change-kind table in §22).
+  `aoa_statutory_filings`, `owner_loans` and `owner_loan_repayments` come with
+  every fresh install; there is no upgrade path.
 
 ### Fund Money — Invariants Not to Break
 
@@ -2208,31 +2206,18 @@ All database stored procedures and queries are prefixed with `fn_` and use `%s` 
 2. The corresponding database query inside `app/dash_apps/drilldown/loaders.py`.
 3. The parameter list in `_save_*` inside `app/dash_apps/callbacks/drilldown_callbacks.py` (for database writes).
 
-Use `database/migrate.py` to auto-initialize the schema and seed mock accounts from `database/EstateAcc.xlsx`:
+**Fresh installs only. There is no migration path and no backward compatibility.**
+`database/estatehub.sql` is the only SQL file in the codebase; a schema change is an edit to that file, and every
+database is built from it from scratch:
+
 ```bash
-python3 database/migrate.py --seed
+python3 database/migrate.py --seed                       # empty database: schema + demo data
+python3 database/reset_database.py --yes --after seed    # wipe and reinstall
 ```
 
-**`migrate.py` re-runs the full DDL on every invocation** (the
-`--fresh`/`--force` flag only governs whether demo data is re-seeded). Schema
-changes therefore only ever need to land in `database/estatehub.sql` — no
-numbered migration file is required. Additive changes to *existing* tables
-must still be written idempotently, because `CREATE TABLE IF NOT EXISTS` is a
-no-op against an already-provisioned database:
-
-| Change kind | Required pattern |
-|---|---|
-| New table | `CREATE TABLE IF NOT EXISTS` + a `COMMENT ON` + `CREATE INDEX IF NOT EXISTS` |
-| New column on an existing table | Add the column to the `CREATE TABLE` (fresh installs) **and** a guarded `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` / `DO $$ ... IF NOT EXISTS (SELECT 1 FROM pg_constraint ...) $$` block for provisioned databases |
-| New index / constraint | `CREATE INDEX IF NOT EXISTS`, or a `DO $$ ... pg_constraint ... $$` guard for named constraints (a plain `ADD CONSTRAINT` re-run raises "already exists") |
-| New / changed function | `CREATE OR REPLACE` **plus** `DROP FUNCTION IF EXISTS <name>(<exact old signature>) CASCADE` when the parameter list changed — `CREATE OR REPLACE` only replaces a signature that matches exactly, so an un-dropped old overload lingers as an orphan and calls become ambiguous |
-
-> `bank_statement_lines.bank_acc_id` is the reference example: column in
-> `CREATE TABLE`, then a `DO $$ ... IF NOT EXISTS (SELECT 1 FROM pg_constraint
-> WHERE conname = 'fk_bank_lines_account') $$` block for the composite
-> `(society_id, bank_acc_id) → accounts (society_id, id)` FK. That composite
-> target is valid because `accounts`' primary key **is** `(society_id, id)` —
-> the same pattern `fund_bank_account_map` and `fund_appropriations` use.
+`database/migrate.py` applies the file as one transaction onto an EMPTY database and refuses one that already has
+tables, so nothing needs to be idempotent (`CREATE TABLE`, not `IF NOT EXISTS`; no guarded `ALTER`/backfill
+blocks) and there are no numbered or dated migration scripts.
 
 ### Required PostgreSQL Extensions
 

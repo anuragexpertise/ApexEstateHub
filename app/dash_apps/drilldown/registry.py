@@ -49,6 +49,18 @@ PK_MAP: dict = {
     "tds_rates": "id",
     "tds_section_rates": "id",
     "nocs": "id",
+    "accountants": "id",
+    "supervisors": "id",
+    "staff": "id",
+    "committee_bearers": "id",
+    "tenants": "id",
+    "owner_loans": "id",
+    "apartment_transfers": "id",
+    "owner_admissions": "id",
+    "borrowing_approvals": "id",
+    "compliance_flags": "id",
+    "aoa_statutory_filings": "id",
+    "service_cutoff_proceedings": "id",
 }
 
 
@@ -91,6 +103,18 @@ ENTITY_MAP: dict = {
     "vendor_passes": "vendor_pass",
     "verify_receivable_amts": "verify_receivable_amt",
     "nocs": "noc",
+    "accountants": "accountant",
+    "supervisors": "supervisor",
+    "staff": "staff",
+    "committee_bearers": "committee_bearer",
+    "tenants": "tenant",
+    "owner_loans": "owner_loan",
+    "apartment_transfers": "apartment_transfer",
+    "owner_admissions": "owner_admission",
+    "borrowing_approvals": "borrowing_approval",
+    "compliance_flags": "compliance_flag",
+    "aoa_statutory_filings": "aoa_statutory_filing",
+    "service_cutoff_proceedings": "service_cutoff_proceeding",
 }
 
 ENTITY_MAP_REV: dict = {v: k for k, v in ENTITY_MAP.items()}
@@ -426,6 +450,15 @@ DRILLDOWN_MAP: dict = {
     "kpi_supervisor_total": {"target": "list_supervisors", "label": "Supervisors"},
     "kpi_staff_total": {"target": "list_staff", "label": "Staff"},
     "kpi_committee_bearers": {"target": "list_committee_bearers", "label": "Committee Bearers"},
+    "kpi_tenants_count": {"target": "list_tenants", "label": "Tenants"},
+    "kpi_owner_loans_count": {"target": "list_owner_loans", "label": "Owner Loans"},
+    "kpi_apartment_transfers_count": {"target": "list_apartment_transfers", "label": "Flat Transfers"},
+    "kpi_owner_admissions_count": {"target": "list_owner_admissions", "label": "Owner Admissions"},
+    "kpi_borrowing_approvals_count": {"target": "list_borrowing_approvals", "label": "Borrowing Approvals"},
+    "kpi_compliance_flags_count": {"target": "list_compliance_flags", "label": "Compliance Flags"},
+    "kpi_aoa_statutory_filings_count": {"target": "list_aoa_statutory_filings", "label": "Statutory Filings"},
+    "kpi_service_cutoff_proceedings_count": {"target": "list_service_cutoff_proceedings",
+                                             "label": "Service Cut-offs"},
     "kpi_compliance_settings": {
         "target": "list_compliance_settings",
         "label": "Compliance Settings",
@@ -486,10 +519,20 @@ DRILLDOWN_MAP: dict = {
         "target": "profile_security_roster",
         "label": "Roster Details",
     },
-    "list_accountants": {"target": "profile_user", "label": "Accountant Details"},
-    "list_supervisors": {"target": "profile_user", "label": "Supervisor Details"},
-    "list_staff": {"target": "profile_user", "label": "Staff Details"},
-    "list_committee_bearers": {"target": "profile_committee_bearer", "label": "Committee Bearer Details"},
+    "list_accountants": {"target": "profile_accountant", "label": "Accountant Profile"},
+    "list_supervisors": {"target": "profile_supervisor", "label": "Supervisor Profile"},
+    "list_staff": {"target": "profile_staff", "label": "Staff Profile"},
+    "list_committee_bearers": {"target": "profile_committee_bearer", "label": "Committee Bearer Profile"},
+    # Read-only registers (see curated.py): KPI -> list -> profile, no forms.
+    "list_tenants": {"target": "profile_tenant", "label": "Tenant Details"},
+    "list_owner_loans": {"target": "profile_owner_loan", "label": "Owner Loan Details"},
+    "list_apartment_transfers": {"target": "profile_apartment_transfer", "label": "Transfer Details"},
+    "list_owner_admissions": {"target": "profile_owner_admission", "label": "Admission Details"},
+    "list_borrowing_approvals": {"target": "profile_borrowing_approval", "label": "Approval Details"},
+    "list_compliance_flags": {"target": "profile_compliance_flag", "label": "Flag Details"},
+    "list_aoa_statutory_filings": {"target": "profile_aoa_statutory_filing", "label": "Filing Details"},
+    "list_service_cutoff_proceedings": {"target": "profile_service_cutoff_proceeding",
+                                        "label": "Proceeding Details"},
 
     "list_receivables": {
         "target": "profile_receivable",
@@ -623,6 +666,11 @@ DRILLDOWN_MAP: dict = {
     "profile_patrol_location": {
         "actions": {}
     },
+    "profile_accountant": {"actions": {"edit": {"target": "form_accountant_edit", "prefill": {"*": "*"}}}},
+    "profile_supervisor": {"actions": {"edit": {"target": "form_supervisor_edit", "prefill": {"*": "*"}}}},
+    "profile_staff": {"actions": {"edit": {"target": "form_staff_edit", "prefill": {"*": "*"}}}},
+    "profile_committee_bearer": {
+        "actions": {"edit": {"target": "form_committee_bearer_edit", "prefill": {"*": "*"}}}},
     "profile_compliance_setting": {
         "actions": {
             "edit": {"target": "form_compliance_setting_edit", "prefill": {"*": "*"}},
@@ -678,7 +726,10 @@ def build_breadcrumb(nav_stack: list) -> list:
 #   - concern: highly-customized profile layout in renderers.py that embeds
 #     its own workflow action buttons (Assign, Bid, Resolve), skipping the
 #     generic footer entirely.
-_NO_AUTO_ACTIONS = {"concern", "visitor", "event_ticket", "ledger", "channel", "noc"}
+_NO_AUTO_ACTIONS = {"concern", "visitor", "event_ticket", "ledger", "channel", "noc",
+                    # read-only registers (curated.py): written by their own workflows, never by a generic form
+                    "tenant", "owner_loan", "apartment_transfer", "owner_admission", "borrowing_approval",
+                    "compliance_flag", "aoa_statutory_filing", "service_cutoff_proceeding"}
 
 # Ensure profile action mappings exist for entities.
 # This programmatically adds sensible defaults (edit prefill) and

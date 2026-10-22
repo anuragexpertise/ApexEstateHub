@@ -50,6 +50,8 @@ ENTITY_TABLE_MAP: dict[str, str] = {
     "supervisors": "users",
     "staff": "users",
     "committee_bearers": "committee_offices",
+    # (accountants / supervisors / staff / committee_bearers and the read-only registers are NOT introspected: users
+    # carries password/PIN hashes, so their metadata is declared in drilldown/curated.py)
     "ledger":       "accounts",
     "polls":        "polls",
     "visitors":     "visitors",
@@ -749,15 +751,6 @@ _MASTER_SOCIETIES_LIST_COLUMNS = [
 # double-sided ledger with BF, transaction rows, depreciation row (where
 # applicable), and closing balance — row_type distinguishes them ('bf' |
 # 'txn' | 'depreciation' | 'closing').
-_COMMITTEE_BEARERS_LIST_COLUMNS = [
-    {"name": "Office", "field": "office_code", "sortable": True},
-    {"name": "Holder", "field": "holder_name", "sortable": True},
-    {"name": "Flat No", "field": "flat_no", "sortable": True},
-    {"name": "User Email", "field": "user_email", "sortable": True},
-    {"name": "Status", "field": "status", "sortable": True},
-    {"name": "Term Start", "field": "term_start", "sortable": True, "format": "date"},
-    {"name": "Term End", "field": "term_end", "sortable": True, "format": "date"},
-]
 _LEDGER_LIST_COLUMNS = [
     {"name": "Date",         "field": "row_date",         "sortable": True},
     {"name": "Account",      "field": "account_name",     "sortable": True},
@@ -773,7 +766,9 @@ _LEDGER_LIST_COLUMNS = [
 def build_entity_meta() -> dict:
     from app.dash_apps.drilldown.profile_actions import PROFILE_ACTIONS
     from app.dash_apps.drilldown.registry import to_singular
+    from app.dash_apps.drilldown.curated import curated_meta
 
+    curated = curated_meta()
     meta: dict = {}
 
     # Load the batched schema data ONCE here. If this fails, fail fast with
@@ -782,6 +777,8 @@ def build_entity_meta() -> dict:
     _get_schema_cache()
 
     for ekey, table in ENTITY_TABLE_MAP.items():
+        if ekey in curated:
+            continue
         try:
             columns = get_table_columns(table)
         except Exception as e:
@@ -898,8 +895,6 @@ def build_entity_meta() -> dict:
         if ekey == "ledger":
             meta[ekey]["list_columns"] = _LEDGER_LIST_COLUMNS
             meta[ekey]["list_title"] = "Account Ledger"
-        if ekey == "committee_bearers":
-            meta[ekey]["list_columns"] = _COMMITTEE_BEARERS_LIST_COLUMNS
             meta[ekey]["list_icon"] = "fa-book"
 
         if ekey == "master_societies":
@@ -918,6 +913,7 @@ def build_entity_meta() -> dict:
                 {"name": "Status",  "field": "status",        "sortable": True},
             ]
 
+    meta.update(curated)
     return meta
 
 

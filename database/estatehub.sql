@@ -106,10 +106,9 @@ CREATE TABLE users (
     -- apartment owner (linked_id = apartments.id) uses apartments.qr_version
     -- instead; this column is only ever consulted when linked_id is NULL.
     -- See app/services/qr_service.py _current_qr_version's ADM branch.
-    -- Random 4-digit nonce, not a sequential counter — the ALTER COLUMN
-    -- ... SET DEFAULT right after push_subscriptions below covers already-
-    -- provisioned databases; see qr_service.revoke_and_reissue for how it
-    -- actually gets bumped (always admin-initiated, never automatic).
+    -- Random 4-digit nonce, not a sequential counter; see
+    -- qr_service.revoke_and_reissue for how it gets bumped (always
+    -- admin-initiated, never automatic).
     qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
     login_method VARCHAR(20) DEFAULT 'password',
     is_master_admin BOOLEAN NOT NULL DEFAULT FALSE,
@@ -18155,7 +18154,7 @@ END $$;
 -- ---------------------------------------------------------------------------
 -- G-02  ATTENDANCE & VOTE REGISTERS (compute percentages, don't type them)
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS meeting_attendance (
+CREATE TABLE meeting_attendance (
     id                  SERIAL PRIMARY KEY,
     meeting_id          INT NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
     apartment_id        INT NOT NULL REFERENCES apartments (id) ON DELETE RESTRICT,
@@ -18166,14 +18165,14 @@ CREATE TABLE IF NOT EXISTS meeting_attendance (
     CONSTRAINT uq_meeting_att UNIQUE (meeting_id, apartment_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_meeting_att_meeting ON meeting_attendance (meeting_id);
-CREATE INDEX IF NOT EXISTS idx_meeting_att_apartment ON meeting_attendance (apartment_id);
+CREATE INDEX idx_meeting_att_meeting ON meeting_attendance (meeting_id);
+CREATE INDEX idx_meeting_att_apartment ON meeting_attendance (apartment_id);
 
 COMMENT ON TABLE meeting_attendance IS
     'Attendance register for GBM/EGM/MC meetings. Percentages (owners_present_pct) '
     'must be computed from this table, not self-attested.';
 
-CREATE TABLE IF NOT EXISTS resolution_votes (
+CREATE TABLE resolution_votes (
     id                  SERIAL PRIMARY KEY,
     resolution_id       INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
     apartment_id        INT NOT NULL REFERENCES apartments (id) ON DELETE RESTRICT,
@@ -18183,8 +18182,8 @@ CREATE TABLE IF NOT EXISTS resolution_votes (
     CONSTRAINT uq_resolution_vote UNIQUE (resolution_id, apartment_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_resolution_votes_res ON resolution_votes (resolution_id);
-CREATE INDEX IF NOT EXISTS idx_resolution_votes_ap ON resolution_votes (apartment_id);
+CREATE INDEX idx_resolution_votes_res ON resolution_votes (resolution_id);
+CREATE INDEX idx_resolution_votes_ap ON resolution_votes (apartment_id);
 
 COMMENT ON TABLE resolution_votes IS
     'Vote register per apartment per resolution. Votes_for_pct must be computed '
@@ -18941,20 +18940,6 @@ CREATE TRIGGER trg_receipts_source_guard
 CREATE TRIGGER trg_expenses_source_guard
     BEFORE UPDATE OR DELETE ON expenses
     FOR EACH ROW EXECUTE FUNCTION trg_source_doc_guard();
-
-
--- ---------------------------------------------------------------------------
--- Backfill the hash chain for ledgers that predate this migration, and report
--- anything already out of balance. Both are informational: nothing here fails.
--- ---------------------------------------------------------------------------
-DO $$
-DECLARE v_n BIGINT; v_bad BIGINT;
-BEGIN
-    v_n := fn_rebuild_ledger_chain(NULL, FALSE);
-    SELECT COUNT(*) INTO v_bad FROM fn_ledger_integrity_report(NULL);
-    RAISE NOTICE 'ER phase 1: % ledger line(s) chained; % journal(s) currently out of balance (see fn_ledger_integrity_report()).', v_n, v_bad;
-END;
-$$;
 
 
 -- ---------------------------------------------------------------------------
