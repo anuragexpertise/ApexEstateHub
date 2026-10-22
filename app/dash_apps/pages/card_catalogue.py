@@ -1141,6 +1141,21 @@ KPI_CARDS = {
 # DEFAULT LAYOUTS  — which KPIs appear on each portal's default dashboard
 # ════════════════════════════════════════════════════════════════════════════
 
+def _register_kpi_cards() -> dict:
+    """One count card per read-only register, generated from curated.REGISTERS (single source of truth)."""
+    from app.dash_apps.drilldown.curated import REGISTERS, register_kpi_id, register_kpi_sql
+    return {
+        register_kpi_id(plural): {
+            "query": register_kpi_sql(plural), "params": 1, "format": "number",
+            "icon": d["icon"], "color": d["color"], "title": d["kpi_title"], "group": "Registers",
+        }
+        for plural, d in REGISTERS.items()
+    }
+
+
+KPI_CARDS.update(_register_kpi_cards())
+
+
 DEFAULT_LAYOUTS = {
     "master": {
         "dashboard": [
@@ -1174,6 +1189,21 @@ DEFAULT_LAYOUTS = {
             "kpi_apartments_total",
             "kpi_vendors_total",
             "kpi_security_total",
+            "kpi_accountant_total",
+            "kpi_supervisor_total",
+            "kpi_staff_total",
+            "kpi_committee_bearers",
+        ],
+        # Read-only statutory / governance registers (drilldown/curated.py REGISTERS).
+        "registers": [
+            "kpi_tenants_count",
+            "kpi_owner_loans_count",
+            "kpi_apartment_transfers_count",
+            "kpi_owner_admissions_count",
+            "kpi_borrowing_approvals_count",
+            "kpi_compliance_flags_count",
+            "kpi_aoa_statutory_filings_count",
+            "kpi_service_cutoff_proceedings_count",
         ],
         "financials": [
             "kpi_receipts_month",

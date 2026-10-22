@@ -23,7 +23,7 @@ Domain-row-first means a failed users insert (duplicate email, etc.) rolls
 back the domain row too, rather than leaving an orphan with no login.
 `id` returned by fn_apartments_list / fn_vendors_list / fn_security_list
 is always the domain table's own id — never users.id (see
-fix_vendor_security_pk.sql for the vendor/security part of this).
+estatehub.sql for the vendor/security part of this).
 
 Upload column contract (header row required, case-insensitive, extra columns ignored):
 
@@ -402,7 +402,7 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
       If step 2 fails, roll back the vendors row so the row can be retried
       cleanly rather than leaving an orphan with no login — same reasoning
       as apartments above, and matches fn_vendors_list.id = vendors.id
-      (see fix_vendor_security_pk.sql) rather than users.id.
+      (vendors.id / security_staff.id) rather than users.id.
     """
     required = _BULK_TEMPLATES["vendors"]["required"]
     success  = 0

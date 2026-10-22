@@ -29,6 +29,7 @@ from datetime import date
 import psycopg2
 
 from database.db_manager import db
+from app.dash_apps.drilldown import curated as _cur
 
 PAGE_SIZE = 15
 
@@ -1477,52 +1478,6 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
             tuple([sid] + extra_params + [page_size, offset]),
         )
 
-    if entity == "accountants":
-        base = "SELECT id, name, email, role, society_id, created_at, active FROM users WHERE society_id=%s AND role='accountant'"
-        extra = []
-        params = [sid]
-        if s:
-            extra.append("(name ILIKE %s OR email ILIKE %s)")
-            params.extend([f"%{s}%", f"%{s}%"])
-        q = base + (" AND " + " AND ".join(extra) if extra else "") + " ORDER BY created_at DESC LIMIT %s OFFSET %s"
-        return q, tuple(params + [page_size, offset])
-
-    if entity == "supervisors":
-        base = "SELECT id, name, email, role, society_id, created_at, active FROM users WHERE society_id=%s AND role='supervisor'"
-        extra = []
-        params = [sid]
-        if s:
-            extra.append("(name ILIKE %s OR email ILIKE %s)")
-            params.extend([f"%{s}%", f"%{s}%"])
-        q = base + (" AND " + " AND ".join(extra) if extra else "") + " ORDER BY created_at DESC LIMIT %s OFFSET %s"
-        return q, tuple(params + [page_size, offset])
-
-    if entity == "staff":
-        base = "SELECT id, name, email, role, society_id, created_at, active FROM users WHERE society_id=%s AND role='staff'"
-        extra = []
-        params = [sid]
-        if s:
-            extra.append("(name ILIKE %s OR email ILIKE %s)")
-            params.extend([f"%{s}%", f"%{s}%"])
-        q = base + (" AND " + " AND ".join(extra) if extra else "") + " ORDER BY created_at DESC LIMIT %s OFFSET %s"
-        return q, tuple(params + [page_size, offset])
-
-    if entity == "committee_bearers":
-        base = """SELECT co.id, co.office_code, co.holder_name, co.user_id, co.apartment_id, co.status, co.term_start, co.term_end,
-                         u.email AS user_email, a.flat_no
-                  FROM committee_offices co
-                  LEFT JOIN users u ON u.id = co.user_id
-                  LEFT JOIN apartments a ON a.id = co.apartment_id
-                  WHERE co.society_id=%s"""
-        extra = []
-        params = [sid]
-        if s:
-            extra.append("(co.holder_name ILIKE %s OR u.email ILIKE %s OR co.office_code ILIKE %s)")
-            params.extend([f"%{s}%", f"%{s}%", f"%{s}%"])
-        q = base + (" AND " + " AND ".join(extra) if extra else "") + " ORDER BY co.term_start DESC, co.id DESC LIMIT %s OFFSET %s"
-        return q, tuple(params + [page_size, offset])
-
-
     # ── APARTMENT USERS ───────────────────────────────────────────────────
     if entity == "apartment_users":
         extra_sql, extra_params = "", []
@@ -2331,59 +2286,13 @@ def load_list(
             )
             return rows, int((cnt or {}).get("n", len(rows)))
 
-        if entity == "accountants":
-            base = "SELECT id, name, email, role, society_id, created_at, active FROM users WHERE society_id=%s AND role='accountant'"
-            params = [sid]
-            extra = []
-            if s:
-                extra.append("(name ILIKE %s OR email ILIKE %s)")
-                params.extend([f"%{s}%", f"%{s}%"])
-            where = base + (" AND " + " AND ".join(extra) if extra else "")
-            rows = db._execute(where + " ORDER BY created_at DESC LIMIT %s OFFSET %s", params + [page_size, offset], fetch_all=True) or []
-            cnt = db._execute("SELECT COUNT(*) AS n FROM users WHERE society_id=%s AND role='accountant'" + (" AND " + " AND ".join(extra) if extra else ""), params, fetch_one=True)
-            return rows, int((cnt or {}).get("n", len(rows)))
-
-        if entity == "supervisors":
-            base = "SELECT id, name, email, role, society_id, created_at, active FROM users WHERE society_id=%s AND role='supervisor'"
-            params = [sid]
-            extra = []
-            if s:
-                extra.append("(name ILIKE %s OR email ILIKE %s)")
-                params.extend([f"%{s}%", f"%{s}%"])
-            where = base + (" AND " + " AND ".join(extra) if extra else "")
-            rows = db._execute(where + " ORDER BY created_at DESC LIMIT %s OFFSET %s", params + [page_size, offset], fetch_all=True) or []
-            cnt = db._execute("SELECT COUNT(*) AS n FROM users WHERE society_id=%s AND role='supervisor'" + (" AND " + " AND ".join(extra) if extra else ""), params, fetch_one=True)
-            return rows, int((cnt or {}).get("n", len(rows)))
-
-        if entity == "staff":
-            base = "SELECT id, name, email, role, society_id, created_at, active FROM users WHERE society_id=%s AND role='staff'"
-            params = [sid]
-            extra = []
-            if s:
-                extra.append("(name ILIKE %s OR email ILIKE %s)")
-                params.extend([f"%{s}%", f"%{s}%"])
-            where = base + (" AND " + " AND ".join(extra) if extra else "")
-            rows = db._execute(where + " ORDER BY created_at DESC LIMIT %s OFFSET %s", params + [page_size, offset], fetch_all=True) or []
-            cnt = db._execute("SELECT COUNT(*) AS n FROM users WHERE society_id=%s AND role='staff'" + (" AND " + " AND ".join(extra) if extra else ""), params, fetch_one=True)
-            return rows, int((cnt or {}).get("n", len(rows)))
-
+        # ── TEAM LOGINS / COMMITTEE BEARERS / REGISTERS (see curated.py) ────
+        if entity in _cur.TEAM_ENTITIES:
+            return _cur.list_team(_cur.TEAM_ENTITIES[entity][0], sid, s, page_size, offset)
         if entity == "committee_bearers":
-            base = """SELECT co.id, co.office_code, co.holder_name, co.user_id, co.apartment_id, co.status, co.term_start, co.term_end,
-                             u.email AS user_email, a.flat_no
-                      FROM committee_offices co
-                      LEFT JOIN users u ON u.id = co.user_id
-                      LEFT JOIN apartments a ON a.id = co.apartment_id
-                      WHERE co.society_id=%s"""
-            params = [sid]
-            extra = []
-            if s:
-                extra.append("(co.holder_name ILIKE %s OR u.email ILIKE %s OR co.office_code ILIKE %s)")
-                params.extend([f"%{s}%", f"%{s}%", f"%{s}%"])
-            where = base + (" AND " + " AND ".join(extra) if extra else "")
-            rows = db._execute(where + " ORDER BY co.term_start DESC, co.id DESC LIMIT %s OFFSET %s", params + [page_size, offset], fetch_all=True) or []
-            cnt = db._execute("SELECT COUNT(*) AS n FROM committee_offices co LEFT JOIN users u ON u.id=co.user_id WHERE co.society_id=%s" + (" AND " + " AND ".join(extra) if extra else ""), params, fetch_one=True)
-            return rows, int((cnt or {}).get("n", len(rows)))
-
+            return _cur.list_bearers(sid, s, page_size, offset)
+        if entity in _cur.REGISTERS:
+            return _cur.list_register(entity, sid, s, page_size, offset)
 
         # ── CHANNELS (School Bus / Taxi / Visitor alert channels) ───────
         # Was previously unhandled here (fell through to `return [],0`
@@ -2629,7 +2538,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
             # separately). It also used to be called with `user_id or
             # society_id` collapsed into one positional slot, so a falsy
             # user_id silently substituted society_id as the "user" whose
-            # vote to check. See migration_poll_security_fixes.sql.
+            # vote to check.
             r = db._execute(
                 "SELECT * FROM fn_get_poll_detail(%s, %s, %s)",
                 (pk, user_id, society_id), fetch_one=True
@@ -2640,7 +2549,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
         if entity_singular == "concern":
             # NOTE (fixed 2026-08): fn_concern_profile previously took only
             # p_concern_id with no tenant check — any pk could be loaded
-            # regardless of society. See migration_fn_concern_profile_scope.sql.
+            # regardless of society.
             r = db._execute(
                 "SELECT * FROM fn_concern_profile(%s, %s)", (pk, society_id), fetch_one=True
             )
@@ -2670,7 +2579,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
             # NOTE (fixed 2026-08): fn_account_profile previously took only
             # p_account_id with no tenant check — any pk could be loaded
             # regardless of society, same IDOR class as fn_concern_profile /
-            # fn_get_poll_detail. See migration_fn_account_profile_scope.sql.
+            # fn_get_poll_detail.
             r = db._execute(
                 "SELECT * FROM fn_account_profile(%s, %s)", (pk, society_id), fetch_one=True
             )
@@ -2962,6 +2871,17 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
             )
             return dict(r) if r else None
 
+        # ── TEAM LOGIN / COMMITTEE BEARER / REGISTER (curated.py) ─────────
+        if entity_singular in _cur.TEAM_ROLE_CODES:
+            r = _cur.get_team_member(entity_singular, pk, society_id)
+            return dict(r) if r else None
+        if entity_singular == "committee_bearer":
+            r = _cur.get_bearer(pk, society_id)
+            return dict(r) if r else None
+        if entity_singular in _cur.REGISTER_SINGULAR:
+            r = _cur.get_register_row(_cur.REGISTER_SINGULAR[entity_singular], pk, society_id)
+            return dict(r) if r else None
+
         return None
 
     except Exception as e:
@@ -3022,6 +2942,11 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
     try:
         from app.security.audit_context import get_current_user_id
         _upd_by = get_current_user_id()
+        if entity_plural in _cur.TEAM_ENTITIES or entity_plural == "committee_bearers":
+            return False, ("A login is disabled (Edit, Login Enabled = false) and a committee seat is ended "
+                           "(Edit, give a reason) - neither is deleted, so the history stays.")
+        if entity_plural in _cur.REGISTERS:
+            return False, "This is a read-only register; it is maintained by its own workflow."
         if entity_plural == "apartments":
             # Trigger will block if outstanding dues > 0
             db._execute(

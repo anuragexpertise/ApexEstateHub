@@ -3485,7 +3485,7 @@ def _render_card(
             caller_role    = get_current_user_role()
 
             # load_profile("vendor", ...) now expects vendors.id (see
-            # fix_vendor_security_pk.sql), so resolve it from the login's
+            # estatehub.sql), so resolve it from the login's
             # users.id up front — reused below for the rates lookup too.
             ven_id = None
             if vendor_user_id and sid_val:
@@ -3931,9 +3931,8 @@ def _save_entity(entity, card_id, data):
         if entity == "apt_charge":      return _save_apt_charge(db, data, sid, is_edit, pk)
         if entity == "ven_charge":      return _save_ven_charge(db, data, sid, is_edit, pk)
         if entity == "security_roster": return _save_security_roster(db, data, sid, is_edit, pk)
-        if entity == "accountant":       return _save_user_entity(db, data, sid, "accountant", is_edit, pk)
-        if entity == "supervisor":       return _save_user_entity(db, data, sid, "supervisor", is_edit, pk)
-        if entity == "staff":            return _save_user_entity(db, data, sid, "staff", is_edit, pk)
+        if entity in ("accountant", "supervisor", "staff"):
+            return _save_team_login(entity, data, is_edit, pk)
         if entity == "committee_bearer": return _save_committee_bearer(db, data, sid, is_edit, pk)
         if entity == "tds_rate":        return _save_tds_rate(db, data, sid, is_edit, pk)
         if entity == "sec_charge":
@@ -6084,47 +6083,91 @@ def _save_security_roster(db, d, sid, is_edit, pk):
         raise
     return True, "Shift assigned", (r or {}).get("id")
 
-def _save_committee_bearer(db, d, sid, is_edit, pk):
-    office_code = (d.get("office_code") or "").strip().lower()
-    holder_name = (d.get("holder_name") or "").strip()
-    apartment_id = d.get("apartment_id") or d.get("apt_id")
-    user_id = d.get("user_id") or None
-    term_start = d.get("term_start") or None
-    term_end = d.get("term_end") or None
-    status = (d.get("status") or "active").strip().lower()
+def _team_actor():
+    """((actor_id, society_id), None) for an admin holding roles.manage in their OWN society, else (None, message).
 
-    if not office_code:
-        raise ValueError("Office code is required")
-    if not holder_name:
-        raise ValueError("Holder name is required")
+    The society is always the server-side session's, never the form's: a posted society_id is ignored."""
+    from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
+    from app.security.authorization import Cap
+    from app.security.service_guard import blocks, check
+    if get_current_user_role() != "admin":
+        return None, "Admin role required."
+    sid = get_current_society_id()
+    if not sid:
+        return None, "Society not resolved."
+    if blocks(check(Cap.ROLES_MANAGE, "role_assignment", target_society_id=int(sid))):
+        return None, "You don't have permission to do that."
+    return (get_current_user_id(), int(sid)), None
 
-    # Validate office_code
-    valid = {"president", "vice_president", "secretary", "joint_secretary", "treasurer", "working_committee_member"}
-    if office_code not in valid:
-        raise ValueError("Invalid office code")
 
-    if is_edit and pk:
-        db._execute(
-            """UPDATE committee_offices
-               SET office_code=%s, holder_name=%s, apartment_id=%s, user_id=%s,
-                   term_start=%s, term_end=%s, status=%s
-               WHERE id=%s AND society_id=%s""",
-            (office_code, holder_name, apartment_id if apartment_id else None, user_id if user_id else None,
-             term_start, term_end, status, pk, sid),
-        )
-        return True, "Committee bearer updated", pk
-
-    # insert via function if available? or direct insert - fn_appoint_office_bearer exists
+def _save_team_login(role, d, is_edit, pk):
+    """Accountant / Supervisor / Staff profile forms -> team_service (same rules as the Team Logins tab)."""
+    from app.services import team_service as ts
+    actor, err = _team_actor()
+    if err:
+        return False, err, None
+    uid, sid = actor
     try:
-        r = db._execute(
-            "SELECT fn_appoint_office_bearer(%s,%s,%s,%s,%s,%s,%s,NULL,NULL,%s)",
-            (sid, apartment_id if apartment_id else None, office_code, holder_name, user_id if user_id else None,
-             term_start or __import__("datetime").date.today(), term_end, get_current_user_id()),
-            fetch_one=True,
-        )
-        return True, "Committee bearer added", (r or {}).get("fn_appoint_office_bearer") or None
-    except Exception:
-        raise
+        if is_edit:
+            active = d.get("active")
+            if isinstance(active, str):
+                active = active.strip().lower() == "true"
+            member = ts.get_member(sid, pk)
+            if not member or member["role"] != role:
+                return False, "That login was not found.", None
+            ok, msg = ts.update_member(uid, "admin", sid, pk, name=d.get("name"), active=active,
+                                       new_password=d.get("password"), actor_society_id=sid)
+            return ok, msg, pk if ok else None
+        ok, msg = ts.create_login(uid, "admin", sid, role, d.get("name"), d.get("email"), d.get("password"),
+                                  actor_society_id=sid)
+        if not ok:
+            return False, msg, None
+        row = db._execute("SELECT id FROM users WHERE society_id=%s AND lower(email)=%s",
+                          (sid, (d.get("email") or "").strip().lower()), fetch_one=True)
+        return True, msg, (row or {}).get("id")
+    except PermissionError as exc:
+        return False, str(exc), None
+
+
+def _save_committee_bearer(db, d, sid, is_edit, pk):
+    """Committee bearer forms -> committee_service (audited, grants/revokes the office's role)."""
+    from app.services import committee_service as cs
+    actor, err = _team_actor()
+    if err:
+        return False, err, None
+    uid, sid = actor
+    try:
+        if is_edit:
+            reason = (d.get("end_reason") or "").strip()
+            ok, msg = cs.update_office(uid, "admin", sid, pk, holder_name=d.get("holder_name"),
+                                       term_end=d.get("term_end") or "", resolution_ref=d.get("resolution_ref"),
+                                       actor_society_id=sid)
+            if ok and reason:
+                ok, msg = cs.end_office(uid, "admin", sid, pk, reason, actor_society_id=sid)
+            return ok, msg, pk if ok else None
+        apartment_id = d.get("apartment_id") or d.get("apt_id")
+        if not apartment_id:
+            return False, "Choose the flat the office-bearer represents.", None
+        # The seat is only useful with a login (it confers the signing powers), so link the flat's owner login
+        # when it is unambiguous; otherwise appoint without one and say so (appoint's own message does).
+        user_id = d.get("user_id") or None
+        if not user_id:
+            flat = cs.flat_detail(sid, apartment_id) or {}
+            owners = flat.get("users") or []
+            if len(owners) == 1:
+                user_id = owners[0]["id"]
+        ok, msg = cs.appoint(uid, "admin", sid, apartment_id, (d.get("office_code") or "").strip().lower(),
+                             d.get("holder_name"), user_id=user_id, term_start=d.get("term_start") or None,
+                             term_end=d.get("term_end") or None, resolution_ref=d.get("resolution_ref"),
+                             actor_society_id=sid)
+        if not ok:
+            return False, msg, None
+        row = db._execute("SELECT id FROM committee_offices WHERE society_id=%s AND apartment_id=%s AND "
+                          "office_code=%s AND status='active' ORDER BY id DESC LIMIT 1",
+                          (sid, apartment_id, (d.get("office_code") or "").strip().lower()), fetch_one=True)
+        return True, msg, (row or {}).get("id")
+    except PermissionError as exc:
+        return False, str(exc), None
 
 
 def _get_account_by_name(society_id, account_name):
@@ -6208,7 +6251,7 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
         # linked_id for security = security_staff.id, and fn_security_list
         # now returns security_staff.id as `id` too (previously returned
         # users.id, which meant this filter never actually matched
-        # anything — see fix_vendor_security_pk.sql).
+        # anything —).
         sec_staff_id = get_current_linked_id()
         if sec_staff_id:
             f["security_id"] = sec_staff_id

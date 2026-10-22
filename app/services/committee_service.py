@@ -258,3 +258,41 @@ def end_office(actor_id, actor_role, society_id, office_id, reason, actor_societ
         return False, _db_message(exc)
     _invalidate_permission_cache()
     return True, f"{office['holder_name']} is no longer {OFFICE_LABEL[office['office_code']]}."
+
+
+def update_office(actor_id, actor_role, society_id, office_id, holder_name=None, term_end=None,
+                  resolution_ref=None, actor_society_id=None) -> tuple[bool, str]:
+    """Correct the details of an ACTIVE seat (name, planned term end, resolution reference).
+
+    The office, the flat and the login are not editable: they decide who holds power, so changing them means ending
+    the seat and appointing again (end_office / appoint), which is audited and re-grants the role."""
+    _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
+    try:
+        sid, oid = int(society_id), int(office_id)
+    except (TypeError, ValueError):
+        return False, "Choose the office to edit."
+    row = _row("SELECT holder_name, term_start, term_end, resolution_ref FROM committee_offices "
+               "WHERE id = %s AND society_id = %s AND status = 'active'", (oid, sid))
+    if not row:
+        return False, "That office is not active in your society."
+    name = (holder_name if holder_name is not None else row["holder_name"] or "").strip()
+    if not name:
+        return False, "The office-bearer's name is required."
+    end = row["term_end"]
+    if term_end is not None:
+        end = _date(term_end)
+        if str(term_end).strip() and end is None:
+            return False, "The term end is not a valid date."
+    if end is not None and end < row["term_start"]:
+        return False, "The term must not end before it starts."
+    ref = row["resolution_ref"] if resolution_ref is None else ((resolution_ref or "").strip()[:255] or None)
+    try:
+        with db._conn() as conn:
+            cur = conn.cursor()
+            cur.execute("UPDATE committee_offices SET holder_name = %s, term_end = %s, resolution_ref = %s "
+                        "WHERE id = %s AND society_id = %s AND status = 'active'", (name, end, ref, oid, sid))
+            _audit(cur, "committee.update", oid, {"holder_name": name, "term_end": str(end) if end else None,
+                                                  "resolution_ref": ref})
+    except Exception as exc:
+        return False, _db_message(exc)
+    return True, "Office details updated."
