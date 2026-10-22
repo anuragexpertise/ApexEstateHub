@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 
 from werkzeug.security import check_password_hash, generate_password_hash
 from database.db_manager import db
+from app.models.user import active_select
 from app.security.roles import resolve_role
 from app.security.password_policy import validate_password
 
@@ -96,12 +97,21 @@ def _build_auth(row: dict) -> dict | None:
 
 
 def _fetch_user(email: str, society_id: int | None) -> dict | None:
-    """Fetch user row by email + society scope."""
+    """Fetch user row by email + society scope. A disabled login (users.active = FALSE) is returned as "no such
+    user", so password, PIN and pattern sign-in all refuse it with the same answer as an unknown email."""
+    row = _fetch_user_row(email, society_id)
+    if row and row.get("active") is False:
+        log.warning("Disabled account attempt: %s", email)
+        return None
+    return row
+
+
+def _fetch_user_row(email: str, society_id: int | None) -> dict | None:
     try:
         if society_id is None:
             return db._execute(
                 """SELECT id, email, role, society_id, linked_id, is_master_admin, user_type,
-                          password_hash, pin_hash, pattern_hash, locked_until
+                          password_hash, pin_hash, pattern_hash, locked_until""" + active_select() + """
                     FROM users
                    WHERE lower(email) = lower(:email)
                      AND (society_id IS NULL OR is_master_admin = TRUE)""",
@@ -110,7 +120,7 @@ def _fetch_user(email: str, society_id: int | None) -> dict | None:
             )
         return db._execute(
             """SELECT id, email, role, society_id, linked_id, is_master_admin, user_type,
-                      password_hash, pin_hash, pattern_hash, locked_until
+                      password_hash, pin_hash, pattern_hash, locked_until""" + active_select() + """
                 FROM users
                WHERE lower(email) = lower(:email)
                  AND society_id = :sid""",

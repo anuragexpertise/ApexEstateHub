@@ -122,6 +122,9 @@ CREATE TABLE users (
     -- admin for residents/vendors/guards), so this defaults to TRUE and is
     -- cleared by change_password() / reset_password().
     must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
+    -- FALSE = the login is switched off (e.g. a departed accountant): it cannot sign in and an open session ends.
+    -- Not the same as locked_until, which a password reset clears.
+    active BOOLEAN NOT NULL DEFAULT TRUE,
     -- A11: shared (cross-worker) 5-second throttle for Setup Wizard submits.
     setup_submit_at TIMESTAMP,
     push_token TEXT,
