@@ -149,6 +149,13 @@ def render_governance_summary(role: str, sid):
     last = snap["last_meeting"]
     last_txt = last.strftime("%d %b %Y") if hasattr(last, "strftime") else (str(last) if last else "none recorded")
     pend = snap["pending_choices"]
+    try:
+        from app.services import committee_service as _cs
+        mc = _cs.summary(society_id)
+        mc_txt = f"{mc['seated']} seated" + (f" · vacant: {', '.join(mc['vacant_core'])}" if mc["vacant_core"] else "")
+        mc_warn = bool(mc["vacant_core"])
+    except Exception:
+        mc_txt, mc_warn = "unavailable", False
 
     def _stat(label, value, warn=False):
         return html.Div([html.Div(label, style={"fontSize": "11px", "color": "#666"}),
@@ -156,12 +163,13 @@ def render_governance_summary(role: str, sid):
                                                 "color": "#b26a00" if warn else "inherit"})],
                         style={"marginRight": "28px"})
 
-    verb = "record meetings and resolutions, and adopt bye-laws" if role == "admin" else "view your society's bye-laws, meetings and resolutions"
+    verb = "record meetings and resolutions, adopt bye-laws and appoint the Managing Committee" if role == "admin" else "view your society's bye-laws, meetings and resolutions"
     return html.Div([
         html.Div([html.I(className="fas fa-gavel me-2"), html.Strong("Society governance")], style={"marginBottom": "6px"}),
         html.Div([_stat("Last meeting", last_txt),
                   _stat("Choices awaiting a resolution", str(pend), warn=pend > 0),
-                  _stat("Pending enactments", str(snap["pending_enactments"]), warn=snap["pending_enactments"] > 0)],
+                  _stat("Pending enactments", str(snap["pending_enactments"]), warn=snap["pending_enactments"] > 0),
+                  _stat("Managing Committee", mc_txt, warn=mc_warn)],
                  style={"display": "flex", "flexWrap": "wrap", "marginBottom": "6px"}),
         html.Small(f"Scroll down past the cards below to the Society governance tabs, where you can {verb}.",
                    className="text-muted"),
@@ -184,7 +192,7 @@ def render_governance_tabs(role: str, sid, color: str = "#1859b8"):
     compliance = _rwa_compliance_up_page(color, role=role, embedded=True)
     if not society_id:
         scoped = [_no_society()]
-        return _wrap(role, compliance, scoped, scoped, scoped)
+        return _wrap(role, compliance, scoped, scoped, scoped, scoped)
 
     # ── Rules ───────────────────────────────────────────────────────────────
     try:
@@ -218,10 +226,14 @@ def render_governance_tabs(role: str, sid, color: str = "#1859b8"):
                          "activated automatically (decision type, quorum and meeting body are checked). Record the "
                          "meeting first, then the resolution."))
 
-    return _wrap(role, compliance, rules, bye, mtg)
+    # ── Managing Committee ──────────────────────────────────────────────────
+    from app.dash_apps.pages.committee_page import committee_tab
+    committee = committee_tab(role, society_id)
+
+    return _wrap(role, compliance, rules, bye, mtg, committee)
 
 
-def _wrap(role, compliance, rules, bye, mtg):
+def _wrap(role, compliance, rules, bye, mtg, committee):
     head = [html.H5("Society governance", id="society-governance", style={"fontWeight": "700", "marginTop": "8px"})]
     if role != "admin":
         head.append(html.Small("Read-only view for your society.", className="text-muted"))
@@ -233,5 +245,6 @@ def _wrap(role, compliance, rules, bye, mtg):
             dcc.Tab(label="Rules", value="tab-rules", children=html.Div(rules)),
             dcc.Tab(label="Society By-laws", value="tab-bye", children=html.Div(bye)),
             dcc.Tab(label="Meetings & Resolutions", value="tab-mtg", children=html.Div(mtg)),
+            dcc.Tab(label="Managing Committee", value="tab-committee", children=html.Div(committee)),
         ]),
     ])

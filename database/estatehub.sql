@@ -17721,7 +17721,8 @@ CREATE TABLE committee_offices (
     ended_reason        TEXT,
     appointed_by        INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT committee_term_order CHECK (term_end IS NULL OR term_end > term_start)
+    -- >= : an office ended the day it began (a mistaken appointment undone at once) is a one-day term, not an error
+    CONSTRAINT committee_term_order CHECK (term_end IS NULL OR term_end >= term_start)
 );
 CREATE UNIQUE INDEX uq_committee_single_seat ON committee_offices (society_id, office_code)
     WHERE status = 'active' AND office_code <> 'working_committee_member';
@@ -17814,7 +17815,8 @@ RETURNS BOOLEAN LANGUAGE plpgsql AS $$
 BEGIN
     UPDATE committee_offices
        SET status = 'ended', ended_at = NOW(), ended_reason = p_reason,
-           term_end = LEAST(COALESCE(term_end, CURRENT_DATE), CURRENT_DATE)
+           -- never before the term began (an office ended before its start date, or on its first day)
+           term_end = GREATEST(term_start, LEAST(COALESCE(term_end, CURRENT_DATE), CURRENT_DATE))
      WHERE id = p_office_id AND society_id = p_society_id AND status = 'active';
     RETURN FOUND;
 END $$;

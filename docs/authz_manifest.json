@@ -135,6 +135,30 @@
         "channel.subscribe"
       ]
     },
+    "callback:committee_callbacks.py::mc_appoint": {
+      "classification": "action",
+      "actions": [
+        "roles.manage"
+      ]
+    },
+    "callback:committee_callbacks.py::mc_end_office": {
+      "classification": "action",
+      "actions": [
+        "roles.manage"
+      ]
+    },
+    "callback:committee_callbacks.py::mc_pick_flat": {
+      "classification": "action",
+      "actions": [
+        "roles.manage"
+      ]
+    },
+    "callback:committee_callbacks.py::mc_pick_user": {
+      "classification": "action",
+      "actions": [
+        "roles.manage"
+      ]
+    },
     "callback:concern_bid_callbacks.py::close_bid_modal": {
       "classification": "exempt",
       "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."

@@ -1880,6 +1880,13 @@ def render_category_content(category, society_id=None, state=None, constitution=
             dbc.Input(id="sw-sec-email", type="email", value=s_email, className="mb-3"),
             _label("Secretary Signature Image"),
             _render_image_capture_control("society", "sec_sign", _imgs.get("sec_sign"), society_id),
+            dbc.Alert([
+                html.Strong("Managing Committee: "),
+                "the President, Treasurer, Secretary and Working Committee are not entered here. An office belongs to a "
+                "flat, and bye-law 7 checks that flat's dues, so they are appointed once your flats and owner logins "
+                "exist: Settings → Society governance → Managing Committee. The details above are the Secretary's "
+                "letterhead details only.",
+            ], color="info", className="mb-3", style={"fontSize": "12.5px"}),
             html.Hr(),
             html.P("Create this society's QR SIGNING_SECRET.", className="text-danger fw-bold mb-1"),
             html.P(

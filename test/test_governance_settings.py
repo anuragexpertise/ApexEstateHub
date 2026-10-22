@@ -315,6 +315,11 @@ def stub(monkeypatch):
     monkeypatch.setattr(rra, "list_resolutions", lambda s: [])
     monkeypatch.setattr(rra, "list_pending_enactments", lambda s: [])
     monkeypatch.setattr(rra, "list_decision_types", lambda: [])
+    from app.services import committee_service as cs
+    monkeypatch.setattr(cs, "current_committee", lambda s: [])
+    monkeypatch.setattr(cs, "committee_history", lambda s, limit=10: [])
+    monkeypatch.setattr(cs, "flat_choices", lambda s: [])
+    monkeypatch.setattr(cs, "summary", lambda s: {"seated": 0, "vacant_core": [], "in_arrears": 0})
     monkeypatch.setattr(rra, "list_instruments", lambda r: [])
     monkeypatch.setattr(rra, "model_bye_laws_source",
                         lambda *a: {"reference": "UP Model Bye-Laws 2011", "url": "https://example.test/bl.pdf"})
@@ -409,10 +414,10 @@ def _labels(node, acc=None):
     return acc
 
 
-TABS = ["RWA Compliance (UP)", "Rules", "Society By-laws", "Meetings & Resolutions"]
+TABS = ["RWA Compliance (UP)", "Rules", "Society By-laws", "Meetings & Resolutions", "Managing Committee"]
 
 
-def test_admin_has_the_four_tabs_and_the_governance_forms(stub):
+def test_admin_has_the_five_tabs_and_the_governance_forms(stub):
     tree = stub.render_governance_tabs("admin", 5)
     assert _labels(tree) == TABS
     ids = _ids(tree)
