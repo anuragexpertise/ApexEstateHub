@@ -1011,7 +1011,8 @@ In UP, the Setup Wizard's Constitution dropdown offers four distinct legal forms
 | **Resolution → Rule activation** | `_auto_activate()` (`regime_rules_admin.py` lines 928–973) — fires on passed resolution, activates matching provisional L1/L2/L3 choices |
 | **Resolution enactments (regime-wide)** | `resolution_effects` table with handlers `set_regime_param`, `set_society_policy`, `set_board_param`; executed via `execute_enactment()` |
 | **Rule resolver (engine)** | SQL function `fn_resolve_rule` / `fn_rule` — reads Layer 0 → 1 → 2 → 3, only tightening |
-| **UI: Society governance tabs** | `governance_settings.py` → tabs: RWA Compliance \| Rules \| Society By-laws \| Meetings & Resolutions |
+| **UI: Society governance tabs** | `governance_settings.py` → tabs: RWA Compliance \| Rules \| Society By-laws \| Meetings & Resolutions \| Managing Committee |
+| **UI: Managing Committee** | `committee_page.py` / `committee_callbacks.py` / `committee_service.py`. Everyone sees who serves, with each flat's standing and any vacant President / Secretary / Treasurer seat. The society admin (capability `roles.manage`, own society only) appoints an office-bearer flat-first: pick the flat, then the owner login and name follow, and bye-law 7 arrears are shown before submitting and enforced by `fn_appoint_office_bearer`. Appointing writes `committee_offices`, the matching RBAC role (`society_president` / `society_secretary` / `treasurer` / `committee_member`) and an audit row in ONE transaction. Ending an office (with a reason) revokes only the role that office gave, and only if no other seat or manual grant still confers it. The setup wizard cannot take committee details because an office needs a flat, so its Administrator step points here |
 | **UI: Setup Wizard steps** | `setup_wizard.py` → "Legal Regime Selection", "State Act & Rules", "Model Bye-Laws Adoption", "Funds" |
 
 ### Flow Example: Adopting a Bye-law Clause
