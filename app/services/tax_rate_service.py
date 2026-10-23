@@ -38,6 +38,19 @@ def _is_acting_secretary(society_id: int, user_id: int) -> bool:
     return bool(row)
 
 
+def secretary_fallback_allowed(society_id: int | None) -> bool:
+    """The current user is the seated Secretary AND no Treasurer is seated. The capability is NOT consulted here."""
+    if not society_id:
+        return False
+    try:
+        principal = current_principal()
+    except Exception:       # noqa: BLE001
+        return False
+    if principal is None or not principal.user_id:
+        return False
+    return _is_acting_secretary(society_id, principal.user_id) and not treasurer_seated(society_id)
+
+
 def may_edit_tax_rates(society_id: int | None) -> tuple[bool, str]:
     """-> (allowed, reason) for the CURRENT session user in THIS society."""
     if not society_id:
@@ -104,3 +117,75 @@ def save_gst_rates(society_id: int, cgst, sgst) -> None:
     mark_pending(society_id)
     audit_event("gst_rates.edited", RESOURCE, society_id, before=dict(row) if row else None,
                 after={"cgst": cgst, "sgst": sgst}, permission_used=Cap.FINANCE_TAX_RATES_MANAGE, society_id=society_id)
+
+
+# -- what the "TDS & GST Rates" tab shows and saves -------------------------------------------------------------------
+def tds_rows(society_id: int) -> list[dict]:
+    rows = db._execute(
+        "SELECT id, section, discriminator, nature_of_income, rate, rate_no_pan, single_bill_threshold, "
+        "annual_aggregate_threshold, effective_from FROM tds_section_rates WHERE society_id = %s "
+        "ORDER BY section, discriminator NULLS FIRST, id", (society_id,), fetch_all=True) or []
+    return [dict(r) for r in rows]
+
+
+def gst_row(society_id: int) -> dict | None:
+    row = db._execute("SELECT cgst_rate_pct, sgst_rate_pct, effective_from FROM gst_rates WHERE society_id = %s "
+                      "ORDER BY effective_from DESC, id DESC LIMIT 1", (society_id,), fetch_one=True)
+    return dict(row) if row else None
+
+
+def status(society_id: int) -> dict:
+    """{'pending': bool, 'confirmed_at': datetime|None, 'confirmed_by': str|None}"""
+    row = db._execute(
+        "SELECT s.ca_rates_confirmed_at AS at, u.name AS who FROM societies s "
+        "LEFT JOIN users u ON u.id = s.ca_rates_confirmed_by WHERE s.id = %s", (society_id,), fetch_one=True) or {}
+    return {"pending": row.get("at") is None, "confirmed_at": row.get("at"), "confirmed_by": row.get("who")}
+
+
+def _num(v, label: str, lo: float = 0.0, hi: float | None = None):
+    if v in (None, ""):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a number.")
+    if f < lo or (hi is not None and f > hi):
+        raise ValueError(f"{label} must be between {lo:g} and {hi:g}." if hi is not None else f"{label} cannot be below {lo:g}.")
+    return f
+
+
+def save_tds_rates(society_id: int, changes: list[dict]) -> int:
+    """Edit TDS rows in place. `changes` = [{id, rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold}].
+    A blank value leaves that column as it is. Only rows of THIS society are touched. -> number of rows changed."""
+    _require(society_id)
+    n, before_after = 0, []
+    for ch in changes:
+        try:
+            rid = int(ch["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        vals = {
+            "rate": _num(ch.get("rate"), "TDS rate", 0, 100),
+            "rate_no_pan": _num(ch.get("rate_no_pan"), "TDS rate without PAN", 0, 100),
+            "single_bill_threshold": _num(ch.get("single_bill_threshold"), "Single-bill threshold"),
+            "annual_aggregate_threshold": _num(ch.get("annual_aggregate_threshold"), "Annual threshold"),
+        }
+        given = {k: v for k, v in vals.items() if v is not None}
+        if not given:
+            continue
+        cur = db._execute("SELECT id, rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold "
+                          "FROM tds_section_rates WHERE id = %s AND society_id = %s", (rid, society_id), fetch_one=True)
+        if not cur:
+            continue                      # not a row of this society: ignore, never touch
+        if all(cur.get(k) is not None and float(cur[k]) == v for k, v in given.items()):
+            continue                      # nothing actually changed
+        sets = ", ".join(f"{k} = %s" for k in given)
+        db._execute(f"UPDATE tds_section_rates SET {sets} WHERE id = %s AND society_id = %s",
+                    (*given.values(), rid, society_id))
+        before_after.append({"id": rid, "before": {k: cur.get(k) for k in given}, "after": given})
+        n += 1
+    if n:
+        mark_pending(society_id)
+        audit_event("tds_rates.edited", RESOURCE, society_id, after={"rows": before_after},
+                    permission_used=Cap.FINANCE_TAX_RATES_MANAGE, society_id=society_id)
+    return n

@@ -113,6 +113,7 @@ _SEARCH_TAB_ROUTES = {
         "dashboard": "/dashboard/accountant-portal", "receipts": "/dashboard/accountant-receipts",
         "expenses": "/dashboard/accountant-expenses", "dues": "/dashboard/accountant-dues",
         "cashbook": "/dashboard/accountant-cashbook", "financials": "/dashboard/accountant-financials",
+        "taxrates": "/dashboard/accountant-taxrates",
     },
     "supervisor": {
         "dashboard": "/dashboard/supervisor-portal", "gate": "/dashboard/supervisor-gate",
@@ -414,7 +415,7 @@ _PATH_LABELS = {
     "security-receipt":   "New Receipt",
     "security-users":    "Users",
     "accountant-portal": "Dashboard", "accountant-receipts": "Receipts", "accountant-expenses": "Expenses",
-    "accountant-dues": "Dues", "accountant-cashbook": "Cashbook", "accountant-financials": "Financials",
+    "accountant-dues": "Dues", "accountant-cashbook": "Cashbook", "accountant-financials": "Financials", "accountant-taxrates": "TDS & GST",
     "supervisor-portal": "Dashboard", "supervisor-gate": "Gate & Security", "supervisor-users": "Users",
     "supervisor-concerns": "Concerns", "supervisor-events": "Events", "supervisor-channels": "Channels",
     "staff-portal": "Dashboard", "staff-concerns": "Concerns", "staff-events": "Events",
@@ -591,6 +592,7 @@ def _portal_content(role, society_id, pathname, auth=None):
             "dues"       if "/accountant-dues"       in p else
             "cashbook"   if "/accountant-cashbook"   in p else
             "financials" if "/accountant-financials" in p else
+            "taxrates"   if "/accountant-taxrates"   in p else
             "dashboard"
         )
         return accountant_portal_page(tab, sid=society_id)

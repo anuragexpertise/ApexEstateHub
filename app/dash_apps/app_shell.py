@@ -99,6 +99,7 @@ ROLE_CONFIG = {
             {"label": "Dues",       "href": "/dashboard/accountant-dues",       "icon": "fa-hand-holding-usd"},
             {"label": "Cashbook",   "href": "/dashboard/accountant-cashbook",   "icon": "fa-book"},
             {"label": "Financials", "href": "/dashboard/accountant-financials", "icon": "fa-balance-scale"},
+            {"label": "TDS & GST",  "href": "/dashboard/accountant-taxrates",   "icon": "fa-percent"},
         ],
     },
     "supervisor": {

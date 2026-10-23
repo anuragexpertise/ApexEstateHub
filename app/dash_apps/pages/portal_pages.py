@@ -1675,6 +1675,7 @@ _EMPLOYEE_TABS = {
         "dues":       ("fa-hand-holding-usd", "Dues", "receivables and payables (read-only)"),
         "cashbook":   ("fa-book", "Cashbook", "cash and bank movements"),
         "financials": ("fa-balance-scale", "Financials", "FY closing report and the 6 statements"),
+        "taxrates":   ("fa-percent", "TDS & GST", "edit and confirm the society's TDS and GST rates"),
     },
     "supervisor": {
         "dashboard": ("fa-th-large", "Supervisor Dashboard", "gate, security staff and open issues"),
@@ -1711,6 +1712,14 @@ def _employee_tab_page(portal: str, tab: str, sid) -> html.Div:
 
 
 def accountant_portal_page(active_tab="dashboard", sid=None):
+    if active_tab == "taxrates":
+        # The CA edits and confirms the TDS / GST figures here (see app/services/tax_rate_service.py). No KPI row.
+        from app.dash_apps.pages.tax_rates_page import tax_rates_page
+        from app.security.audit_context import get_current_society_id
+        c = _C["accountant"]
+        icon, title, sub = _EMPLOYEE_TABS["accountant"]["taxrates"]
+        return html.Div([_page_title(icon, c, title, sub),
+                         tax_rates_page("accountant", get_current_society_id() or sid, c)], className="portal-page")
     return _employee_tab_page("accountant", active_tab, sid)
 
 
