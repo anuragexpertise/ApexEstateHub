@@ -218,6 +218,35 @@ def create_app(config_name: str | None = None) -> Flask:
         """
         return html_page
 
+    @app.route("/print_wizard/<path:category>")
+    @login_required
+    def print_wizard(category):
+        """Clean, standalone print view of any Setup Wizard step.
+
+        window.print() on the SPA page also prints the wizard modal (greyed
+        backdrop box); this renders the step's content on its own page, like
+        /print_doc does for Instructions/Agreement. `state` / `constitution`
+        query args carry the not-yet-saved dropdown picks, since the wizard only
+        persists them on submit. The society always comes from the session.
+        """
+        from html import escape as _esc
+        from flask import request
+        from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label, render_category_content
+        from app.dash_apps.print_render import component_to_html, render_print_page
+        from app.security.audit_context import get_current_society_id
+
+        if category not in CATEGORIES:
+            return "Category not found", 404
+        state = (request.args.get("state") or "").strip()[:64] or None
+        constitution = (request.args.get("constitution") or "").strip()[:32] or None
+        try:
+            body = component_to_html(render_category_content(
+                category, get_current_society_id(), state, constitution=constitution))
+        except Exception as e:
+            log.error("print_wizard failed for %s: %s", category, e)
+            return "Unable to render this section for printing.", 500
+        return render_print_page(step_label(category), body)
+
     # Flask-Login
     login_manager.login_view = "auth.login"
 

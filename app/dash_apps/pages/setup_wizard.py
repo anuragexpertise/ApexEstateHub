@@ -1218,8 +1218,10 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 )
             )
         
-    # Add Print Button for specific categories
-    if category in ["State Act & Rules", "Model Bye-Laws Adoption", "TAN & TDS Rates", "Accounts Heads"]:
+    # Print button for every step except those with their own print link
+    # (Instructions, Agreement) or that are filled in live by a callback (Review).
+    # It opens the clean /print_wizard/<category> view, not window.print().
+    if category not in ("Instructions", "Agreement", "Review"):
         elements.append(
             html.Div([
                 dbc.Button([html.I(className="fas fa-print me-2"), "Print / Open in New Window"], 

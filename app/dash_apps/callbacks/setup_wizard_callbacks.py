@@ -943,14 +943,23 @@ def register_setup_wizard_callbacks(app):
 
     clientside_callback(
         """
-        function(n_clicks) {
-            if (n_clicks) {
-                window.print();
+        function(n_clicks, state, constitution, btn_id) {
+            if (n_clicks && btn_id) {
+                // Open the clean server-rendered view (/print_wizard) instead of
+                // window.print() on the SPA, which also prints the wizard modal.
+                var q = [];
+                if (state) q.push('state=' + encodeURIComponent(state));
+                if (constitution) q.push('constitution=' + encodeURIComponent(constitution));
+                window.open('/print_wizard/' + encodeURIComponent(btn_id.cat) +
+                            (q.length ? '?' + q.join('&') : ''), '_blank');
             }
             return window.dash_clientside.no_update;
         }
         """,
         Output({"type": "sw-print-btn", "cat": MATCH}, "id"),
         Input({"type": "sw-print-btn", "cat": MATCH}, "n_clicks"),
+        State("sw-society-state", "value"),
+        State("sw-society-constitution", "value"),
+        State({"type": "sw-print-btn", "cat": MATCH}, "id"),
         prevent_initial_call=True
     )
