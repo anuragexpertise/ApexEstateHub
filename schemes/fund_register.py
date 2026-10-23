@@ -48,9 +48,9 @@ FUNDS = {
         "status": "statutory",
         "verification": "supplied",
         "verification_note": (
-            "Act s.14(5) proviso read in the Act. The slabs are the text of Regulation 47(d) (Notification No. "
-            "7098/UPRERA/Regulation/2026-27) as supplied by the society's administrator; the notification itself was not "
-            "independently read. The text gives a rate per sq ft but not which area (carpet, built-up or super) it is charged on."),
+            "UP RERA Regulation 47(d); Notification 7098/U.P. RERA/Regulation/2026-27 dated 13.07.2026. "
+            "Figures below are from press/law-firm reports only — Provisional — verify against the gazetted notification."
+        ),
         "source": "UP Apartment Act 2010 s.14(5) proviso; UP RERA General Regulations 2019, Reg. 47 (as amended 13.07.2026)",
         "description": "Interest-Free Maintenance Security collected by the promoter; handed to the AOA at handover.",
         "applicability": ("Promoter-collected security. The AOA does not levy it: it receives the corpus and a unit-wise "

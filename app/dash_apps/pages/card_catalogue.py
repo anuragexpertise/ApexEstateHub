@@ -369,6 +369,13 @@ KPI_CARDS = {
         "title": "Staff", "group": "Enrolled Members",
     },
 
+    "kpi_auditor_total": {
+        "query": "SELECT COUNT(*) AS v FROM users WHERE society_id=%s AND role='auditor' AND COALESCE(active, TRUE)=TRUE",
+        "params": 1, "format": "number",
+        "icon": "fa-search", "color": "#dc2626",
+        "title": "Auditors", "group": "Enrolled Members",
+    },
+
     "kpi_committee_bearers": {
         "query": "SELECT COUNT(DISTINCT co.id) AS v FROM committee_offices co WHERE co.society_id=%s AND co.status='active'",
         "params": 1, "format": "number",
@@ -1192,6 +1199,7 @@ DEFAULT_LAYOUTS = {
             "kpi_accountant_total",
             "kpi_supervisor_total",
             "kpi_staff_total",
+            "kpi_auditor_total",
             "kpi_committee_bearers",
         ],
         # Read-only statutory / governance registers (drilldown/curated.py REGISTERS).

@@ -449,6 +449,7 @@ DRILLDOWN_MAP: dict = {
     "kpi_accountant_total": {"target": "list_accountants", "label": "Accountants"},
     "kpi_supervisor_total": {"target": "list_supervisors", "label": "Supervisors"},
     "kpi_staff_total": {"target": "list_staff", "label": "Staff"},
+    "kpi_auditor_total": {"target": "list_auditors", "label": "Auditors"},
     "kpi_committee_bearers": {"target": "list_committee_bearers", "label": "Committee Bearers"},
     "kpi_tenants_count": {"target": "list_tenants", "label": "Tenants"},
     "kpi_owner_loans_count": {"target": "list_owner_loans", "label": "Owner Loans"},
@@ -522,6 +523,7 @@ DRILLDOWN_MAP: dict = {
     "list_accountants": {"target": "profile_accountant", "label": "Accountant Profile"},
     "list_supervisors": {"target": "profile_supervisor", "label": "Supervisor Profile"},
     "list_staff": {"target": "profile_staff", "label": "Staff Profile"},
+    "list_auditors": {"target": "profile_auditor", "label": "Auditor Profile"},
     "list_committee_bearers": {"target": "profile_committee_bearer", "label": "Committee Bearer Profile"},
     # Read-only registers (see curated.py): KPI -> list -> profile, no forms.
     "list_tenants": {"target": "profile_tenant", "label": "Tenant Details"},
@@ -669,6 +671,7 @@ DRILLDOWN_MAP: dict = {
     "profile_accountant": {"actions": {"edit": {"target": "form_accountant_edit", "prefill": {"*": "*"}}}},
     "profile_supervisor": {"actions": {"edit": {"target": "form_supervisor_edit", "prefill": {"*": "*"}}}},
     "profile_staff": {"actions": {"edit": {"target": "form_staff_edit", "prefill": {"*": "*"}}}},
+    "profile_auditor": {"actions": {"edit": {"target": "form_auditor_edit", "prefill": {"*": "*"}}}},
     "profile_committee_bearer": {
         "actions": {"edit": {"target": "form_committee_bearer_edit", "prefill": {"*": "*"}}}},
     "profile_compliance_setting": {
