@@ -645,7 +645,7 @@ def register_setup_wizard_callbacks(app):
         _noop = (no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update)
         
         # Default compliance settings (no longer in wizard, set defaults)
-        c_gst_exempt = True
+        c_gst_exempt = False
         c_gst_cad = "monthly"
         c_tds_act = "warn"
         c_exp_fmt = "structured"
@@ -898,6 +898,7 @@ def register_setup_wizard_callbacks(app):
             except _SetupRejected as rej:
                 return True, no_update, no_update, no_update, no_update, str(rej), _hidden_spinner, no_update, no_update
             except Exception as e:
+                print("⚠️  Setup submission failed:", e)
                 return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to save the society setup. Please try again.")["message"], _hidden_spinner, no_update, no_update
 
             outcome = (result or {}).get("result") or ""
