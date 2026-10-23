@@ -1421,6 +1421,21 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
     # ── MASTER SOCIETIES ────────────────────────────────────────────────
     if entity == "master_societies":
         sid = _sid(filters)
+        where_clauses = []
+        params = []
+        if sid:
+            where_clauses.append("s.id=%s")
+            params.append(sid)
+        # Apply filters from KPI clicks
+        plan_filter = filters.get("plan")
+        if plan_filter:
+            where_clauses.append("s.plan=%s")
+            params.append(plan_filter)
+        status_filter = filters.get("status")
+        if status_filter == "expired":
+            where_clauses.append("s.plan_validity < CURRENT_DATE")
+        elif status_filter == "expiring_soon":
+            where_clauses.append("s.plan_validity >= CURRENT_DATE AND s.plan_validity <= CURRENT_DATE + INTERVAL '30 days'")
         base_query = """
             SELECT 
                 s.id, s.name, s.address, s.PAN_number, s.registration_number, 
@@ -1429,11 +1444,11 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
             FROM societies s
             LEFT JOIN apartments a ON a.society_id = s.id
         """
-        if sid:
-            return (base_query + " WHERE s.id=%s GROUP BY s.id LIMIT %s OFFSET %s",
-                    (sid, page_size, offset))
-        return (base_query + " GROUP BY s.id ORDER BY s.id DESC LIMIT %s OFFSET %s",
-                (page_size, offset))
+        if where_clauses:
+            base_query += " WHERE " + " AND ".join(where_clauses)
+        base_query += " GROUP BY s.id ORDER BY s.id DESC LIMIT %s OFFSET %s"
+        params.extend([page_size, offset])
+        return (base_query, tuple(params))
 
     # ── APT_CHARGES ─────────────────────────────────────────────────────
     if entity == "apt_charges":

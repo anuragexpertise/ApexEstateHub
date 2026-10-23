@@ -20,11 +20,11 @@ for _k in FUND_ORDER:
 BF_FUND_ACCOUNTS = dict(_BF_ACCOUNT_FUNDS)
 
 _BF_LABEL = {
-    3210: "Sinking Fund Reserve",
+    3210: "Sinking Fund Reserve (UP AOA)",
     3220: {"reserve": "Reserve Fund", "both": "Reserve Fund / Repair & Maintenance Fund Reserve"},
-    3230: "IFMS Corpus (Interest-Free Maintenance Security) \u2014 a.k.a. Corpus Fund",
-    3270: "Major Repair Fund (\u00bd% transfer fee + common-area rent reserve)",
-    3280: "Depreciation Fund (DepFund)",
+    3230: "Corpus Fund (IFMS) (UP AOA)",
+    3270: "Major Repair Fund (UP AOA)",
+    3280: "Depreciation Fund (Society Policy / as applicable)",
 }
 
 

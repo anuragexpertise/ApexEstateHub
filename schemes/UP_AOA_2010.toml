@@ -720,7 +720,7 @@ tighten = "none"
 enforcement = "policy"
 feeds = ["fn_ensure_depreciation_fund", "fn_appropriate_depreciation_fund"]
 verification = "provisional"
-source = """Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure"""
+source = """Not in the Act, the Rules or the Model Bye-Laws 2011. A society may keep a depreciation fund by General Body resolution (society policy), not by statute. Its rate and basis are its own, and the default shown is an engine default, not a legal figure"""
 
 [[parameter]]
 key = "depreciation_fund_basis"

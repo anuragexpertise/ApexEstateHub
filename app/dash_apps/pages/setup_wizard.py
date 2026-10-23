@@ -9,7 +9,7 @@ from database.db_manager import db
 # ── Defaults requested for first-time setup ────────────────────────────────
 DEFAULT_SINKING_FUND_RATE = 0.25    # ₹ per sq ft / month
 DEFAULT_REPAIR_FUND_RATE  = 0.75    # ₹ per sq ft / month
-DEFAULT_INTEREST_RATE_PCT = 1.75    # pre-filled, EDITABLE late-payment interest (% per month, simple interest)
+DEFAULT_INTEREST_RATE_PCT = None    # leave blank; rate set by General Body resolution per UP Model Bye-Laws 2011 bye-law 46(a)
 # There is no hard cap in the wizard: the rate is whatever the General Body resolved.
 INTEREST_RATE_NOTE = ("Simple interest, % per month, on overdue dues after the Billing Due Day. "
                       "UP Model Bye-Laws 2011, bye-law 46(a): the rate is set by General Body resolution.")
@@ -262,31 +262,23 @@ CONVERSATION_TEXT_OVERRIDES = {
 REVIEW_STEP_NAME = "Review"
 WIZARD_GROUPS = {
     "Organization Details": ["Instructions", "Society Details", "Administrator"],
-    "Legal Regime": ["Legal Regime Selection"],
-    # Central Acts are not a choice: they apply to every society, so they are a read-only banner on
-    # "Legal Regime Selection". Only the two steps that need figures (TAN/TDS, GSTIN/GST) remain here.
-    "Central Acts": ["TAN & TDS Rates", "GSTIN & GST Rate"],
-    "State Act & Rules": ["State Act & Rules", "Model Bye-Laws Adoption"],
-    "Society Policy": ["Apartment Charges", "Funds", "Vendor Charges", "Society Operations"],
-    "Accounts": ["Accounts Heads", "Brought Forward"],
-    "Finalization": ["Review", "Agreement"]
+    "Statutory Compliance": ["TAN & TDS Rates", "GSTIN & GST Rates", "Compliance (UP_AOA)"],
+    "By-Laws & Governance": ["By-Laws Adoption"],
+    "Society Policy & Operations": ["Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward"],
+    "Finalization": ["Agreement"]
 }
 CATEGORIES = [
     'Instructions',
     'Society Details',
     'Administrator',
-    'Legal Regime Selection',
     'TAN & TDS Rates',
-    'GSTIN & GST Rate',
-    'State Act & Rules',
-    'Model Bye-Laws Adoption',
+    'GSTIN & GST Rates',
+    'Compliance (UP_AOA)',
+    'By-Laws Adoption',
     'Apartment Charges',
-    'Funds',
     'Vendor Charges',
-    'Society Operations',
-    'Accounts Heads',
+    'Accounts',
     'Brought Forward',
-    'Review',
     'Agreement'
 ]
 
@@ -294,18 +286,14 @@ CATEGORY_ICONS = {
     "Society Details": "fas fa-building",
     "Administrator": "fas fa-user-shield",
     "Instructions": "fas fa-info-circle",
-    "Legal Regime Selection": "fas fa-sitemap",
-    "State Act & Rules": "fas fa-university",
-    "Model Bye-Laws Adoption": "fas fa-scale-balanced",
     "TAN & TDS Rates": "fas fa-percent",
-    "GSTIN & GST Rate": "fas fa-file-invoice-dollar",
+    "GSTIN & GST Rates": "fas fa-file-invoice-dollar",
+    "Compliance (UP_AOA)": "fas fa-gavel",
+    "By-Laws Adoption": "fas fa-scale-balanced",
     "Apartment Charges": "fas fa-home",
-    "Funds": "fas fa-piggy-bank",
     "Vendor Charges": "fas fa-truck",
-    "Society Operations": "fas fa-cogs",
-    "Accounts Heads": "fas fa-book",
+    "Accounts": "fas fa-book",
     "Brought Forward": "fas fa-arrow-right",
-    "Review": "fas fa-clipboard-check",
     "Agreement": "fas fa-handshake"
 }
 
@@ -1551,8 +1539,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 dbc.Col([_label("Billing Due Day"), dbc.Input(id="sw-apt-due", type="number", value=s_due, min=1, max=31, step=1, className="mb-3")], width=4),
             ]),
             dbc.Row([dbc.Col([_label("Charges Interest Rate (% per month)"),
-                              dbc.Input(id="sw-apt-interest", type="number", value=s_int, min=0, step=0.01, className="mb-1"),
-                              html.Small(INTEREST_RATE_NOTE, className="text-muted d-block mb-1")] + citation, width=8)]),
+                              dbc.Input(id="sw-apt-interest", type="number", value=s_int if s_int is not None else "", min=0, step=0.01, className="mb-1", placeholder="Set by General Body resolution"),
+                              html.Small("UP Model Bye-Laws 2011, bye-law 46(a): the rate is set by General Body resolution. " + INTEREST_RATE_NOTE, className="text-muted d-block mb-1")] + citation, width=8)]),
             html.P("After enrolment, each flat needs its undivided-interest %. Area share is used until you enter the Declaration figures.", className="text-muted small"),
         ]
     elif category == "Funds":

@@ -37,6 +37,7 @@ TEAM_ENTITIES = {
     "accountants": ("accountant", "Accountant", "#7c3aed", "fa-calculator"),
     "supervisors": ("supervisor", "Supervisor", "#ea580c", "fa-user-tie"),
     "staff": ("staff", "Staff", "#64748b", "fa-users"),
+    "auditors": ("auditor", "Auditor", "#dc2626", "fa-search"),
 }
 
 TEAM_ROLE_CODES = frozenset(v[0] for v in TEAM_ENTITIES.values())
