@@ -54,6 +54,7 @@ def register_callbacks(app):
         "team_callbacks",                # 13j2. Team Logins (admin, own society)
         "governance_callbacks",          # 13j. Settings governance tabs (admin, own society)
         "committee_callbacks",           # 13j2. Managing Committee tab (admin, own society)
+        "tax_rate_callbacks",            # 13j3. TDS & GST Rates tab (CA / Treasurer / Secretary, own society)
         "auditor_callbacks",             # 13k. Auditor portal (read-only verification)
         "bulk_enroll_callbacks",      # 14. Bulk Enroll
         "bank_reconcile_callbacks",   # 14a2. Bank Reconcile
