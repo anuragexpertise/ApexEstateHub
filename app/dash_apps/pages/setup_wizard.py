@@ -275,7 +275,7 @@ WIZARD_GROUPS = {
 # render_category_content() and the callbacks all key on them. STEP_LABELS is display wording only.
 STEP_LABELS = {
     "GSTIN & GST Rate": "GSTIN & GST Rates",
-    "State Act & Rules": "Compliance (UP_AOA)",
+    "State Act & Rules": "Compliance",
     "Model Bye-Laws Adoption": "By-Laws Adoption",
     "Accounts Heads": "Accounts",
 }

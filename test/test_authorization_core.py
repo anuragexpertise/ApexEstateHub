@@ -50,7 +50,10 @@ def test_platform_operator_holds_only_platform_capabilities():
 def test_capability_matrix_is_frozen():
     m = az.capability_matrix()
     assert m["treasurer"] == sorted([Cap.FINANCE_PAYMENT_APPROVE, Cap.FINANCE_REVERSE,
-                                     Cap.FINANCE_RECONCILE, Cap.FINANCE_PERIOD_CLOSE, Cap.REPORT_EXPORT])
+                                     Cap.FINANCE_RECONCILE, Cap.FINANCE_PERIOD_CLOSE, Cap.REPORT_EXPORT,
+                                     Cap.FINANCE_TAX_RATES_MANAGE])
+    # TDS / GST rates: the CA (accountant) and the Treasurer. Never admin, auditor or the other office-bearers.
+    assert sorted(r for r, caps in m.items() if Cap.FINANCE_TAX_RATES_MANAGE in caps) == ["accountant", "treasurer"]
     # Locking a financial year is irreversible: the Treasurer alone holds it.
     assert [r for r, caps in m.items() if Cap.FINANCE_PERIOD_CLOSE in caps] == ["treasurer"]
     # no single role both prepares and approves payments

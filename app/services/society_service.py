@@ -196,22 +196,3 @@ def delete_society(society_id: int) -> bool:
     except Exception:
         log.exception("delete_society error")
         return False
-
-
-# ── CA confirmation of TDS / GST figures (entered by the admin at setup) ───────────────────────────────────────
-# The wizard saves whatever the admin typed as PROVISIONAL (societies.ca_rates_confirmed_at IS NULL). The society's CA,
-# working as an Accountant login (or Master), edits the figures and then confirms them here.
-CA_CONFIRM_ROLES = ("accountant", "master")
-
-
-def ca_rates_pending(society_id: int) -> bool:
-    """True while the society's TDS / GST figures have not been confirmed by the CA."""
-    row = db._execute("SELECT ca_rates_confirmed_at FROM societies WHERE id = :sid", {"sid": society_id}, fetch_one=True)
-    return bool(row) and row.get("ca_rates_confirmed_at") is None
-
-
-def confirm_ca_rates(society_id: int, user_id: int, role: str) -> None:
-    """Stamp the TDS / GST figures as confirmed by the CA. Only an accountant of this society, or Master, may do it."""
-    if role not in CA_CONFIRM_ROLES:
-        raise PermissionError("Only the society's CA (Accountant login) or Master can confirm TDS / GST rates.")
-    db._execute("SELECT fn_confirm_ca_rates(:sid, :uid)", {"sid": society_id, "uid": user_id}, fetch_one=True)

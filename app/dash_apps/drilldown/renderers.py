@@ -234,6 +234,8 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("accountant", "apartments"):  {"view"},
     ("accountant", "vendors"):     {"view"},
     ("accountant", "security"):    {"view"},
+    # TDS rates: the CA's login edits them. The edit right is decided per request by tax_rate_service (capability
+    # finance.taxrates.manage), so it is added in _perms_for below, not listed here.
     ("accountant", "tds_rates"):   {"view"},
     ("accountant", "tds_section_rates"): {"view"},
     ("accountant", "*"):           set(),
@@ -267,6 +269,28 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
 }
 
 
+_TDS_RATE_ENTITIES = ("tds_rates", "tds_section_rates", "tds_rate")
+
+
+def _may_edit_tax_rates_cached() -> bool:
+    """One lookup per request: _perms_for is called many times while a card renders."""
+    try:
+        from flask import g, has_request_context
+        from app.security.audit_context import get_current_society_id
+        sid = get_current_society_id()
+        if has_request_context():
+            cached = getattr(g, "_may_edit_tax_rates", None)
+            if cached is not None and cached[0] == sid:
+                return cached[1]
+        from app.services import tax_rate_service
+        ok = tax_rate_service.may_edit_tax_rates(sid)[0]
+        if has_request_context():
+            g._may_edit_tax_rates = (sid, ok)
+        return ok
+    except Exception:      # noqa: BLE001 - when in doubt, no edit right
+        return False
+
+
 def _perms_for(role: str, entity: str, user_type: str | None = None) -> set[str]:
     """Return allowed action set for role × entity."""
     key_specific = (role, entity)
@@ -277,6 +301,12 @@ def _perms_for(role: str, entity: str, user_type: str | None = None) -> set[str]
     elif key_star in _PORTAL_PERMS:
         perms = set(_PORTAL_PERMS[key_star])
         
+    # TDS rates: CA (accountant), Treasurer, or Secretary while there is no Treasurer. Never Admin (Setup Wizard is the
+    # Admin's route), never Auditor. Decided server-side per request; see app/services/tax_rate_service.py.
+    if entity in _TDS_RATE_ENTITIES and role in ("accountant", "apartment"):
+        if _may_edit_tax_rates_cached():
+            perms |= {"view", "edit", "new"}
+
     if role == "apartment":
         if user_type == "visitor":
             if entity == "concerns":

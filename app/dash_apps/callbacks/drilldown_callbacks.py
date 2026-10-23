@@ -5791,6 +5791,15 @@ def _save_compliance_settings(db, d, sid, is_edit, pk):
 
 
 def _save_tds_rate(db, d, sid, is_edit, pk):
+    # Who may edit TDS rates: the CA (accountant login), the Treasurer, or the Secretary when no Treasurer is seated
+    # (app/services/tax_rate_service.py); Master keeps platform-level edit. The society is the SERVER session's,
+    # never the browser's `society_id`. The role gate before _save_entity is a convenience; this is the real check.
+    from app.services import tax_rate_service
+    if get_current_user_role() != "master":
+        sid = get_current_society_id()
+        allowed, why = tax_rate_service.may_edit_tax_rates(sid)
+        if not allowed:
+            return False, why, None
     section = (d.get("section") or "").strip()
     discriminator = (d.get("discriminator") or "").strip() or None
     nature_of_income = (d.get("nature_of_income") or "").strip()
@@ -5814,7 +5823,8 @@ def _save_tds_rate(db, d, sid, is_edit, pk):
                 "WHERE id=%s AND society_id=%s",
                 (section, discriminator, nature_of_income, rate, rate_no_pan, single_thr, annual_thr, eff_from, pk, sid)
             )
-            return True, "TDS rate updated.", None
+            tax_rate_service.mark_pending(sid)      # an edited figure is provisional until confirmed again
+            return True, "TDS rate updated. Pending confirmation.", None
         else:
             db._execute(
                 "INSERT INTO tds_section_rates "
@@ -5822,7 +5832,8 @@ def _save_tds_rate(db, d, sid, is_edit, pk):
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (sid, section, discriminator, nature_of_income, rate, rate_no_pan, single_thr, annual_thr, eff_from)
             )
-            return True, "TDS rate added.", None
+            tax_rate_service.mark_pending(sid)
+            return True, "TDS rate added. Pending confirmation.", None
     except Exception as e:
         return False, _clean_pg_error(e), None
 
