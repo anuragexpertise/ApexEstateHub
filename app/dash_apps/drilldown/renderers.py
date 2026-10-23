@@ -90,7 +90,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # retains full control via ("master","societies") below.
     ("admin", "societies"):    {"view", "edit"},
     ("admin", "receivables"):  {"view"},
-    ("admin", "payables"):     {"view"},
+    ("admin", "payables"):     {"view", "edit"},   # edit = Shift Fraction only (see _save_payable_shift_fraction)
     ("admin","gate_logs"):     {"view"},
     ("admin", "security_roster"): {"view"},
     ("admin", "ledger"):       {"view"},
@@ -991,6 +991,13 @@ def render_list_card(card_id: str, title: str, icon: str,
         c for c in columns
         if (c.get("field") or c.get("name") or "") not in hidden
         and _field_visible(entity, c.get("field") or c.get("name") or "", role)
+    ]
+    # A raw foreign-key column (entity_id, acc_id ...) is displayed as its human name (see _display_value),
+    # so listing it next to the name column shows the same value twice. Keep the name column only.
+    _present = {(c.get("field") or c.get("name") or "") for c in visible_columns}
+    visible_columns = [
+        c for c in visible_columns
+        if _FK_HUMAN_ALIASES.get(c.get("field") or c.get("name") or "") not in _present
     ]
     total_pages = max(1, -(-total_rows // page_size))
 

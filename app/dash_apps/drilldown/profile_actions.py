@@ -280,12 +280,13 @@ PROFILE_ACTIONS: dict[str, list[dict]] = {
 
     "payables": [
         {
-            "label": "Edit",
+            "label": "Edit Shift Fraction",
             "action_id": "edit",
             "target_card": "form_payables",
             "icon": "fa-edit",
             "color": "primary",
             "roles": ["admin"],
+            "condition": {"field": "status", "equals": "pending"},   # a verified salary is locked into the ledger
         },
         {
             "label": "Verify",

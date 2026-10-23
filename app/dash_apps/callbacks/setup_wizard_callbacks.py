@@ -8,7 +8,7 @@ import dash_bootstrap_components as dbc
 from database.db_manager import db
 from database.seed import TDS_SECTION_RATE_SEED
 from app.dash_apps.pages.setup_wizard import (
-    get_setup_wizard_layout, CATEGORIES, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS,
+    get_setup_wizard_layout, CATEGORIES, step_label, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS,
     build_rules_panel, rules_subtitle, apt_charges_error, basis_hint, render_review,
     fund_plan, funds_error, fund_rate_label, fund_hint, FUND_BASIS_LABELS,
     fund_flags, fund_note, regime_badge, state_thresholds_rows, legal_regime_live, fund_status_children,
@@ -282,11 +282,11 @@ def register_setup_wizard_callbacks(app):
             cat_icon_cls = CATEGORY_ICONS.get(cat, 'fas fa-circle')
             cat_icon = html.I(className=f"{cat_icon_cls} me-2")
             if (cat == "GSTIN & GST Rate" and not central_gst) or (cat == "TAN & TDS Rates" and not central_tds):
-                nav_children.append(html.Span([cat_icon, cat], style={"textDecoration": "line-through", "opacity": "0.5"}))
+                nav_children.append(html.Span([cat_icon, step_label(cat)], style={"textDecoration": "line-through", "opacity": "0.5"}))
             elif i < new_step:
-                nav_children.append(html.Span([cat_icon, cat, html.I(className="fas fa-check-circle text-success float-end", style={"marginTop": "4px"})]))
+                nav_children.append(html.Span([cat_icon, step_label(cat), html.I(className="fas fa-check-circle text-success float-end", style={"marginTop": "4px"})]))
             else:
-                nav_children.append(html.Span([cat_icon, cat]))
+                nav_children.append(html.Span([cat_icon, step_label(cat)]))
                 
         prev_disabled = (new_step == 0)
         
@@ -294,7 +294,7 @@ def register_setup_wizard_callbacks(app):
         submit_style = {"display": "inline-block"} if new_step == len(CATEGORIES) - 1 else {"display": "none"}
         spinner_style = {"display": "inline-block"} if new_step == len(CATEGORIES) - 1 else {"display": "none"}
 
-        return new_step, cat_name, step_styles, rules_html, rules_sub, nav_active, nav_children, prev_disabled, next_style, submit_style, spinner_style, error_msg
+        return new_step, step_label(cat_name), step_styles, rules_html, rules_sub, nav_active, nav_children, prev_disabled, next_style, submit_style, spinner_style, error_msg
 
 
     # Apartment Charges: tell the admin which Part A field the chosen billing basis needs.

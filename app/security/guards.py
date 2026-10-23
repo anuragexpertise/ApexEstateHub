@@ -49,7 +49,61 @@ from functools import wraps
 
 from dash.exceptions import PreventUpdate
 
-from app.security.audit_context import get_current_user_id
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
+from app.security.setup_guard import society_setup_incomplete
+
+# ── Setup-completion gate (callback level) ────────────────────────────────
+# The page router already refuses to render a portal for a society whose Setup
+# Wizard is unfinished (shell_callbacks.py), but a request sent straight to
+# /dashboard/_dash-update-component skips the router. So require_session also
+# refuses to run a callback body for a signed-in, non-master user whose society
+# has not finished setup — EXCEPT the callbacks the wizard itself needs, which
+# must work while setup is incomplete:
+#   * whole modules: the wizard, the shell/router, login, account (compulsory
+#     password change) and the agreement shown right after the wizard;
+#   * single functions, listed by name below (the wizard's logo/photo upload);
+#   * anything marked with @allow_during_setup (either side of @require_session).
+_SETUP_EXEMPT_MODULES = frozenset({
+    "setup_wizard_callbacks",
+    "shell_callbacks",
+    "login_callbacks",
+    "account_callbacks",
+    "agreement_callbacks",
+})
+_SETUP_EXEMPT_FUNCTIONS = frozenset({
+    ("drilldown_callbacks", "handle_image_upload"),
+})
+_SETUP_DONE: set = set()      # a society that finished setup never goes back, so cache only "done"
+
+
+def allow_during_setup(f):
+    """Mark a callback as usable before the society has finished the Setup Wizard."""
+    f._allow_during_setup = True
+    return f
+
+
+def _setup_exempt(f, wrapped) -> bool:
+    if getattr(f, "_allow_during_setup", False) or getattr(wrapped, "_allow_during_setup", False):
+        return True
+    module = (getattr(f, "__module__", "") or "").rsplit(".", 1)[-1]
+    return module in _SETUP_EXEMPT_MODULES or (module, getattr(f, "__name__", "")) in _SETUP_EXEMPT_FUNCTIONS
+
+
+def _setup_blocks_callback() -> bool:
+    """True when the signed-in user belongs to a society whose setup is unfinished."""
+    if get_current_user_role() in (None, "master"):
+        return False
+    sid = get_current_society_id()
+    if not sid or sid in _SETUP_DONE:
+        return False
+    if society_setup_incomplete(sid):      # fails closed: a database error raises and the callback does not run
+        return True
+    _SETUP_DONE.add(sid)
+    return False
 
 
 def require_session(f):
@@ -66,6 +120,8 @@ def require_session(f):
     @wraps(f)
     def wrapped(*args, **kwargs):
         if get_current_user_id() is None:
+            raise PreventUpdate
+        if not _setup_exempt(f, wrapped) and _setup_blocks_callback():
             raise PreventUpdate
         return f(*args, **kwargs)
     return wrapped

@@ -3931,6 +3931,7 @@ def _save_entity(entity, card_id, data):
         if entity == "apt_charge":      return _save_apt_charge(db, data, sid, is_edit, pk)
         if entity == "ven_charge":      return _save_ven_charge(db, data, sid, is_edit, pk)
         if entity == "security_roster": return _save_security_roster(db, data, sid, is_edit, pk)
+        if entity in ("payable", "payables"): return _save_payable_shift_fraction(db, data, pk)
         if entity in ("accountant", "supervisor", "staff"):
             return _save_team_login(entity, data, is_edit, pk)
         if entity == "committee_bearer": return _save_committee_bearer(db, data, sid, is_edit, pk)
@@ -5934,7 +5935,8 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
         maint_amount = float(d.get("apt_maintenance_amount") or 0)
         rate         = float(d.get("apt_maintenance_rate") or 3.0)
         due_day      = int(d.get("apt_due_day") or 5)
-        interest_pct = float(d.get("apt_interest_pct") or 1.75)
+        _ip = d.get("apt_interest_pct")      # no silent default: blank = no interest (bye-law 46(a): rate set by General Body)
+        interest_pct = float(_ip) if _ip not in (None, "") else None
         sinking_rate = float(d.get("apt_sinking_fund_rate") or 0)
         repair_rate  = float(d.get("apt_repair_fund_rate") or 0)
     except ValueError:
@@ -6044,6 +6046,42 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
         f"Charge rule created",
         (r or {}).get("id"),
     )
+
+def _save_payable_shift_fraction(db, d, pk):
+    """Admin edit of a pending security-salary payable: only the shift fraction can change.
+
+    The trigger payable_update_amount recomputes the amount as salary_per_shift x fraction. That would silently drop a
+    patrol-missed-scan penalty already deducted in the amount, so such a payable is refused here.
+    Role and society come from the server session, never from the form.
+    """
+    from app.security.audit_context import get_current_society_id, get_current_user_role
+    if get_current_user_role() != "admin":
+        return False, "Only the society admin can change a shift fraction", None
+    server_sid = get_current_society_id()
+    if not pk or not server_sid:
+        return False, "Salary entry not found", None
+    try:
+        frac = Decimal(str(d.get("shift_fraction")).strip())
+    except Exception:
+        return False, "Shift Fraction must be a number", None
+    if not (Decimal("0") < frac <= Decimal("1")):
+        return False, "Shift Fraction must be above 0 and at most 1 (for example 0.5 for a half shift)", None
+    row = db._execute(
+        "SELECT role, status, description FROM payables WHERE id=%s AND society_id=%s",
+        (pk, server_sid), fetch_one=True)
+    if not row:
+        return False, "Salary entry not found", None
+    if row.get("role") != "security":
+        return False, "Shift Fraction applies to security salary entries only", None
+    if row.get("status") != "pending":
+        return False, "Only a pending salary entry can be changed; this one is already " + str(row.get("status")), None
+    if "penalty" in str(row.get("description") or "").lower():
+        return False, "This salary includes a patrol penalty, which a shift-fraction change would wipe out. Cancel and regenerate it instead", None
+    db._execute("UPDATE payables SET shift_fraction=%s WHERE id=%s AND society_id=%s AND status='pending' AND role='security'",
+                (frac, pk, server_sid))
+    new = db._execute("SELECT amount FROM payables WHERE id=%s AND society_id=%s", (pk, server_sid), fetch_one=True) or {}
+    return True, f"Shift fraction set to {frac}; salary is now ₹{Decimal(str(new.get('amount') or 0)):,.2f}", pk
+
 
 def _save_security_roster(db, d, sid, is_edit, pk):
     # assigned_by is never a form field — it's always the logged-in
