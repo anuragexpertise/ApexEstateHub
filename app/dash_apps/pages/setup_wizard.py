@@ -7,8 +7,8 @@ from database.db_manager import db
 
 
 # ── Defaults requested for first-time setup ────────────────────────────────
-DEFAULT_SINKING_FUND_RATE = 0.25    # ₹ per sq ft / month
-DEFAULT_REPAIR_FUND_RATE  = 0.75    # ₹ per sq ft / month
+# Sinking and Repair & Maintenance Fund rates have NO default and NO cap: the figure is whatever the society's General
+# Body resolved. A blank rate means "not entered", never a silent 0.
 DEFAULT_INTEREST_RATE_PCT = None    # leave blank; rate set by General Body resolution per UP Model Bye-Laws 2011 bye-law 46(a)
 # There is no hard cap in the wizard: the rate is whatever the General Body resolved.
 INTEREST_RATE_NOTE = ("Simple interest, % per month, on overdue dues after the Billing Due Day. "
@@ -16,6 +16,9 @@ INTEREST_RATE_NOTE = ("Simple interest, % per month, on overdue dues after the B
 # Case name + citation to print under the interest field. Left None until a verified citation is supplied.
 INTEREST_CASE_CITATION = None
 DEFAULT_VENDOR_1DAY, DEFAULT_VENDOR_7DAY, DEFAULT_VENDOR_1MTH = 100, 500, 2000
+
+# UP AOA is the default regime. The program is not UP-only: other states / constitutions are chosen on Society Details.
+DEFAULT_STATE = "UP"
 
 # Legal hierarchy rows are built from the society's regime: see legal_hierarchy_rows()
 
@@ -56,16 +59,16 @@ FIELD_TIPS = {
     "TDS Effective Date": "Date from which the TDS rates below apply. The default is the start of the financial year.",
     # GST
     "GSTIN": "15-character GST identification number issued on registration.",
-    "CGST Rate (%)": "Central GST rate. Default 9% (CGST 9% + SGST 9% = 18%).",
-    "SGST Rate (%)": "State GST rate. Default 9% (CGST 9% + SGST 9% = 18%).",
+    "CGST Rate (%)": "Central GST rate as advised by your CA. Pending CA confirmation.",
+    "SGST Rate (%)": "State GST rate as advised by your CA. Pending CA confirmation.",
     "Annual Turnover Limit for GST (Lakhs)": "Statutory turnover above which registration is mandatory. Maintained by Master — read-only.",
     "Monthly Exemption Limit (₹ per member)": "Maintenance up to this amount per member per month is GST-exempt. Maintained by Master — read-only.",
     # Apartment charges
     "Base Maintenance Amount": "Flat monthly maintenance charged per apartment. Leave 0 if you charge only by rate per sq ft.",
     "Maintenance Rate/SqFt": "Monthly maintenance per sq ft of apartment area.",
     "Billing Due Day": "Day of the month by which bills must be paid (1–31). Interest starts after this day.",
-    "Sinking Fund Rate": f"Monthly Sinking Fund contribution (₹ per sq ft). Default {DEFAULT_SINKING_FUND_RATE}.",
-    "Repair Fund Rate": f"Monthly Repair & Maintenance Fund contribution (₹ per sq ft). Default {DEFAULT_REPAIR_FUND_RATE}.",
+    "Sinking Fund Rate": "Sinking Fund contribution, on the basis chosen on the Funds step. No default and no cap: enter the rate the General Body resolved.",
+    "Repair Fund Rate": "Repair & Maintenance Fund contribution, on the basis chosen on the Funds step. No default and no cap: enter the rate the General Body resolved.",
     "Charges Interest Rate (% per month)": "Simple interest per month on overdue dues. The rate is the one your General Body resolved (UP Model Bye-Laws 2011, bye-law 46(a)).",
     "Construction Cost of Project (₹)": "Total construction cost of the project. Recorded for fund percentages and the Declaration; it is not billed as maintenance.",
     "Monthly Common-Expense Budget (₹)": "Society's monthly common-expense budget. Under Undivided Interest billing each flat pays this x its undivided-interest %.",
@@ -262,13 +265,14 @@ CONVERSATION_TEXT_OVERRIDES = {
 REVIEW_STEP_NAME = "Review"
 WIZARD_GROUPS = {
     "Organization Details": ["Instructions", "Society Details", "Administrator"],
-    "Statutory Compliance": ["TAN & TDS Rates", "GSTIN & GST Rates", "Compliance (UP_AOA)"],
-    "By-Laws & Governance": ["By-Laws Adoption"],
-    "Society Policy & Operations": ["Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward"],
-    "Finalization": ["Agreement"]
+    "Legal Regime & Funds": ["Legal Regime Selection", "Funds"],
+    "Statutory Compliance": ["TAN & TDS Rates", "GSTIN & GST Rate", "State Act & Rules"],
+    "By-Laws & Governance": ["Model Bye-Laws Adoption"],
+    "Society Policy & Operations": ["Apartment Charges", "Vendor Charges", "Accounts Heads", "Brought Forward"],
+    "Finalization": ["Review", "Agreement"],
 }
-# Display wording only. The internal step names above are keys used by statutory_rules.py and the callbacks,
-# so they are not renamed; the screen shows these labels instead.
+# CATEGORIES holds INTERNAL step keys. statutory_rules.py (STEP_ROWS, STEP_LINK_CATEGORIES), the render branches in
+# render_category_content() and the callbacks all key on them. STEP_LABELS is display wording only.
 STEP_LABELS = {
     "GSTIN & GST Rate": "GSTIN & GST Rates",
     "State Act & Rules": "Compliance (UP_AOA)",
@@ -285,30 +289,36 @@ CATEGORIES = [
     'Instructions',
     'Society Details',
     'Administrator',
+    'Legal Regime Selection',
+    'Funds',
     'TAN & TDS Rates',
-    'GSTIN & GST Rates',
-    'Compliance (UP_AOA)',
-    'By-Laws Adoption',
+    'GSTIN & GST Rate',
+    'State Act & Rules',
+    'Model Bye-Laws Adoption',
     'Apartment Charges',
     'Vendor Charges',
-    'Accounts',
+    'Accounts Heads',
     'Brought Forward',
-    'Agreement'
+    'Review',
+    'Agreement',
 ]
 
 CATEGORY_ICONS = {
     "Society Details": "fas fa-building",
     "Administrator": "fas fa-user-shield",
     "Instructions": "fas fa-info-circle",
+    "Legal Regime Selection": "fas fa-balance-scale",
+    "Funds": "fas fa-piggy-bank",
     "TAN & TDS Rates": "fas fa-percent",
-    "GSTIN & GST Rates": "fas fa-file-invoice-dollar",
-    "Compliance (UP_AOA)": "fas fa-gavel",
-    "By-Laws Adoption": "fas fa-scale-balanced",
+    "GSTIN & GST Rate": "fas fa-file-invoice-dollar",
+    "State Act & Rules": "fas fa-gavel",
+    "Model Bye-Laws Adoption": "fas fa-scale-balanced",
     "Apartment Charges": "fas fa-home",
     "Vendor Charges": "fas fa-truck",
-    "Accounts": "fas fa-book",
+    "Accounts Heads": "fas fa-book",
     "Brought Forward": "fas fa-arrow-right",
-    "Agreement": "fas fa-handshake"
+    "Review": "fas fa-clipboard-check",
+    "Agreement": "fas fa-handshake",
 }
 
 def _render_image_capture_control(entity, field, existing=None, society_id=None):
@@ -443,6 +453,14 @@ def _render_banner(title, text):
     ], className="mb-4 shadow-sm border-0 bg-light")
 
 
+def pending_ca_banner(what):
+    """Warning shown wherever the admin types TDS / GST figures: they are provisional until the CA confirms them."""
+    return dbc.Alert([html.I(className="fas fa-exclamation-triangle me-2"), html.Strong("Pending CA confirmation. "),
+                      f"The {what} you enter here is provisional. Enter what your Chartered Accountant has advised; the CA "
+                      "can edit and confirm it later after logging in. A blank row is not saved (no figure is assumed)."],
+                     color="warning", className="py-2 mb-3", style={"fontSize": "12.5px"})
+
+
 def _central_acts_banner():
     """Read-only table of the Central Acts (Layer 0). Nothing here is entered or chosen: figures go on the
     'TAN & TDS Rates' and 'GSTIN & GST Rate' steps. Wording is deliberately conservative: the Income-tax Act, 2025
@@ -487,10 +505,10 @@ def _render_tds_rates_table():
             html.Div(dbc.Input(id={"type": "tds-section", "index": idx}, value=section, readonly=True, size="sm")),
             html.Div(dbc.Input(id={"type": "tds-discriminator", "index": idx}, value=discriminator or "", readonly=True, size="sm")),
             html.Div(dbc.Input(id={"type": "tds-nature", "index": idx}, value=nature, size="sm")),
-            html.Div(dbc.Input(id={"type": "tds-rate", "index": idx}, type="number", value=rate, step=0.1, size="sm")),
-            html.Div(dbc.Input(id={"type": "tds-rate-no-pan", "index": idx}, type="number", value=rate_no_pan, step=0.1, size="sm")),
-            html.Div(dbc.Input(id={"type": "tds-single-bill", "index": idx}, type="number", value=single_bill, size="sm")),
-            html.Div(dbc.Input(id={"type": "tds-agg-bill", "index": idx}, type="number", value=agg_bill, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-rate", "index": idx}, type="number", value=None, placeholder=str(rate), step=0.1, min=0, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-rate-no-pan", "index": idx}, type="number", value=None, placeholder=str(rate_no_pan), step=0.1, min=0, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-single-bill", "index": idx}, type="number", value=None, placeholder=str(single_bill), min=0, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-agg-bill", "index": idx}, type="number", value=None, placeholder=str(agg_bill), min=0, size="sm")),
         ], className="sw-grid-row sw-tds-grid"))
     return html.Div([header] + rows, className="sw-hscroll")
 
@@ -964,6 +982,8 @@ def render_review(v, society_id=None):
         problems.append("TDS applies but no TAN is entered (TAN & TDS Rates).")
     if v.get("central_gst") and not str(v.get("gstin") or "").strip():
         problems.append("GST applies but no GSTIN is entered (GSTIN & GST Rate).")
+    if v.get("central_gst") and (v.get("cgst") in (None, "") or v.get("sgst") in (None, "")):
+        problems.append("GST applies but CGST / SGST are not entered: no GST rate will exist until your CA's figures are entered.")
     if not str(v.get("sec_name") or "").strip():
         problems.append("Secretary name is empty (Administrator).")
 
@@ -988,8 +1008,7 @@ def render_review(v, society_id=None):
 
     from database.seed import TDS_SECTION_RATE_SEED
     rates = v.get("tds_rates") or []
-    tds_edited = sum(1 for i, item in enumerate(TDS_SECTION_RATE_SEED)
-                     if i < len(rates) and rates[i] is not None and abs(num(rates[i]) - num(item[3])) > 1e-9)
+    tds_entered = sum(1 for r in rates if r not in (None, ""))
 
     fund_rows = []
     try:
@@ -1026,11 +1045,13 @@ def render_review(v, society_id=None):
         ("TAN & TDS", [
             ("TAN", v.get("tan") or "—"),
             ("TDS effective date", v.get("tds_date") or "—"),
-            ("TDS rate rows changed from standard", tds_edited),
+            ("TDS rate rows entered (pending CA confirmation)", tds_entered),
         ]),
         ("GST", [
             ("GSTIN", v.get("gstin") or "—"),
-            ("CGST / SGST", f"{num(v.get('cgst')):g}% / {num(v.get('sgst')):g}%"),
+            ("CGST / SGST (pending CA confirmation)",
+             (f"{num(v.get('cgst')):g}% / {num(v.get('sgst')):g}%" if v.get("cgst") not in (None, "") and v.get("sgst") not in (None, "")
+              else "Not entered")),
         ]),
         ("Apartment Charges (society default)", [
             ("Maintenance Billing Basis", basis_label),
@@ -1039,8 +1060,8 @@ def render_review(v, society_id=None):
             ("Default Rate per sq ft", rs(v.get("apt_rate"))),
             ("Default Fixed Amount", rs(v.get("apt_amt"))),
             ("Billing Due Day", v.get("apt_due") or "—"),
-            ("Sinking Fund Rate", num(v.get("apt_sink"))),
-            ("Repair Fund Rate", num(v.get("apt_repair"))),
+            ("Sinking Fund Rate", f"{num(v.get('apt_sink')):g}" if v.get("apt_sink") not in (None, "") else "Not entered"),
+            ("Repair Fund Rate", f"{num(v.get('apt_repair')):g}" if v.get("apt_repair") not in (None, "") else "Not entered"),
             ("Interest (% per month, simple)", (f"{num(v.get('apt_interest')):g}%" if num(v.get("apt_interest")) > 0
                                                 else "Not set: no interest is charged on overdue dues until the General Body rate is entered")),
         ]),
@@ -1208,7 +1229,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
         )
 
     if category == "Society Details":
-        s_name, s_addr, s_pan, s_reg, s_phone, s_email, s_gate_logic, s_duty_hrs, s_state, s_constitution = "", "", "", "", "", "", "both", "8", "", "AOA"
+        s_name, s_addr, s_pan, s_reg, s_phone, s_email, s_gate_logic, s_duty_hrs, s_state, s_constitution = "", "", "", "", "", "", "both", "8", DEFAULT_STATE, "AOA"
         if society_id:
             row = db._execute("SELECT name, address, phone, email, PAN_number, registration_number, gate_logic, duty_hrs, state, constitution FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row:
@@ -1220,7 +1241,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 s_reg = row.get("registration_number", "") or ""
                 s_gate_logic = row.get("gate_logic", "both") or "both"
                 s_duty_hrs = row.get("duty_hrs", "8") or "8"
-                s_state = row.get("state", "") or ""
+                s_state = row.get("state", "") or DEFAULT_STATE
                 s_constitution = row.get("constitution", "AOA") or "AOA"
         from app.services.kpi_rule_links_service import get_states
         # Jurisdiction-aware statutory rules (fn_balance_sheet_fy statutory
@@ -1278,6 +1299,15 @@ def render_category_content(category, society_id=None, state=None, constitution=
             dbc.Input(id="sw-society-reg", type="text", className="mb-1", value=s_reg, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
             html.Small("Entered by Master. Contact Master to change it." if s_reg else "Not entered yet. Ask Master to add your registration number.", className="text-muted d-block mb-3"),
             _field_feedback("sw-society-reg-feedback"),
+            _label("Gate Pass Enforcement"),
+            dbc.Select(id="sw-gate-logic", options=[{"label": "Deny Both Entry and Exit", "value": "both"},
+                                                     {"label": "Deny Entry Only", "value": "entry"},
+                                                     {"label": "Deny Exit Only", "value": "exit"}],
+                       value=s_gate_logic, className="mb-3"),
+            _label("Security Duty Hours"),
+            dbc.Select(id="sw-duty-hrs", options=[{"label": "8 Hours (morning, evening, night)", "value": "8"},
+                                                   {"label": "12 Hours (day, night)", "value": "12"}],
+                       value=s_duty_hrs, className="mb-3"),
             _label("Login Background (Image)"),
             _render_image_capture_control("society", "bg", _imgs.get("bg"), society_id),
         ]
@@ -1441,7 +1471,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
             if row:
                 s_tan = row.get("tan_number") or ""
         inputs = [
-            _render_banner("TAN & TDS Rates", "Configure TAN and TDS Section rates. Values are pre-filled with standards."),
+            _render_banner("TAN & TDS Rates", "Enter the TAN and the TDS rates your CA advises. Section, payee type and nature are listed for you; the standard rate is shown as a hint only."),
+            pending_ca_banner("TDS rates and thresholds"),
             _label("TAN Number"),
             dbc.Input(id="sw-society-tan", type="text", placeholder="Enter TAN...", value=s_tan, className="mb-4"),
             _label("TDS Effective Date"),
@@ -1471,10 +1502,10 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 html.Div(dbc.Input(id={"type": "tds-section", "index": idx}, value=section, readonly=True, size="sm")),
                 html.Div(dbc.Input(id={"type": "tds-discriminator", "index": idx}, value=discriminator or "", readonly=True, size="sm")),
                 html.Div(dbc.Input(id={"type": "tds-nature", "index": idx}, value=nature, size="sm")),
-                html.Div(dbc.Input(id={"type": "tds-rate", "index": idx}, type="number", value=rate, step=0.1, size="sm")),
-                html.Div(dbc.Input(id={"type": "tds-rate-no-pan", "index": idx}, type="number", value=rate_no_pan, step=0.1, size="sm")),
-                html.Div(dbc.Input(id={"type": "tds-single-bill", "index": idx}, type="number", value=single_bill, size="sm")),
-                html.Div(dbc.Input(id={"type": "tds-agg-bill", "index": idx}, type="number", value=agg_bill, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-rate", "index": idx}, type="number", value=None, placeholder=str(rate), step=0.1, min=0, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-rate-no-pan", "index": idx}, type="number", value=None, placeholder=str(rate_no_pan), step=0.1, min=0, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-single-bill", "index": idx}, type="number", value=None, placeholder=str(single_bill), min=0, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-agg-bill", "index": idx}, type="number", value=None, placeholder=str(agg_bill), min=0, size="sm")),
             ], className="sw-grid-row sw-tds-grid"))
         inputs.append(html.Div([header] + rows, className="sw-hscroll"))
 
@@ -1499,22 +1530,16 @@ def render_category_content(category, society_id=None, state=None, constitution=
         exempt_val = (exempt_row or {}).get("value", 7500.0)
         readonly_style = {"opacity": "0.7", "backgroundColor": "#e9ecef"}
         return elements + [
-            _render_banner("GSTIN & GST Rate", "Configure this society's GSTIN and GST rates. Turnover/exemption limits below are statutory constants maintained by Master, not editable per-society."),
+            _render_banner("GSTIN & GST Rate", "Enter the GSTIN and the GST rates your CA advises. Turnover/exemption limits below are statutory constants maintained by Master, not editable per-society."),
+            pending_ca_banner("GSTIN and GST rates"),
             _label("GSTIN"),
             dbc.Input(id="sw-society-gstin", type="text", placeholder="Enter GSTIN...", value=s_gstin, className="mb-4"),
             html.Hr(),
             html.H6("GST Rates", className="text-primary mb-2"),
-            html.P(
-                [html.I(className="fas fa-info-circle me-1"),
-                 "These GST rates are the defaults for the selected UP AOA scheme "
-                 "(UP Apartment Act, 2010 — Apartment Owners' Association): CGST 9% + SGST 9% = 18%. "
-                 "Change them only if your CA advises."],
-                className="small text-muted mb-3",
-            ),
             _label("CGST Rate (%)"),
-            dbc.Input(id="sw-cgst", type="number", value=9.0, className="mb-3", step=0.1),
+            dbc.Input(id="sw-cgst", type="number", value=None, placeholder="e.g. 9 - as advised by CA", className="mb-3", step=0.1, min=0),
             _label("SGST Rate (%)"),
-            dbc.Input(id="sw-sgst", type="number", value=9.0, className="mb-3", step=0.1),
+            dbc.Input(id="sw-sgst", type="number", value=None, placeholder="e.g. 9 - as advised by CA", className="mb-3", step=0.1, min=0),
             _label("Annual Turnover Limit for GST (Lakhs)"),
             dbc.Input(type="number", value=turnover_val, className="mb-3", readonly=True, style=readonly_style),
             _label("Monthly Exemption Limit (₹ per member)"),
@@ -1562,11 +1587,11 @@ def render_category_content(category, society_id=None, state=None, constitution=
         from app.services import regime_rules_admin as rra
         from app.dash_apps.pages.setup_wizard import fund_plan, fund_flags
         from app.services.statutory_rules import fund_rules_for_state
-        s_sink, s_repair = 0.0, 0.0
+        s_sink, s_repair = None, None          # no default: blank until the society enters the resolved rate
         if society_id:
             row = db._execute("SELECT apt_sinking_fund_rate, apt_repair_fund_rate FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
-                s_sink, s_repair = row.get("apt_sinking_fund_rate") or 0.0, row.get("apt_repair_fund_rate") or 0.0
+                s_sink, s_repair = row.get("apt_sinking_fund_rate") or None, row.get("apt_repair_fund_rate") or None
         fp = fund_plan(society_id, state, constitution=constitution)
         ff = fund_flags(society_id, state, constitution=constitution)
         fund_rules = fund_rules_for_state(state)
@@ -1603,11 +1628,11 @@ def render_category_content(category, society_id=None, state=None, constitution=
                     continue            # the Depreciation Fund and its parameters exist only in the UP pack
                 # Opt-in only: the percentage / basis / rate are regime parameters (Legal rules), not a per-flat rate here.
                 cards.append(dbc.Card([
-                    dbc.CardHeader(html.Strong(name)),
+                    dbc.CardHeader([html.Strong(name + "  "), dbc.Badge("Not statutory", color="secondary", pill=True)]),
                     dbc.CardBody([_fund_status_badges(fund_info, opted=dep_opted),
                                   html.Small(fund_info["description"], className="text-muted d-block mb-2"),
                                   _fund_facts_block(fund_info),
-                                  html.Small(f"Not prescribed by {fp['regime']}. Optional: the society decides, by General Body resolution.",
+                                  html.Small(f"Not statutory: not prescribed by {fp['regime']}. An optional society policy, adopted by General Body resolution only.",
                                              className="text-muted d-block mb-2"),
                                   policy_select("levy_depreciation_fund"),
                                   html.Small("Percentage, basis and rate are regime parameters (Legal rules > depreciation_fund_*), "
@@ -1630,7 +1655,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 stored_rate = 0.0
                 f = {"statutory": is_statutory, "mode": "none", "basis": "per_sq_ft", "min_pct": None, "regime_mode": "none", "regime_basis": "per_sq_ft"}
 
-            rate_value = stored_rate or 0.0
+            rate_value = stored_rate or None
 
             if is_statutory:
                 # Statutory funds - show locked info
@@ -1648,7 +1673,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                         body.append(html.Small(f"Statutory minimum: {min_pct}% of construction cost per year", className="text-warning d-block mb-2"))
                     body.append(html.Div([
                         html.Div(_label(fund_rate_label(f.get("basis", "per_sq_ft"))), id=f"sw-fund-{fund_key}-rate-label"),
-                        dbc.Input(id=f"sw-apt-{fund_key}", type="number", value=rate_value, min=0, step=0.01, className="mb-1", disabled=True),
+                        dbc.Input(id=f"sw-apt-{fund_key}", type="number", value=rate_value, min=0, step="any", className="mb-1", disabled=True),
                     ], id=f"sw-fund-{fund_key}-rate-wrap", style={"display": "block"}))
                     body.append(html.Small("Rate fixed by state statute — cannot be changed.", className="text-muted d-block"))
             else:
@@ -1668,7 +1693,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
             if rate_applicable and not is_statutory:
                 body.append(html.Div([
                     html.Div(_label(fund_rate_label(f.get("basis", "per_sq_ft"))), id=f"sw-fund-{fund_key}-rate-label"),
-                    dbc.Input(id=f"sw-apt-{fund_key}", type="number", value=rate_value, min=0, step=0.01, className="mb-1"),
+                    dbc.Input(id=f"sw-apt-{fund_key}", type="number", value=rate_value, min=0, step="any", className="mb-1",
+                              placeholder="Rate resolved by the General Body (no default, no cap)"),
                 ], id=f"sw-fund-{fund_key}-rate-wrap", style={} if f.get("mode") == "on_bill" else {"display": "none"}))
                 body.append(html.Small(fund_hint(f, fp["regime"]), id=f"sw-fund-{fund_key}-hint", className="text-muted d-block"))
 
@@ -1696,38 +1722,6 @@ def render_category_content(category, society_id=None, state=None, constitution=
         return elements + [
             _render_banner("Vendor Charges", f"Set default vendor pass charges. Pre-filled: 1 Day ₹{DEFAULT_VENDOR_1DAY}, 7 Days ₹{DEFAULT_VENDOR_7DAY}, 1 Month ₹{DEFAULT_VENDOR_1MTH}."),
             dbc.Row([dbc.Col([_label("Vendor Pass (1 Day) ₹"), dbc.Input(id="sw-ven-1day", type="number", value=s_v1, step=1, className="mb-3")]), dbc.Col([_label("Vendor Pass (7 Days) ₹"), dbc.Input(id="sw-ven-7day", type="number", value=s_v7, step=1, className="mb-3")]), dbc.Col([_label("Vendor Pass (1 Month) ₹"), dbc.Input(id="sw-ven-1mth", type="number", value=s_v30, step=1, className="mb-3")])])
-        ]
-    elif category == "Society Operations":
-        s_gate_logic, s_duty_hrs = "both", "8"
-        if society_id:
-            row = db._execute("SELECT gate_logic, duty_hrs FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
-            if row:
-                s_gate_logic = row.get("gate_logic", "both") or "both"
-                s_duty_hrs = row.get("duty_hrs", "8") or "8"
-        return elements + [
-            _render_banner("Society Operations", "Configure gate pass enforcement and security duty hours. (Vendor pass prices are set on the Vendor Charges step.)"),
-            html.H6("Gate Pass & Security", className="text-primary mb-3"),
-            _label("Gate Pass Enforcement"),
-            dbc.Select(
-                id="sw-gate-logic",
-                options=[
-                    {"label": "Deny Both Entry and Exit", "value": "both"},
-                    {"label": "Deny Entry Only", "value": "entry"},
-                    {"label": "Deny Exit Only", "value": "exit"},
-                ],
-                value=s_gate_logic,
-                className="mb-3"
-            ),
-            _label("Security Duty Hours"),
-            dbc.Select(
-                id="sw-duty-hrs",
-                options=[
-                    {"label": "8 Hours (morning, evening, night)", "value": "8"},
-                    {"label": "12 Hours (day, night)", "value": "12"},
-                ],
-                value=s_duty_hrs,
-                className="mb-3"
-            ),
         ]
     elif category == "Accounts Heads":
         s_calc = str(fy_start_date())
