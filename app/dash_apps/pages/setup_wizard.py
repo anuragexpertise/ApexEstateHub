@@ -267,6 +267,20 @@ WIZARD_GROUPS = {
     "Society Policy & Operations": ["Apartment Charges", "Vendor Charges", "Accounts", "Brought Forward"],
     "Finalization": ["Agreement"]
 }
+# Display wording only. The internal step names above are keys used by statutory_rules.py and the callbacks,
+# so they are not renamed; the screen shows these labels instead.
+STEP_LABELS = {
+    "GSTIN & GST Rate": "GSTIN & GST Rates",
+    "State Act & Rules": "Compliance (UP_AOA)",
+    "Model Bye-Laws Adoption": "By-Laws Adoption",
+    "Accounts Heads": "Accounts",
+}
+
+
+def step_label(cat):
+    return STEP_LABELS.get(cat, cat)
+
+
 CATEGORIES = [
     'Instructions',
     'Society Details',
@@ -1027,7 +1041,8 @@ def render_review(v, society_id=None):
             ("Billing Due Day", v.get("apt_due") or "—"),
             ("Sinking Fund Rate", num(v.get("apt_sink"))),
             ("Repair Fund Rate", num(v.get("apt_repair"))),
-            ("Interest (% per month, simple)", f"{num(v.get('apt_interest')):g}%"),
+            ("Interest (% per month, simple)", (f"{num(v.get('apt_interest')):g}%" if num(v.get("apt_interest")) > 0
+                                                else "Not set: no interest is charged on overdue dues until the General Body rate is entered")),
         ]),
         ("Funds (Sinking / Repair)", fund_rows),
         ("Vendor Pass Charges", [
@@ -1997,7 +2012,7 @@ def get_setup_wizard_layout(society_id=None):
                             dbc.Nav(
                                 [
                                     dbc.NavLink(
-                                        [html.I(className=f"{CATEGORY_ICONS.get(cat, 'fas fa-circle')} me-2"), cat],
+                                        [html.I(className=f"{CATEGORY_ICONS.get(cat, 'fas fa-circle')} me-2"), step_label(cat)],
                                         active=True if i == 0 else False,
                                         id={"type": "sw-nav-item", "index": i},
                                         href="#",
@@ -2015,7 +2030,7 @@ def get_setup_wizard_layout(society_id=None):
                     # ── Column 2: step content ─────────────────────────────
                     html.Div(className="sw-col sw-col-content", children=[
                         html.Div(className="sw-col-head", children=[
-                            html.H4(id="sw-category-title", children=CATEGORIES[0], style={"fontWeight": "bold"}),
+                            html.H4(id="sw-category-title", children=step_label(CATEGORIES[0]), style={"fontWeight": "bold"}),
                         ]),
                         html.Div(id="sw-category-content", className="sw-col-body", children=[
                             html.Div(

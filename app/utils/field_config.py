@@ -1124,9 +1124,9 @@ FIELD_CONFIG = {
         "apt_interest_pct": {
             "visible": ALL_ROLES,
             "editable": ADMIN_ONLY,
-            "default": 1.75,
+            "default": None,
             "validation": {},
-            "tooltip": "Monthly interest percentage on late payment",
+            "tooltip": "Monthly interest % on late payment, as resolved by the General Body (UP Model Bye-Laws 2011, bye-law 46(a)). Blank = no interest charged",
         },
         "apt_status": {
             "visible": ALL_ROLES,
