@@ -61,6 +61,7 @@ class Permission:
     FINANCE_RECEIPT_VIEW    = "finance.receipt.view_own"
     FINANCE_PAYMENT_APPROVE = "finance.payment.approve"
     FINANCE_PERIOD_CLOSE    = "finance.period.close"
+    FINANCE_TAX_RATES_MANAGE = "finance.taxrates.manage"
     ENROLLMENT_IMPORT       = "enrollment.import"
     ROLE_GRANT              = "role.grant"
     VISITOR_APPROVE         = "visitor.approve"

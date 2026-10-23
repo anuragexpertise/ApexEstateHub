@@ -1850,6 +1850,7 @@ INSERT INTO permissions (resource, action, description) VALUES
     ('finance',     'receipt.view_own',    'View own financial receipts'),
     ('finance',     'payment.approve',     'Approve a payment against the approval threshold'),
     ('finance',     'period.close',        'Close a financial period / FY'),
+    ('finance',     'taxrates.manage',     'Edit and confirm the society TDS / GST rates (CA and Treasurer)'),
     ('enrollment',  'import',              'Bulk-enroll apartment/vendor/security members'),
     ('role',        'grant',               'Grant or revoke a society role on a user'),
     ('visitor',     'approve',             'Approve / deny a visitor / gate alert')
@@ -1881,6 +1882,8 @@ SELECT rd.id, p.id, NULL
 FROM role_definitions rd, permissions p
 WHERE (rd.code = 'treasurer' AND p.resource = 'finance' AND p.action = 'receipt.view_own')
    OR (rd.code = 'treasurer' AND p.resource = 'finance' AND p.action = 'period.close')
+   OR (rd.code = 'treasurer' AND p.resource = 'finance' AND p.action = 'taxrates.manage')
+   OR (rd.code = 'accountant' AND p.resource = 'finance' AND p.action = 'taxrates.manage')
    OR (rd.code = 'accountant' AND p.resource = 'finance' AND p.action = 'receipt.view_own')
    OR (rd.code = 'committee_member' AND p.resource = 'poll' AND p.action = 'declare_results')
    OR (rd.code = 'resident_owner' AND p.resource = 'finance' AND p.action = 'receipt.view_own')

@@ -69,6 +69,10 @@ class Cap:
     # not the admin / secretary (no finance powers), not the accountant (the maker).
     FINANCE_PERIOD_CLOSE    = "finance.period.close"
     REPORT_EXPORT           = "report.export"
+    # Editing and confirming the society's TDS / GST rates. Held by the CA (accountant login) and the Treasurer.
+    # The Secretary holds it ONLY while no Treasurer is seated (checked in app/services/tax_rate_service.py, because
+    # that depends on committee_offices, not on a role). The Admin enters the first figures in the Setup Wizard.
+    FINANCE_TAX_RATES_MANAGE = "finance.taxrates.manage"
     # Read-only verification of a society's books (hash chains, journal balance, cash vouchers, ...).
     # Held by the auditor ONLY: no preparing, posting or approving capability sits beside it.
     AUDIT_VIEW              = "audit.view"
@@ -118,6 +122,7 @@ _RES: dict[str, frozenset[str]] = {
     Cap.FINANCE_RECONCILE:       frozenset({"bank_line"}),
     Cap.FINANCE_PERIOD_CLOSE:    frozenset({"fy_lock"}),
     Cap.REPORT_EXPORT:           frozenset({"financial_report"}),
+    Cap.FINANCE_TAX_RATES_MANAGE: frozenset({"tax_rate_config"}),
     Cap.AUDIT_VIEW:              frozenset({"audit_report"}),
     Cap.STAFF_ROSTER_MANAGE:     frozenset({"staff_roster"}),
     Cap.PLATFORM_RULES_MANAGE:   frozenset({"platform_rule"}),
@@ -184,11 +189,12 @@ DEFAULT_CAPABILITIES: dict[str, frozenset[str]] = {
     "committee_member": frozenset({Cap.CONCERN_TRIAGE, Cap.CONCERN_ASSIGN}),
     "treasurer": frozenset({
         Cap.FINANCE_PAYMENT_APPROVE, Cap.FINANCE_REVERSE,
-        Cap.FINANCE_RECONCILE, Cap.FINANCE_PERIOD_CLOSE, Cap.REPORT_EXPORT,
+        Cap.FINANCE_RECONCILE, Cap.FINANCE_PERIOD_CLOSE, Cap.REPORT_EXPORT, Cap.FINANCE_TAX_RATES_MANAGE,
     }),
+    # The society's CA logs in as an accountant.
     "accountant": frozenset({
         Cap.FINANCE_RECEIPT_PREPARE, Cap.FINANCE_PAYMENT_PREPARE,
-        Cap.FINANCE_POST, Cap.REPORT_EXPORT,
+        Cap.FINANCE_POST, Cap.REPORT_EXPORT, Cap.FINANCE_TAX_RATES_MANAGE,
     }),
     # Supervises gate, security and housekeeping staff and the concerns they work. No finance powers.
     SUPERVISOR: frozenset({Cap.CONCERN_TRIAGE, Cap.GATE_VISITOR_PROCESS, Cap.STAFF_ROSTER_MANAGE}),
