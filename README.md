@@ -416,6 +416,7 @@ Browser (Dash SPA)
 │   ├── customize_kpi_callbacks.py← KPI Inspector cascading dropdowns
 │   ├── list_inspector_callbacks.py / form_inspector_callbacks.py ← column/field config
 │   ├── setup_wizard_callbacks.py ← First-time society setup wizard
+│   ├── tax_rate_callbacks.py ← Tax rate management (CA/Treasurer)
 │   ├── bulk_enroll_callbacks.py  ← Excel bulk upload for members/staff
 │   ├── bank_reconcile_callbacks.py ← Bank statement upload + reconciliation
 │   ├── channel_callbacks.py / poll_callbacks.py ← Alert channels · Polls
@@ -1640,6 +1641,7 @@ EstateHub/
 │   │   │   ├── list_inspector_callbacks.py   ← List column configuration
 │   │   │   ├── form_inspector_callbacks.py   ← Form field configuration
 │   │   │   ├── setup_wizard_callbacks.py     ← First-time society setup wizard
+│   │   │   ├── tax_rate_callbacks.py         ← Tax rate management (CA/Treasurer)
 │   │   │   ├── bulk_enroll_callbacks.py      ← Excel bulk upload for members/staff
 │   │   │   ├── bank_reconcile_callbacks.py   ← Bank statement upload and reconciliation, per bank account (Bank Account selector on the upload modal; candidates filtered by where the money actually landed)
 │   │   │   ├── assign_to_callbacks.py        ← Assign-To modal (concern → admin/vendor/security)
@@ -1678,12 +1680,14 @@ EstateHub/
 │   │       ├── customize_layout.py           ← KPI Customize layout views
 │   │       ├── login_system.py               ← Login and pattern/PIN authentication views
 │   │       ├── setup_wizard.py               ← First-time society setup wizard (imports `statutory_rules.STEP_ROWS` for its Acts & Rules panel)
+│   │       ├── tax_rates_page.py            ← Tax rates page (CA/Treasurer)
 │   │       ├── up_compliance_card.py         ← UP AOA Compliance card renderer — 7 sections, all component ids prefixed `upc-`. `render_up_compliance_body()` returns sections only so a save can swap the body without losing the toast (it reads `card.children[2].children` positionally)
 │   │       └── router.py                     ← Page routing definitions
 │   ├── services/
 │   │   ├── auth_service.py                   ← authenticate_user(), reset flow
 │   │   ├── qr_service.py                     ← generate_static_qr_code(), validate_qr_code()
 │   │   ├── statutory_rules.py                ← Acts & Rules summary rows for the Setup Wizard's right-hand panel, plus the Act/Rules/Bye-laws loader (`instruments_for_society()`) that reads `legal_instrument_catalog` (Master Portal → RWA Compliance (UP)) for the wizard's "UP AOA Compliance" step, falling back to `LEGAL_INSTRUMENTS_UP_AOA` in seed.py when that table isn't integrated yet. **Presentation strings only** — the enforced thresholds live in `regime_rule_parameters` (§9), not here
+│   │   ├── tax_rate_service.py               ← CA/Treasurer tax rate management service
 │   │   ├── up_aoa_actions.py                 ← The live UP AOA service: every handler returns `(ok, message)` and re-checks society ownership via `_owns()`; also `load_card_data()` (the single read path the renderer consumes) and `annexure_workbook_bytes()` (openpyxl, `Owners` + `Loanees` sheets)
 │   │   └── up_aoa_compliance_service.py      ← ⚠️ Dead code — a read-only wrapper over nine SQL functions with zero importers; the card uses `up_aoa_actions`. Keep as the documented "these functions report only" contract, or delete it — don't wire both
 │   └── assets/                               ← Static files + uploaded images
