@@ -15,7 +15,45 @@ rows.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+log = logging.getLogger(__name__)
+
+# compliance_flags.rule_code raised when fn_compute_tds_pct finds no rate row for a bill's section.
+RULE_SECTION_NOT_CONFIGURED = "TDS_SECTION_NOT_CONFIGURED"
+
+
+def section_not_configured_message(section: str | None, discriminator: str | None = None, as_of=None) -> str:
+    """The wording shown on the expense form and stored on the compliance flag when no rate row matched."""
+    label = f"{section} ({discriminator})" if discriminator else str(section)
+    when = f" on {as_of}" if as_of else ""
+    return (f"No TDS rate is configured for section {label}{when}, so no TDS could be worked out for this bill. "
+            f"Ask the CA to add the rate under Settings > TDS & GST Rates.")
+
+
+def flag_unconfigured_section(db, society_id: int, expense_id: int | None, section: str | None,
+                              discriminator: str | None = None, as_of=None) -> bool:
+    """Record a compliance flag for a saved expense whose TDS section has no rate row, so the gap is never silent.
+
+    fn_compute_tds_pct is STABLE and cannot write, hence this caller-side flag. One flag per expense (the table's
+    unique key makes a repeat a no-op). Best effort: a failure here is logged and must never lose the expense.
+    Returns True when the insert was issued.
+    """
+    if not society_id or not expense_id or not section:
+        return False
+    try:
+        db._execute(
+            "INSERT INTO compliance_flags (society_id, rule_code, source_table, source_id, detail) "
+            "VALUES (%s, %s, 'expenses', %s, %s) "
+            "ON CONFLICT (source_table, source_id, rule_code) DO NOTHING",
+            (society_id, RULE_SECTION_NOT_CONFIGURED, expense_id,
+             section_not_configured_message(section, discriminator, as_of)),
+        )
+        return True
+    except Exception:       # noqa: BLE001 - a flag that cannot be written must not block the expense
+        log.warning("could not record %s flag for expense %s", RULE_SECTION_NOT_CONFIGURED, expense_id, exc_info=True)
+        return False
 
 
 def _fy_from_date(d) -> str:
@@ -193,6 +231,8 @@ def suggest_expense_tax_fields(
           "tds_section": str|None,    # inherited from the account
           "tds_applies": bool,
           "tds_basis": str,
+          "tds_discriminator": str|None,
+          "tds_config_warning": str|None, # set when basis is 'section-not-configured' (no rate row for the section)
           "tds_act_version": str|None,   # 'IT1961' / 'IT2025' — the Act the date falls under
           "tds_section_2025": str|None,  # e.g. 'Sec 393(1) Sl. 6(i) [D(a)]'
           "pan_captured": bool,
@@ -241,8 +281,12 @@ def suggest_expense_tax_fields(
         "tds_section": section,
         "tds_applies": comp["applies"],
         "tds_basis": comp["basis"],
+        "tds_discriminator": discriminator,
         "tds_act_version": comp.get("act_version"),
         "tds_section_2025": comp.get("section_2025"),
+        # Shown on the expense form when no rate row exists for the section (basis 'section-not-configured').
+        "tds_config_warning": (section_not_configured_message(section, discriminator, expense_date)
+                               if comp["basis"] == "section-not-configured" else None),
         "pan_captured": pan_captured,
         "pan_action": no_pan_action(db, society_id),
         "pan_warning": None,

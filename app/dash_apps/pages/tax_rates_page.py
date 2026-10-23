@@ -30,6 +30,17 @@ def _num_text(v) -> str:
     return "" if v is None else f"{float(v):g}"
 
 
+_ACT_LABELS = {"IT1961": "Income-tax Act 1961", "IT2025": "Income-tax Act 2025"}
+
+
+def act_line(row: dict) -> str:
+    """'Income-tax Act 2025 · from 01 Apr 2026' - which Act (and from when) a TDS row governs. Two rows can share a
+    section and discriminator (one per Act), so the label has to tell them apart."""
+    act = _ACT_LABELS.get(row.get("act_version"), row.get("act_version") or "")
+    since = row.get("effective_from")
+    return f"{act} · from {_fmt_dt(since)}" if since else act
+
+
 def status_banner(society_id: int):
     st = trs.status(society_id)
     if st["pending"]:
@@ -87,8 +98,9 @@ def tax_rates_body(society_id: int, can_edit: bool) -> list:
         else:
             cells = [_num_text(r.get("rate")), _num_text(r.get("rate_no_pan")),
                      _num_text(r.get("single_bill_threshold")), _num_text(r.get("annual_aggregate_threshold"))]
-        body_rows.append(html.Tr([html.Td(label), html.Td(r.get("nature_of_income") or "--",
-                                                          style={"fontSize": "12px", "color": "#445"})]
+        body_rows.append(html.Tr([html.Td([label, html.Div(act_line(r), style=_MUTED)]),
+                                  html.Td(r.get("nature_of_income") or "--",
+                                          style={"fontSize": "12px", "color": "#445"})]
                                  + [html.Td(c) for c in cells]))
     if not rows:
         tds_block = html.Div([html.H6("TDS rates", className="mb-2"),

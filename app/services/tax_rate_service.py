@@ -112,8 +112,11 @@ def save_gst_rates(society_id: int, cgst, sgst) -> None:
     if row:
         db._execute("UPDATE gst_rates SET cgst_rate_pct = %s, sgst_rate_pct = %s WHERE id = %s", (cgst, sgst, row["id"]))
     else:
+        # The first rate (a society whose Admin left GST blank at setup) is in force from the first day of the
+        # accounting-start month, like the one the Setup Wizard writes, so that earlier billing months find it.
         db._execute("INSERT INTO gst_rates (society_id, cgst_rate_pct, sgst_rate_pct, effective_from) "
-                    "VALUES (%s, %s, %s, CURRENT_DATE)", (society_id, cgst, sgst))
+                    "SELECT s.id, %s, %s, date_trunc('month', COALESCE(s.calc_start_date, CURRENT_DATE))::DATE "
+                    "FROM societies s WHERE s.id = %s", (cgst, sgst, society_id))
     mark_pending(society_id)
     audit_event("gst_rates.edited", RESOURCE, society_id, before=dict(row) if row else None,
                 after={"cgst": cgst, "sgst": sgst}, permission_used=Cap.FINANCE_TAX_RATES_MANAGE, society_id=society_id)
@@ -123,8 +126,9 @@ def save_gst_rates(society_id: int, cgst, sgst) -> None:
 def tds_rows(society_id: int) -> list[dict]:
     rows = db._execute(
         "SELECT id, section, discriminator, nature_of_income, rate, rate_no_pan, single_bill_threshold, "
-        "annual_aggregate_threshold, effective_from FROM tds_section_rates WHERE society_id = %s "
-        "ORDER BY section, discriminator NULLS FIRST, id", (society_id,), fetch_all=True) or []
+        "annual_aggregate_threshold, effective_from, effective_to, act_version FROM tds_section_rates "
+        "WHERE society_id = %s ORDER BY section, discriminator NULLS FIRST, effective_from, id",
+        (society_id,), fetch_all=True) or []
     return [dict(r) for r in rows]
 
 
