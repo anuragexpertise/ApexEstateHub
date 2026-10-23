@@ -6,7 +6,7 @@ from dash.exceptions import PreventUpdate
 from dash import Input, Output, State, ALL, MATCH, callback, no_update, html, ctx, clientside_callback
 import dash_bootstrap_components as dbc
 from database.db_manager import db
-from database.seed import TDS_SECTION_RATE_SEED
+from database.seed import TDS_SECTION_RATE_SEED, it2025_twin
 from app.dash_apps.pages.setup_wizard import (
     get_setup_wizard_layout, CATEGORIES, step_label, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS,
     build_rules_panel, rules_subtitle, apt_charges_error, basis_hint, render_review,
@@ -755,7 +755,7 @@ def register_setup_wizard_callbacks(app):
                 rate = _num_or_none(tds_rates, idx)
                 if rate is None:
                     continue        # not entered: save nothing for this row; the CA fills it in later
-                tds_pairs.append({
+                pair = {
                     "section": item[0],
                     "discriminator": item[1],
                     "nature_of_income": tds_natures[idx] if idx < len(tds_natures) else None,
@@ -763,7 +763,13 @@ def register_setup_wizard_callbacks(app):
                     "rate_no_pan": _num_or_none(tds_rates_no_pan, idx),
                     "single_bill_threshold": _num_or_none(tds_single_bills, idx),
                     "annual_aggregate_threshold": _num_or_none(tds_agg_bills, idx),
-                })
+                }
+                # The rows above are IT1961 rows. From 1-Apr-2026 the TDS engine reads only IT2025 rows, so the
+                # setup function also writes a 2025 twin (same rate, s.393 thresholds) where the 2025 table has one.
+                twin = it2025_twin(item[0], item[1])
+                if twin is not None:
+                    pair["it2025"] = twin
+                tds_pairs.append(pair)
 
             bf_json = []
             if bf_ids and bf_amts:

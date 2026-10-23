@@ -1739,6 +1739,29 @@ TDS_IT2025_SEED = [
     ('206AA', None, 'Higher rate where PAN is not furnished', 20.00, 20.00, 0, 0, False, 'bill', 'Sec 397(2)'),
 ]
 
+
+def it2025_twin(section, discriminator=None):
+    """The Income-tax Act 2025 (s.393) row that matches an IT1961 (section, discriminator), shaped as the 'it2025'
+    object fn_complete_society_setup reads, or None when the 2025 table carries no such row (193, 192A, 194F and
+    206AB have none, so a society gets no 2025 twin for them and the expense form flags it instead).
+
+    Only the statutory parts are returned: thresholds, whether the threshold is inclusive, what it is measured over
+    (bill / month / transaction) and the s.393 cross-reference. The RATE is never taken from here; the setup
+    function copies the rate the Admin or CA entered, so no rate is assumed.
+    """
+    for (sec, disc, _nature, _rate, _rate_no_pan, single_thr, annual_thr,
+         inclusive, basis, section_2025) in TDS_IT2025_SEED:
+        if sec == section and disc == discriminator:
+            return {
+                "single_bill_threshold": single_thr,
+                "annual_aggregate_threshold": annual_thr,
+                "threshold_inclusive": inclusive,
+                "threshold_basis": basis,
+                "section_2025": section_2025,
+            }
+    return None
+
+
 def seed_tds_section_rates(cur, conn, society_id: int):
     """Seed TDS section rates for a society (ER.md T-01, T-02).
 

@@ -4062,22 +4062,18 @@ BEGIN
                 END IF;
             END IF;
 
-            -- Fetch dynamic GST rates for this month
+            -- Fetch dynamic GST rates for this month. A missing rate is NOT an error on its own: a society
+            -- that has not yet been given its GST rate by the CA (Setup Wizard CGST/SGST left blank) can still
+            -- bill while no GST is leviable. It only matters when GST would actually be charged, so the check
+            -- that raises lives below, after the threshold / turnover gate has decided that.
             SELECT cgst_rate_pct, sgst_rate_pct INTO v_cgst_rate, v_sgst_rate
               FROM gst_rates
              WHERE society_id = p_society_id
                AND effective_from <= v_month
                AND (effective_to IS NULL OR effective_to >= v_month)
              ORDER BY effective_from DESC LIMIT 1;
-             
-            IF v_cgst_rate IS NULL AND v_sgst_rate IS NULL THEN
-                RAISE EXCEPTION 'No active GST rate found for society % on %', p_society_id, v_month;
-            END IF;
             v_cgst_rate := COALESCE(v_cgst_rate, 0);
             v_sgst_rate := COALESCE(v_sgst_rate, 0);
-            IF v_cgst_rate = 0 AND v_sgst_rate = 0 THEN
-                RAISE EXCEPTION 'No active GST rate found for society % on %', p_society_id, v_month;
-            END IF;
 
             -- Fetch dynamic thresholds
             SELECT value INTO v_gst_threshold FROM state_compliance_thresholds WHERE threshold_key = 'gst_per_member_monthly' AND is_active = TRUE LIMIT 1;
@@ -4105,6 +4101,11 @@ BEGIN
             END IF;
 
             IF v_total_taxable > v_gst_threshold AND v_gate_state = 'above' THEN
+                -- GST is leviable on this bill, so a rate is required. Fail loudly rather than bill without it.
+                IF v_cgst_rate = 0 AND v_sgst_rate = 0 THEN
+                    RAISE EXCEPTION 'No active GST rate found for society % on %: GST is leviable on this bill but the rate is pending CA confirmation (Settings > TDS & GST Rates)',
+                        p_society_id, v_month;
+                END IF;
                 v_gst_cgst := ROUND(v_total_taxable * (v_cgst_rate / 100.0), 2);
                 v_gst_sgst := ROUND(v_total_taxable * (v_sgst_rate / 100.0), 2);
             ELSE
@@ -6392,12 +6393,12 @@ BEGIN
        AND (effective_to IS NULL OR effective_to >= p_sale_date)
      ORDER BY effective_from DESC LIMIT 1;
     IF v_cgst_rate IS NULL AND v_sgst_rate IS NULL THEN
-        RAISE EXCEPTION 'No active GST rate found for society % on %', v_asset.society_id, p_sale_date;
+        RAISE EXCEPTION 'No active GST rate found for society % on %: the rate is pending CA confirmation (Settings > TDS & GST Rates)', v_asset.society_id, p_sale_date;
     END IF;
     v_cgst_rate := COALESCE(v_cgst_rate, 0);
     v_sgst_rate := COALESCE(v_sgst_rate, 0);
     IF v_cgst_rate = 0 AND v_sgst_rate = 0 THEN
-        RAISE EXCEPTION 'No active GST rate found for society % on %', v_asset.society_id, p_sale_date;
+        RAISE EXCEPTION 'No active GST rate found for society % on %: the rate is pending CA confirmation (Settings > TDS & GST Rates)', v_asset.society_id, p_sale_date;
     END IF;
     v_tax_on_value := ROUND(p_sale_value * (v_cgst_rate + v_sgst_rate) / 100.0, 2);
 
@@ -14303,6 +14304,53 @@ BEGIN
                     v_tds_eff
                 );
             END IF;
+
+            -- Income-tax Act 2025 twin. The rows above carry no act_version, so they default to 'IT1961'. From
+            -- 1-Apr-2026 fn_compute_tds_pct selects ONLY 'IT2025' rows, and before that date the IT1961 row is
+            -- not yet effective for a society set up in FY 2026-27, so without a twin the section is
+            -- 'section-not-configured' and no TDS is ever deducted. Where the caller supplies an 'it2025' object
+            -- (the matching s.393 row from TDS_IT2025_SEED), write the twin at 2026-04-01 with the rate the
+            -- CA / Admin gave and the statutory thresholds / basis of the 2025 Act. A section the 2025 table
+            -- does not carry gets no twin: no rate is assumed, and the expense form flags it instead.
+            IF jsonb_typeof(v_item->'it2025') = 'object' THEN
+                UPDATE tds_section_rates SET
+                    nature_of_income = v_item->>'nature_of_income',
+                    rate = (v_item->>'rate')::NUMERIC,
+                    rate_no_pan = (v_item->>'rate_no_pan')::NUMERIC,
+                    single_bill_threshold = COALESCE((v_item->'it2025'->>'single_bill_threshold')::NUMERIC, single_bill_threshold),
+                    annual_aggregate_threshold = COALESCE((v_item->'it2025'->>'annual_aggregate_threshold')::NUMERIC, annual_aggregate_threshold),
+                    threshold_inclusive = COALESCE((v_item->'it2025'->>'threshold_inclusive')::BOOLEAN, threshold_inclusive),
+                    threshold_basis = COALESCE(v_item->'it2025'->>'threshold_basis', threshold_basis),
+                    section_2025 = v_item->'it2025'->>'section_2025'
+                WHERE society_id = p_society_id
+                  AND section = v_item->>'section'
+                  AND discriminator IS NOT DISTINCT FROM (v_item->>'discriminator')
+                  AND effective_from = DATE '2026-04-01'
+                  AND act_version = 'IT2025';
+
+                IF NOT FOUND THEN
+                    INSERT INTO tds_section_rates (
+                        society_id, section, discriminator, nature_of_income, rate, rate_no_pan,
+                        single_bill_threshold, annual_aggregate_threshold, effective_from,
+                        act_version, section_2025, threshold_inclusive, threshold_basis
+                    )
+                    VALUES (
+                        p_society_id,
+                        v_item->>'section',
+                        v_item->>'discriminator',
+                        v_item->>'nature_of_income',
+                        (v_item->>'rate')::NUMERIC,
+                        (v_item->>'rate_no_pan')::NUMERIC,
+                        COALESCE((v_item->'it2025'->>'single_bill_threshold')::NUMERIC, 30000),
+                        COALESCE((v_item->'it2025'->>'annual_aggregate_threshold')::NUMERIC, 0),
+                        DATE '2026-04-01',
+                        'IT2025',
+                        v_item->'it2025'->>'section_2025',
+                        COALESCE((v_item->'it2025'->>'threshold_inclusive')::BOOLEAN, FALSE),
+                        COALESCE(v_item->'it2025'->>'threshold_basis', 'bill')
+                    );
+                END IF;
+            END IF;
         END LOOP;
     END IF;
 
@@ -14314,12 +14362,18 @@ BEGIN
     ORDER BY effective_from DESC LIMIT 1;
 
     -- No rate is assumed: when the admin left CGST / SGST blank (to be given by the CA) nothing is written.
+    -- The rate is effective from the first day of the accounting-start month, NOT from today: billing runs from
+    -- the calc-start month, and fn_auto_generate_receivables looks the rate up per month, so a rate stamped
+    -- CURRENT_DATE is "not yet in force" for every earlier month and the bill run fails for them.
     IF p_cgst IS NOT NULL AND p_sgst IS NOT NULL THEN
         IF v_gst_id IS NOT NULL THEN
             UPDATE gst_rates SET cgst_rate_pct = p_cgst, sgst_rate_pct = p_sgst WHERE id = v_gst_id;
         ELSE
             INSERT INTO gst_rates (society_id, cgst_rate_pct, sgst_rate_pct, effective_from)
-            VALUES (p_society_id, p_cgst, p_sgst, CURRENT_DATE);
+            VALUES (p_society_id, p_cgst, p_sgst,
+                    date_trunc('month', COALESCE(p_calc_start,
+                                                 (SELECT calc_start_date FROM societies WHERE id = p_society_id),
+                                                 CURRENT_DATE))::DATE);
         END IF;
     END IF;
 

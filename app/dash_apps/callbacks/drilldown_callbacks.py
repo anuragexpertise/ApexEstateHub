@@ -2508,6 +2508,7 @@ def register_drilldown_callbacks(app):
                 "tds_section": sug["tds_section"],
                 "tds_applies": sug["tds_applies"],
                 "tds_basis": sug["tds_basis"],
+                "tds_config_warning": sug.get("tds_config_warning"),
                 "pan_captured": sug["pan_captured"],
                 "pan_action": sug["pan_action"],
                 "pan_warning": sug["pan_warning"],
@@ -2532,15 +2533,26 @@ def register_drilldown_callbacks(app):
     def expense_tds_pan_banner(data):
         data = data or {}
         warning = data.get("pan_warning")
-        if not warning:
+        # No rate row exists for the chosen section: say so on the form instead of quietly showing 0%.
+        config_warning = data.get("tds_config_warning")
+        if not warning and not config_warning:
             return None
         blocked = data.get("pan_action") == "block"
-        return dbc.Alert(
-            [html.I(className="fas fa-exclamation-triangle me-2"), warning],
-            color="danger" if blocked else "warning",
-            style={"fontSize": "12px", "borderRadius": "10px",
-                   "padding": "8px 14px", "marginTop": "-4px", "marginBottom": "10px"},
-        )
+
+        def _alert(text, color):
+            return dbc.Alert(
+                [html.I(className="fas fa-exclamation-triangle me-2"), text],
+                color=color,
+                style={"fontSize": "12px", "borderRadius": "10px",
+                       "padding": "8px 14px", "marginTop": "-4px", "marginBottom": "10px"},
+            )
+
+        alerts = []
+        if config_warning:
+            alerts.append(_alert(config_warning, "warning"))
+        if warning:
+            alerts.append(_alert(warning, "danger" if blocked else "warning"))
+        return alerts
 
     # ── 3b. CASHBOOK / LEDGER FY EXPORT ─────────────────────────────────────────
     # Full-FY workbook in the CB2025-2026.xlsx reference layout — distinct from
@@ -4264,6 +4276,13 @@ def _save_expense_v3(db, d, sid):
             msg = f"Expense of ₹{amt:,.2f} recorded — pending admin verification [[expense:{expense_id}]]"
         if cash_warning:
             msg += f" ⚠️ {cash_warning}"
+        # fn_compute_tds_pct returns 0% quietly when the section has no rate row. Never let that pass unseen:
+        # raise a compliance flag for the CA and tell the person saving the bill.
+        if tds_sug.get("tds_basis") == "section-not-configured":
+            tds_compliance.flag_unconfigured_section(
+                db, sid, expense_id, tds_sug.get("tds_section") or tds_section,
+                tds_sug.get("tds_discriminator"), expense_date)
+            msg += " ⚠️ No TDS rate is configured for this section; no TDS was deducted. Flagged for the CA."
         return True, msg, expense_id
     except Exception as e:
         return False, _clean_pg_error(e), None
