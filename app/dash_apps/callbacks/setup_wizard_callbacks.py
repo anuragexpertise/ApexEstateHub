@@ -188,6 +188,7 @@ def register_setup_wizard_callbacks(app):
         State("sw-society-phone", "value"),
         State("sw-society-reg", "value"),
         State("sw-society-state", "value"),
+        State("sw-society-constitution", "value"),
         State("sw-apt-billing-basis", "value"),
         State("sw-apt-budget", "value"),
         State("sw-apt-rate", "value"),
@@ -201,7 +202,7 @@ def register_setup_wizard_callbacks(app):
     )
     @require_session
     def handle_wizard_navigation(n_prev, n_next, nav_clicks, current_step, society_id, central_it_tan, central_tds, central_gst, central_rera, qr_secret, qr_confirm,
-                                 s_address, s_email_v, s_phone_v, s_reg_v, s_state_v,
+                                 s_address, s_email_v, s_phone_v, s_reg_v, s_state_v, s_constit_v,
                                  apt_basis_v, apt_budget_v, apt_rate_v, apt_amt_v,
                                  apt_sinking_v, apt_repair_v, apt_cost_v, pol_values, pol_ids):
         triggered_id = ctx.triggered_id
@@ -219,7 +220,7 @@ def register_setup_wizard_callbacks(app):
         elif _forward and CATEGORIES[current_step] == "Funds":
             # the live drop-down values, not the saved ones: the admin may not have left the field yet
             _chosen = {i["key"]: v for i, v in zip(pol_ids or [], pol_values or [])}
-            gate_err = funds_error(fund_plan(get_current_society_id(), s_state_v, _chosen)["plan"], apt_sinking_v, apt_repair_v, apt_cost_v)
+            gate_err = funds_error(fund_plan(get_current_society_id(), s_state_v, _chosen, constitution=s_constit_v)["plan"], apt_sinking_v, apt_repair_v, apt_cost_v)
         
         def get_next_valid_step(step, direction):
             while 0 <= step < len(CATEGORIES):
@@ -497,15 +498,16 @@ def register_setup_wizard_callbacks(app):
             *_FUND_OUTS,
             Input({"type": "sw-pol-choice", "key": ALL}, "value"),
             Input("sw-society-state", "value"),
+            Input("sw-society-constitution", "value"),
             State({"type": "sw-pol-choice", "key": ALL}, "id"),
             State("sw-society-id", "data"),
             prevent_initial_call=True,
         )
         @require_session
-        def toggle_fund_fields(values, picked_state, ids, _client_society_id):
+        def toggle_fund_fields(values, picked_state, picked_constitution, ids, _client_society_id):
             society_id = get_current_society_id()  # server session, not the browser-side store
             chosen = {i["key"]: v for i, v in zip(ids or [], values or [])}
-            fp = fund_plan(society_id, picked_state, chosen)
+            fp = fund_plan(society_id, picked_state, chosen, constitution=picked_constitution)
             show = lambda on: {} if on else {"display": "none"}
             out = []
             for fund in ("sinking", "repair"):
@@ -697,7 +699,7 @@ def register_setup_wizard_callbacks(app):
 
             from app.dash_apps.pages.setup_wizard import fund_flags as _ff_submit
             _apt_err = (apt_charges_error(apt_billing_basis, apt_budget, apt_rate, apt_amt)
-                        or funds_error(_ff_submit(society_id, s_state)["plan"], apt_sinking, apt_repair, apt_cost))
+                        or funds_error(_ff_submit(society_id, s_state, constitution=s_constitution)["plan"], apt_sinking, apt_repair, apt_cost))
             if _apt_err:
                 return True, no_update, no_update, no_update, no_update, _apt_err, _hidden_spinner, no_update, no_update
 
@@ -744,19 +746,25 @@ def register_setup_wizard_callbacks(app):
             # rows sharing section '194C' — the later one in this list wins
             # once persisted, a pre-existing schema/seed mismatch, not
             # something this fix resolves.
+            def _num_or_none(lst, i):
+                v = lst[i] if i < len(lst) else None
+                return None if v in (None, "") else float(v)
+
             tds_pairs = []
             for idx, item in enumerate(TDS_SECTION_RATE_SEED):
-                if idx < len(tds_rates):
-                    tds_pairs.append({
-                        "section": item[0],
-                        "discriminator": item[1],
-                        "nature_of_income": tds_natures[idx] if idx < len(tds_natures) else None,
-                        "rate": float(tds_rates[idx] or 0),
-                        "rate_no_pan": float(tds_rates_no_pan[idx] or 0) if idx < len(tds_rates_no_pan) else 0.0,
-                        "single_bill_threshold": float(tds_single_bills[idx] or 0) if idx < len(tds_single_bills) else 0.0,
-                        "annual_aggregate_threshold": float(tds_agg_bills[idx] or 0) if idx < len(tds_agg_bills) else 0.0
-                    })
-            
+                rate = _num_or_none(tds_rates, idx)
+                if rate is None:
+                    continue        # not entered: save nothing for this row; the CA fills it in later
+                tds_pairs.append({
+                    "section": item[0],
+                    "discriminator": item[1],
+                    "nature_of_income": tds_natures[idx] if idx < len(tds_natures) else None,
+                    "rate": rate,
+                    "rate_no_pan": _num_or_none(tds_rates_no_pan, idx),
+                    "single_bill_threshold": _num_or_none(tds_single_bills, idx),
+                    "annual_aggregate_threshold": _num_or_none(tds_agg_bills, idx),
+                })
+
             bf_json = []
             if bf_ids and bf_amts:
                 for idx, acc_dict in enumerate(bf_ids):
@@ -806,7 +814,7 @@ def register_setup_wizard_callbacks(app):
             # Fund settings come from the Bye-Laws Adoption step, not from separate Compliance inputs.
             # A fund the state does not prescribe and the society did not opt into is stored as 0 (not levied),
             # so monthly billing (fn_generate_monthly_charges bills a fund only when its rate > 0) skips it.
-            _flags = _fund_flags(society_id, s_state)
+            _flags = _fund_flags(society_id, s_state, constitution=s_constitution)
             apt_sinking = (apt_sinking or 0) if _flags["sinking"] else 0
             apt_repair = (apt_repair or 0) if _flags["repair"] else 0
             # society_compliance_settings keeps the allocation basis of a fund billed on the bill (the CHECK allows
@@ -846,7 +854,8 @@ def register_setup_wizard_callbacks(app):
                         "sec_email": sec_email,
                         "sec_sign": sign_path,
                         "tds_json": json.dumps(tds_pairs),
-                        "cgst": cgst, "sgst": sgst,
+                        "cgst": None if cgst in (None, "") else float(cgst),
+                        "sgst": None if sgst in (None, "") else float(sgst),
                         "apt_amt": apt_amt, "apt_rate": apt_rate, "apt_billing_basis": apt_billing_basis, "apt_due": apt_due_day,
                         "apt_sink": apt_sinking, "apt_repair": apt_repair,
                         "ven_1": ven_1day, "ven_7": ven_7day, "ven_30": ven_1mth,

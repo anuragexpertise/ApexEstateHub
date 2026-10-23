@@ -50,6 +50,10 @@ CREATE TABLE societies (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gstin VARCHAR(15),
     registration_number VARCHAR(100),
+    -- TDS / GST rates typed at setup are provisional until the society's CA confirms them.
+    -- NULL = pending CA confirmation. (No FK on _by: societies is created before users.)
+    ca_rates_confirmed_at TIMESTAMP,
+    ca_rates_confirmed_by INT,
     -- state (2026-09, RCM Phase 3): the society's own state, for
     -- intra- vs. inter-state determination on RCM supplies (compared
     -- against vendors.state to decide CGST+SGST vs. IGST). Previously
@@ -1592,14 +1596,14 @@ CREATE TABLE apt_charges_fines_basis (
     apt_maintenance_amount NUMERIC(10, 2) NOT NULL DEFAULT 1500, -- amount overide rate
     apt_maintenance_rate NUMERIC(10, 2) NOT NULL DEFAULT 3.0,
     apt_due_day INTEGER DEFAULT 5,
-    apt_interest_pct NUMERIC(5, 2),
+    apt_interest_pct NUMERIC(10, 4),   -- no cap: the rate the General Body resolved
     apt_status BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
     -- created_by/updated_by removed: apt charge/fine basis is an
     -- admin-only settings table (no self-service, no PROFILE_ACTIONS).
-    apt_sinking_fund_rate NUMERIC(10, 2) DEFAULT 0,
-    apt_repair_fund_rate NUMERIC(10, 2) DEFAULT 0,
+    apt_sinking_fund_rate NUMERIC(14, 4) DEFAULT 0,   -- no default rate, no cap (0 = not levied)
+    apt_repair_fund_rate NUMERIC(14, 4) DEFAULT 0,
     charges_interest BOOLEAN DEFAULT TRUE,
     -- Billing basis:
     --   'per_sqft'           : apt_maintenance_rate x apartment_size (default).
@@ -14097,6 +14101,12 @@ $$;
 -- ("function fn_complete_society_setup(integer, unknown, ...) does not
 -- exist") before the body ever ran. Added here, matching the Python
 -- call's position (right after gate_logic, before tds_effective_date).
+-- CA confirmation of the TDS / GST figures entered at setup. Role checking is done by the caller
+-- (society_service.confirm_ca_rates); this only stamps the society.
+CREATE OR REPLACE FUNCTION fn_confirm_ca_rates(p_society_id INT, p_user_id INT) RETURNS VOID LANGUAGE sql AS $$
+    UPDATE societies SET ca_rates_confirmed_at = NOW(), ca_rates_confirmed_by = p_user_id WHERE id = p_society_id;
+$$;
+
 CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_society_id        INT,
     p_signing_secret_enc TEXT,
@@ -14213,6 +14223,8 @@ BEGIN
         secretary_phone = COALESCE(NULLIF(BTRIM(p_sec_phone), ''), secretary_phone),
         secretary_email = COALESCE(NULLIF(BTRIM(p_sec_email), ''), secretary_email),
         secretary_sign = COALESCE(p_sec_sign, secretary_sign),
+        ca_rates_confirmed_at = NULL,
+        ca_rates_confirmed_by = NULL,
         gate_logic = COALESCE(p_gate_logic, gate_logic),
         duty_hrs = COALESCE(p_duty_hrs, duty_hrs),
         -- A10: State is written in the SAME statement (so the state->legal-regime
@@ -14264,8 +14276,8 @@ BEGIN
                 nature_of_income = v_item->>'nature_of_income',
                 rate = (v_item->>'rate')::NUMERIC,
                 rate_no_pan = (v_item->>'rate_no_pan')::NUMERIC,
-                single_bill_threshold = (v_item->>'single_bill_threshold')::NUMERIC,
-                annual_aggregate_threshold = (v_item->>'annual_aggregate_threshold')::NUMERIC
+                single_bill_threshold = COALESCE((v_item->>'single_bill_threshold')::NUMERIC, single_bill_threshold),
+                annual_aggregate_threshold = COALESCE((v_item->>'annual_aggregate_threshold')::NUMERIC, annual_aggregate_threshold)
             WHERE society_id = p_society_id
               AND section = v_item->>'section'
               AND discriminator IS NOT DISTINCT FROM (v_item->>'discriminator')
@@ -14283,8 +14295,8 @@ BEGIN
                     v_item->>'nature_of_income',
                     (v_item->>'rate')::NUMERIC,
                     (v_item->>'rate_no_pan')::NUMERIC,
-                    (v_item->>'single_bill_threshold')::NUMERIC,
-                    (v_item->>'annual_aggregate_threshold')::NUMERIC,
+                    COALESCE((v_item->>'single_bill_threshold')::NUMERIC, 30000),
+                    COALESCE((v_item->>'annual_aggregate_threshold')::NUMERIC, 0),
                     v_tds_eff
                 );
             END IF;
@@ -14298,11 +14310,14 @@ BEGIN
     WHERE society_id = p_society_id AND effective_to IS NULL
     ORDER BY effective_from DESC LIMIT 1;
 
-    IF v_gst_id IS NOT NULL THEN
-        UPDATE gst_rates SET cgst_rate_pct = p_cgst, sgst_rate_pct = p_sgst WHERE id = v_gst_id;
-    ELSE
-        INSERT INTO gst_rates (society_id, cgst_rate_pct, sgst_rate_pct, effective_from)
-        VALUES (p_society_id, p_cgst, p_sgst, CURRENT_DATE);
+    -- No rate is assumed: when the admin left CGST / SGST blank (to be given by the CA) nothing is written.
+    IF p_cgst IS NOT NULL AND p_sgst IS NOT NULL THEN
+        IF v_gst_id IS NOT NULL THEN
+            UPDATE gst_rates SET cgst_rate_pct = p_cgst, sgst_rate_pct = p_sgst WHERE id = v_gst_id;
+        ELSE
+            INSERT INTO gst_rates (society_id, cgst_rate_pct, sgst_rate_pct, effective_from)
+            VALUES (p_society_id, p_cgst, p_sgst, CURRENT_DATE);
+        END IF;
     END IF;
 
     -- 4) Apartment charges default (apt_id IS NULL row = society-wide fallback,
