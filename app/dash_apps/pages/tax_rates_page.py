@@ -37,8 +37,10 @@ def act_line(row: dict) -> str:
     """'Income-tax Act 2025 · from 01 Apr 2026' - which Act (and from when) a TDS row governs. Two rows can share a
     section and discriminator (one per Act), so the label has to tell them apart."""
     act = _ACT_LABELS.get(row.get("act_version"), row.get("act_version") or "")
-    since = row.get("effective_from")
-    return f"{act} · from {_fmt_dt(since)}" if since else act
+    since, until = row.get("effective_from"), row.get("effective_to")
+    if not since:
+        return act
+    return f"{act} · from {_fmt_dt(since)}" + (f" to {_fmt_dt(until)}" if until else "")
 
 
 def status_banner(society_id: int):
@@ -56,6 +58,40 @@ def status_banner(society_id: int):
 def _inp(kind: str, rid, value, width="92px"):
     return dbc.Input(id={"type": f"{P}-{kind}", "id": rid}, type="number", value=value, min=0, step="any",
                      size="sm", style={"width": width})
+
+
+def _field(label, comp, width="150px"):
+    return html.Div([html.Div(label, style={"fontSize": "11.5px", "color": "#556", "marginBottom": "2px"}), comp],
+                    style={"marginRight": "12px", "marginBottom": "8px", "width": width})
+
+
+def _add_rate_block():
+    """A section can carry several rates, each with its own effective date. This adds one."""
+    def inp(suffix, **kw):
+        return dbc.Input(id=f"{P}-new-{suffix}", size="sm", **kw)
+    num = {"type": "number", "min": 0, "step": "any"}
+    return html.Div([
+        html.H6("Add a rate with an effective date", className="mb-1"),
+        html.Div("A section can have different rates from different dates; the rate in force on the bill's date is "
+                 "used. Rate and rate without PAN are required. A blank nature or limit is taken from the nearest "
+                 "earlier rate of the same section; the earlier rate then ends the day before this one starts.",
+                 style={**_MUTED, "marginBottom": "8px"}),
+        html.Div([
+            _field("Section *", inp("section", type="text", maxLength=10, placeholder="e.g. 194C"), "110px"),
+            _field("Discriminator", inp("disc", type="text", maxLength=50, placeholder="e.g. Company"), "140px"),
+            _field("Effective from *", inp("from", type="date"), "150px"),
+            _field("Act", dbc.Select(id=f"{P}-new-act", size="sm", value="",
+                                     options=[{"label": "By date", "value": ""},
+                                              {"label": "Income-tax Act 1961", "value": "IT1961"},
+                                              {"label": "Income-tax Act 2025", "value": "IT2025"}]), "170px"),
+            _field("Rate % *", inp("rate", **num), "90px"),
+            _field("Rate without PAN % *", inp("nopan", **num), "120px"),
+            _field("Single-bill limit", inp("single", **num), "120px"),
+            _field("Annual limit", inp("annual", **num), "120px"),
+            _field("Nature of payment", inp("nature", type="text", maxLength=255), "240px"),
+        ], style={"display": "flex", "flexWrap": "wrap"}),
+        dbc.Button("Add rate", id=f"{P}-tds-add", color="primary", size="sm"),
+    ], style=_CARD)
 
 
 def tax_rates_body(society_id: int, can_edit: bool) -> list:
@@ -115,6 +151,8 @@ def tax_rates_body(society_id: int, can_edit: bool) -> list:
             (html.Div("A blank box leaves that figure as it is.", style=_MUTED) if can_edit else None),
         ], style=_CARD)
 
+    add_block = _add_rate_block() if can_edit else None
+
     actions = []
     if can_edit:
         st = trs.status(society_id)
@@ -123,7 +161,7 @@ def tax_rates_body(society_id: int, can_edit: bool) -> list:
                        disabled=not st["pending"]),
             html.Span("  Confirms the figures as they stand now. Any later edit makes them pending again.",
                       style=_MUTED)], style={**_CARD, "background": "#f1faf4"})]
-    return [status_banner(society_id), gst_block, tds_block, *actions]
+    return [status_banner(society_id), gst_block, tds_block, *([add_block] if add_block is not None else []), *actions]
 
 
 def tax_rates_tab(role: str, society_id: int | None):

@@ -487,7 +487,7 @@ def _central_acts_banner():
 
 def _render_tds_rates_table():
     """Render the TDS rates table for the TAN & TDS Rates step."""
-    from database.seed import TDS_SECTION_RATE_SEED
+    from database.seed import tds_wizard_rows
     header = html.Div([
         _th("Section", "Income Tax Act section the TDS is deducted under (e.g. 194C contractors, 194J professionals)."),
         _th("Discriminator", "Sub-category inside a section (for example payee type). Fixed by the seed data."),
@@ -499,7 +499,7 @@ def _render_tds_rates_table():
     ], className="sw-grid-row sw-tds-grid sw-grid-head")
 
     rows = []
-    for idx, item in enumerate(TDS_SECTION_RATE_SEED):
+    for idx, item in enumerate(tds_wizard_rows()):
         section, discriminator, nature, rate, rate_no_pan, single_bill, agg_bill = item[:7]  # seed rows also carry eff_from / act_version / section_2025
         rows.append(html.Div([
             html.Div(dbc.Input(id={"type": "tds-section", "index": idx}, value=section, readonly=True, size="sm")),
@@ -1006,7 +1006,6 @@ def render_review(v, society_id=None):
     if bf_n and abs(bf_dr - bf_cr) > 0.005:
         problems.append(f"Brought Forward does not balance: Dr ₹{bf_dr:,.2f} vs Cr ₹{bf_cr:,.2f}. Submit will reject it.")
 
-    from database.seed import TDS_SECTION_RATE_SEED
     rates = v.get("tds_rates") or []
     tds_entered = sum(1 for r in rates if r not in (None, ""))
 
@@ -1466,7 +1465,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                       color="warning", className="mt-3", style={"fontSize": "13px"}),
         ]
     elif category == "TAN & TDS Rates":
-        from database.seed import TDS_SECTION_RATE_SEED
+        from database.seed import tds_wizard_rows
         s_tan = ""
         if society_id:
             row = db._execute("SELECT tan_number FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
@@ -1498,7 +1497,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
         ], className="sw-grid-row sw-tds-grid sw-grid-head")
 
         rows = []
-        for idx, item in enumerate(TDS_SECTION_RATE_SEED):
+        for idx, item in enumerate(tds_wizard_rows()):
             section, discriminator, nature, rate, rate_no_pan, single_bill, agg_bill = item[:7]  # seed rows also carry eff_from / act_version / section_2025
             rows.append(html.Div([
                 html.Div(dbc.Input(id={"type": "tds-section", "index": idx}, value=section, readonly=True, size="sm")),

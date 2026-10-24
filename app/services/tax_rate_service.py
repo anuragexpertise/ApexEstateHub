@@ -15,6 +15,8 @@ Any edit puts the figures back to "pending" until someone entitled confirms them
 """
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
+
 from app.security.authorization import Cap
 from app.security.service_guard import audit_event, check, current_principal
 from database.db_manager import db
@@ -61,6 +63,8 @@ def may_edit_tax_rates(society_id: int | None) -> tuple[bool, str]:
         return False, "Authorization is unavailable."
     if principal is None or not principal.user_id:
         return False, "Not signed in."
+    if principal.base_role == "master":      # platform operator: the drilldown has always let Master edit TDS rates
+        return True, "Master"
     if check(Cap.FINANCE_TAX_RATES_MANAGE, RESOURCE, target_society_id=society_id, audit_denials=False).allowed:
         return True, "CA / Treasurer"
     if _is_acting_secretary(society_id, principal.user_id):
@@ -193,3 +197,133 @@ def save_tds_rates(society_id: int, changes: list[dict]) -> int:
         audit_event("tds_rates.edited", RESOURCE, society_id, after={"rows": before_after},
                     permission_used=Cap.FINANCE_TAX_RATES_MANAGE, society_id=society_id)
     return n
+
+
+IT2025_START = date(2026, 4, 1)      # the TDS engine reads only 'IT2025' rows from this date (fn_compute_tds_pct)
+
+
+def _date(v, label: str) -> date:
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    try:
+        return date.fromisoformat(str(v)[:10])
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a date (YYYY-MM-DD).")
+
+
+def add_tds_rate(society_id: int, d: dict) -> int:
+    """Add a TDS rate that takes effect on a given date. A section can carry several rates, each with its own
+    effective date; the engine picks the one in force on the bill's date (and the Act that date falls under).
+
+    `d` = {section, discriminator, nature_of_income, rate, rate_no_pan, single_bill_threshold,
+           annual_aggregate_threshold, effective_from, act_version}.
+    Required: section, rate, rate_no_pan, effective_from. act_version blank = the Act the date falls under
+    (IT2025 from 1-Apr-2026, else IT1961). Blank nature / thresholds are taken from the nearest existing rate of the
+    same section, discriminator and Act; with no such rate the single-bill threshold is required.
+    The neighbouring rates' end dates are kept consistent: the rate before it ends the day before this one starts, and
+    this one ends the day before the next one starts. Returns the new row id."""
+    _require(society_id)
+    section = (d.get("section") or "").strip()
+    if not section or len(section) > 10:
+        raise ValueError("Enter the section (up to 10 characters), e.g. 194C.")
+    disc = (d.get("discriminator") or "").strip() or None
+    if disc and len(disc) > 50:
+        raise ValueError("Discriminator is too long.")
+    if d.get("effective_from") in (None, ""):
+        raise ValueError("Enter the date this rate takes effect.")
+    eff = _date(d.get("effective_from"), "Effective from")
+    act = (d.get("act_version") or "").strip() or ("IT2025" if eff >= IT2025_START else "IT1961")
+    if act not in ("IT1961", "IT2025"):
+        raise ValueError("Act must be IT1961 or IT2025.")
+    rate = _num(d.get("rate"), "TDS rate", 0, 100)
+    nopan = _num(d.get("rate_no_pan"), "TDS rate without PAN", 0, 100)
+    if rate is None or nopan is None:
+        raise ValueError("Enter both the TDS rate and the rate without PAN. No rate is assumed.")
+    single = _num(d.get("single_bill_threshold"), "Single-bill threshold")
+    annual = _num(d.get("annual_aggregate_threshold"), "Annual threshold")
+
+    key = (society_id, section, disc, disc, act)
+    same = ("society_id = %s AND section = %s AND (discriminator = %s OR (discriminator IS NULL AND %s IS NULL)) "
+            "AND act_version = %s")
+    if db._execute(f"SELECT 1 AS x FROM tds_section_rates WHERE {same} AND effective_from = %s LIMIT 1",
+                   (*key, eff), fetch_one=True):
+        raise ValueError(f"A {act} rate for {section} effective {eff:%d %b %Y} already exists. Edit that row instead.")
+
+    # nearest existing rate of the same kind: the previous one if any, else the next one
+    prev = db._execute(f"SELECT id, nature_of_income, single_bill_threshold, annual_aggregate_threshold, "
+                       f"threshold_inclusive, threshold_basis, section_2025, effective_to FROM tds_section_rates "
+                       f"WHERE {same} AND effective_from < %s ORDER BY effective_from DESC LIMIT 1",
+                       (*key, eff), fetch_one=True)
+    nxt = db._execute(f"SELECT id, nature_of_income, single_bill_threshold, annual_aggregate_threshold, "
+                      f"threshold_inclusive, threshold_basis, section_2025, effective_from FROM tds_section_rates "
+                      f"WHERE {same} AND effective_from > %s ORDER BY effective_from ASC LIMIT 1",
+                      (*key, eff), fetch_one=True)
+    base = prev or nxt
+    if single is None:
+        if not base:
+            raise ValueError(f"Enter the single-bill threshold: there is no {act} rate for this section to take it from "
+                             "(the limits differ between the 1961 and 2025 Acts, so they are not copied across).")
+        single = float(base["single_bill_threshold"])
+    if annual is None:
+        annual = float(base["annual_aggregate_threshold"]) if base else 0.0
+    nature = (d.get("nature_of_income") or "").strip() or (base or {}).get("nature_of_income")
+    inclusive = bool(base["threshold_inclusive"]) if base else False
+    basis = (base or {}).get("threshold_basis") or "bill"
+    section_2025 = (base or {}).get("section_2025")
+
+    to_date = (nxt["effective_from"] - timedelta(days=1)) if nxt else None
+    row = db._execute(
+        "INSERT INTO tds_section_rates (society_id, section, discriminator, nature_of_income, rate, rate_no_pan, "
+        "single_bill_threshold, annual_aggregate_threshold, effective_from, effective_to, act_version, section_2025, "
+        "threshold_inclusive, threshold_basis) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+        (society_id, section, disc, nature, rate, nopan, single, annual, eff, to_date, act, section_2025,
+         inclusive, basis), fetch_one=True)
+    new_id = int(row["id"])
+    if prev and (prev.get("effective_to") is None or prev["effective_to"] >= eff):
+        db._execute("UPDATE tds_section_rates SET effective_to = %s WHERE id = %s AND society_id = %s",
+                    (eff - timedelta(days=1), prev["id"], society_id))
+    mark_pending(society_id)
+    audit_event("tds_rate.added", RESOURCE, society_id,
+                after={"id": new_id, "section": section, "discriminator": disc, "act_version": act,
+                       "effective_from": str(eff), "rate": rate, "rate_no_pan": nopan},
+                permission_used=Cap.FINANCE_TAX_RATES_MANAGE, society_id=society_id)
+    return new_id
+
+
+def update_tds_rate(society_id: int, rate_id: int, d: dict) -> None:
+    """Edit the VALUES of one existing TDS rate: rate, rate without PAN, limits, nature of payment.
+
+    The section, discriminator and effective date identify the rate and keep the dated chain consistent (each rate
+    ends the day before the next one starts), so they cannot be changed here: add a new dated rate instead
+    (add_tds_rate). Sending them unchanged is fine."""
+    _require(society_id)
+    cur = db._execute("SELECT id, section, discriminator, effective_from FROM tds_section_rates "
+                      "WHERE id = %s AND society_id = %s", (rate_id, society_id), fetch_one=True)
+    if not cur:
+        raise ValueError("That TDS rate does not belong to this society.")
+    if (d.get("section") or "").strip() not in ("", cur["section"]) or \
+       ((d.get("discriminator") or "").strip() or None) != (cur["discriminator"] or None) or \
+       (d.get("effective_from") not in (None, "") and _date(d["effective_from"], "Effective from") != cur["effective_from"]):
+        raise ValueError("The section, discriminator and effective date of a rate cannot be changed. "
+                         "To start a new rate from another date, add a new rate.")
+    rate = _num(d.get("rate"), "TDS rate", 0, 100)
+    if rate is None:
+        raise ValueError("Enter the TDS rate.")
+    vals = {"rate": rate,
+            "rate_no_pan": _num(d.get("rate_no_pan"), "TDS rate without PAN", 0, 100),
+            "single_bill_threshold": _num(d.get("single_bill_threshold"), "Single-bill threshold"),
+            "annual_aggregate_threshold": _num(d.get("annual_aggregate_threshold"), "Annual threshold")}
+    given = {k: v for k, v in vals.items() if v is not None}
+    nature = d.get("nature_of_income")
+    sets = [f"{k} = %s" for k in given]
+    params = list(given.values())
+    if nature is not None:
+        sets.append("nature_of_income = %s")
+        params.append(nature.strip() or None)
+    db._execute(f"UPDATE tds_section_rates SET {', '.join(sets)} WHERE id = %s AND society_id = %s",
+                (*params, rate_id, society_id))
+    mark_pending(society_id)
+    audit_event("tds_rate.edited", RESOURCE, society_id, after={"id": rate_id, **given},
+                permission_used=Cap.FINANCE_TAX_RATES_MANAGE, society_id=society_id)

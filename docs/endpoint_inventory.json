@@ -1198,7 +1198,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "close_fy_with_reserve",
-    "line": 6379,
+    "line": 6381,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1219,7 +1219,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "download_fy_export",
-    "line": 2575,
+    "line": 2587,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1236,7 +1236,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "download_xls",
-    "line": 2723,
+    "line": 2735,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1287,7 +1287,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "expense_tds_pan_banner",
-    "line": 2532,
+    "line": 2533,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1362,7 +1362,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "handle_poll_vote",
-    "line": 2820,
+    "line": 2832,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1385,7 +1385,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "lock_financial_year",
-    "line": 6487,
+    "line": 6489,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1409,7 +1409,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "mark_rcm_gstr_filed",
-    "line": 2750,
+    "line": 2762,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1470,7 +1470,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "select_pass_type",
-    "line": 2778,
+    "line": 2790,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1487,7 +1487,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "update_member_ledger_state",
-    "line": 6335,
+    "line": 6337,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3918,6 +3918,25 @@
       "require_session"
     ],
     "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:tax_rate_callbacks.py::tr_add_tds",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/tax_rate_callbacks.py",
+    "function": "tr_add_tds",
+    "line": 111,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [
+      "finance.taxrates.manage"
+    ],
     "public": false
   },
   {

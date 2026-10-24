@@ -734,6 +734,12 @@
     "callback:shell_callbacks.py::update_global_card_search": {
       "classification": "unclassified"
     },
+    "callback:tax_rate_callbacks.py::tr_add_tds": {
+      "classification": "action",
+      "actions": [
+        "finance.taxrates.manage"
+      ]
+    },
     "callback:tax_rate_callbacks.py::tr_confirm": {
       "classification": "action",
       "actions": [
