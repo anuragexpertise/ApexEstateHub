@@ -21,7 +21,7 @@ import re
 import time
 import logging
 from contextlib import contextmanager
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import psycopg2
 import psycopg2.extras
@@ -66,7 +66,17 @@ class DatabaseManager:
 
     def __init__(self):
         self._pool: pool.ThreadedConnectionPool | None = None
+        self._last_error: str = ""
         self._init_pool()
+
+    @staticmethod
+    def _safe_target(dsn: str) -> str:
+        """host:port/db from a DSN, with credentials and query string removed."""
+        try:
+            parts = urlsplit(dsn)
+            return f"{parts.hostname}:{parts.port or 5432}{parts.path}"
+        except Exception:
+            return "<unparseable DSN>"
 
     # ── Pool init ─────────────────────────────────────────────────────────────
 
@@ -117,16 +127,27 @@ class DatabaseManager:
         # urllib.parse.quote(), which is what the DSN's own `quote(pw)` above
         # already does for the password for the identical reason.
         tz = os.getenv("TZ", "Asia/Kolkata")
-        dsn += f"&options={quote(f'-c timezone={tz}')}"
+        # Aiven's PgBouncer connection pools reject the "options" startup
+        # parameter with "unsupported startup parameter: options", which
+        # fails every connection. Set PG_SKIP_STARTUP_OPTIONS=1 on the host
+        # (Render) when connecting through a PgBouncer pool.
+        skip_opts = os.getenv("PG_SKIP_STARTUP_OPTIONS", "").strip().lower() in ("1", "true", "yes")
+        if not skip_opts:
+            dsn += f"&options={quote(f'-c timezone={tz}')}"
 
         return dsn
 
     def _init_pool(self):
+        dsn = ""
         try:
             dsn = self._dsn()
+            # minconn=1: every gunicorn worker builds its own pool, and the
+            # old minconn=5 opened 5 connections per worker at import time,
+            # which exhausts the connection limit of small Aiven plans.
+            # Extra connections are opened on demand up to maxconn.
             self._pool = pool.ThreadedConnectionPool(
-                minconn=5,
-                maxconn=10,
+                minconn=int(os.getenv("DB_POOL_MIN", "1")),
+                maxconn=int(os.getenv("DB_POOL_MAX", "10")),
                 dsn=dsn,
                 cursor_factory=psycopg2.extras.RealDictCursor,
                 connect_timeout=15,
@@ -135,9 +156,15 @@ class DatabaseManager:
                 keepalives_interval=10,
                 keepalives_count=5,
             )
-            log.info("✅ DB pool initialised (Aiven PostgreSQL)")
+            self._last_error = ""
+            log.info("✅ DB pool initialised (%s)", self._safe_target(dsn))
         except Exception as exc:
-            log.error("❌ DB pool init failed: %s", exc)
+            target = self._safe_target(dsn) if dsn else "<no DSN built>"
+            self._last_error = f"{type(exc).__name__}: {exc}".strip()
+            # print() as well: this module logs with print() elsewhere, and the
+            # message must reach Render's log stream even if logging is unconfigured.
+            print(f"❌ DB pool init failed for {target}: {self._last_error}")
+            log.error("❌ DB pool init failed for %s: %s", target, self._last_error)
             self._pool = None
 
     # ── Connection context manager ────────────────────────────────────────────
@@ -147,7 +174,10 @@ class DatabaseManager:
         if self._pool is None:
             self._init_pool()
         if self._pool is None:
-            raise RuntimeError("Database connection pool unavailable")
+            raise RuntimeError(
+                "Database connection pool unavailable"
+                + (f" ({self._last_error})" if self._last_error else "")
+            )
 
         _t_get0 = time.monotonic()
         conn = self._pool.getconn()
