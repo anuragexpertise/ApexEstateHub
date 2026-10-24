@@ -5819,40 +5819,23 @@ def _save_tds_rate(db, d, sid, is_edit, pk):
         allowed, why = tax_rate_service.may_edit_tax_rates(sid)
         if not allowed:
             return False, why, None
-    section = (d.get("section") or "").strip()
-    discriminator = (d.get("discriminator") or "").strip() or None
-    nature_of_income = (d.get("nature_of_income") or "").strip()
-    rate = d.get("rate")
-    rate_no_pan = d.get("rate_no_pan")
-    single_thr = d.get("single_bill_threshold")
-    if single_thr is None:
-        single_thr = 30000
-    annual_thr = d.get("annual_aggregate_threshold")
-    if annual_thr is None:
-        annual_thr = 0
-    eff_from = d.get("effective_from")
-    if not section or rate is None or not eff_from:
-        return False, "Section, Rate and Effective From are required.", None
-
+    # Both paths go through tax_rate_service so the dated chain stays consistent: a new rate gets its Act version
+    # and closes the previous rate's end date; an edit changes values only (section / date identify the rate).
+    payload = {
+        "section": d.get("section"), "discriminator": d.get("discriminator"),
+        "nature_of_income": d.get("nature_of_income"), "rate": d.get("rate"), "rate_no_pan": d.get("rate_no_pan"),
+        "single_bill_threshold": d.get("single_bill_threshold"),
+        "annual_aggregate_threshold": d.get("annual_aggregate_threshold"),
+        "effective_from": d.get("effective_from"), "act_version": d.get("act_version"),
+    }
     try:
         if is_edit:
-            db._execute(
-                "UPDATE tds_section_rates SET section=%s, discriminator=%s, nature_of_income=%s, rate=%s, rate_no_pan=%s, "
-                "single_bill_threshold=%s, annual_aggregate_threshold=%s, effective_from=%s "
-                "WHERE id=%s AND society_id=%s",
-                (section, discriminator, nature_of_income, rate, rate_no_pan, single_thr, annual_thr, eff_from, pk, sid)
-            )
-            tax_rate_service.mark_pending(sid)      # an edited figure is provisional until confirmed again
+            tax_rate_service.update_tds_rate(sid, pk, payload)
             return True, "TDS rate updated. Pending confirmation.", None
-        else:
-            db._execute(
-                "INSERT INTO tds_section_rates "
-                "(society_id, section, discriminator, nature_of_income, rate, rate_no_pan, single_bill_threshold, annual_aggregate_threshold, effective_from) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (sid, section, discriminator, nature_of_income, rate, rate_no_pan, single_thr, annual_thr, eff_from)
-            )
-            tax_rate_service.mark_pending(sid)
-            return True, "TDS rate added. Pending confirmation.", None
+        tax_rate_service.add_tds_rate(sid, payload)
+        return True, "TDS rate added. Pending confirmation.", None
+    except (ValueError, PermissionError) as e:
+        return False, str(e), None
     except Exception as e:
         return False, _clean_pg_error(e), None
 

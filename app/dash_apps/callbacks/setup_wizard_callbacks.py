@@ -6,7 +6,7 @@ from dash.exceptions import PreventUpdate
 from dash import Input, Output, State, ALL, MATCH, callback, no_update, html, ctx, clientside_callback
 import dash_bootstrap_components as dbc
 from database.db_manager import db
-from database.seed import TDS_SECTION_RATE_SEED, it2025_twin
+from database.seed import tds_wizard_rows, it2025_twin
 from app.dash_apps.pages.setup_wizard import (
     get_setup_wizard_layout, CATEGORIES, step_label, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS,
     build_rules_panel, rules_subtitle, apt_charges_error, basis_hint, render_review,
@@ -741,17 +741,14 @@ def register_setup_wizard_callbacks(app):
             except Exception as e:
                 return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to secure the signing secret. Check the server configuration and try again.")["message"], _hidden_spinner, no_update, no_update
 
-            # Zip edited rates back onto their seed sections. See the note
-            # on fn_complete_society_setup: TDS_SECTION_RATE_SEED has two
-            # rows sharing section '194C' — the later one in this list wins
-            # once persisted, a pre-existing schema/seed mismatch, not
-            # something this fix resolves.
+            # Zip the typed rates back onto the wizard's rows: ONE per (section, discriminator), see
+            # database.seed.tds_wizard_rows(). Earlier dated rates are added later on the TDS & GST Rates tab.
             def _num_or_none(lst, i):
                 v = lst[i] if i < len(lst) else None
                 return None if v in (None, "") else float(v)
 
             tds_pairs = []
-            for idx, item in enumerate(TDS_SECTION_RATE_SEED):
+            for idx, item in enumerate(tds_wizard_rows()):
                 rate = _num_or_none(tds_rates, idx)
                 if rate is None:
                     continue        # not entered: save nothing for this row; the CA fills it in later

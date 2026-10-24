@@ -102,3 +102,23 @@ def register_tax_rate_callbacks(app):
         except PermissionError as exc:
             return _alert(str(exc), "danger"), no_update
         return _alert("TDS and GST rates confirmed.", "success"), tp.tax_rates_body(sid, True)
+
+    _NEW = ("section", "disc", "from", "act", "rate", "nopan", "single", "annual", "nature")
+
+    @app.callback(_TOAST, _BODY, Input(f"{P}-tds-add", "n_clicks"),
+                  *[State(f"{P}-new-{k}", "value") for k in _NEW], prevent_initial_call=True)
+    @require_session
+    def tr_add_tds(n, section, disc, eff_from, act, rate, nopan, single, annual, nature):
+        if not n:
+            return no_update, no_update
+        sid, err = _ctx()
+        if err:
+            return err, no_update
+        try:
+            trs.add_tds_rate(sid, {
+                "section": section, "discriminator": disc, "effective_from": eff_from, "act_version": act,
+                "rate": rate, "rate_no_pan": nopan, "single_bill_threshold": single,
+                "annual_aggregate_threshold": annual, "nature_of_income": nature})
+        except (ValueError, PermissionError) as exc:
+            return _alert(str(exc), "danger"), no_update
+        return _alert("Rate added. Pending confirmation.", "success"), tp.tax_rates_body(sid, True)

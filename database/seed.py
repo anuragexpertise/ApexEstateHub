@@ -1740,6 +1740,25 @@ TDS_IT2025_SEED = [
 ]
 
 
+def tds_wizard_rows():
+    """The rows the Setup Wizard offers: ONE per (section, discriminator), the one in force today.
+
+    TDS_SECTION_RATE_SEED also carries dated history (194H and 194-IB each appear twice: an older and a newer
+    rate). The wizard saves the figure the Admin / CA types as the society's current rate, so offering both
+    history rows made two boxes for one thing and the later one silently won. Earlier dated rates are added
+    afterwards, one by one, on Settings > TDS & GST Rates > "Add a rate". Rows keep the seed's tuple shape and
+    first-seen order, so existing code that indexes item[0..9] works unchanged."""
+    latest, order = {}, []
+    for row in TDS_SECTION_RATE_SEED:
+        key = (row[0], row[1])
+        if key not in latest:
+            order.append(key)
+            latest[key] = row
+        elif str(row[7]) > str(latest[key][7]):
+            latest[key] = row
+    return [latest[k] for k in order]
+
+
 def it2025_twin(section, discriminator=None):
     """The Income-tax Act 2025 (s.393) row that matches an IT1961 (section, discriminator), shaped as the 'it2025'
     object fn_complete_society_setup reads, or None when the 2025 table carries no such row (193, 192A, 194F and
