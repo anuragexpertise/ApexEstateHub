@@ -48,8 +48,8 @@ load_dotenv(ENV_FILE)
 # Database configuration from .env
 DB_HOST = os.getenv("DATABASE_HOST") or os.getenv("PGHOST") or "localhost"
 DB_PORT = int(os.getenv("DATABASE_PORT") or os.getenv("PGPORT") or "5432")
-DB_NAME = os.getenv("DATABASE_NAME") or os.getenv("PGDATABASE") or "neondb"
-DB_USER = os.getenv("DATABASE_USER") or os.getenv("PGUSER") or "neondb_owner"
+DB_NAME = os.getenv("DATABASE_NAME") or os.getenv("PGDATABASE") or "defaultdb"
+DB_USER = os.getenv("DATABASE_USER") or os.getenv("PGUSER") or "avnadmin"
 DB_PASSWORD = os.getenv("DATABASE_PASSWORD") or os.getenv("PGPASSWORD") or ""
 
 # SSL for Aiven (recommended)
