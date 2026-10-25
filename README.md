@@ -2333,3 +2333,16 @@ The following tables map every user-reachable workflow in the application, organ
 - **Audit gate**: a statement cannot be recorded as published without an auditor and a sign-off date on or before publication.
 - Citation fix: the reserve appropriation provision is bye-law 46(c). The Corpus Fund's RERA citations in this README were not found in the UP Act or bye-laws and should be read as unverified.
 - Not yet built: cheque co-signatories (bye-law 49(1)), interest-rate resolution, investment limits (bye-law 47), borrowing approval (46(d)), daily cashbook signature (25(f)), s.18(2) tenant liability. Bye-law 35 (assessment on "value of the unit") versus s.18(1) (undivided interest) needs an advocate's view.
+
+---
+
+### Phase 0 — recorded answers (24 Oct 2026)
+
+- **Wizard steps:** keep all steps; labels only (task 0.1).
+- **Cash-in-Hand leg:** deferred; stays in risks.
+- **Interest wording:** "Simple Interest - Bye-law 46(a) - Rate <rate> via Resolution by GBM" (task 1.9).
+- **Approval ladder:** optional with UI; default ₹20,000 (bye-law 49) for Secretary/Treasurer, unlimited for Committee and General Body (task 2.5).
+- **Scheduler and keys:** ApexWeave scheduled jobs; four keys per society; `SECRET_VAULT_KEY` in host `.env`; `SECRET_MASTER_KEY` held offline (tasks 1.2–1.4, 4.5). Dropped: news feature and monthly bill job.
+- **Advisers and retention:** Treasurer/Auditor files advocate opinions and CA sign-offs; 5-year default retention (tasks 0.3, 0.4, 2.7, 4.4).
+
+Provisional figures needing an opinion: 2/3 policy and 1/2 resolution majorities, cash ceiling, bye-law 46(d) depreciation-fund label, bye-law 7 year basis, poll majority basis (task 0.2). Retention default 5 years, configurable per society, subject to CA confirmation on longer periods required by any applicable Act (task 0.4).
