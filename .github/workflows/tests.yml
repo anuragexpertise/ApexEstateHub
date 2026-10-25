@@ -12,3 +12,33 @@ jobs:
       - run: env -u PGHOST -u PGDATABASE -u PGUSER -u PGPASSWORD -u DATABASE_URL python -m pytest -q test -m "not postgres_integration"
       - run: python scripts/check_callback_guards.py
       - run: python scripts/inventory_endpoints.py --check
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: estatehub
+          POSTGRES_PASSWORD: estatehub
+          POSTGRES_DB: estatehub
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt pytest
+      - run: psql -h localhost -U estatehub -d estatehub -f database/estatehub.sql
+        env:
+          PGPASSWORD: estatehub
+      - run: python -m pytest -q test -m "postgres_integration"
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGDATABASE: estatehub
+          PGUSER: estatehub
+          PGPASSWORD: estatehub
