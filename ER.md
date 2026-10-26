@@ -156,13 +156,27 @@ constraints inline; the only `ALTER TABLE` left is `societies.fk_primary_bank_ac
 | A-03 income-tax working paper | **Partly done** | Rebuilt on `fn_income_expenditure_fy` (P&L accounts only, accrual). The old function referenced a non-existent column and could never run. Export fixed (Decimal, one `Expenditure` label). **Not done:** expense-apportionment rule (needs a resolution-approved assumption), depreciation, brought-forward losses. |
 | A-04 period locks | **Done** | `fy_locks`, `fn_lock_fy`, enforced by trigger on `transactions`. |
 | T-01 / T-02 TDS & Income-tax Act 2025 | **Done, with limits** | Effective-dated rows, `act_version`/`section_2025`, strict "exceeds" test (194-IA inclusive), IT1961 rows end 31-Mar-2026. Limits: IT1961 rows for 1-Apr-2025..31-Mar-2026 were re-derived only for 194H and 194-IB; 192A has no IT2025 row; rent is per *month* in the 2025 Act but the engine tests one bill at a time; 194-IA/194Q need inputs the engine lacks. Confirm every figure with your CA. |
-| X-01 GST fund toggle | **Done** | Default FALSE; TRUE requires a resolution reference and a CA/advocate opinion reference (`ck_fund_gst_exempt_authority`). **Not done:** printing the authority on invoices. |
-| X-02 turnover / 0% GST | **Partly done** | Billing already raises when no GST rate exists. **Not done:** the Sec 2(6) aggregate-turnover definition and dated worksheet. |
+| X-01 GST fund toggle | **Done** | Default FALSE; TRUE requires a resolution reference and a CA/advocate opinion reference (`ck_fund_gst_exempt_authority`). **Not done:** printing the authority on invoices (plan task 1.6). |
+| X-02 turnover / 0% GST | **Done, with limits** | Billing raises when no GST rate exists. `gst_export.py` has an *Aggregate Turnover* worksheet under CGST s.2(6), backed by `fn_gst_turnover_lines` / `fn_gst_turnover_gate`. **Limits:** it covers the society's own books only (s.2(6) is PAN-wide and all-India; the footer says so), and accounts are classified from SQL, not a screen. |
 | G-01 resolution validity | **Done** | CHECK (`passed` ⇔ `status`, majority reached), quorum check and freeze trigger, and `fn_rule` now requires the linked resolution to have *passed*. |
-| G-02 vote registers | **Partly done** | Registers already existed; `fn_resolution_vote_summary` derives the tallies. The typed `votes_for_pct` is still accepted — it is not yet forced to equal the register. |
+| G-02 vote registers | **Done for General Body; open for Managing Committee** | `fn_resolution_vote_summary` derives the tally and General Body decisions ignore the typed percentage. Managing Committee decisions still take a typed value (plan task 1.10). The register itself is still keyed in by the secretary. |
 | G-03 meeting record | **Already in base** | `meetings` already had notice, agenda, chair, adjournment, sign-off fields. |
 | G-04 ratification expiry | **Partly done** | Expiry raises a `RATIFICATION_EXPIRED` compliance flag. **Not done:** automatic reversal — nothing links a posting to the decision that authorised it. |
 | C-01 cash rules | **Done** | s.186 (was s.269ST) enforced for cash receipts ≥ ₹2,00,000 (refused in `block` mode, flagged in `warn`); engine default is now `block`. The 40A(3) message is on the expense side only. |
 | I-02 arrears interest | **Already in base** | No silent default. **Not done:** cap check, simple/compound declaration. |
 | G-05, G-06, I-01, X-03, §7, §8-item 7 | **Not done** | Need advocate/CA input (G-05), a policy decision (G-06 approval ladder), or are new modules (ratification-of-irregular-item register, rule-application register, compliance certificate). |
-| Hygiene | **Partly done** | `income_tax_export.py` uses `Decimal`. About 95 `float()` conversions remain in the other exports and have not been audited. |
+| Hygiene | **Partly done** | `income_tax_export.py` uses `Decimal`. 297 `float(` calls remain across `app/` and `database/` (counted 25 Oct 2026; worst: `drilldown/renderers.py` 49, `drilldown_callbacks.py` 47, `financial_statements_export.py` 32, `ledger_export.py` 16, `fund_management_callbacks.py` 16, `gst_export.py` 13). Plan task 3.4. |
+
+### Decisions record (owner answers, 24-25 Oct 2026)
+
+Recorded from Plan v3, Phase 0 task 0.1. These are the owner's instructions; they are not legal advice and every legal figure still needs the CA or advocate.
+
+| Question | Decision | Plan task |
+|---|---|---|
+| Setup Wizard steps | Keep all steps; only labels change. | 0.1 |
+| Cash-in-Hand ledger leg (A-02) | Deferred. Not planned. | none |
+| Arrears interest wording | "Simple Interest - Bye-law 46(a) - Rate <rate> via Resolution by GBM". Simple interest only; no rate resolved means no interest; cap check stays off until an advocate's opinion (I-02). | 1.9 |
+| Spending approval ladder (G-06) | Optional per society, with a UI. Default Rs 20,000 (bye-law 49): Secretary or Treasurer approves. Above it: Managing Committee resolution plus at least 2 different serving office-bearers (adjustable 1-5). Committee and General Body unlimited; optional General Body threshold. | 2.5 |
+| Scheduler and keys | Estatehub runs on Render.com with an Aiven PostgreSQL database; scheduled jobs are Render cron jobs (not ApexWeave). Four signing keys per society (QR, NOC, Agreement, Ledger). `SECRET_VAULT_KEY` in the host `.env`; `SECRET_MASTER_KEY` held by the owner outside `.env` and the database. News feature and monthly bill job dropped. | 1.2-1.4, 4.5 |
+| Advisers and retention | Treasurer or Auditor files advocate opinions and CA sign-offs. Retention default 5 years, configurable per society; CA to say whether any applicable Act needs longer. | 0.3, 0.4, 2.7, 4.4 |
+| Adviser decisions (24-25 Oct 2026) | Majorities and contested-rule readings are per society, not Setup Wizard answers. Stored in `society_decision_types` and society-scoped rows of `rule_parameter_defs` (`society_id`, `start_date`), PROVISIONAL until the Secretary AND the Treasurer (two different people) approve on an Advocate's, CA's or Auditor's behalf, with a reference number (50 characters) and a PDF. An engine that needs a provisional entry refuses with "DECISION REQUIRED". | 0.2, 2.7 |
