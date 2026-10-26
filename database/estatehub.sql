@@ -12749,6 +12749,13 @@ BEGIN
     v_quorum_met := (v_eligible_voters = 0) OR (v_total_votes * 100.0 / NULLIF(v_eligible_voters, 0) >= v_poll.quorum_pct);
 
     IF v_weighted THEN
+        -- The reading of 'majority' is contested (poll_majority_of): the society's adviser must have confirmed it first.
+        BEGIN
+            PERFORM fn_require_confirmed(p_society_id, 'rule', 'poll_majority_of', CURRENT_DATE);
+        EXCEPTION WHEN SQLSTATE 'EH001' THEN
+            RETURN QUERY SELECT FALSE, SQLERRM::TEXT, NULL::JSONB;
+            RETURN;
+        END;
         -- Bye-law 8: a vote carries the owner's percentage. Bye-law 2(e): a "majority" is owners holding 51%
         -- of the votes. By default (poll_majority_of = all_votes) that is 51% of ALL eligible votes, so
         -- abstentions count against a motion; the society may not loosen that, only choose it explicitly.
@@ -14508,7 +14515,33 @@ CREATE TABLE regime_rule_parameters (
 -- statutory (Layer 0, society cannot change it) or non-statutory, who may vary it and within what limits,
 -- how it is enforced and which code reads it. Generated from schemes/<CODE>.toml (see below); the Master
 -- rule editor's RULE_SPECS and the society-level resolver fn_rule() read it too, so a rule is written once.
+-- -- ADVISER REFERENCE DOCUMENTS ---------------------------------------------------
+-- The PDF an Advocate / CA / Auditor gave the society for a decision or a rule reading. Immutable once stored
+-- (a decision's approval hashes the document's SHA-256). Declared here, ahead of rule_parameter_defs, which points at it.
+CREATE TABLE adviser_reference_documents (
+    id           SERIAL PRIMARY KEY,
+    society_id   INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    file_name    VARCHAR(120) NOT NULL,
+    mime_type    VARCHAR(30)  NOT NULL DEFAULT 'application/pdf' CHECK (mime_type = 'application/pdf'),
+    size_bytes   INT NOT NULL CHECK (size_bytes BETWEEN 5 AND 5242880),      -- 5 MB
+    sha256       CHAR(64) NOT NULL,
+    content      BYTEA NOT NULL,
+    uploaded_by  INT REFERENCES users (id),
+    uploaded_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_adviser_doc_size   CHECK (size_bytes = octet_length(content)),
+    CONSTRAINT ck_adviser_doc_hash   CHECK (sha256 = encode(sha256(content), 'hex')),
+    CONSTRAINT ck_adviser_doc_is_pdf CHECK (substring(content FROM 1 FOR 5) = '\x255044462d'::bytea)   -- "%PDF-"
+);
+CREATE INDEX idx_adviser_docs_society ON adviser_reference_documents (society_id);
+CREATE OR REPLACE FUNCTION trg_adviser_doc_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'An adviser reference document is evidence and cannot be changed or deleted: upload a new one.' USING ERRCODE = 'restrict_violation';
+END $$;
+CREATE TRIGGER trg_adviser_doc_immutable BEFORE UPDATE OR DELETE ON adviser_reference_documents
+    FOR EACH ROW EXECUTE FUNCTION trg_adviser_doc_immutable();
+
 CREATE TABLE rule_parameter_defs (
+    id             SERIAL PRIMARY KEY,
     regime_code    VARCHAR(30) NOT NULL,     -- no FK, like regime_rule_parameters
     rule_key       VARCHAR(30) NOT NULL,     -- <= 30: also used as resolutions.clause_id
     label          VARCHAR(200) NOT NULL,
@@ -14534,10 +14567,29 @@ CREATE TABLE rule_parameter_defs (
     needs_decision BOOLEAN NOT NULL DEFAULT FALSE,
     implemented    BOOLEAN NOT NULL DEFAULT TRUE,
     description    TEXT,
-    PRIMARY KEY (regime_code, rule_key),
+    -- Society scope. society_id NULL = the platform's definition (one per regime and rule). A row with a society_id is that
+    -- society's own copy: its start_date says from when it applies, and approved_status says whether the Secretary AND
+    -- Treasurer have confirmed it on an adviser's behalf (see society_decision_approvals). The engines that need a
+    -- 'provisional' or 'disputed' rule refuse to run until the society's row is confirmed (fn_require_confirmed).
+    society_id       INT REFERENCES societies (id) ON DELETE RESTRICT,
+    start_date       DATE,
+    approval_by      TEXT[] NOT NULL DEFAULT ARRAY['secretary', 'treasurer'],
+    on_behalf_of     VARCHAR(10) CHECK (on_behalf_of IN ('Advocate', 'CA', 'Auditor')),
+    reference_text   VARCHAR(50),
+    reference_doc_id INT REFERENCES adviser_reference_documents (id),
+    approved_status  VARCHAR(12) NOT NULL DEFAULT 'provisional' CHECK (approved_status IN ('provisional', 'confirmed')),
+    confirmed_at     TIMESTAMP,
+    CONSTRAINT ck_rule_defs_scope CHECK (
+        (society_id IS NULL AND start_date IS NULL AND approved_status = 'provisional' AND on_behalf_of IS NULL
+                            AND reference_text IS NULL AND reference_doc_id IS NULL AND confirmed_at IS NULL)
+     OR (society_id IS NOT NULL AND start_date IS NOT NULL)),
+    CONSTRAINT ck_rule_defs_confirmed CHECK ((approved_status = 'confirmed') = (confirmed_at IS NOT NULL)),
+    CONSTRAINT ck_rule_defs_approval_by CHECK (approval_by <@ ARRAY['secretary', 'treasurer'] AND cardinality(approval_by) = 2),
     CONSTRAINT ck_rule_defs_statutory CHECK ((nature = 'statutory') = (base_source IN ('central', 'state_act_rules'))),
     CONSTRAINT ck_rule_defs_statutory_locked CHECK (nature <> 'statutory' OR (layers = '{}' AND NOT droppable))
 );
+CREATE UNIQUE INDEX uq_rule_defs_platform ON rule_parameter_defs (regime_code, rule_key) WHERE society_id IS NULL;
+CREATE UNIQUE INDEX uq_rule_defs_society  ON rule_parameter_defs (society_id, regime_code, rule_key, start_date) WHERE society_id IS NOT NULL;
 
 -- >>> GENERATED by scripts/build_scheme_sql.py from schemes/*.toml. Do not edit by hand.
 INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provision, clause_id, nature,
@@ -14680,7 +14732,7 @@ RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
 DECLARE d rule_parameter_defs%ROWTYPE; v_pos INT; v_cur_pos INT;
 BEGIN
     SELECT df.* INTO d FROM society_legal_regime slr
-      JOIN rule_parameter_defs df ON df.regime_code = slr.regime_code AND df.rule_key = p_key
+      JOIN rule_parameter_defs df ON df.regime_code = slr.regime_code AND df.rule_key = p_key AND df.society_id IS NULL
      WHERE slr.society_id = p_society_id;
     IF NOT FOUND THEN RETURN format('%s is not a configurable rule in this society''s legal scheme', p_key); END IF;
     IF p_layer NOT IN (1, 2, 3) THEN RETURN 'Layer must be 1, 2 or 3'; END IF;
@@ -14745,7 +14797,7 @@ BEGIN
      ORDER BY rp.effective_from DESC LIMIT 1;
     IF NOT FOUND THEN RETURN; END IF;
     v_val := b.value; v_txt := b.value_text; v_source := b.source_reference;
-    SELECT df.* INTO d FROM rule_parameter_defs df WHERE df.regime_code = v_regime AND df.rule_key = p_key;
+    SELECT df.* INTO d FROM rule_parameter_defs df WHERE df.regime_code = v_regime AND df.rule_key = p_key AND df.society_id IS NULL;
     IF NOT FOUND THEN
         RETURN QUERY SELECT v_val, v_txt, NULL::INT, 'baseline'::TEXT, v_source, NULL::TEXT, NULL::TEXT, NULL::BIGINT, 0;
         RETURN;
@@ -15064,6 +15116,8 @@ CREATE TABLE decision_types (
     -- 'committee' = simple majority of the committee members.
     authority_layer     SMALLINT NOT NULL DEFAULT 2 CHECK (authority_layer BETWEEN 1 AND 3),
     majority_basis      VARCHAR(12) NOT NULL DEFAULT 'all_votes' CHECK (majority_basis IN ('all_votes', 'committee')),
+    -- The majorities an adviser may choose between for a society (society_decision_types.choice_options starts from this).
+    majority_choices    NUMERIC(5, 2)[] NOT NULL DEFAULT '{}',
     -- A decision that departs from the Model Bye-Laws needs a written advocate's opinion on file before it can be
     -- recorded as passed (e.g. a clause recorded as 'not adopted').
     needs_advocate_opinion BOOLEAN NOT NULL DEFAULT FALSE,
@@ -15837,6 +15891,9 @@ DECLARE v_days INT; v_cut DATE; v_loans INT;
 BEGIN
     v_days := fn_regime_param_num(p_society_id, 'arrears_disqualify_days', p_election_date)::INT;
     IF v_days IS NULL THEN RETURN; END IF;           -- rule not active for this society
+    IF p_basis IS NULL THEN                          -- the 'year' of bye-law 7 is contested: the adviser must have confirmed the reading
+        PERFORM fn_require_confirmed(p_society_id, 'rule', 'bye_law7_year_basis', p_election_date);
+    END IF;
     v_cut   := fn_bye_law7_cutoff_date(p_society_id, p_election_date, p_basis);
     v_loans := COALESCE(fn_regime_param_num(p_society_id, 'owner_loan_counts_bye_law7', p_election_date)::INT, 0);
 
@@ -17471,7 +17528,7 @@ BEGIN
       FROM loa_ratification lr
       JOIN society_rule_decisions sd ON sd.id = lr.decision_id
       JOIN rule_parameter_defs d ON d.regime_code = (SELECT regime_code FROM society_legal_regime WHERE society_id = p_society_id)
-                                 AND d.rule_key = lr.rule_key
+                                 AND d.rule_key = lr.rule_key AND d.society_id IS NULL
      WHERE lr.society_id = p_society_id AND lr.status = 'pending'
      ORDER BY lr.ratify_by;
 END $$;
@@ -17596,6 +17653,14 @@ INSERT INTO decision_types (code, label, required_body, majority_pct, authority_
         'The majorities and quorum in this table are provisional until the society''s General Body ratifies them on a written advocate''s opinion',
         'General Body ratifies the voting thresholds and quorum this software applies (provisional until recorded)')
 ON CONFLICT (code) DO NOTHING;
+
+-- The choices a society's adviser may pick from. 51 = bye-law 2(e) ordinary majority; 66.67 = two-thirds. These are
+-- the platform's offer, not legal advice: change them here if an advocate says another figure is possible.
+UPDATE decision_types SET majority_choices = CASE
+        WHEN majority_basis = 'committee'    THEN ARRAY[majority_pct]
+        WHEN verification   = 'provisional'  THEN (SELECT ARRAY(SELECT DISTINCT x FROM unnest(ARRAY[51.00::NUMERIC, 66.67, majority_pct]) x ORDER BY x))
+        ELSE ARRAY[majority_pct] END
+ WHERE majority_choices = '{}';
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- AOA BYE-LAWS ACCEPTANCE & GOVERNANCE LAYER — Phase 1
@@ -19046,6 +19111,7 @@ DECLARE
     v_total   NUMERIC;
 BEGIN
     IF p_mode IS DISTINCT FROM 'cash' THEN RETURN NULL; END IF;
+    PERFORM fn_require_confirmed(p_society_id, 'rule', 'cash_receipt_limit', COALESCE(p_receipt_date, CURRENT_DATE));
     v_limit := COALESCE(fn_regime_param_num(p_society_id, 'cash_receipt_limit',
                                             COALESCE(p_receipt_date, CURRENT_DATE)), 200000);
     IF p_entity_id IS NOT NULL AND p_role IS NOT NULL AND p_receipt_date IS NOT NULL THEN
@@ -19480,3 +19546,367 @@ CREATE TRIGGER trg_regime_audit_no_truncate      BEFORE TRUNCATE ON regime_rule_
 CREATE TRIGGER trg_fy_locks_no_truncate          BEFORE TRUNCATE ON fy_locks                FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
 CREATE TRIGGER trg_anchors_no_truncate           BEFORE TRUNCATE ON ledger_chain_anchors    FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
 CREATE TRIGGER trg_gst_ws_no_truncate            BEFORE TRUNCATE ON gst_turnover_worksheets FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SOCIETY-SCOPED ADVISER DECISIONS (Gold-Standard Plan v3, Phase 0)
+--
+-- Which majority a society needs for a kind of decision, and how one of the engine's contested rules is to be read,
+-- are questions for THAT society's Advocate, CA or Auditor. They cannot be answered by the platform or in the Setup
+-- Wizard. So the answer is recorded per society, from a start date, and is PROVISIONAL until BOTH the Secretary and the
+-- Treasurer have approved it on the adviser's behalf, with the adviser's reference number and PDF attached.
+--
+--   decision_types / rule_parameter_defs (society_id NULL)  the platform's catalogue and its defaults
+--   society_decision_types                                   the society's choice of majority for a decision type
+--   rule_parameter_defs (society_id = n)                     the society's confirmation of a contested rule
+--   society_decision_approvals                               the two signatures, bound to a hash of what was approved
+--   adviser_reference_documents                              the adviser's PDF (declared earlier in this file)
+--
+-- An engine that depends on a catalogue entry still marked 'provisional' (or, for a rule, 'disputed') calls
+-- fn_require_confirmed, which refuses with a message starting "DECISION REQUIRED" until the society's row is confirmed.
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE society_decision_types (
+    id               SERIAL PRIMARY KEY,
+    society_id       INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    decision_code    VARCHAR(40) NOT NULL REFERENCES decision_types (code),
+    choice_options   NUMERIC(5, 2)[] NOT NULL,          -- the majorities the adviser may choose between
+    default_choice   NUMERIC(5, 2) NOT NULL,            -- the platform's figure when this row was created
+    majority_pct     NUMERIC(5, 2) NOT NULL,            -- the chosen majority
+    majority_basis   VARCHAR(12) NOT NULL CHECK (majority_basis IN ('all_votes', 'committee')),
+    start_date       DATE NOT NULL,
+    end_date         DATE,
+    approval_by      TEXT[] NOT NULL DEFAULT ARRAY['secretary', 'treasurer'],
+    on_behalf_of     VARCHAR(10) CHECK (on_behalf_of IN ('Advocate', 'CA', 'Auditor')),
+    reference_text   VARCHAR(50),                       -- the adviser's opinion / letter number
+    reference_doc_id INT REFERENCES adviser_reference_documents (id),
+    approved_status  VARCHAR(12) NOT NULL DEFAULT 'provisional' CHECK (approved_status IN ('provisional', 'confirmed')),
+    confirmed_at     TIMESTAMP,
+    note             TEXT,
+    created_by       INT REFERENCES users (id),
+    created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_sdt_choice     CHECK (majority_pct = ANY (choice_options)),
+    CONSTRAINT ck_sdt_dates      CHECK (end_date IS NULL OR end_date >= start_date),
+    CONSTRAINT ck_sdt_confirmed  CHECK ((approved_status = 'confirmed') = (confirmed_at IS NOT NULL)),
+    CONSTRAINT ck_sdt_approval_by CHECK (approval_by <@ ARRAY['secretary', 'treasurer'] AND cardinality(approval_by) = 2),
+    CONSTRAINT uq_sdt_society_code_start UNIQUE (society_id, decision_code, start_date)
+);
+CREATE INDEX idx_sdt_society ON society_decision_types (society_id, decision_code);
+
+CREATE TABLE society_decision_approvals (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    subject_kind        VARCHAR(8) NOT NULL CHECK (subject_kind IN ('decision', 'rule')),
+    subject_id          INT NOT NULL,                    -- society_decision_types.id or rule_parameter_defs.id
+    role                VARCHAR(10) NOT NULL CHECK (role IN ('secretary', 'treasurer')),
+    user_id             INT NOT NULL REFERENCES users (id),
+    committee_office_id INT NOT NULL REFERENCES committee_offices (id),
+    item_hash           CHAR(64) NOT NULL,               -- SHA-256 of exactly what was approved; any edit voids the approval
+    signed_at           TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_sda_one_per_role UNIQUE (subject_kind, subject_id, role, item_hash)
+);
+CREATE INDEX idx_sda_subject ON society_decision_approvals (subject_kind, subject_id);
+
+CREATE OR REPLACE FUNCTION trg_sda_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'An approval is a record of who signed what and when; it cannot be changed or deleted.' USING ERRCODE = 'restrict_violation';
+END $$;
+CREATE TRIGGER trg_sda_immutable BEFORE UPDATE OR DELETE ON society_decision_approvals
+    FOR EACH ROW EXECUTE FUNCTION trg_sda_immutable();
+
+-- What exactly is approved: the chosen figure, the dates, the adviser, the reference and the SHA-256 of the PDF.
+CREATE OR REPLACE FUNCTION fn_sdt_hash(r society_decision_types) RETURNS TEXT LANGUAGE sql STABLE AS $$
+    SELECT encode(sha256(convert_to(concat_ws('|', 'decision', r.society_id, r.decision_code, r.majority_pct::TEXT,
+               r.majority_basis, r.start_date::TEXT, COALESCE(r.on_behalf_of, ''), COALESCE(r.reference_text, ''),
+               COALESCE((SELECT d.sha256 FROM adviser_reference_documents d WHERE d.id = r.reference_doc_id), '')), 'UTF8')), 'hex')
+$$;
+
+CREATE OR REPLACE FUNCTION fn_srd_hash(r rule_parameter_defs) RETURNS TEXT LANGUAGE sql STABLE AS $$
+    SELECT encode(sha256(convert_to(concat_ws('|', 'rule', r.society_id, r.regime_code, r.rule_key, r.start_date::TEXT,
+               COALESCE((SELECT p.value::TEXT || '/' || COALESCE(p.value_text, '') FROM regime_rule_parameters p
+                          WHERE p.regime_code = r.regime_code AND p.rule_key = r.rule_key AND p.effective_from <= r.start_date
+                          ORDER BY p.effective_from DESC LIMIT 1), ''),
+               COALESCE(r.on_behalf_of, ''), COALESCE(r.reference_text, ''),
+               COALESCE((SELECT d.sha256 FROM adviser_reference_documents d WHERE d.id = r.reference_doc_id), '')), 'UTF8')), 'hex')
+$$;
+
+CREATE OR REPLACE FUNCTION fn_approvals_complete(p_kind TEXT, p_subject_id INT, p_hash TEXT) RETURNS BOOLEAN
+LANGUAGE sql STABLE AS $$
+    SELECT EXISTS (SELECT 1 FROM society_decision_approvals s JOIN society_decision_approvals t
+                      ON t.subject_kind = s.subject_kind AND t.subject_id = s.subject_id AND t.item_hash = s.item_hash
+                   WHERE s.subject_kind = p_kind AND s.subject_id = p_subject_id AND s.item_hash = p_hash
+                     AND s.role = 'secretary' AND t.role = 'treasurer' AND s.user_id <> t.user_id)
+$$;
+
+-- Common checks before a row may become 'confirmed'.
+CREATE OR REPLACE FUNCTION fn_confirm_problem(p_society_id INT, p_kind TEXT, p_subject_id INT, p_hash TEXT,
+        p_on_behalf VARCHAR, p_ref VARCHAR, p_doc INT) RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    IF p_on_behalf IS NULL THEN RETURN 'Say whose advice this is: Advocate, CA or Auditor.'; END IF;
+    IF LENGTH(COALESCE(BTRIM(p_ref), '')) < 3 THEN RETURN 'Enter the adviser''s reference number (letter, opinion or certificate number).'; END IF;
+    IF p_doc IS NULL THEN RETURN 'Upload the adviser''s reference document (PDF).'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM adviser_reference_documents d WHERE d.id = p_doc AND d.society_id = p_society_id) THEN
+        RETURN 'The reference document belongs to another society.';
+    END IF;
+    IF NOT fn_approvals_complete(p_kind, p_subject_id, p_hash) THEN
+        RETURN 'Both the Secretary and the Treasurer (two different people) must approve exactly what is shown.';
+    END IF;
+    RETURN NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION trg_society_decision_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_old TEXT; v_new TEXT; v_problem TEXT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.approved_status = 'confirmed' THEN
+            RAISE EXCEPTION 'A confirmed decision cannot be deleted: record a new one with a later start date.' USING ERRCODE = 'restrict_violation';
+        END IF;
+        RETURN OLD;
+    END IF;
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.approved_status <> 'provisional' THEN
+            RAISE EXCEPTION 'A decision starts as provisional; it is confirmed by the Secretary and the Treasurer signing it.' USING ERRCODE = 'check_violation';
+        END IF;
+        RETURN NEW;
+    END IF;
+    v_old := fn_sdt_hash(OLD); v_new := fn_sdt_hash(NEW);
+    IF OLD.approved_status = 'confirmed' THEN
+        IF v_new IS DISTINCT FROM v_old THEN          -- the substance changed: the approvals no longer cover it
+            NEW.approved_status := 'provisional'; NEW.confirmed_at := NULL;
+        ELSIF NEW.approved_status <> 'confirmed' THEN
+            RAISE EXCEPTION 'A confirmed decision cannot be un-confirmed: record a new one with a later start date.' USING ERRCODE = 'check_violation';
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF NEW.approved_status = 'confirmed' THEN
+        v_problem := fn_confirm_problem(NEW.society_id, 'decision', NEW.id, v_new, NEW.on_behalf_of, NEW.reference_text, NEW.reference_doc_id);
+        IF v_problem IS NOT NULL THEN RAISE EXCEPTION '%', v_problem USING ERRCODE = 'check_violation'; END IF;
+        NEW.confirmed_at := NOW();
+    ELSE
+        NEW.confirmed_at := NULL;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_society_decision_guard BEFORE INSERT OR UPDATE OR DELETE ON society_decision_types
+    FOR EACH ROW EXECUTE FUNCTION trg_society_decision_guard();
+
+CREATE OR REPLACE FUNCTION trg_society_rule_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_old TEXT; v_new TEXT; v_problem TEXT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.society_id IS NOT NULL AND OLD.approved_status = 'confirmed' THEN
+            RAISE EXCEPTION 'A confirmed rule reading cannot be deleted: record a new one with a later start date.' USING ERRCODE = 'restrict_violation';
+        END IF;
+        RETURN OLD;
+    END IF;
+    IF NEW.society_id IS NULL THEN RETURN NEW; END IF;          -- the platform catalogue is not approved per society
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.approved_status <> 'provisional' THEN
+            RAISE EXCEPTION 'A rule reading starts as provisional; it is confirmed by the Secretary and the Treasurer signing it.' USING ERRCODE = 'check_violation';
+        END IF;
+        RETURN NEW;
+    END IF;
+    v_old := fn_srd_hash(OLD); v_new := fn_srd_hash(NEW);
+    IF OLD.approved_status = 'confirmed' THEN
+        IF v_new IS DISTINCT FROM v_old THEN
+            NEW.approved_status := 'provisional'; NEW.confirmed_at := NULL;
+        ELSIF NEW.approved_status <> 'confirmed' THEN
+            RAISE EXCEPTION 'A confirmed rule reading cannot be un-confirmed: record a new one with a later start date.' USING ERRCODE = 'check_violation';
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF NEW.approved_status = 'confirmed' THEN
+        v_problem := fn_confirm_problem(NEW.society_id, 'rule', NEW.id, v_new, NEW.on_behalf_of, NEW.reference_text, NEW.reference_doc_id);
+        IF v_problem IS NOT NULL THEN RAISE EXCEPTION '%', v_problem USING ERRCODE = 'check_violation'; END IF;
+        NEW.confirmed_at := NOW();
+    ELSE
+        NEW.confirmed_at := NULL;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_society_rule_guard BEFORE INSERT OR UPDATE OR DELETE ON rule_parameter_defs
+    FOR EACH ROW EXECUTE FUNCTION trg_society_rule_guard();
+
+-- ── The gate ────────────────────────────────────────────────────────────────────────────────────────────────────
+-- 'not_required'      the catalogue entry is checked/verified (or the society has no regime): nothing to confirm
+-- 'ok'                a confirmed society row is in force on p_on
+-- 'awaiting_approval' the society has a provisional row but the Secretary and Treasurer have not both approved it
+-- 'missing'           the society has not filled the decision at all
+-- A confirmed row governs from its start_date until its end_date; a newer unconfirmed row changes nothing until confirmed.
+CREATE OR REPLACE FUNCTION fn_decision_gate(p_society_id INT, p_kind TEXT, p_key TEXT, p_on DATE DEFAULT CURRENT_DATE)
+RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
+DECLARE v_regime VARCHAR(30); v_ok BOOLEAN; v_any BOOLEAN;
+BEGIN
+    IF p_kind = 'decision' THEN
+        IF NOT EXISTS (SELECT 1 FROM decision_types WHERE code = p_key AND verification = 'provisional') OR p_key = 'RATIFY_VOTING_THRESHOLDS' THEN
+            RETURN 'not_required';      -- RATIFY_VOTING_THRESHOLDS is itself the General Body's route to ratify, so it is never blocked
+        END IF;
+        SELECT EXISTS (SELECT 1 FROM society_decision_types x WHERE x.society_id = p_society_id AND x.decision_code = p_key
+                          AND x.approved_status = 'confirmed' AND x.start_date <= p_on AND (x.end_date IS NULL OR x.end_date >= p_on)),
+               EXISTS (SELECT 1 FROM society_decision_types x WHERE x.society_id = p_society_id AND x.decision_code = p_key
+                          AND x.approved_status = 'provisional')
+          INTO v_ok, v_any;
+    ELSIF p_kind = 'rule' THEN
+        SELECT slr.regime_code INTO v_regime FROM society_legal_regime slr WHERE slr.society_id = p_society_id;
+        IF v_regime IS NULL OR NOT EXISTS (SELECT 1 FROM rule_parameter_defs d WHERE d.regime_code = v_regime AND d.rule_key = p_key
+                                              AND d.society_id IS NULL AND d.verification IN ('provisional', 'disputed')) THEN
+            RETURN 'not_required';
+        END IF;
+        SELECT EXISTS (SELECT 1 FROM rule_parameter_defs x WHERE x.society_id = p_society_id AND x.regime_code = v_regime AND x.rule_key = p_key
+                          AND x.approved_status = 'confirmed' AND x.start_date <= p_on),
+               EXISTS (SELECT 1 FROM rule_parameter_defs x WHERE x.society_id = p_society_id AND x.regime_code = v_regime AND x.rule_key = p_key
+                          AND x.approved_status = 'provisional')
+          INTO v_ok, v_any;
+    ELSE
+        RAISE EXCEPTION 'fn_decision_gate: kind must be decision or rule';
+    END IF;
+    RETURN CASE WHEN v_ok THEN 'ok' WHEN v_any THEN 'awaiting_approval' ELSE 'missing' END;
+END $$;
+
+-- The loud refusal. SQLSTATE EH001; the message begins "DECISION REQUIRED" so the app can show it as a banner.
+CREATE OR REPLACE FUNCTION fn_require_confirmed(p_society_id INT, p_kind TEXT, p_key TEXT, p_on DATE DEFAULT CURRENT_DATE)
+RETURNS VOID LANGUAGE plpgsql STABLE AS $$
+DECLARE v_gate TEXT; v_label TEXT;
+BEGIN
+    v_gate := fn_decision_gate(p_society_id, p_kind, p_key, p_on);
+    IF v_gate IN ('not_required', 'ok') THEN RETURN; END IF;
+    IF p_kind = 'decision' THEN
+        SELECT label INTO v_label FROM decision_types WHERE code = p_key;
+    ELSE
+        SELECT d.label INTO v_label FROM rule_parameter_defs d JOIN society_legal_regime slr ON slr.regime_code = d.regime_code
+         WHERE slr.society_id = p_society_id AND d.rule_key = p_key AND d.society_id IS NULL;
+    END IF;
+    RAISE EXCEPTION 'DECISION REQUIRED - THIS ACTION IS BLOCKED. "%" (%) is still PROVISIONAL for your society. %',
+        COALESCE(v_label, p_key), p_key,
+        CASE v_gate WHEN 'awaiting_approval'
+             THEN 'It has been filled in but is waiting for approval: the Secretary AND the Treasurer must both approve it. Open Governance > Adviser Decisions, approve it, then repeat this action.'
+             ELSE 'Open Governance > Adviser Decisions, choose the option your Advocate, CA or Auditor has confirmed, enter their reference number, attach their PDF, and have BOTH the Secretary and the Treasurer approve it. Then repeat this action.' END
+        USING ERRCODE = 'EH001';
+END $$;
+
+-- The majority that applies to a decision type for a society on a date: the confirmed society choice, else the platform's.
+CREATE OR REPLACE FUNCTION fn_decision_majority(p_society_id INT, p_code TEXT, p_on DATE DEFAULT CURRENT_DATE)
+RETURNS NUMERIC LANGUAGE sql STABLE AS $$
+    SELECT COALESCE((SELECT x.majority_pct FROM society_decision_types x
+                      WHERE x.society_id = p_society_id AND x.decision_code = p_code AND x.approved_status = 'confirmed'
+                        AND x.start_date <= p_on AND (x.end_date IS NULL OR x.end_date >= p_on)
+                      ORDER BY x.start_date DESC LIMIT 1),
+                    (SELECT majority_pct FROM decision_types WHERE code = p_code))
+$$;
+
+-- Create the society's provisional rows (one per catalogue entry that is still provisional). Safe to call repeatedly.
+CREATE OR REPLACE FUNCTION fn_init_society_decisions(p_society_id INT, p_user_id INT DEFAULT NULL, p_start DATE DEFAULT NULL)
+RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE v_start DATE; v_n INT := 0; v_c INT; v_regime VARCHAR(30);
+BEGIN
+    v_start := COALESCE(p_start, (SELECT created_at::DATE FROM societies WHERE id = p_society_id));
+    IF v_start IS NULL THEN RAISE EXCEPTION 'Society % not found', p_society_id; END IF;
+    INSERT INTO society_decision_types (society_id, decision_code, choice_options, default_choice, majority_pct, majority_basis, start_date, created_by)
+    SELECT p_society_id, dt.code, dt.majority_choices, dt.majority_pct, dt.majority_pct, dt.majority_basis, v_start, p_user_id
+      FROM decision_types dt
+     WHERE dt.verification = 'provisional' AND dt.code <> 'RATIFY_VOTING_THRESHOLDS' AND cardinality(dt.majority_choices) > 0
+       AND NOT EXISTS (SELECT 1 FROM society_decision_types x WHERE x.society_id = p_society_id AND x.decision_code = dt.code);
+    GET DIAGNOSTICS v_c = ROW_COUNT; v_n := v_n + v_c;
+
+    SELECT regime_code INTO v_regime FROM society_legal_regime WHERE society_id = p_society_id;
+    IF v_regime IS NOT NULL THEN
+        INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provision, clause_id, nature, base_source, value_type, unit,
+               min_value, max_value, vary_min, vary_max, choices, layers, tighten, droppable, enforcement, feeds, verification, verified_on,
+               needs_decision, implemented, description, society_id, start_date)
+        SELECT d.regime_code, d.rule_key, d.label, d.instrument, d.provision, d.clause_id, d.nature, d.base_source, d.value_type, d.unit,
+               d.min_value, d.max_value, d.vary_min, d.vary_max, d.choices, d.layers, d.tighten, d.droppable, d.enforcement, d.feeds,
+               d.verification, d.verified_on, d.needs_decision, d.implemented, d.description, p_society_id, v_start
+          FROM rule_parameter_defs d
+         WHERE d.regime_code = v_regime AND d.society_id IS NULL AND d.verification IN ('provisional', 'disputed')
+           AND d.rule_key IN ('cash_receipt_limit', 'bye_law7_year_basis', 'poll_majority_of')      -- the rules an engine gates on (fn_require_confirmed)
+           AND NOT EXISTS (SELECT 1 FROM rule_parameter_defs x WHERE x.society_id = p_society_id AND x.regime_code = d.regime_code AND x.rule_key = d.rule_key);
+        GET DIAGNOSTICS v_c = ROW_COUNT; v_n := v_n + v_c;
+    END IF;
+    RETURN v_n;
+END $$;
+
+-- Sign as Secretary or Treasurer. The caller (the app) has already re-checked the signer's own password.
+CREATE OR REPLACE FUNCTION fn_sign_society_decision(p_kind TEXT, p_subject_id INT, p_role TEXT, p_user_id INT) RETURNS TEXT
+LANGUAGE plpgsql AS $$
+DECLARE v_society INT; v_hash TEXT; v_office INT; v_on VARCHAR; v_ref VARCHAR; v_doc INT; v_status TEXT; v_other INT;
+        v_problem TEXT; v_dec society_decision_types%ROWTYPE; v_rule rule_parameter_defs%ROWTYPE;
+BEGIN
+    IF p_role NOT IN ('secretary', 'treasurer') THEN RAISE EXCEPTION 'Only the Secretary or the Treasurer can approve.'; END IF;
+    IF p_kind = 'decision' THEN
+        SELECT * INTO v_dec FROM society_decision_types WHERE id = p_subject_id FOR UPDATE;
+        IF NOT FOUND THEN RAISE EXCEPTION 'Decision % not found', p_subject_id; END IF;
+        v_society := v_dec.society_id; v_status := v_dec.approved_status; v_hash := fn_sdt_hash(v_dec);
+        v_on := v_dec.on_behalf_of; v_ref := v_dec.reference_text; v_doc := v_dec.reference_doc_id;
+    ELSIF p_kind = 'rule' THEN
+        SELECT * INTO v_rule FROM rule_parameter_defs WHERE id = p_subject_id AND society_id IS NOT NULL FOR UPDATE;
+        IF NOT FOUND THEN RAISE EXCEPTION 'Rule reading % not found', p_subject_id; END IF;
+        v_society := v_rule.society_id; v_status := v_rule.approved_status; v_hash := fn_srd_hash(v_rule);
+        v_on := v_rule.on_behalf_of; v_ref := v_rule.reference_text; v_doc := v_rule.reference_doc_id;
+    ELSE RAISE EXCEPTION 'kind must be decision or rule'; END IF;
+    IF v_status = 'confirmed' THEN RETURN 'Already confirmed.'; END IF;
+
+    -- Attach everything first: the signature is on the reference as well as on the figure.
+    IF v_on IS NULL OR LENGTH(COALESCE(BTRIM(v_ref), '')) < 3 OR v_doc IS NULL THEN
+        RAISE EXCEPTION 'Before approving, say whose advice this is (Advocate, CA or Auditor), enter their reference number and upload their PDF.';
+    END IF;
+    SELECT co.id INTO v_office FROM committee_offices co
+     WHERE co.society_id = v_society AND co.user_id = p_user_id AND co.office_code = p_role AND co.status = 'active'
+       AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE) LIMIT 1;
+    IF v_office IS NULL THEN RAISE EXCEPTION 'You do not hold the office of % in this society today.', p_role; END IF;
+    SELECT user_id INTO v_other FROM society_decision_approvals
+     WHERE subject_kind = p_kind AND subject_id = p_subject_id AND item_hash = v_hash AND role <> p_role;
+    IF v_other = p_user_id THEN RAISE EXCEPTION 'The Secretary and the Treasurer must be two different people; one person holding both offices counts once.'; END IF;
+    IF EXISTS (SELECT 1 FROM society_decision_approvals WHERE subject_kind = p_kind AND subject_id = p_subject_id AND item_hash = v_hash AND role = p_role) THEN
+        RETURN format('The %s has already approved this.', p_role);
+    END IF;
+
+    INSERT INTO society_decision_approvals (society_id, subject_kind, subject_id, role, user_id, committee_office_id, item_hash)
+    VALUES (v_society, p_kind, p_subject_id, p_role, p_user_id, v_office, v_hash);
+    INSERT INTO audit_events (society_id, actor_id, actor_role, action, resource_type, resource_id, after_value, source)
+    VALUES (v_society, p_user_id, p_role, 'ADVISER_DECISION_APPROVED', 'society_' || p_kind, p_subject_id::TEXT,
+            jsonb_build_object('item_hash', v_hash, 'on_behalf_of', v_on, 'reference', v_ref), 'app');
+
+    IF fn_approvals_complete(p_kind, p_subject_id, v_hash) THEN
+        IF p_kind = 'decision' THEN UPDATE society_decision_types SET approved_status = 'confirmed' WHERE id = p_subject_id;
+        ELSE UPDATE rule_parameter_defs SET approved_status = 'confirmed' WHERE id = p_subject_id; END IF;
+        RETURN 'Confirmed: both the Secretary and the Treasurer have approved.';
+    END IF;
+    RETURN format('Approved by the %s. Waiting for the %s.', p_role, CASE p_role WHEN 'secretary' THEN 'Treasurer' ELSE 'Secretary' END);
+END $$;
+
+-- Everything the society has to fill or approve, for the screen and the banner.
+CREATE OR REPLACE FUNCTION fn_society_decision_status(p_society_id INT, p_on DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (kind TEXT, subject_id INT, key TEXT, label TEXT, gate TEXT, approved_status TEXT, signed_roles TEXT[])
+LANGUAGE sql STABLE AS $$
+    SELECT 'decision'::TEXT, x.id, x.decision_code::TEXT, dt.label::TEXT, fn_decision_gate(p_society_id, 'decision', x.decision_code, p_on),
+           x.approved_status::TEXT,
+           COALESCE((SELECT array_agg(a.role::TEXT ORDER BY a.role) FROM society_decision_approvals a
+                      WHERE a.subject_kind = 'decision' AND a.subject_id = x.id AND a.item_hash = fn_sdt_hash(x)), '{}')
+      FROM society_decision_types x JOIN decision_types dt ON dt.code = x.decision_code
+     WHERE x.society_id = p_society_id
+    UNION ALL
+    SELECT 'rule'::TEXT, r.id, r.rule_key::TEXT, r.label::TEXT, fn_decision_gate(p_society_id, 'rule', r.rule_key, p_on),
+           r.approved_status::TEXT,
+           COALESCE((SELECT array_agg(a.role::TEXT ORDER BY a.role) FROM society_decision_approvals a
+                      WHERE a.subject_kind = 'rule' AND a.subject_id = r.id AND a.item_hash = fn_srd_hash(r)), '{}')
+      FROM rule_parameter_defs r WHERE r.society_id = p_society_id
+     ORDER BY 1, 3
+$$;
+
+-- A resolution cannot be recorded for a decision type whose majority is still provisional, and never on a smaller
+-- majority than the society confirmed.
+CREATE OR REPLACE FUNCTION trg_resolutions_decision_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_society INT; v_code TEXT; v_on DATE; v_need NUMERIC;
+BEGIN
+    SELECT m.society_id INTO v_society FROM meetings m WHERE m.id = NEW.meeting_id;
+    SELECT code INTO v_code FROM decision_types WHERE id = NEW.decision_type_id;
+    v_on := COALESCE(NEW.passed_on, CURRENT_DATE);
+    PERFORM fn_require_confirmed(v_society, 'decision', v_code, v_on);
+    v_need := fn_decision_majority(v_society, v_code, v_on);
+    IF NEW.majority_required < v_need THEN
+        RAISE EXCEPTION 'This decision type needs at least % per cent for your society (confirmed on the adviser''s advice); % was entered.', v_need, NEW.majority_required
+              USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_resolutions_decision_guard BEFORE INSERT ON resolutions
+    FOR EACH ROW EXECUTE FUNCTION trg_resolutions_decision_guard();

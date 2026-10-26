@@ -30,7 +30,7 @@ def _json_safe(d: dict) -> dict:
 
 def _def(society_id: int, rule_key: str) -> dict | None:
     return rra._row("""SELECT d.* FROM society_legal_regime slr
-                         JOIN rule_parameter_defs d ON d.regime_code = slr.regime_code AND d.rule_key = %s
+                         JOIN rule_parameter_defs d ON d.regime_code = slr.regime_code AND d.rule_key = %s AND d.society_id IS NULL
                         WHERE slr.society_id = %s""", (rule_key, society_id))
 
 
@@ -95,7 +95,7 @@ def effective_rules_for_society(society_id: int, on: date | None = None) -> list
                (SELECT lr.ratify_by FROM loa_ratification lr
                  WHERE lr.decision_id = r.decision_id AND lr.society_id = slr.society_id) AS ratify_by
           FROM society_legal_regime slr
-          JOIN rule_parameter_defs d ON d.regime_code = slr.regime_code
+          JOIN rule_parameter_defs d ON d.regime_code = slr.regime_code AND d.society_id IS NULL
           LEFT JOIN LATERAL fn_rule(slr.society_id, d.rule_key, %s) r ON TRUE
          WHERE slr.society_id = %s
          ORDER BY d.instrument, d.rule_key""", (on or date.today(), society_id))

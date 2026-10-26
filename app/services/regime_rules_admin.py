@@ -1171,7 +1171,14 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
 
     # A resolution can never be recorded as passed on a smaller majority than its decision type requires
     # (e.g. 2/3 to adopt a bye-law), nor at a meeting that was not quorate, nor at the wrong kind of meeting.
-    threshold = float(dt["majority_pct"])
+    # The majority is the one this society's adviser confirmed (society_decision_types), else the platform's; and a decision
+    # type whose majority is still provisional blocks here, loudly, until the Secretary and Treasurer have confirmed it.
+    from app.services import adviser_decisions as _ad
+    _on = _d(passed_on) or date.today()
+    blocked = _ad.block_message(society_id, "decision", dt["code"], _on)
+    if blocked:
+        return False, blocked
+    threshold = float(_row("SELECT fn_decision_majority(%s,%s,%s) AS m", (society_id, dt["code"], _on))["m"])
     maj = float(majority_required) if majority_required else threshold
     if maj < threshold:
         return False, f"This decision type needs at least {threshold:g}% to pass."

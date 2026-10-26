@@ -1608,6 +1608,59 @@ def seed_accounts(cur, conn, society_id: int, commit: bool = True):
     return created
 
 
+def seed_demo_adviser_confirmations(cur, conn, society_id: int):
+    """DEMO DATA ONLY: confirm the demo society's adviser decisions so the demo engines are not blocked.
+
+    A real society has to do this itself, from Governance > Adviser Decisions, with its own Advocate / CA / Auditor
+    reference and PDF (Plan v3, Phase 0). The reference below says plainly that it is not an opinion. The decisions
+    start on 2000-01-01 so the seed's back-dated history is covered. Needs two different people in the Secretary and
+    Treasurer seats; if the seat holders are not distinct the decisions are left provisional and the engines will block.
+    """
+    cur.execute("SELECT fn_init_society_decisions(%s, NULL, DATE '2000-01-01')", (society_id,))
+    cur.execute("""SELECT office_code, user_id FROM committee_offices
+                    WHERE society_id=%s AND status='active' AND office_code IN ('secretary','treasurer')""", (society_id,))
+    holders = {r["office_code"]: r["user_id"] for r in cur.fetchall()}
+    seated_treasurer = "treasurer" not in holders
+    if seated_treasurer:
+        # The demo committee has no Treasurer (other tests rely on that seat being vacant). Seat one committee member
+        # as Treasurer just long enough to sign, then end the office below; the approvals keep the office record.
+        cur.execute("""SELECT apartment_id, holder_name, user_id, appointed_by FROM committee_offices
+                        WHERE society_id=%s AND status='active' AND office_code='working_committee_member'
+                        ORDER BY id LIMIT 1""", (society_id,))
+        member = cur.fetchone()
+        if member:
+            cur.execute("SELECT fn_appoint_office_bearer(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (society_id, member["apartment_id"], "treasurer", member["holder_name"], member["user_id"],
+                         OFFICE_TERM_START, None, OFFICE_RESOLUTION_REF, None, member["appointed_by"]))
+            holders["treasurer"] = member["user_id"]
+    if len(holders) < 2 or holders["secretary"] == holders["treasurer"] or None in holders.values():
+        conn.commit()
+        print("  ! Adviser decisions left PROVISIONAL: the demo Secretary and Treasurer are not two different logins.")
+        return
+    pdf = (b"%PDF-1.4\n% DEMO SEED - NOT AN ADVISER'S OPINION. Replace with the real document.\n"
+           b"1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n")
+    cur.execute("""INSERT INTO adviser_reference_documents (society_id, file_name, size_bytes, sha256, content)
+                   VALUES (%s, 'DEMO-seed-placeholder.pdf', %s, encode(sha256(%s::bytea),'hex'), %s) RETURNING id""",
+                (society_id, len(pdf), pdf, pdf))
+    doc_id = cur.fetchone()["id"]
+    cur.execute("""UPDATE society_decision_types SET on_behalf_of='CA', reference_text='DEMO-SEED (not an opinion)', reference_doc_id=%s
+                    WHERE society_id=%s AND approved_status='provisional'""", (doc_id, society_id))
+    cur.execute("""UPDATE rule_parameter_defs SET on_behalf_of='CA', reference_text='DEMO-SEED (not an opinion)', reference_doc_id=%s
+                    WHERE society_id=%s AND approved_status='provisional'""", (doc_id, society_id))
+    cur.execute("SELECT 'decision' AS kind, id FROM society_decision_types WHERE society_id=%s AND approved_status='provisional' "
+                "UNION ALL SELECT 'rule', id FROM rule_parameter_defs WHERE society_id=%s AND approved_status='provisional'",
+                (society_id, society_id))
+    for row in cur.fetchall():
+        for role in ("secretary", "treasurer"):
+            cur.execute("SELECT fn_sign_society_decision(%s,%s,%s,%s)", (row["kind"], row["id"], role, holders[role]))
+    if seated_treasurer:
+        cur.execute("""UPDATE committee_offices SET status='ended', term_end=CURRENT_DATE, ended_at=NOW(),
+                              ended_reason='Demo seed: seated only to sign the demo adviser decisions'
+                        WHERE society_id=%s AND office_code='treasurer' AND status='active'""", (society_id,))
+    conn.commit()
+    print("  ✓ DEMO adviser decisions confirmed (placeholder reference; a real society fills these itself)")
+
+
 def seed_society_created_by(cur, conn, society_id: int, admin_uid: int):
     pass
 
@@ -3123,6 +3176,7 @@ def _run_seed_unguarded(conn):
     seed_statutory_head_catalog(cur, conn)
     seed_account_statutory_mappings(cur, conn, society_id)
     seed_gst_rates(cur, conn)
+    seed_demo_adviser_confirmations(cur, conn, society_id)
     seed_society_created_by(cur, conn, society_id, admin_uid)
     seed_admin_created_by(cur, conn, admin_uid)
 

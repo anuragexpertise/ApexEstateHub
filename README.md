@@ -241,12 +241,14 @@ Until these are built, the society should adopt a written privacy notice and ret
 | **C-01** Cash rules mis-framed | ✅ Done | Ceiling is a dated rule parameter; day's total per payer tested; enforced by trigger on every insert path; `block` default now consistent between SQL and scheme packs; 40A(3) on the expense side only. The 269ST → s.186 mapping stays *provisional* pending the CA. |
 | **I-02** Arrears interest | 🟡 | No silent default rate. No cap check against any bye-law/Act limit and no simple-vs-compound declaration on the invoice. |
 | **G-05** Gazette citations self-verified | ⬜ Needs an advocate | Several bye-law numbers and the ₹2,500 ceiling remain **provisional** until an advocate's opinion is stored against each (`advocate_opinion_ref`). |
-| **G-06** No delegation-of-financial-powers ladder | ⬜ Needs a policy decision | No per-role / per-amount approval ladder (treasurer → committee → General Body) for ordinary spend, and no "spend before approval → ratify" state. |
+| **G-06** No delegation-of-financial-powers ladder | ⬜ Decision made (24 Oct 2026); build planned | Owner decision: optional per-society ladder, default Rs 20,000 (bye-law 49) for Secretary or Treasurer, resolution plus 2 office-bearers above it. Not built: plan task 2.5. No "spend before approval → ratify" state yet. |
 | **I-01** Depreciation rates / Act versions | ⬜ | Rates live in per-account data; confirm against the CA's schedule. |
 | **X-03** Proportionate ITC reversal on exempt supplies | ⬜ | Sec 18(6) disposal reversal exists; proportionate reversal of common-input ITC for exempt supplies not found. |
 | **Review §7** Ratification-of-Irregular-Item register | ⬜ | A single record for exceptions (expense before approval, emergency spend, arrears write-off, interest waiver, and similar) with reversal on reject/expire. New module. |
 | **Review §8.7** Rule-Application Register; Compliance Certificate | ⬜ | New exports. |
-| **Hygiene** `float` in exports | 🟡 | `income_tax_export.py` uses `Decimal`; about 95 `float()` conversions remain in other exports, unaudited. |
+| **Hygiene** `float` in exports | 🟡 | `income_tax_export.py` uses `Decimal`; 297 `float(` calls remain across `app/` and `database/` (counted 25 Oct 2026). Planned: [Gold-Standard Plan v3](ApexEstateHub%20Gold-Standard%20Plan%20v3.md), task 3.4. |
+
+Owner decisions taken on 24-25 Oct 2026 are in the *Decisions record* at the end of [`ER.md`](ER.md) §9. The questions waiting for an advocate or CA are listed in [`docs/PHASE0_ADVISER_QUESTIONS.md`](docs/PHASE0_ADVISER_QUESTIONS.md), and Phase 0 progress is in [`docs/PHASE0_TRACKER.md`](docs/PHASE0_TRACKER.md).
 
 ### Gaps we are open about
 
