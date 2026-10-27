@@ -474,7 +474,7 @@ def _setup_pending_content(role):
     """
     Rendered by route_page in place of the real dashboard whenever the
     society hasn't finished the Setup Wizard yet (societies.
-    signing_secret_enc IS NULL) — see app/security/setup_guard.py.
+    stepup_password_hash IS NULL) — see app/security/setup_guard.py.
 
     Admin also gets the interactive wizard modal on top of this (see
     trigger_setup_wizard in setup_wizard_callbacks.py); this page is what

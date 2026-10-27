@@ -181,8 +181,12 @@ def close_year(cur, fy):
 
 
 def key(monkeypatch):
-    from app.security import ledger_anchor
-    monkeypatch.setenv(ledger_anchor.SECRET_ENV, "k" * 48)
+    # Anchors are signed with society 1's SIGNING_LEDGER key, wrapped under the seed's SECRET_VAULT_KEY.
+    import os
+    from app.services import secret_vault
+    if not os.getenv(secret_vault.ENV_NAME):
+        import pytest
+        pytest.skip("SECRET_VAULT_KEY must be the key the database was seeded with")
 
 
 def make_entry(cur, fy):

@@ -42,7 +42,7 @@ FIELD_TIPS = {
     "Secretary Phone": "Secretary's contact number.",
     "Secretary Email": "Secretary's contact email.",
     "Secretary Signature Image": "Scanned signature printed on receipts and official letters.",
-    "SIGNING_SECRET (Strong Password)": "Key that signs every QR gate-pass for this society. Minimum 8 characters with upper case, lower case and a special character. Changing it later invalidates all printed QR codes.",
+    "SIGNING_SECRET (Strong Password)": "Step-up password: it only confirms sensitive actions such as QR re-issue and key rotation. It signs nothing; the society's four signing keys are made by the server. Minimum 8 characters with upper case, lower case and a special character.",
     "Confirm SIGNING_SECRET": "Re-enter the SIGNING_SECRET exactly to avoid a typo locking you out of QR issuing.",
     # Society Compliance
     "Registered for GST?": "Yes shows the GSTIN & GST Rate step. Societies are usually registered only when turnover crosses the GST threshold.",
@@ -1868,7 +1868,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
             if row:
                 s_name, s_phone, s_email = row.get("secretary_name", "") or "", row.get("secretary_phone", "") or "", row.get("secretary_email", "") or ""
         return elements + [
-            _render_banner("Administrator Details", "Configure Secretary details, digital signature, and your secure QR SIGNING_SECRET. This secret is required to authenticate generated QR codes."),
+            _render_banner("Administrator Details", "Configure Secretary details, digital signature, and your step-up password. The password confirms sensitive actions (QR re-issue, key rotation); the server creates and guards the society's signing keys. Who signs what: expenses, NOCs, agreements and minutes are signed by the office-bearers named in the README table \"Who signs what\" (status marks show what is built today); a password confirmation records who confirmed but is not a legal e-signature."),
             html.H6("Secretary Details", className="text-primary mb-3"),
             _label("Secretary Name"),
             dbc.Input(id="sw-sec-name", type="text", value=s_name, className="mb-3"),
@@ -1886,7 +1886,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 "letterhead details only.",
             ], color="info", className="mb-3", style={"fontSize": "12.5px"}),
             html.Hr(),
-            html.P("Create this society's QR SIGNING_SECRET.", className="text-danger fw-bold mb-1"),
+            html.P("Create this society's step-up password.", className="text-danger fw-bold mb-1"),
             html.P(
                 "This is the real key used to sign every QR gate-pass code "
                 "(apartments, vendors, security, admin) issued for THIS "

@@ -252,26 +252,20 @@ class TestQRAndAlerts(unittest.TestCase):
             # a version without a secret cannot be signed either
             self.assertEqual(qr_service.build_qr_payload(2, "SEC", 5, None, 3), "2-SEC-5")
 
-    def test_resolve_signing_secret_from_stored_ciphertext(self):
-        """Decryption is tested on its own, apart from QR image construction:
-        a stored ciphertext resolves to the plaintext it decrypts to."""
-        from test.fake_db import FakeDB
-        from app.services import secret_vault
+    def test_signing_secret_comes_from_the_society_qr_key(self):
+        """The QR key resolves through the signing service; no society or no key means the legacy unsigned path."""
+        from app.services import signing_service
+        with patch.object(signing_service, "raw_key_for_qr", side_effect=lambda sid, db=None: "ab" * 32 if sid == 7 else None):
+            self.assertEqual(qr_service._get_signing_secret(7), "ab" * 32)
+            self.assertIsNone(qr_service._get_signing_secret(8))
+            self.assertIsNone(qr_service._get_signing_secret(None))     # a falsy id never consults the database
 
-        fake = FakeDB.get_instance()
-        fake.tables["societies"].append(
-            {"id": 7, "name": "Vault Society", "signing_secret_enc": "stored-ciphertext"})
-        original = secret_vault.decrypt_secret
-        secret_vault.decrypt_secret = lambda tok: f"plaintext-for-{tok}"
-        try:
-            with patch.object(qr_service, "db", fake):
-                self.assertEqual(qr_service._get_signing_secret(7), "plaintext-for-stored-ciphertext")
-                # a society with no stored secret resolves to None (legacy path)
-                self.assertIsNone(qr_service._get_signing_secret(8))
-                # a falsy society id never consults the database
-                self.assertIsNone(qr_service._get_signing_secret(None))
-        finally:
-            secret_vault.decrypt_secret = original
+    def test_vault_failure_is_an_error_not_an_unsigned_code(self):
+        from app.services import signing_service
+        from app.services.secret_vault import SecretVaultError
+        with patch.object(signing_service, "raw_key_for_qr", side_effect=SecretVaultError("wrong key")):
+            with self.assertRaises(qr_service.QRSigningError):
+                qr_service._get_signing_secret(7)
 
     def test_role_codes(self):
         self.assertEqual(ROLE_CODE_MAP.get("ADM"), "admin")

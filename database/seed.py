@@ -117,15 +117,38 @@ from db_config import connection_params, describe_target  # noqa: E402
 
 
 def _seed_signing_secret(plaintext: str):
-    """Encrypt the demo society's SIGNING_SECRET for seeding, gracefully
-    returning None (unsigned QR fallback) if SECRET_VAULT_KEY isn't
-    configured in this environment."""
-    try:
-        from app.services.secret_vault import encrypt_secret
-        return encrypt_secret(plaintext)
-    except Exception as e:
-        print(f"  ⚠️  Skipping demo SIGNING_SECRET (SECRET_VAULT_KEY not configured?): {e}")
+    """One-way hash of the demo society's step-up password (it signs nothing; keys are made by ensure_society_keys)."""
+    return generate_password_hash(plaintext)
+
+
+class _ConnDB:
+    """Adapter so signing_service can run on the seed's own connection."""
+    def __init__(self, conn):
+        self.conn = conn
+
+    def _execute(self, sql, params=None, fetch_one=False, fetch_all=False):
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+            c.execute(sql, params)
+            if fetch_one:
+                r = c.fetchone()
+                return dict(r) if r else None
+            if fetch_all:
+                return [dict(r) for r in c.fetchall()]
         return None
+
+
+def _seed_signing_keys(conn, society_id: int):
+    """Four signing keys for the demo society. Needs SECRET_VAULT_KEY; without it the society keeps unsigned QR."""
+    try:
+        from app.services.signing_service import ensure_society_keys
+        made = ensure_society_keys(society_id, None, db=_ConnDB(conn))
+        conn.commit()
+        if made:
+            print(f"  ✓ Signing keys created: {', '.join(made)}")
+    except Exception as e:  # noqa: BLE001
+        conn.rollback()
+        print(f"  ⚠️  Skipping signing keys (SECRET_VAULT_KEY not configured?): {e}")
+
 
 logging.basicConfig(level=logging.INFO, format="  %(message)s")
 log = logging.getLogger(__name__)
@@ -397,7 +420,7 @@ SOCIETY = {
     "payment_qr":       "sunrise_qr.png",
     "logo":             "sunrise_logo.png",
     "login_background": "sunrise_bg.png",
-    "signing_secret_enc": _seed_signing_secret("Setup@2024"),
+    "stepup_password_hash": _seed_signing_secret("Setup@2024"),
 }
 
 MASTER = {"email": "master@estatehub.com", "password": "Master@2024", "name": "Master Admin"}
@@ -878,7 +901,7 @@ def seed_society(cur, conn) -> int:
         """INSERT INTO societies
            (id, name, PAN_number, TAN_number, gstin, address, state, email, phone, secretary_name,
             secretary_phone, secretary_email, secretary_sign, plan, plan_validity, calc_start_date,
-            payment_qr, logo, login_background, signing_secret_enc, duty_hrs, primary_bank_account_id, registration_number)
+            payment_qr, logo, login_background, stepup_password_hash, duty_hrs, primary_bank_account_id, registration_number)
            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            ON CONFLICT (id) DO NOTHING""",
         (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["TAN_number"], SOCIETY["gstin"], SOCIETY["address"], SOCIETY.get("state"),
@@ -887,9 +910,10 @@ def seed_society(cur, conn) -> int:
          SOCIETY["plan"], SOCIETY["plan_validity"],
          SOCIETY["calc_start_date"],
          SOCIETY.get("payment_qr"), SOCIETY.get("logo"), SOCIETY.get("login_background"),
-         SOCIETY.get("signing_secret_enc"), SOCIETY.get("duty_hrs", "8"), None, "".join(random.choices(string.ascii_uppercase + string.digits, k=5))),
+         SOCIETY.get("stepup_password_hash"), SOCIETY.get("duty_hrs", "8"), None, "".join(random.choices(string.ascii_uppercase + string.digits, k=5))),
     )
     conn.commit()
+    _seed_signing_keys(conn, SOCIETY_ID)
     cur.execute(
         "SELECT setval(pg_get_serial_sequence('societies','id'), "
         "(SELECT COALESCE(MAX(id),1) FROM societies))"

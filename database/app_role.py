@@ -56,7 +56,17 @@ REVOKE UPDATE, DELETE ON audit_events, regime_rule_audit, fy_locks FROM estatehu
 
 -- Ledger anchors: the signature and the filing reference are the only things filled in afterwards.
 REVOKE UPDATE, DELETE ON ledger_chain_anchors FROM estatehub_app;
-GRANT UPDATE (signature, external_ref) ON ledger_chain_anchors TO estatehub_app;
+GRANT UPDATE (signature, sig_purpose, sig_key_version, sig_algorithm, signed_at, legacy_signature, external_ref)
+    ON ledger_chain_anchors TO estatehub_app;
+
+-- Signing keys: the app may add keys and change status columns, but can NEVER overwrite or delete a wrapped key.
+-- Re-wrapping is the key-rotation login's alone (a member of estatehub_keyrotator; see scripts/rotate_vault_key.py).
+REVOKE UPDATE, DELETE ON society_signing_keys FROM estatehub_app;
+GRANT UPDATE (status, retired_at, revoked_at, compromise_date, revoke_reason) ON society_signing_keys TO estatehub_app;
+REVOKE INSERT, UPDATE, DELETE ON platform_vault_meta FROM estatehub_app;
+GRANT SELECT, UPDATE ON society_signing_keys, platform_vault_meta TO estatehub_keyrotator;
+GRANT USAGE ON SCHEMA public TO estatehub_keyrotator;
+GRANT INSERT ON platform_vault_meta TO estatehub_keyrotator;
 
 -- Re-signing a ledger is not an application operation. (Revoked from PUBLIC as well, so it is the owner's alone.)
 REVOKE EXECUTE ON FUNCTION fn_rebuild_ledger_chain(INT, BOOLEAN) FROM PUBLIC, estatehub_app;

@@ -37,7 +37,7 @@ STATUTORY_ROWS = {
         "Sec. 139(1), Sec. 44AB",
         "Annual ITR-5 filing; tax audit if commercial turnover exceeds the threshold.",
         False,
-        "Out of e-filing scope; no Sec. 44AB flag yet.",
+        "Out of e-filing scope. A provisional Sec. 44AB flag exists (fn_tax_audit_flag, tax_audit_thresholds): it warns, the CA decides.",
     ),
     "tds": (
         "TDS (Income Tax Act, 1961)",
@@ -514,3 +514,10 @@ def regime_profile(regime_code):
     except Exception:
         pass
     return regime_code, None
+
+
+def tax_audit_flag(society_id: int, fy: int) -> dict | None:
+    """Provisional s.44AB warning for financial year `fy` (starting year). 'ok' | 'warn' (80% of the limit) | 'flag'.
+    The threshold is effective-dated and still unconfirmed by a CA; treat the result as a prompt to ask, not a finding."""
+    from database.db_manager import db
+    return db._execute("SELECT * FROM fn_tax_audit_flag(%s, %s)", (society_id, fy), fetch_one=True)

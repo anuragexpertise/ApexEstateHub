@@ -71,17 +71,37 @@ def passed_resolution(cur, meeting_id, clause_id, decision_type_id, body="test",
     return rid
 
 
+def ensure_committee(cur, society_id, n=3):
+    """At least `n` serving office-bearers (one per flat) so a committee register can be entered."""
+    run = _runner(cur)
+    have = run("SELECT COUNT(*) AS v FROM committee_offices WHERE society_id=%s AND status='active'", (society_id,))["v"]
+    if have >= n:
+        return
+    flats = run("SELECT array_agg(id ORDER BY id) AS v FROM (SELECT id FROM apartments WHERE society_id=%s AND active "
+                "AND id NOT IN (SELECT apartment_id FROM committee_offices WHERE society_id=%s AND status='active') "
+                "ORDER BY id LIMIT %s) x", (society_id, society_id, n - have))["v"] or []
+    for i, apt in enumerate(flats):
+        run("INSERT INTO committee_offices (society_id, apartment_id, office_code, holder_name, term_start) "
+            "VALUES (%s,%s,'working_committee_member',%s,DATE '2000-01-01') RETURNING id", (society_id, apt, f"Fixture Member {i}"))
+
+
 def committee_resolution(cur, meeting_id, clause_id, decision_type_id, body="test", majority_required=None,
                          votes_for_pct=100, passed_on=None):
-    """A passed Managing Committee decision (rests on the committee minutes, so it takes a typed percentage)."""
+    """A GENUINELY passed Managing Committee decision: a draft, the committee register (every serving member present;
+    `votes_for_pct` of them FOR, the rest AGAINST), then fn_pass_committee_resolution. Returns its id."""
     run = _runner(cur)
     if majority_required is None:
         majority_required = run("SELECT majority_pct AS v FROM decision_types WHERE id = %s", (decision_type_id,))["v"]
-    return run("""INSERT INTO resolutions (meeting_id, clause_id, decision_type_id, body, majority_required,
-                                           votes_for_pct, passed, status, passed_on)
-                  VALUES (%s,%s,%s,%s,%s,%s,TRUE,'passed',%s) RETURNING id""",
-               (meeting_id, clause_id, decision_type_id, body, majority_required, votes_for_pct,
-                passed_on or date.today()))["id"]
+    soc = run("SELECT society_id AS v FROM meetings WHERE id = %s", (meeting_id,))["v"]
+    ensure_committee(run, soc)
+    rid = insert_resolution(run, meeting_id, clause_id, decision_type_id, body, majority_required)
+    flats = run("SELECT array_agg(DISTINCT apartment_id) AS v FROM fn_serving_committee(%s, (SELECT held_on FROM meetings WHERE id=%s))",
+                (soc, meeting_id))["v"]
+    n_for = round(len(flats) * float(votes_for_pct) / 100)
+    run("SELECT fn_record_committee_register(%s,%s,%s,%s,%s) AS v", (rid, flats, flats[:n_for], flats[n_for:], []))
+    outcome = run("SELECT fn_pass_committee_resolution(%s,%s,NULL) AS v", (rid, passed_on or date.today()))["v"]
+    assert outcome.startswith("Passed"), outcome
+    return rid
 
 
 def pass_for_code(cur, meeting_id, clause_id, decision_code, **kw):

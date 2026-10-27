@@ -8,11 +8,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install -r requirements.txt pytest
+      - run: pip install -r requirements.txt
       - run: env -u PGHOST -u PGDATABASE -u PGUSER -u PGPASSWORD -u DATABASE_URL python -m pytest -q test -m "not postgres_integration"
       - run: python scripts/check_callback_guards.py
       - run: python scripts/inventory_endpoints.py --check
+
   postgres:
+    # Plan task 1.1: EVERY live suite runs on every push, against a freshly loaded and seeded Postgres 16.
+    # A failing live test fails the push. (Before this job opted in, the suites skipped silently.)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -27,18 +30,44 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: estatehub
+      PGUSER: estatehub
+      PGPASSWORD: estatehub
+      ESTATEHUB_LIVE_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install -r requirements.txt pytest
-      - run: psql -h localhost -U estatehub -d estatehub -f database/estatehub.sql
+      - run: pip install -r requirements.txt
+      - name: Load the schema (any error fails the job)
+        run: psql -v ON_ERROR_STOP=1 -q -h localhost -U estatehub -d estatehub -f database/estatehub.sql
+      - name: Seed the demo society (a throwaway vault key; the tests use the same one)
+        run: |
+          KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+          echo "::add-mask::$KEY"
+          echo "SECRET_VAULT_KEY=$KEY" >> "$GITHUB_ENV"
+          SECRET_VAULT_KEY=$KEY python database/seed.py
+      - name: Every test, live suites included
+        run: python -m pytest -q test
+
+  security-scans:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      # Any NEW known-vulnerable pin fails the push. The 11 ids below are the Flask 2.2 / Werkzeug 2.2 / Dash 2.14
+      # stack as pinned on 27 Oct 2026; clearing them needs a framework upgrade (separate task). Remove an id
+      # from this list when its package is upgraded, never add one without a note in docs/.
+      - name: Known-vulnerable dependencies fail the push
+        run: pip install pip-audit && pip-audit -r requirements.txt --strict --ignore-vuln PYSEC-2023-221 --ignore-vuln PYSEC-2024-35 --ignore-vuln PYSEC-2026-1860 --ignore-vuln PYSEC-2026-2043 --ignore-vuln PYSEC-2026-2044 --ignore-vuln PYSEC-2026-2045 --ignore-vuln PYSEC-2026-2046 --ignore-vuln PYSEC-2026-2151 --ignore-vuln PYSEC-2026-2320 --ignore-vuln PYSEC-2026-3417 --ignore-vuln PYSEC-2026-4312
+      - name: Static scan (high severity, high confidence)
+        run: pip install bandit && bandit -q -r app database scripts -lll -iii
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
         env:
-          PGPASSWORD: estatehub
-      - run: python -m pytest -q test -m "postgres_integration"
-        env:
-          PGHOST: localhost
-          PGPORT: 5432
-          PGDATABASE: estatehub
-          PGUSER: estatehub
-          PGPASSWORD: estatehub
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,8 +2,8 @@
 """
 Anchor and sign every society's ledger hash chain (see app/security/ledger_anchor.py).
 
-Run it on a schedule (daily or monthly), from a host that holds LEDGER_ANCHOR_SECRET but is NOT the database
-host, e.g. a Render cron job:
+Run it on a schedule (daily or monthly), as the restricted application login (see database/app_role.py). Each anchor is signed with the society's
+SIGNING_LEDGER key (needs SECRET_VAULT_KEY in the environment):
 
     python scripts/anchor_ledgers.py            # anchor all societies
     python scripts/anchor_ledgers.py --verify   # also verify every stored anchor's signature
