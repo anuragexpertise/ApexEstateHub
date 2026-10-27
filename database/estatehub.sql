@@ -17861,6 +17861,10 @@ CREATE TABLE committee_offices (
                           ('president', 'vice_president', 'secretary', 'joint_secretary', 'treasurer',
                            'working_committee_member')),
     holder_name         VARCHAR(100) NOT NULL,
+    -- Task 2.10: contact and signature for every post (prefilled from the flat's owner, editable).
+    email               VARCHAR(100),
+    phone               VARCHAR(20),
+    signature_image     VARCHAR(255),
     user_id             INT REFERENCES users (id),
     term_start          DATE NOT NULL DEFAULT CURRENT_DATE,
     term_end            DATE,
@@ -20181,3 +20185,122 @@ BEGIN
         (CASE WHEN v_inc >= v_thr THEN 'flag' WHEN v_inc >= v_thr * 0.8 THEN 'warn' ELSE 'ok' END)::VARCHAR, v_status,
         'Ask your CA whether s.44AB tax audit applies. Provisional threshold; mutual receipts may not count as turnover.'::TEXT;
 END $$;
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Phase 2 (tasks 2.1, 2.2, 2.10-2.12): office-bearer records, signatures and sealed records
+-- ════════════════════════════════════════════════════════════════════════════
+-- A serving post is COMPLETE when it has flat, name, email, phone and a signature image.
+CREATE OR REPLACE VIEW v_office_bearer_completeness AS
+SELECT co.id AS committee_office_id, co.society_id, co.office_code, co.apartment_id, co.holder_name, co.user_id,
+       (co.holder_name IS NOT NULL AND NULLIF(BTRIM(co.holder_name), '') IS NOT NULL
+        AND NULLIF(BTRIM(co.email), '') IS NOT NULL AND NULLIF(BTRIM(co.phone), '') IS NOT NULL
+        AND NULLIF(BTRIM(co.signature_image), '') IS NOT NULL) AS complete,
+       ARRAY_REMOVE(ARRAY[CASE WHEN NULLIF(BTRIM(co.email), '') IS NULL THEN 'email' END,
+                          CASE WHEN NULLIF(BTRIM(co.phone), '') IS NULL THEN 'phone' END,
+                          CASE WHEN NULLIF(BTRIM(co.signature_image), '') IS NULL THEN 'signature image' END], NULL) AS missing
+  FROM committee_offices co WHERE co.status = 'active';
+
+-- Who must sign which kind of record. A society may change its own list; the defaults live in
+-- app/services/document_signing.py. eligible = offices that may sign; required = offices that MUST be among the
+-- signers; min_signers = distinct people needed. Pseudo-offices: 'chair' (the meeting's chair), 'platform' (platform operator).
+CREATE TABLE signer_policy (
+    id               SERIAL PRIMARY KEY,
+    society_id       INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    subject_kind     VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
+    eligible_offices TEXT[] NOT NULL,
+    required_offices TEXT[] NOT NULL DEFAULT '{}',
+    min_signers      INT NOT NULL DEFAULT 1 CHECK (min_signers BETWEEN 1 AND 5),
+    updated_by       INT REFERENCES users (id),
+    updated_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (society_id, subject_kind)
+);
+
+-- One row per confirmation (sign / approve / decline). item_hash = SHA-256 of the exact item text at that moment.
+CREATE TABLE document_signatures (
+    id                  BIGSERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    subject_kind        VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
+    subject_id          INT NOT NULL,
+    action              VARCHAR(8) NOT NULL DEFAULT 'sign' CHECK (action IN ('sign', 'approve', 'decline')),
+    user_id             INT NOT NULL REFERENCES users (id),
+    office_code         VARCHAR(30) NOT NULL,
+    committee_office_id INT REFERENCES committee_offices (id),
+    item_hash           VARCHAR(64) NOT NULL,
+    reason              TEXT,
+    signed_at           TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_decline_has_reason CHECK (action <> 'decline' OR LENGTH(BTRIM(COALESCE(reason, ''))) >= 10)
+);
+-- One confirmation per person per item version.
+CREATE UNIQUE INDEX uq_doc_signature_person ON document_signatures (subject_kind, subject_id, item_hash, user_id)
+    WHERE action IN ('sign', 'approve');
+CREATE INDEX idx_doc_signatures_subject ON document_signatures (subject_kind, subject_id);
+
+-- Append-only.
+CREATE OR REPLACE FUNCTION trg_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION '% is append-only', TG_TABLE_NAME; END $$;
+CREATE TRIGGER trg_document_signatures_append_only BEFORE UPDATE OR DELETE ON document_signatures
+    FOR EACH ROW EXECUTE FUNCTION trg_append_only();
+
+-- The seal: made once all required signatures are in, signed with the society's key.
+CREATE TABLE signed_records (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    subject_kind    VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
+    subject_id      INT NOT NULL,
+    purpose         VARCHAR(20) NOT NULL,
+    item_hash       VARCHAR(64) NOT NULL,
+    signature       VARCHAR(64) NOT NULL,
+    key_version     INT NOT NULL,
+    key_id          VARCHAR(32) NOT NULL,
+    algorithm       VARCHAR(20) NOT NULL,
+    signed_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    signers         JSONB NOT NULL,                      -- [{user_id, office, at}] : names and offices only
+    status          VARCHAR(12) NOT NULL DEFAULT 'valid' CHECK (status IN ('valid', 'superseded', 'revoked')),
+    revoked_reason  TEXT
+);
+CREATE UNIQUE INDEX uq_signed_record_current ON signed_records (subject_kind, subject_id) WHERE status = 'valid';
+CREATE OR REPLACE FUNCTION trg_signed_record_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'signed_records is never deleted'; END IF;
+    IF ROW(NEW.society_id, NEW.subject_kind, NEW.subject_id, NEW.purpose, NEW.item_hash, NEW.signature, NEW.key_version,
+           NEW.key_id, NEW.algorithm, NEW.signed_at, NEW.signers)
+       IS DISTINCT FROM ROW(OLD.society_id, OLD.subject_kind, OLD.subject_id, OLD.purpose, OLD.item_hash, OLD.signature,
+           OLD.key_version, OLD.key_id, OLD.algorithm, OLD.signed_at, OLD.signers) THEN
+        RAISE EXCEPTION 'A signed record cannot be changed; only its status may move (superseded or revoked).';
+    END IF;
+    IF OLD.status <> 'valid' AND NEW.status IS DISTINCT FROM OLD.status THEN
+        RAISE EXCEPTION 'A superseded or revoked record cannot change status again.';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_signed_record_guard BEFORE UPDATE OR DELETE ON signed_records
+    FOR EACH ROW EXECUTE FUNCTION trg_signed_record_guard();
+
+-- Once sealed, the signed text cannot be edited (the seal would fail anyway; this stops it at the source).
+CREATE OR REPLACE FUNCTION trg_block_edit_when_sealed() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_kind TEXT := TG_ARGV[0]; v_cols TEXT[] := string_to_array(TG_ARGV[1], ',');
+        v_changed BOOLEAN := FALSE; v_c TEXT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        IF EXISTS (SELECT 1 FROM signed_records WHERE subject_kind = v_kind AND subject_id = OLD.id AND status = 'valid') THEN
+            RAISE EXCEPTION 'This % is sealed with signatures and cannot be deleted.', v_kind;
+        END IF;
+        RETURN OLD;
+    END IF;
+    FOREACH v_c IN ARRAY v_cols LOOP
+        IF to_jsonb(NEW) -> v_c IS DISTINCT FROM to_jsonb(OLD) -> v_c THEN v_changed := TRUE; END IF;
+    END LOOP;
+    IF v_changed AND EXISTS (SELECT 1 FROM signed_records WHERE subject_kind = v_kind AND subject_id = OLD.id AND status = 'valid') THEN
+        RAISE EXCEPTION 'This % is sealed with signatures: its signed text cannot be edited.', v_kind;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_nocs_sealed BEFORE UPDATE OR DELETE ON nocs
+    FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('noc', 'body_text,apartment_id,certificate_no,issued_date,valid_until');
+CREATE TRIGGER trg_agreements_sealed BEFORE UPDATE OR DELETE ON society_agreements
+    FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('agreement', 'body_text,society_name,society_address,registration_number');
+CREATE TRIGGER trg_meetings_sealed BEFORE UPDATE OR DELETE ON meetings
+    FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('minutes', 'held_on,agenda,type,venue,minutes_pdf');
+CREATE TRIGGER trg_polls_sealed BEFORE UPDATE OR DELETE ON polls
+    FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('poll', 'title,choice_1,choice_2,choice_3,choice_4,choice_5,majority_pct,quorum_pct,vote_basis');

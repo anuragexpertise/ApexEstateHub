@@ -1198,7 +1198,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "close_fy_with_reserve",
-    "line": 6381,
+    "line": 6385,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1385,7 +1385,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "lock_financial_year",
-    "line": 6489,
+    "line": 6493,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1487,7 +1487,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "update_member_ledger_state",
-    "line": 6337,
+    "line": 6341,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3080,7 +3080,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/receipt_callbacks.py",
     "function": "_stamp_emailed",
-    "line": 230,
+    "line": 232,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3099,7 +3099,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/receipt_callbacks.py",
     "function": "_stamp_printed",
-    "line": 211,
+    "line": 213,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4635,6 +4635,20 @@
     "guards": [
       "inline-auth"
     ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "route:verify.py::verify_record",
+    "kind": "flask-route",
+    "file": "app/routes/verify.py",
+    "function": "verify_record",
+    "line": 27,
+    "route": "/verify/<kind>/<int:subject_id>",
+    "methods": [
+      "GET"
+    ],
+    "guards": [],
     "actions": [],
     "public": false
   },

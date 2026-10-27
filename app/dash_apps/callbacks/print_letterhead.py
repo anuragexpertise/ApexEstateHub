@@ -41,13 +41,21 @@ def get_letterhead_assets(society: dict, society_id) -> dict:
     from app.dash_apps.drilldown.renderers import get_image_url
 
     society = society or {}
+    # The serving Secretary's own record wins (name + signature image); the society columns are the fallback.
+    sec = {}
+    try:
+        from database.db_manager import db
+        sec = db._execute("SELECT holder_name, signature_image FROM committee_offices WHERE society_id=%s AND office_code='secretary' "
+                          "AND status='active' ORDER BY term_start DESC LIMIT 1", (society_id,), fetch_one=True) or {}
+    except Exception:
+        sec = {}
     return {
         "society_name": society.get("name") or "",
         "society_address": society.get("address") or "",
-        "secretary_name": society.get("secretary_name") or "Authorised Signatory",
+        "secretary_name": sec.get("holder_name") or society.get("secretary_name") or "Authorised Signatory",
         "logo_url": get_image_url(society.get("logo"), None, "society", society_id) or "",
         "background_url": get_image_url(society.get("login_background"), None, "society", society_id) or "",
-        "signature_url": get_image_url(society.get("secretary_sign"), None, "society", society_id) or "",
+        "signature_url": get_image_url(sec.get("signature_image") or society.get("secretary_sign"), None, "society", society_id) or "",
     }
 
 

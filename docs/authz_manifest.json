@@ -883,6 +883,10 @@
     "route:sse.py::events": {
       "classification": "unclassified"
     },
+    "route:verify.py::verify_record": {
+      "classification": "exempt",
+      "reason": "Public by design: anyone holding a printed NOC/agreement/minutes must be able to check it. Read-only; shows only the outcome, date and signing offices (no content, names, flats or voter data); Cache-Control no-store."
+    },
     "route:web.py::health": {
       "classification": "unclassified"
     },
