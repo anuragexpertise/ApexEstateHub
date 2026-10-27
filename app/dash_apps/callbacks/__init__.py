@@ -40,6 +40,7 @@ def register_callbacks(app):
         "debug_callbacks",            # 10. Debug
         "noc_callbacks",              # 10. NOC card buttons
         "agreement_callbacks",        # 10b. Agreement card buttons
+        "signature_callbacks",        # 10c. Sign / Decline panel (NOC, agreements, resolutions...)
         "admin_callbacks",            # 11. Admin callbacks
         "form_autofill_callbacks",    # 12. Form autofill
         "receipt_callbacks",          # 13. Receipt buttons

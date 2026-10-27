@@ -3293,8 +3293,13 @@ def verify_receipt(receipt_id: int, confirmed_by: int, mode: str = None) -> tupl
 # ════════════════════════════════════════════════════════════════════════════════
 
 def verify_expense(expense_id: int, confirmed_by: int, mode: str = None) -> tuple[bool, str]:
-    """Admin verifies a pending expense → posts to transactions."""
+    """Admin verifies a pending expense → posts to transactions. Above the society's approval threshold the
+    committee's signatures and resolution reference are required first (expense_approval)."""
     try:
+        from app.services import expense_approval
+        allowed, why = expense_approval.gate(int(expense_id))
+        if not allowed:
+            return False, why
         r = db._execute(
             "SELECT * FROM fn_verify_expense(%s,%s,%s)",
             (expense_id, confirmed_by, mode),

@@ -1091,6 +1091,7 @@ CREATE TABLE expenses (
             'cancelled'
         )
     ),
+    approval_resolution_ref VARCHAR(255), -- MC resolution that approved a spend above the approval threshold
     confirmed_by INT REFERENCES users (id),
     confirmed_at TIMESTAMP,
     last_printed_at TIMESTAMP,
@@ -20304,3 +20305,16 @@ CREATE TRIGGER trg_meetings_sealed BEFORE UPDATE OR DELETE ON meetings
     FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('minutes', 'held_on,agenda,type,venue,minutes_pdf');
 CREATE TRIGGER trg_polls_sealed BEFORE UPDATE OR DELETE ON polls
     FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('poll', 'title,choice_1,choice_2,choice_3,choice_4,choice_5,majority_pct,quorum_pct,vote_basis');
+
+
+-- ── Phase 2.5: approval ladder for expenses (bye-law 49: Rs 20,000) ─────────────────────────────────────────────
+-- Up to `threshold` one administrator verifies as before. Above it the expense needs `min_signers` DIFFERENT serving
+-- office-bearers (document_signatures, kind 'expense') and a Managing Committee resolution reference.
+CREATE TABLE expense_approval_policy (
+    society_id          INT PRIMARY KEY REFERENCES societies (id) ON DELETE CASCADE,
+    threshold           NUMERIC(14, 2) NOT NULL DEFAULT 20000 CHECK (threshold >= 0),
+    min_signers         INT NOT NULL DEFAULT 2 CHECK (min_signers BETWEEN 1 AND 5),
+    require_resolution  BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_by          INT REFERENCES users (id),
+    updated_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);

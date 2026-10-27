@@ -256,10 +256,10 @@ Status marks: ✅ built, 🟡 partly built, ⬜ planned (Gold-Standard Plan v3).
 
 | Record | Today | Planned signers | Sealed with | Status |
 |---|---|---|---|---|
-| Ordinary expense | Accountant prepares; Treasurer or President approves; nobody approves their own item; no amount ladder | Up to ₹20,000 (bye-law 49): Secretary or Treasurer. Above: Managing Committee resolution plus at least 2 serving office-bearers | `SIGNING_AGREEMENT` | 🟡 |
+| Ordinary expense | Accountant prepares; Treasurer or President approves; nobody approves their own item; no amount ladder | Up to ₹20,000 (bye-law 49, adjustable): administrator verifies. Above, or when the same payee's bills within 30 days add up above it: a Managing Committee resolution reference plus at least 2 different serving office-bearers (adjustable 1 to 5) who confirm with their own password; nobody signs a payment to their own flat. Verification is refused until this is met | `SIGNING_AGREEMENT` | ✅ (Approve / Decline panel on a pending expense) |
 | Fund withdrawal | Database enforces a resolution reference and co-signatures above a set amount; no screen yet | Same engine, with Approve and Decline buttons | `SIGNING_AGREEMENT` | 🟡 |
-| NOC | Admin issues; the Secretary's signature image prints | Admin prepares, Secretary signs, system confirms no dues | `SIGNING_NOC` | 🟡 |
-| Agreement | Admin creates it at setup; no signing recorded | President and Secretary for the society; platform operator for the platform | `SIGNING_AGREEMENT` | ⬜ |
+| NOC | Admin issues; the Secretary's signature image prints | Admin prepares, Secretary signs, system confirms no dues. Anyone can check a printed NOC at `/verify/noc/<id>` | `SIGNING_NOC` | ✅ (Sign panel on the NOC card) |
+| Agreement | Admin creates it at setup; no signing recorded | President and Secretary for the society; platform operator for the platform. Editing is blocked once sealed | `SIGNING_AGREEMENT` | ✅ (Sign panel on the Agreement card) |
 | Resolution and minutes | General Body **and Managing Committee** tallies are derived from registers (committee register added in Phase 1); `minutes_signed_by` is not yet set by anything | Chair and Secretary sign; system records the tally | `SIGNING_AGREEMENT` | 🟡 |
 | Poll result | Admin declares | Secretary or President declares; system seals the tally | `SIGNING_AGREEMENT` | ⬜ |
 | Ledger anchor certificate | **Signed by the application with the society's `SIGNING_LEDGER` key** (key version recorded); Secretary and Treasurer sign the printed copy and file it with the CA | Same, and each also signs in the app | `SIGNING_LEDGER` | 🟡 |

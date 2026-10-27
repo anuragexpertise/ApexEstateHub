@@ -734,6 +734,12 @@
     "callback:shell_callbacks.py::update_global_card_search": {
       "classification": "unclassified"
     },
+    "callback:signature_callbacks.py::_on_save_ref": {
+      "classification": "legacy-gated"
+    },
+    "callback:signature_callbacks.py::_on_sign": {
+      "classification": "legacy-gated"
+    },
     "callback:tax_rate_callbacks.py::tr_add_tds": {
       "classification": "action",
       "actions": [

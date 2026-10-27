@@ -3921,6 +3921,40 @@
     "public": false
   },
   {
+    "id": "callback:signature_callbacks.py::_on_save_ref",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/signature_callbacks.py",
+    "function": "_on_save_ref",
+    "line": 111,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:signature_callbacks.py::_on_sign",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/signature_callbacks.py",
+    "function": "_on_sign",
+    "line": 84,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:tax_rate_callbacks.py::tr_add_tds",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/tax_rate_callbacks.py",

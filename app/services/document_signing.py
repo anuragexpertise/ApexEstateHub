@@ -107,13 +107,18 @@ def _has_col(d, table, col) -> bool:
 
 
 # ── policy ──────────────────────────────────────────────────────────────────────────────────────────────────────
-def policy(society_id: int, kind: str, db=None) -> dict:
+def policy(society_id: int, kind: str, db=None, subject_id: int | None = None) -> dict:
     d = _db(db)
     row = d._execute("SELECT eligible_offices, required_offices, min_signers FROM signer_policy WHERE society_id=%s AND subject_kind=%s",
                      (society_id, kind), fetch_one=True)
     if row:
         return dict(eligible=list(row["eligible_offices"]), required=list(row["required_offices"]), min=row["min_signers"])
-    return dict(DEFAULT_POLICY[kind])
+    pol = dict(DEFAULT_POLICY[kind])
+    if kind == "expense" and subject_id:                          # the amount-based ladder (expense_approval)
+        from app.services import expense_approval as ea
+        need, _why = ea.required_signers(subject_id, d)
+        pol["min"] = max(need, 1)
+    return pol
 
 
 def set_policy(society_id: int, kind: str, eligible, required, min_signers: int, actor_id: int, db=None) -> None:
@@ -168,7 +173,7 @@ def status(kind: str, subject_id: int, db=None) -> dict:
     d = _db(db)
     society_id, text = item_text(kind, subject_id, d) if kind not in ("resolution", "poll") else _safe_item(d, kind, subject_id)
     h = sha256(text) if text else None
-    pol = policy(society_id, kind, d)
+    pol = policy(society_id, kind, d, subject_id)
     sigs = d._execute("""SELECT s.user_id, s.office_code, s.action, s.signed_at, s.reason, u.name FROM document_signatures s JOIN users u ON u.id = s.user_id
                          WHERE s.subject_kind=%s AND s.subject_id=%s AND s.item_hash=%s ORDER BY s.id""", (kind, subject_id, h), fetch_all=True) if h else []
     signed = [x for x in sigs if x["action"] in ("sign", "approve")]
@@ -207,7 +212,7 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
         raise SigningRefused("This record is already sealed.")
     if action == "decline" and len((reason or "").strip()) < 10:
         raise SigningRefused("Say why you decline (at least 10 characters).")
-    pol = policy(society_id, kind, d)
+    pol = policy(society_id, kind, d, subject_id)
     roles = [r for r in _signer_roles(d, society_id, kind, subject_id, user_id) if r[0] in pol["eligible"]]
     if not roles:
         raise SigningRefused("You do not hold an office that may sign this record.")
@@ -235,11 +240,13 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
 
 
 def _self_dealing(d, kind, subject_id, user_id, society_id) -> bool:
-    if kind != "noc":
+    """Nobody signs a payment to their own flat (the payee is an apartment login of the signer's flat)."""
+    if kind not in ("expense", "fund_withdrawal"):
         return False
-    r = d._execute("SELECT 1 FROM nocs n JOIN users u ON u.linked_id = n.apartment_id AND u.society_id = n.society_id AND u.role='apartment' "
-                   "WHERE n.id=%s AND u.id=%s", (subject_id, user_id), fetch_one=True)
-    return False if r is None else False                                    # a Secretary may sign an NOC for their own flat? No ladder rule yet.
+    r = d._execute("""SELECT 1 FROM expenses x JOIN users u ON u.id=%s AND u.society_id=x.society_id
+                       WHERE x.id=%s AND x.role='apartment' AND u.role='apartment' AND u.linked_id = x.entity_id""",
+                   (user_id, subject_id), fetch_one=True) if kind == "expense" else None
+    return r is not None
 
 
 def _seal(d, society_id, kind, subject_id, item_hash, st) -> dict:
