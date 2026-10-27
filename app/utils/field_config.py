@@ -1128,6 +1128,13 @@ FIELD_CONFIG = {
             "validation": {},
             "tooltip": "Monthly interest % on late payment, as resolved by the General Body (UP Model Bye-Laws 2011, bye-law 46(a)). Blank = no interest charged",
         },
+        "interest_resolution_ref": {
+            "visible": ALL_ROLES,
+            "editable": ADMIN_ONLY,
+            "default": None,
+            "validation": {},
+            "tooltip": "Number of the General Body resolution that set the interest rate. Printed as 'Simple Interest - Bye-law 46(a) - Rate <rate> via Resolution <number> by GBM'. Blank = no interest is billed",
+        },
         "apt_status": {
             "visible": ALL_ROLES,
             "editable": ADMIN_ONLY,

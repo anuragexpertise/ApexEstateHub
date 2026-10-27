@@ -171,9 +171,16 @@ class _Shim:
             return [{d[0]: v for d, v in zip(desc, r)} for r in self.cur.fetchall()]
 
 
-def test_application_signs_the_anchor_and_a_forged_signature_is_caught(cur, monkeypatch):
+@pytest.fixture()
+def vault_env(monkeypatch):
+    """Society 1's keys come from the seed; the tests share its SECRET_VAULT_KEY (CI and resetdb export one)."""
+    from app.services import secret_vault
+    if not os.getenv(secret_vault.ENV_NAME):
+        pytest.skip("SECRET_VAULT_KEY must be the key the database was seeded with")
+
+
+def test_application_signs_the_anchor_and_a_forged_signature_is_caught(cur, vault_env):
     from app.security import ledger_anchor as la
-    monkeypatch.setenv(la.SECRET_ENV, "k" * 48)
     post_entry(cur)
     db = _Shim(cur)
     a = la.anchor_society(SOC, None, "manual", db)
@@ -188,19 +195,19 @@ def test_application_signs_the_anchor_and_a_forged_signature_is_caught(cur, monk
     assert bad and "does not match" in bad[0]["problem"]
 
 
-def test_a_different_key_does_not_verify(cur, monkeypatch):
+def test_an_unknown_key_version_does_not_verify(cur, vault_env):
     from app.security import ledger_anchor as la
-    monkeypatch.setenv(la.SECRET_ENV, "a" * 48)
     post_entry(cur)
     db = _Shim(cur)
-    la.anchor_society(SOC, None, "manual", db)
-    monkeypatch.setenv(la.SECRET_ENV, "b" * 48)
+    a = la.anchor_society(SOC, None, "manual", db)
+    cur.execute("ALTER TABLE ledger_chain_anchors DISABLE TRIGGER USER")
+    cur.execute("UPDATE ledger_chain_anchors SET sig_key_version = 99 WHERE id = %s", (a["anchor_id"],))
+    cur.execute("ALTER TABLE ledger_chain_anchors ENABLE TRIGGER USER")
     assert la.verify_signatures(SOC, db)
 
 
-def test_anchor_all_reports_each_society_separately(cur, monkeypatch):
+def test_anchor_all_reports_each_society_separately(cur, vault_env):
     from app.security import ledger_anchor as la
-    monkeypatch.setenv(la.SECRET_ENV, "k" * 48)
     post_entry(cur)
     res = la.anchor_all(None, "scheduled", _Shim(cur))
     assert any(r["society_id"] == SOC and r["ok"] for r in res)

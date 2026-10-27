@@ -156,10 +156,8 @@ def test_a_committee_decision_is_not_forced_through_the_general_body_registers(c
     mid = cur.fetchone()[0]
     cur.execute("SELECT id FROM decision_types WHERE code='SET_BOARD_PARAM'")
     dt = cur.fetchone()[0]
-    cur.execute("""INSERT INTO resolutions (meeting_id, clause_id, decision_type_id, body, majority_required,
-                      votes_for_pct, passed, status, passed_on)
-                   VALUES (%s,'petty_cash_limit',%s,'x',50,75,TRUE,'passed',CURRENT_DATE) RETURNING id""", (mid, dt))
-    assert cur.fetchone()[0]
+    from test import resolution_fixtures as rf
+    assert rf.committee_resolution(cur, mid, 'petty_cash_limit', dt, body='x', majority_required=50, votes_for_pct=75)
     cur.execute("SAVEPOINT s")
     with pytest.raises(psycopg2.Error):
         cur.execute("SELECT fn_pass_resolution(%s,CURRENT_DATE,NULL)", (0,))
@@ -197,3 +195,77 @@ def test_service_passes_from_flat_numbers_and_ignores_typed_percentages(cur, con
     ok, msg = rra.create_resolution(5, "admin", SOC, mid, dt, "petty_cash_limit", "body", 66.67, True, date.today(),
                                     "a sufficient reason", present_flats=", ".join(flats), for_flats=", ".join(flats))
     assert ok and "Passed" in msg, msg
+
+
+# ── task 1.10: committee decisions are tallied from the committee register ─────────────────────────────────────
+def _mc_draft(cur, society_flats=3):
+    from test import resolution_fixtures as rf
+    cur.execute("INSERT INTO meetings (society_id,type,held_on) VALUES (%s,'MC',CURRENT_DATE) RETURNING id", (SOC,))
+    mid = cur.fetchone()[0]
+    cur.execute("SELECT id FROM decision_types WHERE code='SET_BOARD_PARAM'")
+    dt = cur.fetchone()[0]
+    rf.ensure_committee(cur, SOC, society_flats)
+    rid = rf.insert_resolution(cur, mid, 'petty_cash_limit', dt, majority_required=50)
+    cur.execute("SELECT array_agg(DISTINCT apartment_id) FROM fn_serving_committee(%s, CURRENT_DATE)", (SOC,))
+    return rid, cur.fetchone()[0]
+
+
+def test_committee_decision_cannot_be_passed_with_a_typed_figure_and_no_register(cur):
+    rid, _ = _mc_draft(cur)
+    cur.execute("SAVEPOINT s")
+    with pytest.raises(psycopg2.Error):
+        cur.execute("UPDATE resolutions SET passed=TRUE, status='passed', passed_on=CURRENT_DATE, votes_for_pct=100 WHERE id=%s", (rid,))
+    cur.execute("ROLLBACK TO SAVEPOINT s")
+
+
+def test_committee_tally_comes_from_the_register_and_a_typed_value_is_ignored(cur):
+    rid, flats = _mc_draft(cur)
+    cur.execute("SELECT fn_record_committee_register(%s,%s,%s,%s,%s)", (rid, flats, flats[:-1], flats[-1:], []))
+    cur.execute("SELECT strength, present, for_n, votes_for_pct FROM fn_committee_tally(%s)", (rid,))
+    strength, present, for_n, pct = cur.fetchone()
+    assert present == strength and for_n == len(flats) - 1
+    cur.execute("SELECT fn_pass_committee_resolution(%s,CURRENT_DATE,NULL)", (rid,))
+    assert cur.fetchone()[0].startswith("Passed")
+    cur.execute("SELECT votes_for_pct FROM resolutions WHERE id=%s", (rid,))
+    assert float(cur.fetchone()[0]) == float(pct) != 100
+    # a typed 100 on the passed row is refused (frozen), and the register is frozen too
+    cur.execute("SAVEPOINT s")
+    with pytest.raises(psycopg2.Error):
+        cur.execute("UPDATE resolutions SET votes_for_pct=100 WHERE id=%s", (rid,))
+    cur.execute("ROLLBACK TO SAVEPOINT s")
+    cur.execute("SAVEPOINT s")
+    with pytest.raises(psycopg2.Error):
+        cur.execute("DELETE FROM committee_votes WHERE resolution_id=%s", (rid,))
+    cur.execute("ROLLBACK TO SAVEPOINT s")
+
+
+def test_committee_majority_is_measured_on_the_whole_committee(cur):
+    rid, flats = _mc_draft(cur)
+    cur.execute("UPDATE resolutions SET majority_required = 66.67 WHERE id=%s", (rid,))
+    cur.execute("SELECT fn_record_committee_register(%s,%s,%s,%s,%s)", (rid, flats, flats[:1], flats[1:], []))
+    cur.execute("SELECT fn_pass_committee_resolution(%s,CURRENT_DATE,NULL)", (rid,))
+    assert cur.fetchone()[0].startswith("Not carried")
+
+
+def test_committee_quorum_needs_more_than_half(cur):
+    rid, flats = _mc_draft(cur, 4)
+    cur.execute("SELECT fn_record_committee_register(%s,%s,%s,%s,%s)", (rid, flats[:2], flats[:2], [], []))
+    cur.execute("SELECT fn_pass_committee_resolution(%s,CURRENT_DATE,NULL)", (rid,))
+    out = cur.fetchone()[0]
+    assert out.startswith("Quorum not met")
+    cur.execute("SELECT status FROM resolutions WHERE id=%s", (rid,))
+    assert cur.fetchone()[0] == "draft"
+
+
+def test_only_serving_office_bearers_can_be_entered_and_one_vote_each(cur):
+    rid, flats = _mc_draft(cur)
+    cur.execute("SELECT id FROM apartments WHERE society_id=%s AND active AND id <> ALL(%s) LIMIT 1", (SOC, flats))
+    outsider = cur.fetchone()[0]
+    cur.execute("SAVEPOINT s")
+    with pytest.raises(psycopg2.Error):
+        cur.execute("SELECT fn_record_committee_register(%s,%s,%s,%s,%s)", (rid, [outsider], [outsider], [], []))
+    cur.execute("ROLLBACK TO SAVEPOINT s")
+    cur.execute("SAVEPOINT s")
+    with pytest.raises(psycopg2.Error):
+        cur.execute("SELECT fn_record_committee_register(%s,%s,%s,%s,%s)", (rid, flats, flats[:1], flats[:1], []))   # for AND against
+    cur.execute("ROLLBACK TO SAVEPOINT s")

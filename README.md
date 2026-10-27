@@ -138,7 +138,7 @@ The full, source-cited catalogue of Acts, Rules, Bye-laws and Notifications for 
 | **TDS on payments (vendors / contractors / professionals / rent)** | ✅ | `fn_compute_tds_pct` and `tds_compliance.py` are a single choke-point for **section, rate, threshold and PAN-vs-no-PAN** (194A, 194C, 194H, 194-I, 194-IA/IB/IC, 194J). Section rates are now **effective-dated rows** (`effective_from`/`effective_to`), so a return for FY 2024-25 and one for FY 2026-27 each use the figures in force, and each row carries `act_version` (`IT1961` / `IT2025`) and `section_2025` (the Sec 393 reference). Thresholds use a strict "exceeds" test (194-IA is inclusive). 194H (₹20,000 from 1-Apr-2025) and 194-IB (2% from 1-Oct-2024) were re-derived. | **Limits, confirm each figure with your CA:** other 1961-Act rows for 1-Apr-2025 to 31-Mar-2026 were not re-derived; 194A's threshold for a society paying interest is unverified; 192A has no 2025-Act row; rent is a per-*month* test in the 2025 Act but the engine tests one bill at a time; 194-IA and 194Q need inputs the engine does not hold. |
 | **TDS return support (Form 26Q)** | 🟡 | `tds_export.py` produces a **26Q-shaped quarterly workbook** with per-deduction records (date, section, rate, PAN, amount, TDS) for the CA to transcribe. The society's TAN is captured in the Setup Wizard. | It is **not** a TRACES integration and does not e-file or generate challans. |
 | **Form 26AS / AIS reconciliation** | ⬜ | **Not built.** The society's TDS-deducted records can be exported for comparison, but there is no automated match against 26AS or AIS. | |
-| **Return of income, tax audit** | ⬜ | Out of scope by design: EstateHub is a **books-of-account** system, not an e-filer. There is no s.44AB turnover flag yet. | |
+| **Return of income, tax audit** | 🟡 | Out of e-filing scope by design: EstateHub is a **books-of-account** system, not an e-filer. A **provisional s.44AB flag** exists (`fn_tax_audit_flag`, effective-dated `tax_audit_thresholds`, both figures marked provisional): it warns from 80% of the limit; the CA decides. | |
 | **Statute version (Income-tax Act, 2025)** | 🟡 | The 2025 Act applies from **1 April 2026**. TDS rows now carry both the 1961 section and the Sec 393 reference, and the 1961 rows end on 31-Mar-2026. **Not yet done:** dual 1961/2025 references on the 26Q-shaped export header, on depreciation, disposal and audit-threshold labels, and on the statutory wizard rows. Those still cite 1961-Act sections (43(6)(c), 50, 139(1), 44AB). | |
 
 ---
@@ -249,6 +249,25 @@ Until these are built, the society should adopt a written privacy notice and ret
 | **Hygiene** `float` in exports | 🟡 | `income_tax_export.py` uses `Decimal`; 297 `float(` calls remain across `app/` and `database/` (counted 25 Oct 2026). Planned: [Gold-Standard Plan v3](ApexEstateHub%20Gold-Standard%20Plan%20v3.md), task 3.4. |
 
 Owner decisions taken on 24-25 Oct 2026 are in the *Decisions record* at the end of [`ER.md`](ER.md) §9. The questions waiting for an advocate or CA are listed in [`docs/PHASE0_ADVISER_QUESTIONS.md`](docs/PHASE0_ADVISER_QUESTIONS.md), and Phase 0 progress is in [`docs/PHASE0_TRACKER.md`](docs/PHASE0_TRACKER.md).
+
+### Who signs what
+
+Status marks: ✅ built, 🟡 partly built, ⬜ planned (Gold-Standard Plan v3). A password confirmation records who confirmed; it is **not** a legal e-signature, and whether it satisfies the bye-laws and the IT Act is a question for the society's advocate. Keep signed paper minutes.
+
+| Record | Today | Planned signers | Sealed with | Status |
+|---|---|---|---|---|
+| Ordinary expense | Accountant prepares; Treasurer or President approves; nobody approves their own item; no amount ladder | Up to ₹20,000 (bye-law 49): Secretary or Treasurer. Above: Managing Committee resolution plus at least 2 serving office-bearers | `SIGNING_AGREEMENT` | 🟡 |
+| Fund withdrawal | Database enforces a resolution reference and co-signatures above a set amount; no screen yet | Same engine, with Approve and Decline buttons | `SIGNING_AGREEMENT` | 🟡 |
+| NOC | Admin issues; the Secretary's signature image prints | Admin prepares, Secretary signs, system confirms no dues | `SIGNING_NOC` | 🟡 |
+| Agreement | Admin creates it at setup; no signing recorded | President and Secretary for the society; platform operator for the platform | `SIGNING_AGREEMENT` | ⬜ |
+| Resolution and minutes | General Body **and Managing Committee** tallies are derived from registers (committee register added in Phase 1); `minutes_signed_by` is not yet set by anything | Chair and Secretary sign; system records the tally | `SIGNING_AGREEMENT` | 🟡 |
+| Poll result | Admin declares | Secretary or President declares; system seals the tally | `SIGNING_AGREEMENT` | ⬜ |
+| Ledger anchor certificate | **Signed by the application with the society's `SIGNING_LEDGER` key** (key version recorded); Secretary and Treasurer sign the printed copy and file it with the CA | Same, and each also signs in the app | `SIGNING_LEDGER` | 🟡 |
+| QR gate passes, receipts, NOC tags | Signed with the society's `SIGNING_QR` key; reissue confirmed by the admin's step-up password | Unchanged | `SIGNING_QR` | ✅ |
+
+**Keys.** Each society has four random keys (`SIGNING_QR`, `SIGNING_NOC`, `SIGNING_AGREEMENT`, `SIGNING_LEDGER`), wrapped under `SECRET_VAULT_KEY` (host `.env`, never in the database). `SECRET_MASTER_KEY`, held by the platform operator outside `.env` and the database, is needed to change the vault key (`scripts/rotate_vault_key.py`). No human knows a signing key. The admin's former "signing secret" is now a **step-up password**, stored as a one-way hash, that only confirms sensitive actions. Anyone who controls the host and the database can sign as any society: independence for authorities comes from the paper certificate the Secretary and Treasurer sign and file, and from the CA holding copies of anchor heads.
+
+**Scheduled jobs.** `python scripts/run_job.py anchors|patrol|ratification` writes a `job_runs` row and alerts the platform masters on failure. The host's scheduler must be configured to call them (plan task 0.6).
 
 ### Gaps we are open about
 

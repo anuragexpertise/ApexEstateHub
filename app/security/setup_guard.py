@@ -2,7 +2,7 @@
 """
 Society setup-completion guard.
 
-societies.signing_secret_enc is NULL until a society's admin completes the
+societies.stepup_password_hash is NULL until a society's admin completes the
 Setup Wizard (TDS/GST rate defaults, apartment/vendor charge defaults,
 brought-forward balances, QR signing secret, etc — see
 setup_wizard_callbacks.py / fn_complete_society_setup).
@@ -18,7 +18,7 @@ their normal dashboard with no gate whatsoever.
 
 Fix: exactly one definition of "setup complete" lives here. Anything that
 needs to know should call society_setup_incomplete(society_id) instead of
-querying signing_secret_enc directly.
+querying stepup_password_hash directly.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from __future__ import annotations
 def society_setup_incomplete(society_id) -> bool:
     """
     True if `society_id` is set and that society hasn't finished the Setup
-    Wizard yet (societies.signing_secret_enc IS NULL). False for a falsy
+    Wizard yet (societies.stepup_password_hash IS NULL). False for a falsy
     society_id (e.g. master admin, who isn't scoped to one society) so
     callers don't need to special-case that themselves.
     """
@@ -36,8 +36,8 @@ def society_setup_incomplete(society_id) -> bool:
 
     from database.db_manager import db
     row = db._execute(
-        "SELECT signing_secret_enc FROM societies WHERE id = :sid",
+        "SELECT stepup_password_hash FROM societies WHERE id = :sid",
         {"sid": society_id},
         fetch_one=True,
     )
-    return bool(row) and not row.get("signing_secret_enc")
+    return bool(row) and not row.get("stepup_password_hash")

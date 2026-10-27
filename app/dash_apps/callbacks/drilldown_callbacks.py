@@ -5960,7 +5960,7 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
             "UPDATE apt_charges_fines_basis SET apt_id=%s, start_date=%s, end_date=%s,"
             " apt_maintenance_amount=%s, apt_maintenance_rate=%s, apt_due_day=%s,"
             " apt_interest_pct=%s, apt_status=%s, apt_sinking_fund_rate=%s,"
-            " apt_repair_fund_rate=%s, charges_interest=%s "
+            " apt_repair_fund_rate=%s, charges_interest=%s, interest_resolution_ref=%s "
             " WHERE id=%s AND society_id=%s",
             (
                 d.get("apt_id"),
@@ -5974,6 +5974,7 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
                 sinking_rate,
                 repair_rate,
                 charges_interest if charges_interest is not None else True,
+                (d.get("interest_resolution_ref") or "").strip() or None,
                 pk,
                 sid,
             ),
@@ -5986,8 +5987,8 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
     r = db._execute(
         "INSERT INTO apt_charges_fines_basis(society_id, apt_id, start_date, end_date,"
         " apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_interest_pct,"
-        " apt_status, apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest)"
-        " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+        " apt_status, apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest, interest_resolution_ref)"
+        " VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
         (
             sid,
             apt_id,
@@ -6001,6 +6002,7 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
             sinking_rate,
             repair_rate,
             charges_interest if charges_interest is not None else True,
+            (d.get("interest_resolution_ref") or "").strip() or None,
         ),
         fetch_one=True,
     )

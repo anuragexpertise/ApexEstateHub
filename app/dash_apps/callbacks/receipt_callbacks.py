@@ -61,6 +61,7 @@ def _receipt_html_js() -> str:
             row('Received From', d.payer + ' (' + d.role + ')') +
             row('Particulars', d.particulars) +
             row('Account', d.account) +
+            (d.gst_exempt_authority ? row('GST exemption authority', d.gst_exempt_authority) : '') +
             (d.tds_pct > 0 
                 ? (row('Gross Amount', '\\u20B9' + d.amount) + 
                    row('TDS (' + d.tds_pct + '%' + (d.tds_section ? ' - ' + d.tds_section : '') + ')', '- \\u20B9' + d.tds_amount) + 
@@ -142,6 +143,7 @@ function emailReceipt(n_clicks, d) {
         'Received From: ' + d.payer + ' (' + d.role + ')\n' +
         'Particulars: ' + d.particulars + '\n' +
         'Account: ' + d.account + '\n' +
+        (d.gst_exempt_authority ? 'GST exemption authority: ' + d.gst_exempt_authority + '\n' : '') +
         (d.tds_pct > 0 
             ? ('Gross Amount: Rs. ' + d.amount + '\n' +
                'TDS (' + d.tds_pct + '%' + (d.tds_section ? ' - ' + d.tds_section : '') + '): - Rs. ' + d.tds_amount + '\n' +

@@ -74,13 +74,13 @@ def ledger_chain(sid):
                           "The ledger chain is broken at the rows below.")
 
 
-# 2b. signed anchors (the HMAC itself needs LEDGER_ANCHOR_SECRET, so it is verified by scripts/anchor_ledgers.py --verify)
+# 2b. signed anchors (the HMAC needs the society's SIGNING_LEDGER key, so it is verified by scripts/anchor_ledgers.py --verify)
 def anchors(sid):
     rows = _q("SELECT anchored_at, ledger_seq, row_count, method, "
               "       (signature IS NOT NULL) AS signed, external_ref "
               "  FROM ledger_chain_anchors WHERE society_id = %s ORDER BY ledger_seq DESC LIMIT 20", (sid,))
-    note = ("Anchor register (latest 20). Signatures are HMAC-SHA256 and can only be checked by a host holding "
-            "LEDGER_ANCHOR_SECRET: run `python scripts/anchor_ledgers.py --verify`.")
+    note = ("Anchor register (latest 20). Signatures are HMAC-SHA256 under the society's SIGNING_LEDGER key "
+            "and can only be checked by a host holding SECRET_VAULT_KEY: run `python scripts/anchor_ledgers.py --verify`.")
     if not rows:
         return _result("finding", [], "No anchor has ever been recorded for this society. " + note)
     unsigned = sum(1 for r in rows if not r["signed"])

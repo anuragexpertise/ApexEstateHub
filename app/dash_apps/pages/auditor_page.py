@@ -3,7 +3,7 @@
 Auditor portal body: a read-only "Verify it yourself" panel. Each card runs one of the SQL verification
 functions through app.services.auditor_checks and shows a pass / finding / info badge with the rows.
 Checks that cannot run from a web page (the pytest suite, anchor-signature verification that needs
-LEDGER_ANCHOR_SECRET, and the tamper statements that must only ever run on a copy) are listed as reference.
+SIGNING_LEDGER / SECRET_VAULT_KEY, and the tamper statements that must only ever run on a copy) are listed as reference.
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ REFERENCE = """-- 1. Automated suite (live-DB tests are skipped unless a Postgre
 pip install -r requirements.txt
 pytest test/ -q
 
--- 2b. Anchor the chain now and check every anchor's signature (host holding LEDGER_ANCHOR_SECRET)
+-- 2b. Anchor the chain now and check every anchor's signature (host holding SECRET_VAULT_KEY)
 python scripts/anchor_ledgers.py --verify
 
 -- 6. Tamper statements: each must raise an exception. Run ONLY on a copy of the database.

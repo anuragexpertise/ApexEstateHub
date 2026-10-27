@@ -130,31 +130,22 @@ class TestScenarioD_GatePassQR:
         assert "error" in qr_service.parse_qr_payload(payload)
 
     def test_qr_generation_fails_closed_on_undecryptable_secret(self, patched_db):
-        """A configured-but-unreadable secret is an infrastructure fault, not a
-        society that never set one, so it must not downgrade to unsigned.
-
-        Exercises the real resolver against a FakeDB row that *has* a stored
-        ciphertext, with decryption raising — the state that previously logged a
-        warning and quietly produced an unsigned code.
-        """
+        """A key that exists but cannot be unwrapped is an infrastructure fault, not a society with no key yet,
+        so it must not downgrade to an unsigned code."""
+        from app.services import signing_service
         from app.services.secret_vault import SecretVaultError
 
-        patched_db.tables["societies"].append(
-            {"id": 2, "name": "Vault Society", "signing_secret_enc": "gAAAA-ciphertext"})
-        monkey_target = qr_service
-        import app.services.secret_vault as vault
-
-        def _boom(_tok):
+        def _boom(_sid, db=None):
             raise SecretVaultError("bad vault key")
 
-        monkey_target_decrypt = vault.decrypt_secret
-        vault.decrypt_secret = _boom
+        original = signing_service.raw_key_for_qr
+        signing_service.raw_key_for_qr = _boom
         try:
             with pytest.raises(qr_service.QRSigningError):
                 qr_service._get_signing_secret(2)
             img, payload = qr_service.generate_qr_code(2, "SEC", 5)
         finally:
-            vault.decrypt_secret = monkey_target_decrypt
+            signing_service.raw_key_for_qr = original
 
         assert img is None, "an unreadable secret must not yield an image"
         assert "bad vault key" in payload
@@ -170,11 +161,12 @@ class TestScenarioD_GatePassQR:
         SIGNING_SECRET — seed.py leaves it NULL, which is the legacy unsigned
         path and is covered by the hermetic tests above.
         """
+        import os
         row = qr_service.db._execute(
-            "SELECT signing_secret_enc FROM societies WHERE id=%s AND signing_secret_enc IS NOT NULL",
+            "SELECT 1 AS ok FROM society_signing_keys WHERE society_id=%s AND purpose='SIGNING_QR' AND status='active'",
             (1,), fetch_one=True)
-        if not row:
-            pytest.skip("society 1 has no provisioned SIGNING_SECRET")
+        if not row or not os.getenv("SECRET_VAULT_KEY"):
+            pytest.skip("society 1 has no SIGNING_QR key, or SECRET_VAULT_KEY is not the seed's")
         version = qr_service._current_qr_version("APT", _first_apartment_id())
         if version is None:
             pytest.skip("no apartment with a qr_version to sign")

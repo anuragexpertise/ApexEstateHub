@@ -9,6 +9,10 @@
 
 -- (No custom ENUM/DOMAIN types in this schema)
 
+-- pgcrypto: fn_trg_receipt_hash_insert() uses DIGEST(); signing-key wrapping (task 1.2) may use it too.
+-- Aiven/Render allow it for the database owner; a CI database needs it explicitly.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 1: TABLES
 -- ════════════════════════════════════════════════════════════════
@@ -66,15 +70,11 @@ CREATE TABLE societies (
     -- How the society is constituted; with `state` it selects the legal scheme (fn_sync_society_regime).
     -- Existing societies were all treated as apartment owners' associations, hence the default.
     constitution VARCHAR(20) NOT NULL DEFAULT 'AOA' CHECK (constitution IN ('AOA', 'REG_SOCIETY', 'COOP', 'GENERIC')),
-    -- signing_secret_enc: this society's own QR SIGNING_SECRET, Fernet-encrypted
-    -- (reversible) under the deployment's SECRET_VAULT_KEY — see
-    -- app/services/secret_vault.py. It must be reversible, because an HMAC key
-    -- cannot be recovered from a hash: a one-way value could only ever act as a
-    -- "setup completed" flag, never as real key material. NULL means this society
-    -- hasn't completed the Setup Wizard yet (or hasn't set a signing secret), so
-    -- its QR codes stay unsigned until it is. Also doubles as the "has this
-    -- society finished onboarding" flag the Setup Wizard trigger checks.
-    signing_secret_enc TEXT,
+    -- stepup_password_hash: one-way hash (werkzeug, like login passwords) of the admin's step-up password. It
+    -- signs nothing; it only confirms sensitive actions (QR reissue, key rotation). Signing keys live in
+    -- society_signing_keys (wrapped under SECRET_VAULT_KEY). NULL means the Setup Wizard is not finished, which
+    -- is the flag the setup guard checks.
+    stepup_password_hash TEXT,
     primary_bank_account_id INT,
     -- Per-society override of the legal regime's cash-payment enforcement:
     -- 'warn' (default NULL behaviour) logs an over-limit cash payment,
@@ -1597,6 +1597,8 @@ CREATE TABLE apt_charges_fines_basis (
     apt_maintenance_rate NUMERIC(10, 2) NOT NULL DEFAULT 3.0,
     apt_due_day INTEGER DEFAULT 5,
     apt_interest_pct NUMERIC(10, 4),   -- no cap: the rate the General Body resolved
+    -- Task 1.9: the number of that General Body resolution. No resolution number = no interest is billed.
+    interest_resolution_ref VARCHAR(100),
     apt_status BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
@@ -2756,7 +2758,7 @@ ALTER TABLE societies
     FOREIGN KEY (id, primary_bank_account_id)
     REFERENCES accounts (society_id, id);
 
--- societies.signing_secret_enc / secretary_email: signing_secret_enc holds
+-- societies.stepup_password_hash / secretary_email: stepup_password_hash holds
 -- Fernet ciphertext (reversible, so it can actually be used as an HMAC key; see
 -- app/services/secret_vault.py and qr_service.py). secretary_email backs the
 -- post-onboarding society Agreement (see society_agreements below), which needs
@@ -3910,7 +3912,7 @@ BEGIN
             SELECT id, apt_maintenance_amount, apt_maintenance_rate, apt_due_day,
                    apt_interest_pct, start_date, end_date,
                    apt_sinking_fund_rate, apt_repair_fund_rate, charges_interest,
-                   billing_basis, common_expense_budget_monthly
+                   billing_basis, common_expense_budget_monthly, interest_resolution_ref
               INTO charge
               FROM apt_charges_fines_basis
              WHERE society_id = p_society_id AND apt_status = TRUE
@@ -4052,6 +4054,7 @@ BEGIN
             -- onward is still added by fn_apply_receivable_interest when it next runs.
             IF COALESCE(charge.charges_interest, TRUE)
                AND COALESCE(charge.apt_interest_pct, 0) > 0
+               AND LENGTH(BTRIM(COALESCE(charge.interest_resolution_ref, ''))) > 0
                AND v_base_maint > 0
                AND v_month < period_first_day(v_month)
             THEN
@@ -4243,6 +4246,12 @@ $$;
 
 -- Applies SIMPLE INTEREST monthly on overdue residual.
 
+-- The wording printed beside every interest charge (Phase 0 decision).
+CREATE OR REPLACE FUNCTION fn_interest_basis_text(p_rate NUMERIC, p_ref TEXT) RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
+    SELECT format('Simple Interest - Bye-law 46(a) - Rate %s%% via Resolution %s by GBM',
+                  trim(trailing '.' FROM trim(trailing '0' FROM p_rate::NUMERIC(10,4)::TEXT)), p_ref);
+$$;
+
 CREATE OR REPLACE FUNCTION fn_apply_receivable_interest(p_society_id INT)
 RETURNS VOID
 LANGUAGE plpgsql
@@ -4255,6 +4264,7 @@ DECLARE
     v_residual        NUMERIC(15,2);
     v_total_increment NUMERIC(15,2);
     v_int_acc_id      INT;
+    v_ref             VARCHAR(100);
 BEGIN
     SELECT id
       INTO v_int_acc_id
@@ -4289,7 +4299,7 @@ BEGIN
         -- 'arrears_interest_pct' is no longer read here; this function never guesses a rate.
         -- apt_interest_pct (apt_charges_fines_basis) is the single source of truth. A flat's own row wins over
         -- the society default (apt_id IS NULL). rec.entity_id is the apartment id for role = 'apartment'.
-        SELECT c.apt_interest_pct INTO v_rate
+        SELECT c.apt_interest_pct, c.interest_resolution_ref INTO v_rate, v_ref
           FROM apt_charges_fines_basis c
          WHERE c.society_id = p_society_id
            AND c.apt_status = TRUE
@@ -4300,7 +4310,8 @@ BEGIN
          ORDER BY c.apt_id NULLS LAST, c.start_date DESC
          LIMIT 1;
 
-        IF v_rate IS NULL OR v_rate <= 0 THEN
+        -- Task 1.9: simple interest only, at a rate a General Body resolution set. No rate or no resolution number = no interest.
+        IF v_rate IS NULL OR v_rate <= 0 OR LENGTH(BTRIM(COALESCE(v_ref, ''))) = 0 THEN
             CONTINUE;
         END IF;
 
@@ -4358,7 +4369,7 @@ BEGIN
         PERFORM fn_post_receivable_accrual(
             p_society_id, rec.id, rec.entity_id, 'apartment',
             COALESCE(rec.interest_acc_id, v_int_acc_id), v_total_increment,
-            'Interest on ' || COALESCE(rec.description, 'Maintenance Due')
+            'Interest on ' || COALESCE(rec.description, 'Maintenance Due') || ' - ' || fn_interest_basis_text(v_rate, v_ref)
         );
 
     END LOOP;
@@ -11205,7 +11216,7 @@ RETURNS TABLE (
     secretary_phone VARCHAR(20), secretary_email VARCHAR(100), secretary_sign VARCHAR(100),
     payment_qr VARCHAR(255), plan VARCHAR(20), plan_validity DATE, calc_start_date DATE,
     login_background VARCHAR(100), created_at TIMESTAMP, gstin VARCHAR(15),
-    registration_number VARCHAR(100), signing_secret_enc TEXT, primary_bank_account_id INT,
+    registration_number VARCHAR(100), stepup_password_hash TEXT, primary_bank_account_id INT,
     plan_status VARCHAR(10), total_apartments INT, total_users INT, total_receivables NUMERIC(15,2)
 )
 LANGUAGE plpgsql STABLE AS $$
@@ -11217,7 +11228,7 @@ BEGIN
         s.secretary_phone::VARCHAR(20), s.secretary_email::VARCHAR(100), s.secretary_sign::VARCHAR(100),
         s.payment_qr::VARCHAR(255), s.plan::VARCHAR(20), s.plan_validity::DATE, s.calc_start_date::DATE,
         s.login_background::VARCHAR(100), s.created_at::TIMESTAMP, s.gstin::VARCHAR(15),
-        s.registration_number::VARCHAR(100), s.signing_secret_enc::TEXT, s.primary_bank_account_id::INT,
+        s.registration_number::VARCHAR(100), s.stepup_password_hash::TEXT, s.primary_bank_account_id::INT,
         CASE WHEN s.plan='Free' THEN 'Free'
              WHEN s.plan_validity >= CURRENT_DATE THEN 'Active'
              ELSE 'Expired' END::VARCHAR(10),
@@ -14071,7 +14082,7 @@ $$;
 -- Persists everything collected by the Admin portal's first-time Setup
 -- Wizard (app/dash_apps/pages/setup_wizard.py). Before this function
 -- existed, submit_setup_wizard() only ever wrote the setup-completion
--- secret column (signing_secret_enc, née qr_signing_secret_hash) — the
+-- secret column (stepup_password_hash, née qr_signing_secret_hash) — the
 -- TDS Rates, GST Rates, Apartment Charges, Vendor Charges and Brought
 -- Forward steps collected input on-screen but never persisted any of it,
 -- so every newly onboarded society ended up with zero tds_section_rates
@@ -14099,7 +14110,7 @@ $$;
 -- for 194C/194D via the discriminator column — the schema was never
 -- missing a payee-type column; see the fix note on the TDS section-rates
 -- write below for what was actually broken).
--- p_signing_secret_enc is the Fernet ciphertext already encrypted in
+-- p_stepup_password_hash is the Fernet ciphertext already encrypted in
 -- Python (secret_vault.encrypt_secret) before this call — this function
 -- never sees the plaintext SIGNING_SECRET and does no hashing/encryption
 -- of its own (contrast the old p_qr_hash, which arrived pre-hashed too,
@@ -14120,7 +14131,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_society_id        INT,
-    p_signing_secret_enc TEXT,
+    p_stepup_password_hash TEXT,
     p_logo              VARCHAR(100),
     p_address           TEXT,
     p_phone             VARCHAR(20),
@@ -14219,7 +14230,7 @@ BEGIN
 
     -- 1) Setup-completion flag and society details
     UPDATE societies SET 
-        signing_secret_enc = p_signing_secret_enc,
+        stepup_password_hash = p_stepup_password_hash,
         logo = COALESCE(p_logo, logo),
         address = COALESCE(NULLIF(BTRIM(p_address), ''), address),
         phone = COALESCE(NULLIF(BTRIM(p_phone), ''), phone),
@@ -18582,6 +18593,11 @@ CREATE TABLE ledger_chain_anchors (
     anchored_by  INT REFERENCES users (id),
     method       VARCHAR(10) NOT NULL DEFAULT 'manual' CHECK (method IN ('manual', 'scheduled', 'fy_lock')),
     signature    VARCHAR(64),       -- HMAC-SHA256 by the application; set once
+    sig_purpose  VARCHAR(20),       -- 'SIGNING_LEDGER' (NULL on an anchor signed before the vault existed)
+    sig_key_version INT,            -- society_signing_keys.version that made the signature
+    sig_algorithm   VARCHAR(20),    -- 'HMAC-SHA256'
+    signed_at    TIMESTAMP,         -- when the signature was made
+    legacy_signature BOOLEAN NOT NULL DEFAULT FALSE,   -- TRUE = signed with the retired platform LEDGER_ANCHOR_SECRET
     external_ref TEXT,              -- where the signed certificate was filed (CA's letter, locker, ...); set once
     CONSTRAINT uq_anchor_society_seq UNIQUE (society_id, ledger_seq)
 );
@@ -18598,7 +18614,9 @@ BEGIN
        ROW(OLD.society_id, OLD.anchored_at, OLD.ledger_seq, OLD.head_hash, OLD.row_count, OLD.anchored_by, OLD.method) THEN
         RAISE EXCEPTION 'ledger_chain_anchors is append-only: an anchor cannot be changed';
     END IF;
-    IF (OLD.signature IS NOT NULL AND NEW.signature IS DISTINCT FROM OLD.signature)
+    IF (OLD.signature IS NOT NULL AND (NEW.signature IS DISTINCT FROM OLD.signature
+            OR ROW(NEW.sig_purpose, NEW.sig_key_version, NEW.sig_algorithm, NEW.signed_at, NEW.legacy_signature)
+               IS DISTINCT FROM ROW(OLD.sig_purpose, OLD.sig_key_version, OLD.sig_algorithm, OLD.signed_at, OLD.legacy_signature)))
        OR (OLD.external_ref IS NOT NULL AND NEW.external_ref IS DISTINCT FROM OLD.external_ref) THEN
         RAISE EXCEPTION 'ledger_chain_anchors: the signature and the filing reference are set once';
     END IF;
@@ -19173,7 +19191,7 @@ CREATE TRIGGER trg_receipts_cash_limit
 -- freezes a passed resolution, as regime_rule_audit already is.
 CREATE OR REPLACE FUNCTION trg_resolutions_validity() RETURNS trigger
 LANGUAGE plpgsql AS $$
-DECLARE v_quorum BOOLEAN; v_tally RECORD;
+DECLARE v_quorum BOOLEAN; v_tally RECORD; v_ctally RECORD;
 BEGIN
     IF TG_OP = 'DELETE' THEN
         IF OLD.passed THEN
@@ -19196,6 +19214,16 @@ BEGIN
         IF NOT COALESCE(v_quorum, FALSE) THEN
             RAISE EXCEPTION 'Resolution cannot be passed: meeting % did not have a quorum.', NEW.meeting_id
                 USING ERRCODE = 'check_violation';
+        END IF;
+        -- Task 1.10: a Managing Committee decision passes only on the committee register; any typed figure is replaced.
+        IF (SELECT required_body FROM decision_types WHERE id = NEW.decision_type_id) = 'MC' THEN
+            SELECT * INTO v_ctally FROM fn_committee_tally(NEW.id);
+            IF v_ctally.vote_rows = 0 THEN
+                RAISE EXCEPTION 'A committee decision cannot be passed without the committee register (use fn_pass_committee_resolution).'
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            NEW.votes_for_pct := v_ctally.votes_for_pct;
+            NEW.owners_present_pct := v_ctally.present_pct;
         END IF;
         -- G-02: a General Body resolution passes only on figures the registers add up to.
         IF (SELECT required_body FROM decision_types WHERE id = NEW.decision_type_id) = 'GBM' THEN
@@ -19513,10 +19541,14 @@ END;
 $$;
 
 -- The application's signature, set once.
-CREATE OR REPLACE FUNCTION fn_set_anchor_signature(p_anchor_id INT, p_signature TEXT) RETURNS VOID
+CREATE OR REPLACE FUNCTION fn_set_anchor_signature(p_anchor_id INT, p_signature TEXT,
+        p_purpose TEXT DEFAULT NULL, p_key_version INT DEFAULT NULL, p_algorithm TEXT DEFAULT NULL) RETURNS VOID
 LANGUAGE plpgsql AS $$
 BEGIN
-    UPDATE ledger_chain_anchors SET signature = p_signature WHERE id = p_anchor_id AND signature IS NULL;
+    UPDATE ledger_chain_anchors
+       SET signature = p_signature, sig_purpose = p_purpose, sig_key_version = p_key_version,
+           sig_algorithm = p_algorithm, signed_at = NOW(), legacy_signature = (p_purpose IS NULL)
+     WHERE id = p_anchor_id AND signature IS NULL;
     IF NOT FOUND THEN RAISE EXCEPTION 'Anchor % not found or already signed.', p_anchor_id; END IF;
 END;
 $$;
@@ -19910,3 +19942,242 @@ BEGIN
 END $$;
 CREATE TRIGGER trg_resolutions_decision_guard BEFORE INSERT ON resolutions
     FOR EACH ROW EXECUTE FUNCTION trg_resolutions_decision_guard();
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SECTION: SIGNING-KEY VAULT (Gold-Standard Plan v3, task 1.2)
+-- ════════════════════════════════════════════════════════════════════════════
+-- Four independent keys per society, one per purpose. Each is 32 random bytes made by the server and stored
+-- WRAPPED (Fernet) under SECRET_VAULT_KEY, which lives in the host environment and never in this database.
+-- SECRET_MASTER_KEY lives in neither; it authorises a change of SECRET_VAULT_KEY (scripts/rotate_vault_key.py).
+-- No human knows a signing key. Rotation retires the old version but keeps it so old records still verify.
+
+-- Holds the rights to re-wrap keys. The application's login is NOT a member; the rotation tool's separate login is.
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'estatehub_keyrotator') THEN
+        CREATE ROLE estatehub_keyrotator NOLOGIN;
+    END IF;
+END $$;
+
+CREATE TABLE society_signing_keys (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    purpose         VARCHAR(20) NOT NULL CHECK (purpose IN ('SIGNING_QR', 'SIGNING_NOC', 'SIGNING_AGREEMENT', 'SIGNING_LEDGER')),
+    version         INT NOT NULL CHECK (version >= 1),
+    key_id          VARCHAR(32) NOT NULL UNIQUE,            -- random, NOT derived from the key
+    wrapped_key     TEXT NOT NULL,                          -- Fernet token of the 32 key bytes
+    algorithm       VARCHAR(20) NOT NULL DEFAULT 'HMAC-SHA256',
+    status          VARCHAR(10) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'retired', 'revoked')),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by      INT REFERENCES users (id),
+    retired_at      TIMESTAMP,
+    revoked_at      TIMESTAMP,
+    compromise_date TIMESTAMP,                              -- signatures made at or after this are untrusted
+    revoke_reason   TEXT,
+    UNIQUE (society_id, purpose, version)
+);
+CREATE UNIQUE INDEX uq_signing_key_one_active ON society_signing_keys (society_id, purpose) WHERE status = 'active';
+
+-- Never deleted. The wrapped key never changes except through the rotation tool's login (a member of
+-- estatehub_keyrotator, which a superuser implicitly is). Status moves only active -> retired/revoked, retired -> revoked.
+CREATE OR REPLACE FUNCTION trg_signing_key_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'society_signing_keys rows are never deleted (a retired key still verifies old records)';
+    END IF;
+    IF ROW(NEW.society_id, NEW.purpose, NEW.version, NEW.key_id, NEW.algorithm, NEW.created_at, NEW.created_by)
+       IS DISTINCT FROM ROW(OLD.society_id, OLD.purpose, OLD.version, OLD.key_id, OLD.algorithm, OLD.created_at, OLD.created_by) THEN
+        RAISE EXCEPTION 'society_signing_keys: identity columns cannot be changed';
+    END IF;
+    IF NEW.wrapped_key IS DISTINCT FROM OLD.wrapped_key
+       AND NOT pg_has_role(current_user, 'estatehub_keyrotator', 'member') THEN
+        RAISE EXCEPTION 'society_signing_keys: only the key-rotation login may re-wrap a key';
+    END IF;
+    IF OLD.status = 'revoked' AND NEW.status <> 'revoked' THEN
+        RAISE EXCEPTION 'society_signing_keys: a revoked key cannot be restored';
+    END IF;
+    IF OLD.status = 'retired' AND NEW.status = 'active' THEN
+        RAISE EXCEPTION 'society_signing_keys: a retired key cannot be reactivated';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_signing_key_guard BEFORE UPDATE OR DELETE ON society_signing_keys
+    FOR EACH ROW EXECUTE FUNCTION trg_signing_key_guard();
+
+-- One row: lets the app notice a wrong SECRET_VAULT_KEY at start-up, and lets the rotation tool refuse a wrong
+-- SECRET_MASTER_KEY. It holds a salted verifier of the master key, never the key.
+CREATE TABLE platform_vault_meta (
+    id               INT PRIMARY KEY CHECK (id = 1),
+    master_salt      TEXT NOT NULL,
+    master_verifier  TEXT NOT NULL,
+    vault_fingerprint VARCHAR(64) NOT NULL,
+    vault_version    INT NOT NULL DEFAULT 1,
+    updated_at       TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Scheduled-job log (task 1.4).
+CREATE TABLE job_runs (
+    id          BIGSERIAL PRIMARY KEY,
+    job_name    VARCHAR(40) NOT NULL,
+    started_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMP,
+    status      VARCHAR(10) NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'ok', 'failed')),
+    detail      JSONB,
+    error       TEXT
+);
+CREATE INDEX idx_job_runs_name_time ON job_runs (job_name, started_at DESC);
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Task 1.10: Managing Committee decisions are tallied from a committee register, not typed
+-- ════════════════════════════════════════════════════════════════════════════
+-- The unit is a serving office-bearer (a person holding two offices counts once). Strength is everyone serving on
+-- the meeting date; a committee vote is carried on the share of the WHOLE committee in favour (majority_basis
+-- 'committee'). Committee quorum is "more than half of the serving committee present" [Verify with your advocate:
+-- the bye-laws' own committee quorum figure replaces this once confirmed].
+CREATE TABLE committee_votes (
+    id                  SERIAL PRIMARY KEY,
+    resolution_id       INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
+    committee_office_id INT NOT NULL REFERENCES committee_offices (id),
+    person_key          TEXT NOT NULL,
+    vote                VARCHAR(8) NOT NULL CHECK (vote IN ('FOR', 'AGAINST', 'ABSTAIN', 'PRESENT')),
+    voted_at            TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (resolution_id, person_key)
+);
+
+CREATE OR REPLACE FUNCTION fn_serving_committee(p_society_id INT, p_on DATE)
+RETURNS TABLE (committee_office_id INT, apartment_id INT, person_key TEXT)
+LANGUAGE sql STABLE AS $$
+    SELECT co.id, co.apartment_id, COALESCE('u' || co.user_id::TEXT, 'h' || lower(btrim(co.holder_name)))
+      FROM committee_offices co
+     WHERE co.society_id = p_society_id AND co.term_start <= p_on
+       AND COALESCE(co.term_end, CASE WHEN co.status = 'ended' THEN co.ended_at::DATE END, DATE 'infinity') >= p_on;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_committee_tally(p_resolution_id INT)
+RETURNS TABLE (strength INT, present INT, for_n INT, present_pct NUMERIC, votes_for_pct NUMERIC, vote_rows INT)
+LANGUAGE sql STABLE AS $$
+    WITH r AS (SELECT m.society_id, m.held_on FROM resolutions x JOIN meetings m ON m.id = x.meeting_id WHERE x.id = p_resolution_id),
+    s AS (SELECT COUNT(DISTINCT sc.person_key)::INT AS n FROM r, fn_serving_committee(r.society_id, r.held_on) sc),
+    v AS (SELECT COUNT(*)::INT AS pres, COUNT(*) FILTER (WHERE vote = 'FOR')::INT AS f
+            FROM committee_votes WHERE resolution_id = p_resolution_id)
+    SELECT s.n, v.pres, v.f,
+           CASE WHEN s.n > 0 THEN LEAST(100, ROUND(v.pres::NUMERIC / s.n * 100, 2)) END,
+           CASE WHEN s.n > 0 THEN LEAST(100, ROUND(v.f::NUMERIC / s.n * 100, 2)) END,
+           v.pres
+      FROM s, v;
+$$;
+
+-- Enter (or replace) the committee register of a DRAFT resolution. Arguments are apartment ids of the flats whose
+-- serving office-bearers were present / voted. A member who votes is present; one person, one vote.
+CREATE OR REPLACE FUNCTION fn_record_committee_register(p_resolution_id INT, p_present INT[], p_for INT[], p_against INT[], p_abstain INT[])
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE v_res resolutions%ROWTYPE; v_m meetings%ROWTYPE; v_bad INT; v_n INT;
+BEGIN
+    SELECT * INTO v_res FROM resolutions WHERE id = p_resolution_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Resolution % not found', p_resolution_id; END IF;
+    IF v_res.status <> 'draft' THEN RAISE EXCEPTION 'Resolution % is %: its register can no longer be changed.', p_resolution_id, v_res.status; END IF;
+    SELECT * INTO v_m FROM meetings WHERE id = v_res.meeting_id;
+    IF (SELECT required_body FROM decision_types WHERE id = v_res.decision_type_id) <> 'MC' THEN
+        RAISE EXCEPTION 'This is a General Body decision: use fn_record_resolution_register.';
+    END IF;
+    IF (SELECT COUNT(*) FROM unnest(COALESCE(p_for,'{}') || COALESCE(p_against,'{}') || COALESCE(p_abstain,'{}')) x)
+       <> (SELECT COUNT(DISTINCT x) FROM unnest(COALESCE(p_for,'{}') || COALESCE(p_against,'{}') || COALESCE(p_abstain,'{}')) x) THEN
+        RAISE EXCEPTION 'A flat appears more than once in the vote lists: one vote per member.';
+    END IF;
+    SELECT COUNT(*) INTO v_bad FROM unnest(COALESCE(p_present,'{}') || COALESCE(p_for,'{}') || COALESCE(p_against,'{}') || COALESCE(p_abstain,'{}')) x(id)
+     WHERE NOT EXISTS (SELECT 1 FROM fn_serving_committee(v_m.society_id, v_m.held_on) sc WHERE sc.apartment_id = x.id);
+    IF v_bad > 0 THEN RAISE EXCEPTION 'The register names % flat(s) with no serving office-bearer on the meeting date.', v_bad; END IF;
+
+    DELETE FROM committee_votes WHERE resolution_id = p_resolution_id;
+    INSERT INTO committee_votes (resolution_id, committee_office_id, person_key, vote)
+    SELECT DISTINCT ON (sc.person_key) p_resolution_id, sc.committee_office_id, sc.person_key,
+           CASE WHEN sc.apartment_id = ANY(COALESCE(p_for,'{}')) THEN 'FOR'
+                WHEN sc.apartment_id = ANY(COALESCE(p_against,'{}')) THEN 'AGAINST'
+                WHEN sc.apartment_id = ANY(COALESCE(p_abstain,'{}')) THEN 'ABSTAIN' ELSE 'PRESENT' END
+      FROM fn_serving_committee(v_m.society_id, v_m.held_on) sc
+     WHERE sc.apartment_id = ANY(COALESCE(p_present,'{}') || COALESCE(p_for,'{}') || COALESCE(p_against,'{}') || COALESCE(p_abstain,'{}'))
+     ORDER BY sc.person_key, sc.committee_office_id;
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RETURN format('Committee register recorded: %s member(s) present.', v_n);
+END $$;
+
+-- Pass (or reject) a draft committee decision from its register. A missed quorum leaves it a draft.
+CREATE OR REPLACE FUNCTION fn_pass_committee_resolution(p_resolution_id INT, p_passed_on DATE, p_user INT DEFAULT NULL)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE v_res resolutions%ROWTYPE; v_dt decision_types%ROWTYPE; t RECORD;
+BEGIN
+    SELECT * INTO v_res FROM resolutions WHERE id = p_resolution_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Resolution % not found', p_resolution_id; END IF;
+    IF v_res.status <> 'draft' THEN RAISE EXCEPTION 'Resolution % is already %.', p_resolution_id, v_res.status; END IF;
+    SELECT * INTO v_dt FROM decision_types WHERE id = v_res.decision_type_id;
+    IF v_dt.required_body <> 'MC' THEN RAISE EXCEPTION 'Decision type % needs the General Body: use fn_pass_resolution.', v_dt.code; END IF;
+    IF p_passed_on IS NULL THEN RAISE EXCEPTION 'Give the date the resolution was passed.'; END IF;
+    SELECT * INTO t FROM fn_committee_tally(p_resolution_id);
+    IF t.strength = 0 THEN RAISE EXCEPTION 'No office-bearer was serving on the meeting date, so the committee has no strength to count.'; END IF;
+    IF t.vote_rows = 0 THEN RAISE EXCEPTION 'Record the committee register before passing a committee decision.'; END IF;
+    IF t.present * 2 <= t.strength THEN
+        RETURN format('Quorum not met: %s of %s committee members present (more than half needed). It stays a draft.', t.present, t.strength);
+    END IF;
+    UPDATE meetings SET quorum_met = TRUE WHERE id = v_res.meeting_id AND NOT quorum_met;
+    IF t.votes_for_pct < v_res.majority_required THEN
+        UPDATE resolutions SET status = 'rejected', votes_for_pct = t.votes_for_pct, owners_present_pct = t.present_pct WHERE id = v_res.id;
+        RETURN format('Not carried: %s%% of the committee in favour, %s%% needed.', t.votes_for_pct, v_res.majority_required);
+    END IF;
+    UPDATE resolutions SET status = 'passed', passed = TRUE, passed_on = p_passed_on,
+           votes_for_pct = t.votes_for_pct, owners_present_pct = t.present_pct WHERE id = v_res.id;
+    RETURN format('Passed: %s of %s committee members present, %s%% of the committee in favour (needed %s%%).',
+                  t.present, t.strength, t.votes_for_pct, v_res.majority_required);
+END $$;
+
+-- The committee register is frozen once the resolution has passed on it.
+CREATE OR REPLACE FUNCTION trg_committee_votes_freeze() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF COALESCE((SELECT passed FROM resolutions WHERE id = COALESCE(NEW.resolution_id, OLD.resolution_id)), FALSE) THEN
+        RAISE EXCEPTION 'The committee register is frozen: the resolution has passed on it.';
+    END IF;
+    RETURN COALESCE(NEW, OLD);
+END $$;
+CREATE TRIGGER trg_committee_votes_freeze BEFORE INSERT OR UPDATE OR DELETE ON committee_votes
+    FOR EACH ROW EXECUTE FUNCTION trg_committee_votes_freeze();
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Task 1.8: Sec 44AB tax-audit flag, effective-dated thresholds
+-- ════════════════════════════════════════════════════════════════════════════
+-- PROVISIONAL [Verify with the society's CA]: the figures below are the commonly cited s.44AB(a) limits for a
+-- business (Rs 1 crore; Rs 10 crore where cash receipts and payments are each 5% or less of the total) and are
+-- NOT confirmed. Whether a mutual association's receipts count as "turnover" at all is also a CA question. The
+-- flag is a warning to ask, never a finding. The Income-tax Act 2025 renumbers the section; verify before use.
+CREATE TABLE tax_audit_thresholds (
+    id             SERIAL PRIMARY KEY,
+    threshold_key  VARCHAR(40) NOT NULL,
+    amount         NUMERIC(15,2) NOT NULL CHECK (amount > 0),
+    effective_from DATE NOT NULL,
+    effective_to   DATE,
+    section_1961   VARCHAR(20) NOT NULL DEFAULT '44AB',
+    section_2025   VARCHAR(20),
+    status         VARCHAR(12) NOT NULL DEFAULT 'provisional' CHECK (status IN ('provisional', 'confirmed')),
+    note           TEXT,
+    UNIQUE (threshold_key, effective_from)
+);
+INSERT INTO tax_audit_thresholds (threshold_key, amount, effective_from, note) VALUES
+    ('business_turnover',          10000000.00,  DATE '2000-04-01', 'Rs 1 crore. [Verify] provisional until the CA confirms.'),
+    ('business_turnover_low_cash', 100000000.00, DATE '2020-04-01', 'Rs 10 crore where cash receipts and cash payments are each 5% or less. [Verify] provisional.');
+
+-- The flag for one financial year (fy = starting year, e.g. 2026 = FY 2026-27): receipts from the Income & Expenditure
+-- statement against the threshold in force on the year's last day. 'warn' from 80% of the limit; 'flag' at or above it.
+CREATE OR REPLACE FUNCTION fn_tax_audit_flag(p_society_id INT, p_fy INT)
+RETURNS TABLE (fy INT, total_income NUMERIC, threshold NUMERIC, pct_of_threshold NUMERIC, flag VARCHAR, status VARCHAR, note TEXT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE v_inc NUMERIC; v_thr NUMERIC; v_status VARCHAR; v_end DATE := make_date(p_fy + 1, 3, 31);
+BEGIN
+    SELECT COALESCE(SUM(i.amount), 0) INTO v_inc FROM fn_income_expenditure_fy(p_society_id, p_fy) i WHERE i.statement_section = 'Income';
+    SELECT t.amount, t.status INTO v_thr, v_status FROM tax_audit_thresholds t
+     WHERE t.threshold_key = 'business_turnover' AND t.effective_from <= v_end AND (t.effective_to IS NULL OR t.effective_to >= v_end)
+     ORDER BY t.effective_from DESC LIMIT 1;
+    RETURN QUERY SELECT p_fy, v_inc, v_thr, ROUND(v_inc / v_thr * 100, 2),
+        (CASE WHEN v_inc >= v_thr THEN 'flag' WHEN v_inc >= v_thr * 0.8 THEN 'warn' ELSE 'ok' END)::VARCHAR, v_status,
+        'Ask your CA whether s.44AB tax audit applies. Provisional threshold; mutual receipts may not count as turnover.'::TEXT;
+END $$;
