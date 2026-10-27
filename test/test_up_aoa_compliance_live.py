@@ -557,9 +557,8 @@ def _make_layer3_decision(cur, rule_key="petty_cash_limit", value=15000):
     m_id = cur.fetchone()[0]
     cur.execute("SELECT id, majority_pct FROM decision_types WHERE code='SET_BOARD_PARAM'")
     d = cur.fetchone()
-    cur.execute("INSERT INTO resolutions (meeting_id,clause_id,decision_type_id,body,majority_required,votes_for_pct,passed,status,passed_on) VALUES (%s,%s,%s,'test',%s,100,TRUE,'passed',%s) RETURNING id",
-                (m_id, rule_key, d[0], d[1], date.today()))
-    r_id = cur.fetchone()[0]
+    from test import resolution_fixtures as rf
+    r_id = rf.committee_resolution(cur, m_id, rule_key, d[0], majority_required=d[1])
     cur.execute("INSERT INTO society_rule_decisions (society_id,rule_key,layer,status,value,resolution_id,effective_from) VALUES (%s,%s,3,'adopted_with_variation',%s,%s,%s) RETURNING id",
                 (SOC, rule_key, value, r_id, date.today()))
     did = cur.fetchone()[0]

@@ -308,15 +308,18 @@ def test_resolution_cannot_pass_without_quorum_or_majority(cur):
     ok = _meeting(cur, True)
     no_quorum = _meeting(cur, False)
     passed = dict(passed=True, status="passed", passed_on=datetime.date.today())
-    _resolution(cur, ok, **passed)                                               # valid
+    from test import resolution_fixtures as rf
+    rf.committee_resolution(cur, ok, "petty_cash_limit", one(cur, "SELECT id FROM decision_types WHERE code='SET_BOARD_PARAM'"))   # valid
+    # Task 1.10: a committee decision cannot be inserted as passed at all; it passes from the committee register.
     expect_error(cur, lambda: _resolution(cur, no_quorum, **passed), "quorum")
-    expect_error(cur, lambda: _resolution(cur, ok, votes_for_pct=50, **passed), "ck_resolution_passed")
+    expect_error(cur, lambda: _resolution(cur, ok, votes_for_pct=50, **passed), "committee register")
     expect_error(cur, lambda: _resolution(cur, ok, passed=True, status="draft", passed_on=datetime.date.today()),
-                 "ck_resolution_passed")                                         # passed/status disagree
+                 "committee register")
 
 
 def test_a_passed_resolution_is_frozen(cur):
-    rid = _resolution(cur, _meeting(cur, True), passed=True, status="passed", passed_on=datetime.date.today())
+    from test import resolution_fixtures as rf
+    rid = rf.committee_resolution(cur, _meeting(cur, True), "petty_cash_limit", one(cur, "SELECT id FROM decision_types WHERE code='SET_BOARD_PARAM'"))
     expect_error(cur, lambda: cur.execute("UPDATE resolutions SET votes_for_pct=99 WHERE id=%s", (rid,)), "frozen")
     expect_error(cur, lambda: cur.execute("DELETE FROM resolutions WHERE id=%s", (rid,)), "cannot be deleted")
 

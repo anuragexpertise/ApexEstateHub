@@ -35,27 +35,12 @@ from database.db_manager import db
 # time-boxed/single-use via generate_time_qr, a different mechanism for a
 # different problem (replay, not forgery).
 #
-# SIGNING_SECRET (renamed 2026-09 from the old QR_SIGNING_SECRET env var)
-# is now PER-SOCIETY, not a single deployment-wide value — see
-# app/services/secret_vault.py's module docstring for why a global secret
-# was a cross-tenant risk (one leak could forge QR codes for every society
-# on the platform, not just one). Each society's plaintext SIGNING_SECRET
-# is set once by its own admin in the Setup Wizard, encrypted at rest in
-# societies.signing_secret_enc, and resolved per-call by
-# _get_signing_secret(society_id) below — there is no module-level
-# constant anymore.
+# QR tags are signed with the society's own SIGNING_QR key (app/services/signing_service.py), a random
+# per-society key wrapped under SECRET_VAULT_KEY. No human knows it. _get_signing_secret(society_id) resolves it
+# per call. A society with no key yet (setup not finished) gets unsigned legacy codes, as before.
 #
-# A society with no SIGNING_SECRET configured yet (setup not completed,
-# or the vault can't decrypt it) stays fully backward compatible: newly
-# generated codes for versioned roles are unsigned for that society only,
-# exactly like the old global unset-by-default behavior (mirrors
-# VAPID_PRIVATE_KEY / VAPID_PUBLIC_KEY in push_service.py), just scoped
-# down from platform-wide to that one tenant.
-#
-# revoke_and_reissue additionally REQUIRES the calling society's
-# SIGNING_SECRET to be set — see its docstring — since the replacement
-# nonce is itself derived from it; there is no unsigned fallback for the
-# revoke action the way there is for ordinary code generation.
+# revoke_and_reissue REQUIRES the key, because the replacement nonce is derived from it; there is no unsigned
+# fallback for the revoke action. The admin confirms it with the step-up password (a one-way hash that signs nothing).
 #
 # 2026-09 cutover note: switching from one global secret to per-society
 # secrets was done as a clean cutover (no signed QR codes existed in
@@ -65,35 +50,21 @@ from database.db_manager import db
 
 def _get_signing_secret(society_id):
     """
-    Resolve a society's plaintext SIGNING_SECRET from
-    societies.signing_secret_enc (Fernet-encrypted — see secret_vault.py).
+    The society's ACTIVE SIGNING_QR key (hex string), from the key vault (app/services/signing_service.py).
 
-    Returns None if society_id is falsy or the society hasn't completed setup
-    yet (column is NULL) — a normal state that yields a legacy unsigned code.
-
-    A configured-but-undecryptable secret (vault misconfiguration, rotated
-    SECRET_VAULT_KEY) raises QRSigningError rather than returning None: those
-    are different states, and collapsing the second into the first would mean a
-    deployment fault silently produced unsigned codes that still look valid.
-    Database failures likewise propagate, so a DB outage surfaces as a QR
-    generation failure instead of "no secret configured".
+    Returns None if society_id is falsy or the society has no QR key yet (setup not finished): a normal state that
+    yields a legacy unsigned code. A configured-but-unwrappable key (wrong SECRET_VAULT_KEY) raises QRSigningError
+    rather than returning None, so a deployment fault never silently produces unsigned codes that look valid.
+    Database failures propagate too.
     """
     if not society_id:
         return None
-    row = db._execute(
-        "SELECT signing_secret_enc FROM societies WHERE id=%s",
-        (society_id,), fetch_one=True,
-    )
-    enc = (row or {}).get("signing_secret_enc")
-    if not enc:
-        return None
-    from app.services.secret_vault import decrypt_secret, SecretVaultError
+    from app.services import signing_service
+    from app.services.secret_vault import SecretVaultError
     try:
-        return decrypt_secret(enc)
+        return signing_service.raw_key_for_qr(society_id)
     except SecretVaultError as e:
-        raise QRSigningError(
-            f"SIGNING_SECRET vault error for society_id={society_id}: {e}"
-        ) from e
+        raise QRSigningError(f"SIGNING_QR vault error for society_id={society_id}: {e}") from e
 
 _QR_VERSIONED_ROLES = {
     "APT": "apartments",
@@ -917,19 +888,12 @@ def verify_scanned_qr(qr_data: str, society_id: int) -> dict:
 
 def verify_signing_secret(society_id: int, typed_secret: str) -> bool:
     """
-    Constant-time check that `typed_secret` matches this society's
-    configured SIGNING_SECRET. Used as a step-up confirmation before the
-    admin-only Re-issue tool is allowed to call revoke_and_reissue — typing
-    the actual secret (not just being logged in as admin) is the proof
-    that this is a deliberate, authorized action, since qr_reissue_log
-    entries can't be undone and immediately invalidate a real printed
-    pass. Returns False (never raises) if the society has no secret
-    configured yet or typed_secret is empty.
+    Step-up confirmation before the admin-only Re-issue tool may call revoke_and_reissue: the admin types the
+    society's step-up password (stored only as a one-way hash; it signs nothing). Name kept for callers.
+    Returns False (never raises) if the society has none yet or nothing was typed.
     """
-    secret = _get_signing_secret(society_id)
-    if not secret or not typed_secret:
-        return False
-    return hmac.compare_digest(secret, typed_secret)
+    from app.services.signing_service import verify_stepup_password
+    return verify_stepup_password(society_id, typed_secret or "")
 
 
 def resolve_entity_for_reissue(role_code: str, entity_id: int, society_id: int,

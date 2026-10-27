@@ -1149,7 +1149,9 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
     each flat is weighted by its undivided interest (bye-laws 2(e) and 8), and the database derives owners_present_pct
     and votes_for_pct and checks them against the quorum floor and the decision type's majority. The typed
     votes_for_pct / owners_present_pct arguments are ignored for a General Body decision (kept so old callers still
-    import). A Managing Committee decision still rests on the committee minutes, so it takes votes_for_pct.
+    import). A Managing Committee decision is passed the same way from a COMMITTEE register (task 1.10): the flat
+    numbers of the serving office-bearers present and voting; the database derives the committee's share in favour
+    and a typed votes_for_pct is ignored for it as well.
     A decision type that departs from the Model Bye-Laws also needs advocate_opinion_ref."""
     _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
     why = _text(reason, MIN_TEXT)
@@ -1201,16 +1203,21 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
             if not (present_flats or proxy_flats) or not (for_flats or against_flats or abstain_flats):
                 return False, ("A General Body resolution is passed from the attendance and vote registers: list the flats "
                                "present in person, any present by proxy, and the flats voting for, against or abstaining.")
-        elif votes_for is None:
-            return False, "Give the share of the committee voting in favour (from the committee minutes)."
-        elif votes_for < maj:
-            return False, f"Not carried: {votes_for:g}% in favour, {maj:g}% needed."
+        else:
+            # Committee decision: derived from the committee register by the database; typed figures are ignored.
+            if not (present_flats or for_flats or against_flats or abstain_flats):
+                return False, ("A committee decision is passed from the committee register: list the flats of the office-bearers "
+                               "present, and those voting for, against or abstaining.")
         if dt["needs_advocate_opinion"] and (not advocate_ref or len(advocate_ref) < 5):
             return False, ("This decision departs from the Model Bye-Laws or ratifies the software's thresholds, so it needs a "
                            "reference to the written advocate's opinion before it can be recorded as passed.")
     
     gbm = dt["required_body"] == "GBM"
     ids = {}
+    if not gbm and (present_flats or for_flats or against_flats or abstain_flats):
+        ok, why_not, ids = _flats_to_ids(society_id, present_flats, proxy_flats, for_flats, against_flats, abstain_flats)
+        if not ok:
+            return False, why_not
     if gbm:
         # A General Body resolution is first a DRAFT with no tallies; the registers are recorded against it and
         # the database then passes (or rejects) it from them.
@@ -1219,8 +1226,8 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
             return False, why_not
         passed_date, ins_passed, ins_votes, ins_present = None, False, None, None
     else:
-        passed_date, ins_passed = (_d(passed_on) if passed else None), bool(passed)
-        ins_votes, ins_present = votes_for, present
+        # A committee decision is also a DRAFT first; the committee register is recorded and the database passes it.
+        passed_date, ins_passed, ins_votes, ins_present = None, False, None, None
     
     row = _row(
         """WITH ins AS (
@@ -1240,7 +1247,7 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
         return False, "Failed to create resolution."
     new_id = int(row["rule_key"].split("#")[1])
     msg = f"Resolution #{new_id} created."
-    carried = bool(passed) and not gbm
+    carried = False
     if gbm and any(ids.get(k) for k in ("present", "proxy", "for", "against", "abstain")):
         try:
             _row("SELECT fn_record_resolution_register(%s, %s, %s, %s, %s, %s) AS r",
@@ -1257,6 +1264,22 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
             return False, f"Resolution #{new_id} was saved as a draft, but: {_clean_db_error(exc)}"
     elif gbm and passed:
         return False, f"Resolution #{new_id} was saved as a draft: record the registers to pass it."
+    if not gbm and any(ids.get(k) for k in ("present", "for", "against", "abstain")):
+        try:
+            _row("SELECT fn_record_committee_register(%s, %s, %s, %s, %s) AS r",
+                 (new_id, ids["present"], ids["for"], ids["against"], ids["abstain"]))
+            if passed:
+                outcome = _row("SELECT fn_pass_committee_resolution(%s, %s, %s) AS r", (new_id, _d(passed_on), actor_id))["r"]
+                msg += " " + outcome
+                if not outcome.startswith("Passed"):
+                    return False, msg
+                carried = True
+            else:
+                msg += " Committee register recorded; it stays a draft until it is passed."
+        except Exception as exc:
+            return False, f"Resolution #{new_id} was saved as a draft, but: {_clean_db_error(exc)}"
+    elif not gbm and passed:
+        return False, f"Resolution #{new_id} was saved as a draft: record the committee register to pass it."
     if carried and clause_id:
         try:
             notes = _auto_activate(actor_id, actor_role, society_id, new_id)

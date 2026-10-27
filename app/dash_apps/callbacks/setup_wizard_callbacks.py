@@ -149,7 +149,7 @@ def register_setup_wizard_callbacks(app):
 
         # Setup-completion check now lives in one place — see
         # app/security/setup_guard.py — instead of this callback carrying
-        # its own copy of the signing_secret_enc query.
+        # its own copy of the stepup_password_hash query.
         from app.security.setup_guard import society_setup_incomplete
         if society_setup_incomplete(society_id):
             # Trigger Wizard
@@ -729,17 +729,16 @@ def register_setup_wizard_callbacks(app):
 
             # society_id was resolved from the server session above.
 
-            # Reversible encryption (NOT a one-way hash like passwords/PINs
-            # elsewhere in this codebase) — this is society_id's own real
-            # QR HMAC key and must be decryptable at sign/verify time. See
-            # app/services/secret_vault.py. Requires SECRET_VAULT_KEY to be
-            # configured on the deployment; if it isn't, fail loudly here
-            # rather than silently storing something unusable.
+            # The typed secret is now only a STEP-UP PASSWORD (stored as a one-way hash; it signs nothing). The
+            # four signing keys are random, made by the server and wrapped under SECRET_VAULT_KEY. They are
+            # created BEFORE setup is marked complete, so a vault misconfiguration fails here, loudly, and
+            # never leaves a "complete" society without keys.
             try:
-                from app.services.secret_vault import encrypt_secret
-                secret_enc = encrypt_secret(qr_secret)
+                from app.services.signing_service import ensure_society_keys, set_stepup_password_hash
+                ensure_society_keys(society_id, _sw_uid)
+                secret_enc = set_stepup_password_hash(qr_secret)
             except Exception as e:
-                return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to secure the signing secret. Check the server configuration and try again.")["message"], _hidden_spinner, no_update, no_update
+                return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to create the society's signing keys. Check the server configuration (SECRET_VAULT_KEY) and try again.")["message"], _hidden_spinner, no_update, no_update
 
             # Zip the typed rates back onto the wizard's rows: ONE per (section, discriminator), see
             # database.seed.tds_wizard_rows(). Earlier dated rates are added later on the TDS & GST Rates tab.

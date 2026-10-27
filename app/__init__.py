@@ -156,6 +156,18 @@ def create_app(config_name: str | None = None) -> Flask:
     CORS(app)
     _register_error_handlers(app)
 
+    # Fail closed: production must not start without a valid SECRET_VAULT_KEY that matches this database.
+    if not app.config.get('TESTING'):
+        from app.services.secret_vault import assert_vault_ready
+        try:
+            from database.db_manager import db as _vault_db
+            assert_vault_ready(_vault_db)
+        except RuntimeError:
+            raise
+        except Exception as e:                      # database unreachable at import: still check the key itself
+            log.warning("vault database check skipped: %s", e)
+            assert_vault_ready(None)
+
     # Initialize background jobs
     if not app.config.get('TESTING') and not os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         try:
