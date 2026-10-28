@@ -117,6 +117,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("admin", "accountants"):  {"view", "new", "edit"},
     ("admin", "supervisors"):  {"view", "new", "edit"},
     ("admin", "staff"):        {"view", "new", "edit"},
+    ("admin", "auditors"):     {"view", "new", "edit"},   # like the other team logins: never delete (falls to ("admin","*") otherwise)
     ("admin", "committee_bearers"): {"view", "new", "edit"},
     # Registers written by their own workflows: the admin looks, nothing here edits.
     ("admin", "tenants"):                    {"view"},

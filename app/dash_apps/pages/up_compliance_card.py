@@ -82,6 +82,20 @@ def _mode_dd(id_):
                         clearable=False, style={"fontSize": "13px"})
 
 
+def _tax_audit_notice(data: dict):
+    """Task 1.8: a prompt to ask the CA, shown only from 80% of the provisional Sec 44AB limit. Never a finding."""
+    t = data.get("tax_audit") or {}
+    if t.get("flag") not in ("warn", "flag"):
+        return None
+    word = "has reached" if t["flag"] == "flag" else "is approaching"
+    return dbc.Alert([
+        html.Strong("Tax audit (Sec. 44AB): ask your CA. "),
+        f"This year's receipts of \u20b9{float(t['total_income']):,.0f} {word} the provisional limit of \u20b9{float(t['threshold']):,.0f} "
+        f"({float(t['pct_of_threshold']):.0f}%). The figure is provisional and unconfirmed, and whether a mutual association's receipts "
+        "count as turnover is for the CA to say.",
+    ], id="upc-tax-audit", color="danger" if t["flag"] == "flag" else "warning", style={"fontSize": "12px", "marginTop": "8px", "marginBottom": "0"})
+
+
 def render_up_compliance_card(data: dict) -> html.Div:
     name = (data.get("society") or {}).get("name", "Society")
     header = html.Div([
@@ -89,6 +103,7 @@ def render_up_compliance_card(data: dict) -> html.Div:
         html.Div(f"{name} \u00b7 UP Apartment Act 2010 and Model Bye-Laws 2011", style={"fontSize": "12px", "color": "#666"}),
         html.Div("These tools record and check; the Board and the competent authority act. Confirm bye-law numbers with an advocate "
                  "before relying on them in a filing.", style={"fontSize": "11px", "color": "#8a6d3b", "marginTop": "4px"}),
+        _tax_audit_notice(data),
     ], style={"marginBottom": "6px"})
     toast = html.Div(id="upc-toast", style={"marginTop": "10px"})
 

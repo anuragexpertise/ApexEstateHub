@@ -2375,3 +2375,15 @@ Provisional figures needing an opinion: 2/3 policy and 1/2 resolution majorities
 Done: 3.1/3.2 signed stored auditor checks and tie-out report, 3.8 source-document guard and voucher numbers, 3.4 Decimal money policy (`database/money.py`: paisa for ledgers, whole rupee for TDS; floats only at JSON/Excel display boundaries and for rule parameters and vote weights).
 
 Open, needs CA sign-off before building: 3.3 schedule-format statements and notes, 3.5 depreciation by Act version / apportionment / brought-forward losses, 3.6 TDS challan reconciliation and quarterly statements, 3.7 GST books-to-return reconciliation, 3.9 Form 26AS/AIS comparison.
+
+---
+
+### Phase 1 leftovers (Plan v3, tasks 1.5, 1.8, 1.9)
+
+- **1.5 Disputed / under-protest bills.** `receivable_disputes` (append-only), `fn_raise_receivable_dispute`, `fn_decide_receivable_dispute`, service `app/services/receivable_dispute_service.py`. While a dispute is open the bill accrues **no interest** and is **not in default** (overdue, bye-law 7 arrears, s.22 six-month test, apartment list); it stays outstanding in the books. The hold is dated, so a past "as at" test sees the bill as it stood that day. Deciding: *dismissed* or *withdrawn* ends the hold and the held months' interest catches up on the next run; *upheld* reverses the bill's accrual journals through `fn_post_reversal_journal` and cancels it.
+  - Limits: the hold covers the whole unpaid bill, not part of it. A part-paid bill can be held but not upheld (that needs a refund, posted separately by reversing the payment). Interest for the held period is charged on dismissal; a waiver goes through the ratification register as an `interest_waiver`. **[Verify with the advocate]** whether held-period interest is chargeable after a dismissal.
+  - Not built yet: the screen for raising and deciding a dispute (the service and database functions are in place).
+- **1.8 Sec 44AB flag.** `fn_tax_audit_flag` was already built; it is now shown as a prompt on the UP compliance card from 80% of the limit, and covered by tests. The thresholds remain provisional until the CA confirms them.
+- **1.9 Interest wording.** Covered by tests: the wording, and no interest without a resolved rate and resolution number.
+- **1.7 ITC reversal** is not built: the formula needs CA sign-off first (task 0.3).
+- **CI.** The Postgres job now passes on a fresh database, and the DB-less job passes; stale tests were brought into line with earlier deliberate changes and `database/migrations/` is allowed by the single-SQL-file guard (each migration may only create what `estatehub.sql` also defines).

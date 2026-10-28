@@ -827,6 +827,70 @@ CREATE TABLE receivables (
         CHECK (charge_kind IN ('common_expense', 'transfer_fee', 'depreciation_fund', 'other'))
 );
 
+-- ── Task 1.5: disputed / under-protest bills ──────────────────────────────────────────────────────────────────────
+-- A member disputes a bill. The committee records the dispute with a reason and a resolution reference, and the bill is
+-- HELD: while the dispute is open it accrues no interest and does not count towards default status (overdue, bye-law 7
+-- arrears, the s.22 six-month test). It stays OUTSTANDING in the books. Deciding it either ends the hold
+-- (dismissed / withdrawn: interest catches up on the next run, because the interest clock was never advanced) or, if
+-- upheld, reverses the bill's accrual journals through fn_post_reversal_journal and cancels the bill. A dispute row is
+-- never deleted and never re-opened; correction is by reversal only.
+-- Limits: the hold covers the whole unpaid bill (not part of it); a bill that has been paid in part can be held, but
+-- cannot be UPHELD, because that needs a refund, which is posted separately by reversing the payment.
+CREATE TABLE receivable_disputes (
+    id                       SERIAL PRIMARY KEY,
+    society_id               INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    receivable_id            INT NOT NULL REFERENCES receivables (id) ON DELETE CASCADE,
+    amount_held              NUMERIC(10, 2) NOT NULL CHECK (amount_held > 0),
+    reason                   TEXT NOT NULL CHECK (LENGTH(BTRIM(reason)) >= 10),
+    resolution_ref           VARCHAR(100) NOT NULL CHECK (LENGTH(BTRIM(resolution_ref)) > 0),
+    raised_by                INT REFERENCES users (id),
+    raised_on                DATE NOT NULL DEFAULT CURRENT_DATE,
+    status                   VARCHAR(12) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'upheld', 'dismissed', 'withdrawn')),
+    decided_on               DATE,
+    decided_by               INT REFERENCES users (id),
+    decision_reason          TEXT,
+    decision_resolution_ref  VARCHAR(100),
+    reversal_journal_ids     INT[],
+    created_at               TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_receivable_dispute_decision CHECK (
+        (status = 'open' AND decided_on IS NULL)
+        OR (status <> 'open' AND decided_on IS NOT NULL AND decided_on >= raised_on
+            AND LENGTH(BTRIM(COALESCE(decision_reason, ''))) > 0
+            AND LENGTH(BTRIM(COALESCE(decision_resolution_ref, ''))) > 0))
+);
+CREATE UNIQUE INDEX uq_receivable_dispute_open ON receivable_disputes (receivable_id) WHERE status = 'open';
+CREATE INDEX idx_receivable_disputes_society ON receivable_disputes (society_id, status);
+
+-- Is this bill held by a dispute on that date? Date-based (not status-based) so a past "as at" test, such as the
+-- bye-law 7 cut-off, sees the dispute as it stood on that day.
+CREATE OR REPLACE FUNCTION fn_receivable_disputed_asof(p_receivable_id INT, p_asof DATE DEFAULT CURRENT_DATE)
+RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
+    SELECT EXISTS (SELECT 1 FROM receivable_disputes d
+                    WHERE d.receivable_id = p_receivable_id
+                      AND d.raised_on <= p_asof
+                      AND (d.decided_on IS NULL OR d.decided_on > p_asof))
+$$;
+
+-- Append-only: the only change a row may ever take is open -> decided, and only the decision columns may change.
+CREATE OR REPLACE FUNCTION fn_trg_receivable_dispute_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        IF pg_trigger_depth() > 1 THEN RETURN OLD; END IF;      -- a society being removed by cascade
+        RAISE EXCEPTION 'A dispute record cannot be deleted.';
+    END IF;
+    IF OLD.status <> 'open' THEN
+        RAISE EXCEPTION 'A decided dispute cannot be changed.';
+    END IF;
+    IF NEW.id <> OLD.id OR NEW.society_id <> OLD.society_id OR NEW.receivable_id <> OLD.receivable_id
+       OR NEW.amount_held <> OLD.amount_held OR NEW.reason <> OLD.reason OR NEW.resolution_ref <> OLD.resolution_ref
+       OR NEW.raised_by IS DISTINCT FROM OLD.raised_by OR NEW.raised_on <> OLD.raised_on THEN
+        RAISE EXCEPTION 'Only the decision of a dispute can be recorded; what was raised cannot be edited.';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_receivable_dispute_guard BEFORE UPDATE OR DELETE ON receivable_disputes
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_receivable_dispute_guard();
+
 -- ── PAYMENT LOG ────────────────────────────────────────────────────
 -- Bye-law 7 tests arrears ON A PAST DATE (last day of the year before the election), so the
 -- balance today is the wrong number: an owner who paid after that date is still barred, one who
@@ -3313,7 +3377,8 @@ RETURNS NUMERIC(15,2) LANGUAGE SQL STABLE AS $$
     FROM receivables r
     WHERE r.entity_id = p_apartment_id AND r.role = 'apartment'
       AND r.status IN ('pending','partial')
-      AND r.due_date < CURRENT_DATE;
+      AND r.due_date < CURRENT_DATE
+      AND NOT fn_receivable_disputed_asof(r.id, CURRENT_DATE);    -- task 1.5: a disputed bill is not in default
 $$;
 
 -- SECTION 3A: APARTMENT ACTIVE-STATE TRIGGER
@@ -4306,6 +4371,7 @@ BEGIN
           AND r.role = 'apartment'
           AND r.status IN ('pending','partial')
           AND r.due_date < CURRENT_DATE
+          AND NOT fn_receivable_disputed_asof(r.id, CURRENT_DATE)   -- task 1.5: a held (disputed) bill accrues no interest
         FOR UPDATE
     LOOP
         -- UP Model Bye-Laws 2011, bye-law 46(a): the rate is set by General Body resolution. The rate the
@@ -8760,7 +8826,7 @@ BEGIN
     WITH dues AS (
         SELECT entity_id AS apt_id,
             COALESCE(SUM(amount - paid_amount) FILTER (WHERE status IN ('pending','partial')), 0)::NUMERIC(15,2) AS pending_dues,
-            COALESCE(SUM(amount - paid_amount) FILTER (WHERE status IN ('pending','partial') AND due_date < CURRENT_DATE), 0)::NUMERIC(15,2) AS overdue_dues
+            COALESCE(SUM(amount - paid_amount) FILTER (WHERE status IN ('pending','partial') AND due_date < CURRENT_DATE AND NOT fn_receivable_disputed_asof(r.id, CURRENT_DATE)), 0)::NUMERIC(15,2) AS overdue_dues
         FROM receivables r WHERE r.society_id = p_society_id AND r.role = 'apartment'
         GROUP BY entity_id
     )
@@ -8910,7 +8976,7 @@ BEGIN
     LEFT JOIN security_staff s ON s.id = r.entity_id AND r.role='security'
     WHERE r.society_id = p_society_id
       AND (p_status IS NULL OR
-           (p_status = 'overdue' AND r.status IN ('pending','partial') AND r.due_date < CURRENT_DATE) OR
+           (p_status = 'overdue' AND r.status IN ('pending','partial') AND r.due_date < CURRENT_DATE AND NOT fn_receivable_disputed_asof(r.id, CURRENT_DATE)) OR
            (p_status <> 'overdue' AND r.status = p_status))
       AND (p_entity_id   IS NULL OR r.entity_id = p_entity_id)
       AND (p_entity_role IS NULL OR r.role = p_entity_role)
@@ -14721,7 +14787,7 @@ INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, un
  ('UP_AOA_2010', 'borrowing_ca_approval', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 44(d): borrowing requires Competent Authority approval', DATE '2011-11-16'),
  ('UP_AOA_2010', 'tenant_joint_liability', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(2): tenant is jointly liable with the owner for common expenses', DATE '2011-11-16'),
  ('UP_AOA_2010', 'board_election_voting_basis', NULL, 'undivided_interest', NULL, 'Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration (Act s.12(1)(f): percentage for all purposes including voting). Advisory polls may use one-apartment-one-vote.', DATE '2011-11-16'),
- ('UP_AOA_2010', 'depreciation_fund_pct', 5, NULL, '% or INR', 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'depreciation_fund_pct', 5, NULL, '% or INR', 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the share of the yearly contribution', DATE '2011-11-16'),
  ('UP_AOA_2010', 'depreciation_fund_basis', NULL, 'pct_of_asset_value', NULL, 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the basis of the yearly contribution', DATE '2011-11-16'),
  ('UP_AOA_2010', 'depreciation_fund_rate', 2.0, NULL, 'INR per sq ft/flat', 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the rate when the basis is a fixed amount', DATE '2011-11-16'),
  ('UP_AOA_2010', 'investment_register', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 47: Board shall maintain a register of all investments', DATE '2011-11-16'),
@@ -15901,6 +15967,7 @@ LANGUAGE sql STABLE AS $$
            AND r.charge_kind = 'common_expense'
            AND r.status IN ('pending', 'partial', 'unverified', 'paid')
            AND r.due_date IS NOT NULL AND r.due_date < p_asof - p_margin_days
+           AND NOT fn_receivable_disputed_asof(r.id, p_asof)               -- task 1.5: a bill held on that date does not bar anyone
     )
     SELECT COALESCE(SUM(owed), 0)::NUMERIC,
            MIN(due_date) FILTER (WHERE owed > 0),
@@ -17803,16 +17870,19 @@ BEGIN
             COALESCE(SUM(r.amount - r.paid_amount) FILTER (WHERE r.status IN ('pending', 'partial')), 0) AS outstanding,
             COALESCE(SUM(r.amount - r.paid_amount) FILTER (
                 WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL AND r.due_date < p_asof
+                  AND NOT fn_receivable_disputed_asof(r.id, p_asof)       -- task 1.5
             ), 0) AS overdue,
             COALESCE(SUM(r.amount - r.paid_amount) FILTER (
                 WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL
                   AND r.charge_kind = 'common_expense'
                   AND r.due_date < p_asof - v_arrears_days
+                  AND NOT fn_receivable_disputed_asof(r.id, p_asof)       -- task 1.5
             ), 0) AS arrears_bl7,
             COALESCE(SUM(r.amount - r.paid_amount) FILTER (
                 WHERE r.status IN ('pending', 'partial') AND r.due_date IS NOT NULL
                   AND r.charge_kind = 'common_expense'
                   AND r.due_date <= p_asof - make_interval(months => v_s22_months)
+                  AND NOT fn_receivable_disputed_asof(r.id, p_asof)       -- task 1.5
             ), 0) AS overdue_s22_months
         FROM receivables r
         WHERE r.society_id = p_society_id
@@ -18813,6 +18883,81 @@ COMMENT ON FUNCTION fn_post_reversal_journal(INT, INT, TEXT, INT, DATE) IS
     'mirror-image journal dated p_reversal_date (default today, so it lands in an '
     'open period), keeps each leg''s mode, and refuses a second reversal.';
 
+-- Task 1.5: hold a disputed apartment bill. Returns the dispute id.
+CREATE OR REPLACE FUNCTION fn_raise_receivable_dispute(
+    p_society_id INT, p_receivable_id INT, p_user_id INT, p_reason TEXT, p_resolution_ref TEXT
+) RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE v_rec receivables%ROWTYPE; v_id INT;
+BEGIN
+    SELECT * INTO v_rec FROM receivables WHERE id = p_receivable_id AND society_id = p_society_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Bill not found for this society.'; END IF;
+    IF v_rec.role <> 'apartment' THEN RAISE EXCEPTION 'Only an apartment bill can be disputed.'; END IF;
+    IF v_rec.status NOT IN ('pending', 'partial') OR v_rec.amount - v_rec.paid_amount <= 0 THEN
+        RAISE EXCEPTION 'Only an unpaid bill can be held (this one is %).', v_rec.status;
+    END IF;
+    IF LENGTH(BTRIM(COALESCE(p_reason, ''))) < 10 THEN
+        RAISE EXCEPTION 'Give the reason for the dispute (at least 10 characters).';
+    END IF;
+    IF LENGTH(BTRIM(COALESCE(p_resolution_ref, ''))) = 0 THEN
+        RAISE EXCEPTION 'Name the resolution under which the bill is held.';
+    END IF;
+    IF EXISTS (SELECT 1 FROM receivable_disputes WHERE receivable_id = p_receivable_id AND status = 'open') THEN
+        RAISE EXCEPTION 'This bill is already under dispute.';
+    END IF;
+    INSERT INTO receivable_disputes (society_id, receivable_id, amount_held, reason, resolution_ref, raised_by)
+    VALUES (p_society_id, p_receivable_id, v_rec.amount - v_rec.paid_amount, BTRIM(p_reason), BTRIM(p_resolution_ref), p_user_id)
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END $$;
+
+-- Task 1.5: decide a dispute. 'dismissed' (the bill stands) and 'withdrawn' end the hold; interest for the held period
+-- then catches up on the next fn_apply_receivable_interest run. 'upheld' reverses every accrual journal of the bill
+-- (fn_post_reversal_journal) and cancels it. A waiver of the held-period interest is NOT offered here: it goes through
+-- the ratification register as an interest_waiver.
+CREATE OR REPLACE FUNCTION fn_decide_receivable_dispute(
+    p_society_id INT, p_dispute_id INT, p_outcome TEXT, p_user_id INT, p_reason TEXT, p_resolution_ref TEXT
+) RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_d receivable_disputes%ROWTYPE; v_rec receivables%ROWTYPE;
+    v_j INT; v_new INT; v_ids INT[] := '{}';
+BEGIN
+    SELECT * INTO v_d FROM receivable_disputes WHERE id = p_dispute_id AND society_id = p_society_id FOR UPDATE;
+    IF NOT FOUND OR v_d.status <> 'open' THEN RAISE EXCEPTION 'Only an open dispute can be decided.'; END IF;
+    IF p_outcome NOT IN ('upheld', 'dismissed', 'withdrawn') THEN
+        RAISE EXCEPTION 'Decide it as upheld, dismissed or withdrawn.';
+    END IF;
+    IF LENGTH(BTRIM(COALESCE(p_reason, ''))) = 0 THEN RAISE EXCEPTION 'Say why it is decided this way.'; END IF;
+    IF LENGTH(BTRIM(COALESCE(p_resolution_ref, ''))) = 0 THEN RAISE EXCEPTION 'Name the resolution that decided it.'; END IF;
+
+    SELECT * INTO v_rec FROM receivables WHERE id = v_d.receivable_id FOR UPDATE;
+    IF p_outcome = 'upheld' THEN
+        IF v_rec.paid_amount > 0 THEN
+            RAISE EXCEPTION 'This bill has been paid in part (Rs. %). Upholding it needs a refund, which is posted separately by reversing the payment. Decide it as dismissed or withdrawn, or reverse the payment first.', v_rec.paid_amount;
+        END IF;
+        FOR v_j IN
+            SELECT DISTINCT t.journal_id FROM transactions t
+             WHERE t.society_id = p_society_id AND t.source_table = 'receivables' AND t.source_id = v_rec.id
+               AND t.mode = 'journal' AND NOT COALESCE(t.is_reversal, FALSE)
+               AND NOT EXISTS (SELECT 1 FROM transactions r WHERE r.reverses_id = t.id)
+             ORDER BY 1
+        LOOP
+            v_new := fn_post_reversal_journal(p_society_id, v_j, 'Dispute upheld: ' || BTRIM(p_reason), p_user_id);
+            v_ids := v_ids || v_new;
+        END LOOP;
+        UPDATE receivables SET status = 'cancelled' WHERE id = v_rec.id;
+    END IF;
+
+    UPDATE receivable_disputes
+       SET status = p_outcome, decided_on = CURRENT_DATE, decided_by = p_user_id,
+           decision_reason = BTRIM(p_reason), decision_resolution_ref = BTRIM(p_resolution_ref),
+           reversal_journal_ids = NULLIF(v_ids, '{}')
+     WHERE id = p_dispute_id;
+    RETURN CASE p_outcome
+        WHEN 'upheld'    THEN format('upheld; bill cancelled, %s journal(s) reversed', COALESCE(array_length(v_ids, 1), 0))
+        WHEN 'dismissed' THEN 'dismissed; the bill stands and interest resumes'
+        ELSE                  'withdrawn; the bill stands and interest resumes' END;
+END $$;
+
 
 -- ---------------------------------------------------------------------------
 -- A-02 (completed)  All-cash vouchers: no Cash-in-Hand leg, so what do they balance against?
@@ -19600,6 +19745,7 @@ CREATE TRIGGER trg_regime_audit_no_truncate      BEFORE TRUNCATE ON regime_rule_
 CREATE TRIGGER trg_fy_locks_no_truncate          BEFORE TRUNCATE ON fy_locks                FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
 CREATE TRIGGER trg_anchors_no_truncate           BEFORE TRUNCATE ON ledger_chain_anchors    FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
 CREATE TRIGGER trg_gst_ws_no_truncate            BEFORE TRUNCATE ON gst_turnover_worksheets FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+CREATE TRIGGER trg_receivable_disputes_no_truncate BEFORE TRUNCATE ON receivable_disputes FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SOCIETY-SCOPED ADVISER DECISIONS (Gold-Standard Plan v3, Phase 0)

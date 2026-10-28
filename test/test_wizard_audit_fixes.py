@@ -124,7 +124,7 @@ def test_funds_error_rules():
 
 
 def test_funds_step_is_registered_after_apartment_charges():
-    assert w.CATEGORIES.index("Funds") == w.CATEGORIES.index("Apartment Charges") + 1
+    assert w.CATEGORIES.index("Funds") == w.CATEGORIES.index("Legal Regime Selection") + 1   # current order in setup_wizard.CATEGORIES; Phase 0 answer: keep all steps, labels only
 
 
 def test_fund_rate_inputs_live_only_on_the_funds_step():
