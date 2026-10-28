@@ -6194,7 +6194,8 @@ def _save_committee_bearer(db, d, sid, is_edit, pk):
             reason = (d.get("end_reason") or "").strip()
             ok, msg = cs.update_office(uid, "admin", sid, pk, holder_name=d.get("holder_name"),
                                        term_end=d.get("term_end") or "", resolution_ref=d.get("resolution_ref"),
-                                       actor_society_id=sid)
+                                       actor_society_id=sid, email=d.get("email"), phone=d.get("phone"),
+                                       signature_image=d.get("signature_image"))
             if ok and reason:
                 ok, msg = cs.end_office(uid, "admin", sid, pk, reason, actor_society_id=sid)
             return ok, msg, pk if ok else None
@@ -6212,7 +6213,8 @@ def _save_committee_bearer(db, d, sid, is_edit, pk):
         ok, msg = cs.appoint(uid, "admin", sid, apartment_id, (d.get("office_code") or "").strip().lower(),
                              d.get("holder_name"), user_id=user_id, term_start=d.get("term_start") or None,
                              term_end=d.get("term_end") or None, resolution_ref=d.get("resolution_ref"),
-                             actor_society_id=sid)
+                             actor_society_id=sid, email=d.get("email"), phone=d.get("phone"),
+                             signature_image=d.get("signature_image"))
         if not ok:
             return False, msg, None
         row = db._execute("SELECT id FROM committee_offices WHERE society_id=%s AND apartment_id=%s AND "

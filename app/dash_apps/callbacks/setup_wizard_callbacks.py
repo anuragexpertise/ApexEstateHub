@@ -740,6 +740,12 @@ def register_setup_wizard_callbacks(app):
             except Exception as e:
                 return True, no_update, no_update, no_update, no_update, error_toast(e, "Unable to create the society's signing keys. Check the server configuration (SECRET_VAULT_KEY) and try again.")["message"], _hidden_spinner, no_update, no_update
 
+            try:   # Plan v3 2.8: derive flats' undivided-interest shares from area unless the Declaration's own were typed
+                from app.services.up_aoa_actions import fill_after_enrolment
+                fill_after_enrolment(society_id)
+            except Exception as e:
+                print(f"undivided-interest fill skipped: {e}")
+
             # Zip the typed rates back onto the wizard's rows: ONE per (section, discriminator), see
             # database.seed.tds_wizard_rows(). Earlier dated rates are added later on the TDS & GST Rates tab.
             def _num_or_none(lst, i):

@@ -1730,6 +1730,24 @@ def render_profile_card(card_id: str, title: str, icon: str,
                         color: str = "#1d74d8",
                         auth_data: dict | None = None,
                         filters: dict | None = None) -> html.Div:
+    """Profile card; a declared poll result also shows its Signatures panel (Secretary/President seal the tally)."""
+    card = _render_profile_card_inner(card_id, title, icon, entity, record, fields, actions, color, auth_data, filters)
+    try:
+        rec = record.to_dict() if hasattr(record, "to_dict") else (record or {})
+        if entity == "poll" and rec.get("id") and rec.get("status") == "results_declared":
+            return html.Div([card, html.Div(_signature_panel_for("poll", rec["id"], approve_label="Sign result"),
+                                            style={"padding": "0 16px 12px"})])
+    except Exception as exc:
+        print(f"poll signature panel skipped: {exc}")
+    return card
+
+
+def _render_profile_card_inner(card_id: str, title: str, icon: str,
+                        entity: str, record,
+                        fields: list[dict], actions: list[dict] | None = None,
+                        color: str = "#1d74d8",
+                        auth_data: dict | None = None,
+                        filters: dict | None = None) -> html.Div:
     from app.dash_apps.drilldown.registry import to_plural
 
     auth_data  = auth_data or {}
@@ -7820,6 +7838,7 @@ def render_noc_card(apt: dict, society: dict,
             ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
                       "marginTop": "10px", "paddingTop": "10px",
                       "borderTop": "1px solid rgba(120,148,181,0.15)"}),
+            _signature_panel_for("noc", (noc_record or {}).get("id")),
         ], style={"padding": "14px 16px"}),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
@@ -7828,6 +7847,16 @@ def render_noc_card(apt: dict, society: dict,
 # ════════════════════════════════════════════════════════════════════════════
 # AGREEMENT CARD — society onboarding license agreement, execution page
 # ════════════════════════════════════════════════════════════════════════════
+
+def _signature_panel_for(kind, subject_id):
+    """The Sign / Decline panel; never lets a signing problem break the card it sits in."""
+    try:
+        from app.dash_apps.callbacks.signature_callbacks import signature_panel
+        return signature_panel(kind, subject_id)
+    except Exception as exc:
+        print(f"signature panel unavailable: {exc}")
+        return html.Div()
+
 
 def render_agreement_card(society: dict, agreement_record: dict) -> html.Div:
     """
@@ -8012,6 +8041,7 @@ def render_agreement_card(society: dict, agreement_record: dict) -> html.Div:
             ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
                       "marginTop": "10px", "paddingTop": "10px",
                       "borderTop": "1px solid rgba(120,148,181,0.15)"}),
+            _signature_panel_for("agreement", (agreement_record or {}).get("id")),
         ], style={"padding": "14px 16px"}),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
@@ -8278,6 +8308,8 @@ def render_expense_card(expense: dict, society: dict) -> html.Div:
             ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
                       "marginTop": "16px", "paddingTop": "14px",
                       "borderTop": "1px solid rgba(120,148,181,0.15)"}),
+            *([_signature_panel_for("expense", expense.get("id"), approve_label="Approve")]
+              if (expense.get("status") or "") == "pending" else []),
         ], style={"padding": "16px"}),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})

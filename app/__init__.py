@@ -283,6 +283,8 @@ def create_app(config_name: str | None = None) -> Flask:
         app.register_blueprint(push_bp)
         app.register_blueprint(sse_bp)
         app.register_blueprint(presumed_bp)
+        from app.routes.verify import verify_bp
+        app.register_blueprint(verify_bp)
         log.info("Blueprints registered ✓")
     except Exception as exc:
         log.warning("Blueprint registration partial: %s", exc)

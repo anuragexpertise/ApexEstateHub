@@ -92,6 +92,9 @@ _BEARER_PROFILE_FIELDS = [
     _pf("Term Start", "term_start", "fa-calendar"),
     _pf("Term End", "term_end", "fa-calendar-check"),
     _pf("Resolution Ref", "resolution_ref", "fa-gavel"),
+    _pf("Contact Email", "email", "fa-at"),
+    _pf("Contact Phone", "phone", "fa-phone"),
+    _pf("Signature Image", "signature_image", "fa-signature"),
     _pf("Ended On", "ended_at", "fa-calendar-times"),
     _pf("Ended Because", "ended_reason", "fa-comment"),
 ]
@@ -102,11 +105,17 @@ _BEARER_NEW_FIELDS = [
     {"id": "term_start", "label": "Term Start", "type": "date"},
     {"id": "term_end", "label": "Term End", "type": "date"},
     {"id": "resolution_ref", "label": "Resolution Ref", "type": "text"},
+    {"id": "email", "label": "Contact Email (blank = flat owner's email)", "type": "text"},
+    {"id": "phone", "label": "Contact Phone (blank = flat owner's mobile)", "type": "text"},
+    {"id": "signature_image", "label": "Signature Image (path of the uploaded signature)", "type": "text"},
 ]
 _BEARER_EDIT_FIELDS = [
     {"id": "holder_name", "label": "Holder Name", "type": "text", "required": True},
     {"id": "term_end", "label": "Term End", "type": "date"},
     {"id": "resolution_ref", "label": "Resolution Ref", "type": "text"},
+    {"id": "email", "label": "Contact Email (blank = flat owner's email)", "type": "text"},
+    {"id": "phone", "label": "Contact Phone (blank = flat owner's mobile)", "type": "text"},
+    {"id": "signature_image", "label": "Signature Image (path of the uploaded signature)", "type": "text"},
     {"id": "end_reason", "label": "End this office - reason (min 5 characters)", "type": "text",
      "required": False},
 ]
@@ -368,7 +377,7 @@ def get_team_member(role: str, pk, sid):
 _BEARER_SELECT = (
     "SELECT co.id, co.office_code, INITCAP(REPLACE(co.office_code, '_', ' ')) AS office_label, co.holder_name, "
     "       co.user_id, co.apartment_id, co.status, co.term_start, co.term_end, co.resolution_ref, co.ended_at, "
-    "       co.ended_reason, u.email AS user_email, a.flat_number, a.owner_name "
+    "       co.ended_reason, co.email, co.phone, co.signature_image, u.email AS user_email, a.flat_number, a.owner_name "
     "  FROM committee_offices co "
     "  LEFT JOIN users u ON u.id = co.user_id "
     "  LEFT JOIN apartments a ON a.id = co.apartment_id "

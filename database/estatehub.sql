@@ -70,6 +70,7 @@ CREATE TABLE societies (
     -- How the society is constituted; with `state` it selects the legal scheme (fn_sync_society_regime).
     -- Existing societies were all treated as apartment owners' associations, hence the default.
     constitution VARCHAR(20) NOT NULL DEFAULT 'AOA' CHECK (constitution IN ('AOA', 'REG_SOCIETY', 'COOP', 'GENERIC')),
+    undivided_interest_basis VARCHAR(12) CHECK (undivided_interest_basis IN ('area', 'declaration')), -- how flats' undivided-interest % were set: derived from area, or typed from the Declaration
     -- stepup_password_hash: one-way hash (werkzeug, like login passwords) of the admin's step-up password. It
     -- signs nothing; it only confirms sensitive actions (QR reissue, key rotation). Signing keys live in
     -- society_signing_keys (wrapped under SECRET_VAULT_KEY). NULL means the Setup Wizard is not finished, which
@@ -1091,6 +1092,7 @@ CREATE TABLE expenses (
             'cancelled'
         )
     ),
+    approval_resolution_ref VARCHAR(255), -- MC resolution that approved a spend above the approval threshold
     confirmed_by INT REFERENCES users (id),
     confirmed_at TIMESTAMP,
     last_printed_at TIMESTAMP,
@@ -2381,9 +2383,20 @@ CREATE TABLE legal_instrument_catalog (
         status IN ('active', 'superseded', 'draft')
     ),
     last_verified_on DATE,
+    -- Verification workflow (Plan v3 2.7): a row is 'verified' only with its source text link, notification number, date,
+    -- verifier (Treasurer or Auditor) and the opinion that supports it. Anything else is 'unverified' and is labelled so;
+    -- unverified rows never drive enforcement. Editing the substance of a verified row returns it to 'unverified'.
+    notification_no VARCHAR(100),
+    verification VARCHAR(12) NOT NULL DEFAULT 'unverified' CHECK (verification IN ('unverified', 'verified')),
+    verified_by INT REFERENCES users (id),
+    verifier_role VARCHAR(10) CHECK (verifier_role IN ('treasurer', 'auditor')),
+    opinion_ref VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_legal_instrument UNIQUE (regime_code, title, enactment_year)
+    CONSTRAINT uq_legal_instrument UNIQUE (regime_code, title, enactment_year),
+    CONSTRAINT ck_instrument_verified_complete CHECK (verification <> 'verified' OR (
+        source_url IS NOT NULL AND notification_no IS NOT NULL AND last_verified_on IS NOT NULL
+        AND verified_by IS NOT NULL AND verifier_role IS NOT NULL AND NULLIF(BTRIM(opinion_ref), '') IS NOT NULL))
 );
 
 CREATE INDEX idx_legal_instrument_catalog_regime ON legal_instrument_catalog (regime_code);
@@ -17861,6 +17874,10 @@ CREATE TABLE committee_offices (
                           ('president', 'vice_president', 'secretary', 'joint_secretary', 'treasurer',
                            'working_committee_member')),
     holder_name         VARCHAR(100) NOT NULL,
+    -- Task 2.10: contact and signature for every post (prefilled from the flat's owner, editable).
+    email               VARCHAR(100),
+    phone               VARCHAR(20),
+    signature_image     VARCHAR(255),
     user_id             INT REFERENCES users (id),
     term_start          DATE NOT NULL DEFAULT CURRENT_DATE,
     term_end            DATE,
@@ -20181,3 +20198,401 @@ BEGIN
         (CASE WHEN v_inc >= v_thr THEN 'flag' WHEN v_inc >= v_thr * 0.8 THEN 'warn' ELSE 'ok' END)::VARCHAR, v_status,
         'Ask your CA whether s.44AB tax audit applies. Provisional threshold; mutual receipts may not count as turnover.'::TEXT;
 END $$;
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Phase 2 (tasks 2.1, 2.2, 2.10-2.12): office-bearer records, signatures and sealed records
+-- ════════════════════════════════════════════════════════════════════════════
+-- A serving post is COMPLETE when it has flat, name, email, phone and a signature image.
+CREATE OR REPLACE VIEW v_office_bearer_completeness AS
+SELECT co.id AS committee_office_id, co.society_id, co.office_code, co.apartment_id, co.holder_name, co.user_id,
+       (co.holder_name IS NOT NULL AND NULLIF(BTRIM(co.holder_name), '') IS NOT NULL
+        AND NULLIF(BTRIM(co.email), '') IS NOT NULL AND NULLIF(BTRIM(co.phone), '') IS NOT NULL
+        AND NULLIF(BTRIM(co.signature_image), '') IS NOT NULL) AS complete,
+       ARRAY_REMOVE(ARRAY[CASE WHEN NULLIF(BTRIM(co.email), '') IS NULL THEN 'email' END,
+                          CASE WHEN NULLIF(BTRIM(co.phone), '') IS NULL THEN 'phone' END,
+                          CASE WHEN NULLIF(BTRIM(co.signature_image), '') IS NULL THEN 'signature image' END], NULL) AS missing
+  FROM committee_offices co WHERE co.status = 'active';
+
+-- Who must sign which kind of record. A society may change its own list; the defaults live in
+-- app/services/document_signing.py. eligible = offices that may sign; required = offices that MUST be among the
+-- signers; min_signers = distinct people needed. Pseudo-offices: 'chair' (the meeting's chair), 'platform' (platform operator).
+CREATE TABLE signer_policy (
+    id               SERIAL PRIMARY KEY,
+    society_id       INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    subject_kind     VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
+    eligible_offices TEXT[] NOT NULL,
+    required_offices TEXT[] NOT NULL DEFAULT '{}',
+    min_signers      INT NOT NULL DEFAULT 1 CHECK (min_signers BETWEEN 1 AND 5),
+    updated_by       INT REFERENCES users (id),
+    updated_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (society_id, subject_kind)
+);
+
+-- One row per confirmation (sign / approve / decline). item_hash = SHA-256 of the exact item text at that moment.
+CREATE TABLE document_signatures (
+    id                  BIGSERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    subject_kind        VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
+    subject_id          INT NOT NULL,
+    action              VARCHAR(8) NOT NULL DEFAULT 'sign' CHECK (action IN ('sign', 'approve', 'decline')),
+    user_id             INT NOT NULL REFERENCES users (id),
+    office_code         VARCHAR(30) NOT NULL,
+    committee_office_id INT REFERENCES committee_offices (id),
+    item_hash           VARCHAR(64) NOT NULL,
+    reason              TEXT,
+    signed_at           TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_decline_has_reason CHECK (action <> 'decline' OR LENGTH(BTRIM(COALESCE(reason, ''))) >= 10)
+);
+-- One confirmation per person per item version.
+CREATE UNIQUE INDEX uq_doc_signature_person ON document_signatures (subject_kind, subject_id, item_hash, user_id)
+    WHERE action IN ('sign', 'approve');
+CREATE INDEX idx_doc_signatures_subject ON document_signatures (subject_kind, subject_id);
+
+-- Append-only.
+CREATE OR REPLACE FUNCTION trg_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION '% is append-only', TG_TABLE_NAME; END $$;
+CREATE TRIGGER trg_document_signatures_append_only BEFORE UPDATE OR DELETE ON document_signatures
+    FOR EACH ROW EXECUTE FUNCTION trg_append_only();
+
+-- The seal: made once all required signatures are in, signed with the society's key.
+CREATE TABLE signed_records (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    subject_kind    VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
+    subject_id      INT NOT NULL,
+    purpose         VARCHAR(20) NOT NULL,
+    item_hash       VARCHAR(64) NOT NULL,
+    signature       VARCHAR(64) NOT NULL,
+    key_version     INT NOT NULL,
+    key_id          VARCHAR(32) NOT NULL,
+    algorithm       VARCHAR(20) NOT NULL,
+    signed_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    signers         JSONB NOT NULL,                      -- [{user_id, office, at}] : names and offices only
+    status          VARCHAR(12) NOT NULL DEFAULT 'valid' CHECK (status IN ('valid', 'superseded', 'revoked')),
+    revoked_reason  TEXT
+);
+CREATE UNIQUE INDEX uq_signed_record_current ON signed_records (subject_kind, subject_id) WHERE status = 'valid';
+CREATE OR REPLACE FUNCTION trg_signed_record_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'signed_records is never deleted'; END IF;
+    IF ROW(NEW.society_id, NEW.subject_kind, NEW.subject_id, NEW.purpose, NEW.item_hash, NEW.signature, NEW.key_version,
+           NEW.key_id, NEW.algorithm, NEW.signed_at, NEW.signers)
+       IS DISTINCT FROM ROW(OLD.society_id, OLD.subject_kind, OLD.subject_id, OLD.purpose, OLD.item_hash, OLD.signature,
+           OLD.key_version, OLD.key_id, OLD.algorithm, OLD.signed_at, OLD.signers) THEN
+        RAISE EXCEPTION 'A signed record cannot be changed; only its status may move (superseded or revoked).';
+    END IF;
+    IF OLD.status <> 'valid' AND NEW.status IS DISTINCT FROM OLD.status THEN
+        RAISE EXCEPTION 'A superseded or revoked record cannot change status again.';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_signed_record_guard BEFORE UPDATE OR DELETE ON signed_records
+    FOR EACH ROW EXECUTE FUNCTION trg_signed_record_guard();
+
+-- Once sealed, the signed text cannot be edited (the seal would fail anyway; this stops it at the source).
+CREATE OR REPLACE FUNCTION trg_block_edit_when_sealed() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_kind TEXT := TG_ARGV[0]; v_cols TEXT[] := string_to_array(TG_ARGV[1], ',');
+        v_changed BOOLEAN := FALSE; v_c TEXT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        IF EXISTS (SELECT 1 FROM signed_records WHERE subject_kind = v_kind AND subject_id = OLD.id AND status = 'valid') THEN
+            RAISE EXCEPTION 'This % is sealed with signatures and cannot be deleted.', v_kind;
+        END IF;
+        RETURN OLD;
+    END IF;
+    FOREACH v_c IN ARRAY v_cols LOOP
+        IF to_jsonb(NEW) -> v_c IS DISTINCT FROM to_jsonb(OLD) -> v_c THEN v_changed := TRUE; END IF;
+    END LOOP;
+    IF v_changed AND EXISTS (SELECT 1 FROM signed_records WHERE subject_kind = v_kind AND subject_id = OLD.id AND status = 'valid') THEN
+        RAISE EXCEPTION 'This % is sealed with signatures: its signed text cannot be edited.', v_kind;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_nocs_sealed BEFORE UPDATE OR DELETE ON nocs
+    FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('noc', 'body_text,apartment_id,certificate_no,issued_date,valid_until');
+CREATE TRIGGER trg_agreements_sealed BEFORE UPDATE OR DELETE ON society_agreements
+    FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('agreement', 'body_text,society_name,society_address,registration_number');
+CREATE TRIGGER trg_meetings_sealed BEFORE UPDATE OR DELETE ON meetings
+    FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('minutes', 'held_on,agenda,type,venue,minutes_pdf');
+CREATE TRIGGER trg_polls_sealed BEFORE UPDATE OR DELETE ON polls
+    FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('poll', 'title,choice_1,choice_2,choice_3,choice_4,choice_5,majority_pct,quorum_pct,vote_basis');
+CREATE TRIGGER trg_resolutions_sealed BEFORE UPDATE OR DELETE ON resolutions
+    FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('resolution', 'body,clause_id,majority_required,votes_for_pct,owners_present_pct,passed_on,status');
+
+
+-- ── Phase 2.5: approval ladder for expenses (bye-law 49: Rs 20,000) ─────────────────────────────────────────────
+-- Up to `threshold` one administrator verifies as before. Above it the expense needs `min_signers` DIFFERENT serving
+-- office-bearers (document_signatures, kind 'expense') and a Managing Committee resolution reference.
+CREATE TABLE expense_approval_policy (
+    society_id          INT PRIMARY KEY REFERENCES societies (id) ON DELETE CASCADE,
+    threshold           NUMERIC(14, 2) NOT NULL DEFAULT 20000 CHECK (threshold >= 0),
+    min_signers         INT NOT NULL DEFAULT 2 CHECK (min_signers BETWEEN 1 AND 5),
+    require_resolution  BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_by          INT REFERENCES users (id),
+    updated_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- ── Phase 2.4: ratification of irregular items, with automatic reversal ─────────────────────────────────────────
+-- An irregular item (spend before approval, emergency spend, arrears write-off, interest waiver) is allowed to stand
+-- for a limited time, then it needs a ratifying decision. If it is rejected, or the deadline passes, the postings it
+-- made are reversed through fn_post_reversal_journal and the item shows in the register as reversed.
+CREATE TABLE ratification_items (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    kind                VARCHAR(30) NOT NULL CHECK (kind IN ('spend_before_approval', 'emergency_spend', 'arrears_writeoff', 'interest_waiver')),
+    source_table        VARCHAR(50),
+    source_id           INT,
+    amount              NUMERIC(14, 2) NOT NULL CHECK (amount >= 0),
+    description         TEXT NOT NULL,
+    raised_by           INT REFERENCES users (id),
+    raised_at           TIMESTAMP NOT NULL DEFAULT NOW(),
+    ratify_by           DATE NOT NULL,
+    status              VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'ratified', 'rejected', 'expired', 'reversed')),
+    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    decided_by          INT REFERENCES users (id),
+    decided_at          TIMESTAMP,
+    decision_note       TEXT,
+    reversal_journal_ids INT[] NOT NULL DEFAULT ARRAY[]::INT[],
+    reversal_note       TEXT,                    -- why a reversal could not be posted, if it could not
+    CONSTRAINT ck_ratification_deadline CHECK (ratify_by >= raised_at::date)
+);
+CREATE INDEX idx_ratification_items_open ON ratification_items (society_id, status, ratify_by);
+CREATE UNIQUE INDEX uq_ratification_items_source ON ratification_items (kind, source_table, source_id)
+    WHERE source_table IS NOT NULL AND status IN ('pending', 'ratified');
+
+-- Reverse every journal the item's source document posted. One failure never blocks the rest, and is recorded.
+CREATE OR REPLACE FUNCTION fn_reverse_ratification_item(p_item_id INT, p_reason TEXT, p_user INT DEFAULT NULL)
+RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE
+    v_item ratification_items%ROWTYPE;
+    v_j    INT;
+    v_new  INT;
+    v_ids  INT[] := ARRAY[]::INT[];
+    v_note TEXT := NULL;
+BEGIN
+    SELECT * INTO v_item FROM ratification_items WHERE id = p_item_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Ratification item % not found.', p_item_id; END IF;
+    IF v_item.source_table IS NOT NULL AND v_item.source_id IS NOT NULL THEN
+        FOR v_j IN SELECT DISTINCT journal_id FROM transactions
+                    WHERE society_id = v_item.society_id AND source_table = v_item.source_table AND source_id = v_item.source_id
+                      AND journal_id IS NOT NULL AND NOT is_reversal AND reverses_id IS NULL
+                    ORDER BY journal_id
+        LOOP
+            BEGIN
+                v_new := fn_post_reversal_journal(v_item.society_id, v_j, p_reason, p_user, CURRENT_DATE);
+                v_ids := v_ids || v_new;
+            EXCEPTION WHEN OTHERS THEN
+                v_note := COALESCE(v_note || '; ', '') || format('journal %s: %s', v_j, SQLERRM);
+            END;
+        END LOOP;
+    END IF;
+    UPDATE ratification_items SET reversal_journal_ids = v_ids, reversal_note = v_note,
+           status = CASE WHEN v_note IS NULL AND array_length(v_ids, 1) > 0 THEN 'reversed' ELSE status END
+     WHERE id = p_item_id;
+    RETURN COALESCE(array_length(v_ids, 1), 0);
+END $$;
+
+CREATE OR REPLACE FUNCTION fn_raise_ratification(
+    p_society_id INT, p_kind TEXT, p_source_table TEXT, p_source_id INT, p_amount NUMERIC, p_description TEXT,
+    p_raised_by INT, p_ratify_by DATE DEFAULT NULL
+) RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE v_id INT;
+BEGIN
+    IF NULLIF(BTRIM(p_description), '') IS NULL THEN RAISE EXCEPTION 'Say what is being ratified.'; END IF;
+    INSERT INTO ratification_items (society_id, kind, source_table, source_id, amount, description, raised_by, ratify_by)
+    VALUES (p_society_id, p_kind, p_source_table, p_source_id, p_amount, p_description, p_raised_by,
+            COALESCE(p_ratify_by, CURRENT_DATE + 90))
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END $$;
+
+-- Ratify (needs the resolution that did it) or reject (reverses the postings).
+CREATE OR REPLACE FUNCTION fn_decide_ratification(p_item_id INT, p_ratify BOOLEAN, p_resolution_id INT, p_user INT, p_note TEXT DEFAULT NULL)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE v_item ratification_items%ROWTYPE; v_n INT;
+BEGIN
+    SELECT * INTO v_item FROM ratification_items WHERE id = p_item_id FOR UPDATE;
+    IF NOT FOUND OR v_item.status <> 'pending' THEN RAISE EXCEPTION 'Only a pending item can be decided.'; END IF;
+    IF p_ratify THEN
+        IF p_resolution_id IS NULL OR NOT EXISTS (SELECT 1 FROM resolutions r JOIN meetings m ON m.id = r.meeting_id
+                                                   WHERE r.id = p_resolution_id AND m.society_id = v_item.society_id AND r.status = 'passed') THEN
+            RAISE EXCEPTION 'Ratifying needs a passed resolution of this society.';
+        END IF;
+        UPDATE ratification_items SET status = 'ratified', resolution_id = p_resolution_id, decided_by = p_user,
+               decided_at = NOW(), decision_note = p_note WHERE id = p_item_id;
+        RETURN 'ratified';
+    END IF;
+    IF NULLIF(BTRIM(p_note), '') IS NULL THEN RAISE EXCEPTION 'Say why it is rejected.'; END IF;
+    UPDATE ratification_items SET status = 'rejected', decided_by = p_user, decided_at = NOW(), decision_note = p_note WHERE id = p_item_id;
+    v_n := fn_reverse_ratification_item(p_item_id, 'Ratification rejected: ' || p_note, p_user);
+    RETURN format('rejected; %s journal(s) reversed', v_n);
+END $$;
+
+-- Scheduled: pending items past their deadline expire and their postings are reversed.
+CREATE OR REPLACE FUNCTION fn_expire_ratification_items() RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE v_id INT; v_count INT := 0;
+BEGIN
+    FOR v_id IN SELECT id FROM ratification_items WHERE status = 'pending' AND ratify_by < CURRENT_DATE ORDER BY id
+    LOOP
+        UPDATE ratification_items SET status = 'expired', decided_at = NOW(), decision_note = 'Not ratified by the deadline.' WHERE id = v_id;
+        PERFORM fn_reverse_ratification_item(v_id, 'Ratification deadline passed without a decision', NULL);
+        v_count := v_count + 1;
+    END LOOP;
+    RETURN v_count;
+END $$;
+
+-- ── Phase 2.3: rule-application register ────────────────────────────────────────────────────────────────────────
+-- Which rule, at which layer, under which decision and authority, produced a posting. An auditor traces any posting
+-- to its rule and authority from here (and exports it).
+CREATE TABLE rule_applications (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    source_table        VARCHAR(50) NOT NULL,
+    source_id           INT NOT NULL,
+    journal_id          INT,
+    rule_key            VARCHAR(100) NOT NULL,
+    layer               INT CHECK (layer IN (1, 2, 3)),
+    decision            TEXT NOT NULL,
+    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    resolution_ref      VARCHAR(255),
+    advocate_opinion_ref VARCHAR(255),
+    effective_from      DATE NOT NULL DEFAULT CURRENT_DATE,
+    effective_to        DATE,
+    applied_by          INT REFERENCES users (id),
+    applied_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_rule_application_dates CHECK (effective_to IS NULL OR effective_to >= effective_from)
+);
+CREATE INDEX idx_rule_applications_source ON rule_applications (society_id, source_table, source_id);
+CREATE INDEX idx_rule_applications_rule ON rule_applications (society_id, rule_key);
+
+CREATE OR REPLACE FUNCTION trg_rule_applications_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'The rule-application register is append-only; record a new application instead.';
+END $$;
+CREATE TRIGGER trg_rule_applications_append_only BEFORE UPDATE OR DELETE ON rule_applications
+    FOR EACH ROW EXECUTE FUNCTION trg_rule_applications_append_only();
+
+CREATE OR REPLACE VIEW v_rule_application_register AS
+SELECT ra.id, ra.society_id, ra.applied_at, ra.source_table, ra.source_id, ra.journal_id, ra.rule_key, ra.layer,
+       ra.decision, ra.resolution_id, COALESCE(ra.resolution_ref, r.body) AS resolution_ref, ra.advocate_opinion_ref,
+       ra.effective_from, ra.effective_to,
+       (SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr'), 0) FROM transactions t
+         WHERE t.society_id = ra.society_id AND ra.journal_id IS NOT NULL AND t.journal_id = ra.journal_id) AS journal_debits
+  FROM rule_applications ra LEFT JOIN resolutions r ON r.id = ra.resolution_id;
+
+
+-- ── Phase 2.7: editing what a verified instrument says sends it back to 'unverified' ────────────────────────────
+CREATE OR REPLACE FUNCTION trg_instrument_unverify() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.verification = 'verified' AND NEW.verification = 'verified'
+       AND (NEW.key_provisions IS DISTINCT FROM OLD.key_provisions OR NEW.source_reference IS DISTINCT FROM OLD.source_reference
+            OR NEW.source_url IS DISTINCT FROM OLD.source_url OR NEW.title IS DISTINCT FROM OLD.title
+            OR NEW.notification_no IS DISTINCT FROM OLD.notification_no OR NEW.status IS DISTINCT FROM OLD.status
+            OR NEW.last_verified_on IS DISTINCT FROM OLD.last_verified_on OR NEW.opinion_ref IS DISTINCT FROM OLD.opinion_ref) THEN
+        NEW.verification := 'unverified'; NEW.verified_by := NULL; NEW.verifier_role := NULL;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_legal_instrument_unverify BEFORE UPDATE ON legal_instrument_catalog
+    FOR EACH ROW EXECUTE FUNCTION trg_instrument_unverify();
+
+-- Only the application path below may mark a row verified; it passes the verifier's role it has checked.
+CREATE OR REPLACE FUNCTION fn_verify_instrument(
+    p_instrument_id INT, p_user INT, p_role TEXT, p_notification_no TEXT, p_source_url TEXT, p_opinion_ref TEXT, p_verified_on DATE
+) RETURNS TEXT LANGUAGE plpgsql AS $$
+BEGIN
+    IF p_role NOT IN ('treasurer', 'auditor') THEN RAISE EXCEPTION 'Only the Treasurer or an Auditor can verify an instrument.'; END IF;
+    IF NULLIF(BTRIM(p_opinion_ref), '') IS NULL THEN RAISE EXCEPTION 'An opinion reference is required to verify.'; END IF;
+    IF NULLIF(BTRIM(p_notification_no), '') IS NULL THEN RAISE EXCEPTION 'The notification number is required.'; END IF;
+    IF p_source_url IS NULL OR p_source_url !~* '^https?://' THEN RAISE EXCEPTION 'A link to the source text is required.'; END IF;
+    IF p_verified_on IS NULL OR p_verified_on > CURRENT_DATE THEN RAISE EXCEPTION 'The verified date must not be in the future.'; END IF;
+    UPDATE legal_instrument_catalog SET notification_no = p_notification_no, source_url = p_source_url, opinion_ref = p_opinion_ref,
+           last_verified_on = p_verified_on, verified_by = p_user, verifier_role = p_role, verification = 'verified', updated_at = NOW()
+     WHERE id = p_instrument_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Instrument not found.'; END IF;
+    RETURN 'verified';
+END $$;
+
+-- ── Phase 2.6: per-financial-year compliance certificate ────────────────────────────────────────────────────────
+-- Generated from the data, signed with the society's SIGNING_LEDGER key. The stored text is what was signed; the public
+-- page recomputes its hash and checks the signature, and shows only minimal fields.
+CREATE TABLE compliance_certificates (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    fy              VARCHAR(9) NOT NULL,                 -- e.g. 2026-27
+    generated_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    generated_by    INT REFERENCES users (id),
+    body_text       TEXT NOT NULL,                       -- canonical JSON of every check; this exact text is signed
+    item_hash       CHAR(64) NOT NULL,
+    overall         VARCHAR(10) NOT NULL CHECK (overall IN ('pass', 'exceptions', 'fail')),
+    signature       TEXT NOT NULL,
+    key_version     INT NOT NULL,
+    key_id          TEXT NOT NULL,
+    algorithm       VARCHAR(30) NOT NULL,
+    status          VARCHAR(12) NOT NULL DEFAULT 'valid' CHECK (status IN ('valid', 'superseded', 'revoked')),
+    revoked_reason  TEXT
+);
+CREATE UNIQUE INDEX uq_compliance_certificate_current ON compliance_certificates (society_id, fy) WHERE status = 'valid';
+CREATE OR REPLACE FUNCTION trg_compliance_certificate_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'A compliance certificate cannot be deleted; revoke it instead.'; END IF;
+    IF NEW.body_text IS DISTINCT FROM OLD.body_text OR NEW.item_hash IS DISTINCT FROM OLD.item_hash
+       OR NEW.signature IS DISTINCT FROM OLD.signature OR NEW.fy IS DISTINCT FROM OLD.fy OR NEW.society_id IS DISTINCT FROM OLD.society_id
+       OR NEW.overall IS DISTINCT FROM OLD.overall OR NEW.generated_at IS DISTINCT FROM OLD.generated_at OR NEW.key_version IS DISTINCT FROM OLD.key_version THEN
+        RAISE EXCEPTION 'A signed compliance certificate cannot be edited; generate a new one.';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_compliance_certificate_guard BEFORE UPDATE OR DELETE ON compliance_certificates
+    FOR EACH ROW EXECUTE FUNCTION trg_compliance_certificate_guard();
+
+
+-- ── Phase 2.8: undivided interest filled after enrolment; per-flat tally ────────────────────────────────────────
+-- Figures typed from the Declaration are authoritative ('declaration') and are never overwritten. Until someone types
+-- one, the shares are derived from carpet/built-up area ('area') and re-derived after every enrolment, so the flats
+-- always sum to 100%.
+CREATE OR REPLACE FUNCTION trg_apartment_uip_basis() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.undivided_interest_pct IS NOT NULL
+       AND (TG_OP = 'INSERT' OR NEW.undivided_interest_pct IS DISTINCT FROM OLD.undivided_interest_pct)
+       AND COALESCE(current_setting('app.uip_auto', TRUE), '') <> '1' THEN
+        UPDATE societies SET undivided_interest_basis = 'declaration' WHERE id = NEW.society_id;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_apartment_uip_basis AFTER INSERT OR UPDATE OF undivided_interest_pct ON apartments
+    FOR EACH ROW EXECUTE FUNCTION trg_apartment_uip_basis();
+
+CREATE OR REPLACE FUNCTION fn_fill_undivided_interest_after_enrolment(p_society_id INT)
+RETURNS TABLE (basis TEXT, apartments_total INT, apartments_missing INT, total_declared_pct NUMERIC, balanced BOOLEAN)
+LANGUAGE plpgsql AS $$
+DECLARE v_basis TEXT;
+BEGIN
+    SELECT undivided_interest_basis INTO v_basis FROM societies WHERE id = p_society_id;
+    IF v_basis IS DISTINCT FROM 'declaration' AND EXISTS (SELECT 1 FROM apartments WHERE society_id = p_society_id AND active AND apartment_size > 0) THEN
+        PERFORM set_config('app.uip_auto', '1', TRUE);
+        PERFORM fn_backfill_undivided_interest(p_society_id, TRUE);
+        PERFORM set_config('app.uip_auto', '', TRUE);
+        UPDATE societies SET undivided_interest_basis = 'area' WHERE id = p_society_id;
+        v_basis := 'area';
+    END IF;
+    RETURN QUERY SELECT COALESCE(v_basis, 'none')::TEXT, s.apartments_total, s.apartments_missing, s.total_declared_pct, s.balanced
+                   FROM fn_undivided_interest_summary(p_society_id) s;
+END $$;
+
+-- The weighted General Body tally, flat by flat, straight from the registers (what the auditor compares with the
+-- percentages recorded on the resolution).
+CREATE OR REPLACE FUNCTION fn_resolution_tally_by_apartment(p_resolution_id INT)
+RETURNS TABLE (apartment_id INT, flat_number TEXT, weight NUMERIC, present BOOLEAN, vote TEXT)
+LANGUAGE sql STABLE AS $$
+    SELECT a.id, a.flat_number::TEXT, COALESCE(rv.weight, ma.undivided_interest_pct, a.undivided_interest_pct),
+           COALESCE(ma.present_in_person, FALSE), rv.vote::TEXT
+      FROM resolutions r
+      JOIN meetings m ON m.id = r.meeting_id
+      JOIN apartments a ON a.society_id = m.society_id AND a.active
+      LEFT JOIN meeting_attendance ma ON ma.meeting_id = r.meeting_id AND ma.apartment_id = a.id
+      LEFT JOIN resolution_votes rv ON rv.resolution_id = r.id AND rv.apartment_id = a.id
+     WHERE r.id = p_resolution_id
+     ORDER BY a.flat_number
+$$;

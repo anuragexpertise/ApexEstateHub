@@ -48,7 +48,10 @@ def job_patrol(db=None) -> dict:
 
 
 def job_ratification(db=None) -> dict:
-    row = _db(db)._execute("SELECT fn_expire_overdue_ratifications() AS n", fetch_one=True)
+    d = _db(db)
+    items = d._execute("SELECT fn_expire_ratification_items() AS n", fetch_one=True)
+    row = d._execute("SELECT fn_expire_overdue_ratifications() AS n", fetch_one=True)
+    row = {"n": int(row["n"] or 0) + int((items or {}).get("n") or 0)}
     return {"expired": int(row["n"])}
 
 

@@ -103,6 +103,13 @@ def fill_undivided_interest(society_id: int):
                                                                         "(or no flat has an area recorded).")
 
 
+def fill_after_enrolment(society_id: int) -> dict:
+    """After flats are enrolled: derive undivided-interest shares from area unless the society typed the Declaration's own
+    figures (those are never overwritten). Returns the summary (basis, flats missing, total %, balanced)."""
+    row = db._execute("SELECT * FROM fn_fill_undivided_interest_after_enrolment(%s)", (society_id,), fetch_one=True)
+    return dict(row or {})
+
+
 def set_billing_basis(society_id: int, basis, budget):
     if basis not in ("per_sqft", "undivided_interest"):
         return False, "Choose a billing basis."

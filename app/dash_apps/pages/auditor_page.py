@@ -101,6 +101,28 @@ def _card(key, title, blurb, extra):
     ]), className="mb-3", style={"borderRadius": "10px"})
 
 
+def _instrument_verify_card():
+    """Statute catalogue workflow (Plan v3 2.7): mark an instrument verified with its source, notification number and opinion."""
+    try:
+        from database.db_manager import db
+        rows = db._execute("SELECT id, title, enactment_year, verification FROM legal_instrument_catalog ORDER BY (verification='verified'), display_order, title",
+                           fetch_all=True) or []
+    except Exception:
+        rows = []
+    opts = [{"label": f"{r['title']} ({r['enactment_year'] or 'n/a'}) - {r['verification']}", "value": r["id"]} for r in rows]
+    return dbc.Card(dbc.CardBody([
+        html.H6("Verify a legal instrument", style={"fontSize": "14px"}),
+        html.P("Only the Treasurer or an Auditor can mark an instrument verified, and only with a link to its text, its notification number, "
+               "and the reference of the opinion that supports it. Unverified instruments are labelled and drive nothing.", style={"fontSize": "12px", "color": "#777"}),
+        dbc.Select(id="inst-id", options=opts, size="sm", className="mb-1"),
+        dbc.Input(id="inst-notif", placeholder="Notification number", size="sm", className="mb-1"),
+        dbc.Input(id="inst-url", placeholder="https:// link to the source text", size="sm", className="mb-1"),
+        dbc.Input(id="inst-opinion", placeholder="Opinion reference (advocate or CA)", size="sm", className="mb-1"),
+        dbc.Button("Mark verified", id="inst-verify", color="primary", size="sm", n_clicks=0),
+        html.Div(id="inst-msg", style={"fontSize": "12px", "marginTop": "6px"}),
+    ]), className="mb-3", style={"borderRadius": "10px"})
+
+
 def render_auditor_body(sid, color: str, page_title) -> html.Div:
     """page_title is portal_pages._page_title (passed in to avoid a circular import)."""
     return html.Div([
@@ -114,6 +136,7 @@ def render_auditor_body(sid, color: str, page_title) -> html.Div:
                             color="danger", size="sm"), className="mb-3"),
         html.Div(id="aud-toast"),
         *[_card(*c) for c in CHECKS],
+        _instrument_verify_card(),
         dbc.Accordion([dbc.AccordionItem([
             html.P("Start at database/estatehub.sql (the schema is the source of truth), then the "
                    "legal_instrument_catalog, regime_rule_parameters and regime_rule_audit tables.",
