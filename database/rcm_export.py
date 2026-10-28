@@ -13,6 +13,7 @@ Data source: rcm_liability table + expenses + vendors.
 """
 
 from __future__ import annotations
+from database.money import D
 import io
 from datetime import date
 
@@ -61,17 +62,17 @@ def _write_register_sheet(ws, rows: list[dict]) -> int:
         cell.border = _BORDER_ALL
 
     r = 3
-    t_taxable = 0.0
-    t_cgst = 0.0
-    t_sgst = 0.0
+    t_taxable = D(0)
+    t_cgst = D(0)
+    t_sgst = D(0)
     for row in rows:
         date_val = row.get("liability_date")
         expense_id = row.get("expense_id", "")
         vendor_name = row.get("vendor_name", "")
         rcm_cat = row.get("rcm_category", "")
-        taxable = float(row.get("taxable_value", 0) or 0)
-        cgst = float(row.get("cgst_amount", 0) or 0)
-        sgst = float(row.get("sgst_amount", 0) or 0)
+        taxable = D(row.get("taxable_value", 0) or 0)
+        cgst = D(row.get("cgst_amount", 0) or 0)
+        sgst = D(row.get("sgst_amount", 0) or 0)
         gstr_filed = row.get("gstr_filed", False)
 
         values = [
@@ -131,16 +132,16 @@ def _write_vendor_summary_sheet(ws, rows: list[dict]) -> None:
 
     r = 3
     t_expenses = 0
-    t_taxable = 0.0
-    t_cgst = 0.0
-    t_sgst = 0.0
+    t_taxable = D(0)
+    t_cgst = D(0)
+    t_sgst = D(0)
     for row in rows:
         vendor = row.get("vendor_name", "")
         rcm_cat = row.get("rcm_category", "")
         n_expenses = int(row.get("n_expenses", 0) or 0)
-        taxable = float(row.get("taxable_value", 0) or 0)
-        cgst = float(row.get("cgst_amount", 0) or 0)
-        sgst = float(row.get("sgst_amount", 0) or 0)
+        taxable = D(row.get("taxable_value", 0) or 0)
+        cgst = D(row.get("cgst_amount", 0) or 0)
+        sgst = D(row.get("sgst_amount", 0) or 0)
 
         values = [vendor, rcm_cat, n_expenses, taxable, cgst, sgst, cgst + sgst]
         for col, val in enumerate(values, start=1):
@@ -193,14 +194,14 @@ def _write_reconciliation_sheet(ws, rows: list[dict]) -> None:
         cell.border = _BORDER_ALL
 
     r = 3
-    t_cgst = 0.0
-    t_sgst = 0.0
-    t_itc = 0.0
+    t_cgst = D(0)
+    t_sgst = D(0)
+    t_itc = D(0)
     for row in rows:
         period = row.get("period_month")
-        cgst = float(row.get("cgst_amount", 0) or 0)
-        sgst = float(row.get("sgst_amount", 0) or 0)
-        itc = float(row.get("itc_claimed", 0) or 0)
+        cgst = D(row.get("cgst_amount", 0) or 0)
+        sgst = D(row.get("sgst_amount", 0) or 0)
+        itc = D(row.get("itc_claimed", 0) or 0)
         net = cgst + sgst - itc
 
         values = [period, cgst, sgst, itc, net]

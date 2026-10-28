@@ -8,6 +8,7 @@ The rules themselves are enforced in SQL (see estatehub.sql, "UP AOA COMPLIANCE
 LAYER"); these functions only validate form input and call them.
 """
 from __future__ import annotations
+from database.money import money
 
 from datetime import date, datetime
 
@@ -156,7 +157,7 @@ def record_transfer(society_id: int, user_id, apartment_id, transfer_date, value
         return False, row.get("msg") or "Could not record the transfer."
     if transfer_type != "sale":
         return True, f"{transfer_type.capitalize()} recorded. No transfer fee is levied."
-    return True, f"Transfer recorded. Major Repair Fund fee of \u20b9{float(row['fee_amount']):,.2f} added to the flat's dues."
+    return True, f"Transfer recorded. Major Repair Fund fee of \u20b9{money(row['fee_amount']):,.2f} added to the flat's dues."
 
 
 def set_nodues(society_id: int, transfer_id, action, on):
@@ -353,8 +354,8 @@ def sign_cashbook(society_id: int, user_id: int, day: str, signer_name: str, clo
         if rec["status"] == "agrees":
             msg += f" Cash counted (Rs {counted:,.2f}) agrees with the books."
         else:
-            msg += (f" WARNING: cash counted is Rs {counted:,.2f} but the books show Rs {float(rec['derived_closing']):,.2f} "
-                    f"(difference Rs {float(rec['difference']):,.2f}); this has been flagged for the committee and auditors.")
+            msg += (f" WARNING: cash counted is Rs {counted:,.2f} but the books show Rs {money(rec['derived_closing']):,.2f} "
+                    f"(difference Rs {money(rec['difference']):,.2f}); this has been flagged for the committee and auditors.")
     elif counted is None:
         msg += " No closing cash count was recorded."
     return True, msg

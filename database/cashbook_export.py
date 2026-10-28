@@ -70,6 +70,7 @@ This generator currently always shows the underlying per-account rows.
 """
 
 from __future__ import annotations
+from database.money import D
 import io
 from datetime import date
 
@@ -185,14 +186,14 @@ def _write_month_sheet(
             2: r.get("cr_account_name") or None,
             3: _particulars(r, "cr_") or None,
             4: r.get("cr_acc_id") or None,
-            5: float(r.get("cr_cash") or 0) or None,
-            6: float(r.get("cr_chq") or 0) or None,
+            5: D(r.get("cr_cash") or 0) or None,
+            6: D(r.get("cr_chq") or 0) or None,
             8: r.get("row_date") or None,
             9: r.get("dr_account_name") or None,
             10: _particulars(r, "dr_") or None,
             11: r.get("dr_acc_id") or None,
-            12: float(r.get("dr_cash") or 0) or None,
-            13: float(r.get("dr_chq") or 0) or None,
+            12: D(r.get("dr_cash") or 0) or None,
+            13: D(r.get("dr_chq") or 0) or None,
         }
         for col, val in row_data.items():
             cell = ws.cell(row=current_row, column=col, value=val)
@@ -240,7 +241,7 @@ def _write_month_sheet(
     # Excel formula), so the next month's opening balance doesn't depend on
     # spreadsheet recalculation having happened.
     closing_balance = opening_balance + sum(
-        float(r.get("cr_cash") or 0) - float(r.get("dr_cash") or 0) for r in rows
+        D(r.get("cr_cash") or 0) - D(r.get("dr_cash") or 0) for r in rows
     )
     return closing_balance
 
@@ -304,7 +305,7 @@ def generate_cashbook_excel_fy(
            ), 0) AS bf""",
         (society_id, fy_start, society_id, fy_start), fetch_one=True,
     ) or {}
-    opening_balance = float(bf_row.get("bf", 0))
+    opening_balance = D(bf_row.get("bf", 0))
 
     all_rows = db._execute(
         "SELECT * FROM fn_cashbook_paired_v3(%s, %s, %s, NULL, %s, %s) ORDER BY row_date",
