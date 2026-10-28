@@ -28,6 +28,25 @@ def _scope():
 def register_auditor_callbacks(app):
 
     @app.callback(
+        Output("aud-signed-msg", "children"),
+        Input("aud-run-signed", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def run_and_store(n):
+        sid = _scope()
+        if not n or not sid:
+            raise PreventUpdate
+        from app.security.audit_context import get_current_user_id
+        from app.services import audit_runs
+        try:
+            r = audit_runs.run_all(sid, get_current_user_id())
+            bad = sum(1 for x in r["results"] if x["status"] in ("finding", "error"))
+            return f"Stored and signed {len(r['results'])} results; {bad} need attention. Reload the page to see them listed."
+        except audit_runs.AuditRunRefused as exc:
+            return str(exc)
+
+    @app.callback(
         Output("aud-res", "options"),
         Input("aud-res", "id"),
     )
