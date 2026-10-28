@@ -2369,3 +2369,9 @@ The following tables map every user-reachable workflow in the application, organ
 - **Advisers and retention:** Treasurer/Auditor files advocate opinions and CA sign-offs; 5-year default retention (tasks 0.3, 0.4, 2.7, 4.4).
 
 Provisional figures needing an opinion: 2/3 policy and 1/2 resolution majorities, cash ceiling, bye-law 46(d) depreciation-fund label, bye-law 7 year basis, poll majority basis (task 0.2). Retention default 5 years, configurable per society, subject to CA confirmation on longer periods required by any applicable Act (task 0.4).
+
+## Phase 3 (auditor and CA experience) — status
+
+Done: 3.1/3.2 signed stored auditor checks and tie-out report, 3.8 source-document guard and voucher numbers, 3.4 Decimal money policy (`database/money.py`: paisa for ledgers, whole rupee for TDS; floats only at JSON/Excel display boundaries and for rule parameters and vote weights).
+
+Open, needs CA sign-off before building: 3.3 schedule-format statements and notes, 3.5 depreciation by Act version / apportionment / brought-forward losses, 3.6 TDS challan reconciliation and quarterly statements, 3.7 GST books-to-return reconciliation, 3.9 Form 26AS/AIS comparison.
