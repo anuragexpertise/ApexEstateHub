@@ -49,6 +49,9 @@
     "callback:auditor_callbacks.py::load_resolutions": {
       "classification": "legacy-gated"
     },
+    "callback:auditor_callbacks.py::run_and_store": {
+      "classification": "legacy-gated"
+    },
     "callback:auditor_callbacks.py::run_checks": {
       "classification": "legacy-gated"
     },

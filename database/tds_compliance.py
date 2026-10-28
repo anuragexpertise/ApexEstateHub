@@ -14,6 +14,7 @@ All functions are read-only except where noted; none of them post ledger
 rows.
 """
 from __future__ import annotations
+from database.money import D
 
 import logging
 from typing import Any
@@ -121,12 +122,12 @@ def vendor_cumulative_tds(
     """Sum of confirmed, TDS-deducted expense amounts for one vendor/section
     within FY `fy` (start-year string), excluding `exclude_expense_id`."""
     if not vendor_id or not section:
-        return 0.0
+        return D(0)
     row = db._execute(
         "SELECT fn_vendor_tds_cumulative_fy(%s,%s,%s,%s,%s) AS cum",
         (society_id, vendor_id, section, fy, exclude_expense_id), fetch_one=True,
     )
-    return float((row or {}).get("cum", 0) or 0)
+    return D((row or {}).get("cum", 0) or 0)
 
 
 def compute_tds_pct(
@@ -148,7 +149,7 @@ def compute_tds_pct(
     threshold (s.393(1)(a)); 194-IA is the one inclusive row.
     """
     if not section or not amount:
-        return {"tds_pct": 0.0, "applies": False, "basis": "no-section-or-zero-amount",
+        return {"tds_pct": D(0), "applies": False, "basis": "no-section-or-zero-amount",
                 "act_version": None, "section_2025": None}
     row = db._execute(
         "SELECT * FROM fn_compute_tds_pct(%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -156,7 +157,7 @@ def compute_tds_pct(
         fetch_one=True,
     ) or {}
     return {
-        "tds_pct": float(row.get("tds_pct", 0) or 0),
+        "tds_pct": D(row.get("tds_pct", 0) or 0),
         "applies": bool(row.get("applies", False)),
         "basis": row.get("basis", "below-threshold"),
         "act_version": row.get("act_version"),
@@ -203,7 +204,7 @@ def account_is_depreciable(db, society_id: int, acc_id: int) -> dict:
     account, so the expense form can prompt for a depreciation-rate
     confirmation (Phase 5.2) when a capital asset is being booked."""
     if not acc_id:
-        return {"is_capital": False, "is_depreciable": False, "depreciation_percent": 0.0}
+        return {"is_capital": False, "is_depreciable": False, "depreciation_percent": D(0)}
     row = db._execute(
         "SELECT depreciation_percent, is_depreciable FROM accounts WHERE id=%s AND society_id=%s",
         (acc_id, society_id), fetch_one=True,
@@ -211,7 +212,7 @@ def account_is_depreciable(db, society_id: int, acc_id: int) -> dict:
     return {
         "is_capital": is_capital_account(db, society_id, acc_id),
         "is_depreciable": bool(row.get("is_depreciable", False)),
-        "depreciation_percent": float(row.get("depreciation_percent", 0) or 0),
+        "depreciation_percent": D(row.get("depreciation_percent", 0) or 0),
     }
 
 
@@ -292,7 +293,7 @@ def suggest_expense_tax_fields(
         "pan_warning": None,
         "is_capital": False,
         "is_depreciable": False,
-        "depreciation_percent": 0.0,
+        "depreciation_percent": D(0),
     }
 
     # No-PAN warning/block only matters when TDS actually applies.
@@ -314,7 +315,7 @@ def suggest_expense_tax_fields(
             )
 
     dep = account_is_depreciable(db, society_id, acc_id) if acc_id else {
-        "is_capital": False, "is_depreciable": False, "depreciation_percent": 0.0}
+        "is_capital": False, "is_depreciable": False, "depreciation_percent": D(0)}
     result["is_capital"] = dep["is_capital"]
     result["is_depreciable"] = dep["is_depreciable"]
     result["depreciation_percent"] = dep["depreciation_percent"]

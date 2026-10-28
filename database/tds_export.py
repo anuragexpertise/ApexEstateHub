@@ -31,6 +31,7 @@ file-format validation.
 """
 
 from __future__ import annotations
+from database.money import D
 import io
 
 from openpyxl import Workbook
@@ -94,9 +95,9 @@ def _write_deduction_sheet(ws, rows: list[dict], fy: int, quarter: int) -> int:
         no_pan = bool(row.get("no_pan"))
         values = [
             row.get("vendor_name"), row.get("vendor_pan"), row.get("tds_section"),
-            float(row.get("gross_amount_paid", 0) or 0),
-            float(row.get("tds_deducted", 0) or 0),
-            float(row.get("net_paid", 0) or 0),
+            D(row.get("gross_amount_paid", 0) or 0),
+            D(row.get("tds_deducted", 0) or 0),
+            D(row.get("net_paid", 0) or 0),
             row.get("payment_date"), "YES" if no_pan else "",
         ]
         for col, val in enumerate(values, start=1):
@@ -116,9 +117,9 @@ def _write_deduction_sheet(ws, rows: list[dict], fy: int, quarter: int) -> int:
         r += 1
 
     # Totals row.
-    t_gross = sum(float(x.get("gross_amount_paid", 0) or 0) for x in rows)
-    t_tds = sum(float(x.get("tds_deducted", 0) or 0) for x in rows)
-    t_net = sum(float(x.get("net_paid", 0) or 0) for x in rows)
+    t_gross = sum(D(x.get("gross_amount_paid", 0) or 0) for x in rows)
+    t_tds = sum(D(x.get("tds_deducted", 0) or 0) for x in rows)
+    t_net = sum(D(x.get("net_paid", 0) or 0) for x in rows)
     totals = ["TOTAL", "", "", t_gross, t_tds, t_net, ""]
     for col, val in enumerate(totals, start=1):
         cell = ws.cell(row=r, column=col, value=val)
@@ -155,12 +156,12 @@ def _write_summary_sheet(ws, rows: list[dict], fy: int, quarter: int) -> None:
             row.get("tds_section"),
         )
         bucket = agg.setdefault(key, {
-            "gross": 0.0, "tds": 0.0, "net": 0.0,
+            "gross": D(0), "tds": D(0), "net": D(0),
             "no_pan": False, "bills": 0,
         })
-        bucket["gross"] += float(row.get("gross_amount_paid", 0) or 0)
-        bucket["tds"] += float(row.get("tds_deducted", 0) or 0)
-        bucket["net"] += float(row.get("net_paid", 0) or 0)
+        bucket["gross"] += D(row.get("gross_amount_paid", 0) or 0)
+        bucket["tds"] += D(row.get("tds_deducted", 0) or 0)
+        bucket["net"] += D(row.get("net_paid", 0) or 0)
         bucket["no_pan"] = bucket["no_pan"] or bool(row.get("no_pan"))
         bucket["bills"] += 1
 

@@ -101,6 +101,23 @@ def _card(key, title, blurb, extra):
     ]), className="mb-3", style={"borderRadius": "10px"})
 
 
+def _stored_runs_table(sid):
+    """Latest stored, signed results (Plan v3 3.1), each re-verified as it is shown."""
+    if not sid:
+        return html.Div()
+    try:
+        from app.services import audit_runs
+        rows = audit_runs.latest(sid, 18)
+        body = [html.Tr([html.Td(str(r["run_at"])[:16]), html.Td(r["check_key"]), html.Td(r["status"]),
+                         html.Td(audit_runs.verify_run(r["id"], sid)["status"])]) for r in rows]
+    except Exception as exc:
+        return html.Div(f"Stored results unavailable: {exc}", style={"fontSize": "12px", "color": "#b02a37"})
+    if not body:
+        return html.Div("No stored results yet.", style={"fontSize": "12px", "color": "#888", "marginTop": "6px"})
+    return dbc.Table([html.Thead(html.Tr([html.Th(h) for h in ("Run", "Check", "Result", "Signature")])), html.Tbody(body)],
+                     size="sm", style={"fontSize": "12px", "marginTop": "8px"})
+
+
 def _instrument_verify_card():
     """Statute catalogue workflow (Plan v3 2.7): mark an instrument verified with its source, notification number and opinion."""
     try:
@@ -134,6 +151,11 @@ def render_auditor_body(sid, color: str, page_title) -> html.Div:
                   color="light", style={"fontSize": "13px"}),
         html.Div(dbc.Button([html.I(className="fas fa-play me-2"), "Run all checks"], id="aud-run-all",
                             color="danger", size="sm"), className="mb-3"),
+        html.Div([dbc.Button([html.I(className="fas fa-file-signature me-2"), "Run all and store signed results"], id="aud-run-signed",
+                             color="primary", size="sm", n_clicks=0),
+                  html.Span(" Each result is stored with its date and signed with the society's ledger key.", style={"fontSize": "12px", "color": "#777"}),
+                  html.Div(id="aud-signed-msg", style={"fontSize": "12px", "marginTop": "6px"}),
+                  html.Div(_stored_runs_table(sid))], className="mb-3"),
         html.Div(id="aud-toast"),
         *[_card(*c) for c in CHECKS],
         _instrument_verify_card(),

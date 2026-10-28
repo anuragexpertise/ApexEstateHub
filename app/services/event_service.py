@@ -1,5 +1,6 @@
 # app/services/event_service.py
 
+from database.money import D
 import logging
 from datetime import date
 from database.db_manager import db
@@ -15,8 +16,8 @@ def create_event(
     venue: str = None,
     description: str = None,
     event_time: str = None,
-    ticket_price: float = 0.0,
-    ticket_price2: float = 0.0,
+    ticket_price: float = D(0),
+    ticket_price2: float = D(0),
     ticket_name: str = "Adult",
     ticket_name2: str = "Child",
     account_id: int = None,
@@ -136,7 +137,7 @@ def book_event_tickets(
             "event_ticket_id": event_ticket_id,
             "receipt_id": (r or {}).get("receipt_id"),
             "booking_reference": booking_ref,
-            "total_amount": float((r or {}).get("amount") or 0),
+            "total_amount": D((r or {}).get("amount") or 0),
             "items": created_items,
         }, "Tickets booked successfully"
 
@@ -182,7 +183,7 @@ def get_user_event_tickets(society_id: int, user_id: int):
                 "event_date": str(b["event_date"]),
                 "event_time": str(b.get("event_time") or ""),
                 "venue": b.get("venue") or "",
-                "total_amount": float(b["amount"]),
+                "total_amount": D(b["amount"]),
                 "booking_reference": b["booking_reference"],
                 "status": b["status"],
                 "items": item_list,

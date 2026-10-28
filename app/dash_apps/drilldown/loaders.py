@@ -23,6 +23,7 @@ Entity map for load_list():
 """
 
 from __future__ import annotations
+from database.money import D
 
 from datetime import date
 
@@ -344,7 +345,7 @@ def submit_concern_bid(concern_id: int, society_id: int, role: str, entity_id: i
             return False, "Security staff do not bid on concerns"
         return False, "Only vendors can bid on a concern"
     try:
-        bid = float(bid_amount)
+        bid = D(bid_amount)
         if bid <= 0:
             return False, "Bid amount must be positive"
         if bid > MAX_BID_AMOUNT:
@@ -733,7 +734,7 @@ def get_income_tax_mutuality_summary(society_id: int, fy: int) -> dict | None:
     for row in rows:
         key = (row.get("category"), row.get("nature"))
         if key in totals:
-            totals[key] += float(row.get("total_amount") or 0)
+            totals[key] += D(row.get("total_amount") or 0)
 
     return {
         "mutual_income": totals[("Income", "mutual")],
@@ -3198,8 +3199,8 @@ def pay_apartment_dues_fifo(
         if not r:
             return False, "No result from payment function", {}
         result = dict(r)
-        unalloc = float(result.get("unallocated") or 0)
-        msg = f"Rs.{float(result.get('allocated',0)):,.2f} applied"
+        unalloc = D(result.get("unallocated") or 0)
+        msg = f"Rs.{D(result.get('allocated',0)):,.2f} applied"
         if unalloc > 0:
             msg += f"; Rs.{unalloc:,.2f} credited as advance"
         return True, msg, result
@@ -3227,9 +3228,9 @@ def load_vendor_pass_rates(vendor_user_id: int, society_id: int) -> dict:
             (society_id, vendor_id), fetch_one=True,
         ) or {}
         return {
-            "1day": float(row.get("vendor_1day") or 0),
-            "7day": float(row.get("vendor_7day") or 0),
-            "1mth": float(row.get("vendor_1mth") or 0),
+            "1day": D(row.get("vendor_1day") or 0),
+            "7day": D(row.get("vendor_7day") or 0),
+            "1mth": D(row.get("vendor_1mth") or 0),
             "free_1mth": 0.0,
         }
     except Exception as e:

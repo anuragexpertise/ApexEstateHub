@@ -15,6 +15,7 @@ Data source: fn_gst_summary_fy(p_society_id, p_fy)
 """
 
 from __future__ import annotations
+from database.money import D
 import io
 from datetime import date
 
@@ -68,19 +69,19 @@ def _write_taxable_supplies_sheet(ws, rows: list[dict], fy: int) -> int:
         cell.border = _BORDER_ALL
 
     r = 3
-    t_taxable = 0.0
-    t_cgst = 0.0
-    t_sgst = 0.0
-    t_exempt = 0.0
+    t_taxable = D(0)
+    t_cgst = D(0)
+    t_sgst = D(0)
+    t_exempt = D(0)
     t_gst_bills = 0
     t_exempt_bills = 0
 
     for row in rows:
         period = row.get("period_month")
-        taxable = float(row.get("taxable_value", 0) or 0)
-        cgst = float(row.get("cgst_collected", 0) or 0)
-        sgst = float(row.get("sgst_collected", 0) or 0)
-        exempt = float(row.get("exempt_value", 0) or 0)
+        taxable = D(row.get("taxable_value", 0) or 0)
+        cgst = D(row.get("cgst_collected", 0) or 0)
+        sgst = D(row.get("sgst_collected", 0) or 0)
+        exempt = D(row.get("exempt_value", 0) or 0)
         gst_bills = int(row.get("total_bills_gst_applicable", 0) or 0)
         exempt_bills = int(row.get("total_bills_exempt", 0) or 0)
 
@@ -150,10 +151,10 @@ def _write_summary_sheet(ws, rows: list[dict], fy: int) -> None:
         cell.alignment = _ALIGN_C
         cell.border = _BORDER_ALL
 
-    t_taxable = sum(float(x.get("taxable_value", 0) or 0) for x in rows)
-    t_cgst = sum(float(x.get("cgst_collected", 0) or 0) for x in rows)
-    t_sgst = sum(float(x.get("sgst_collected", 0) or 0) for x in rows)
-    t_exempt = sum(float(x.get("exempt_value", 0) or 0) for x in rows)
+    t_taxable = sum(D(x.get("taxable_value", 0) or 0) for x in rows)
+    t_cgst = sum(D(x.get("cgst_collected", 0) or 0) for x in rows)
+    t_sgst = sum(D(x.get("sgst_collected", 0) or 0) for x in rows)
+    t_exempt = sum(D(x.get("exempt_value", 0) or 0) for x in rows)
     t_gst_bills = sum(int(x.get("total_bills_gst_applicable", 0) or 0) for x in rows)
     t_exempt_bills = sum(int(x.get("total_bills_exempt", 0) or 0) for x in rows)
 
@@ -193,7 +194,7 @@ def _write_turnover_sheet(ws, gate: dict | None, lines: list[dict], fy: int) -> 
     row = 3
     for ln in lines:
         vals = [ln.get("account_name"), ln.get("tab_name"), ln.get("supply_class") or "UNCLASSIFIED",
-                ln.get("class_source"), float(ln.get("amount") or 0)]
+                ln.get("class_source"), D(ln.get("amount") or 0)]
         for col, v in enumerate(vals, start=1):
             c = ws.cell(row=row, column=col, value=v)
             c.font, c.border = _FONT_BODY, _BORDER_ALL
@@ -213,7 +214,7 @@ def _write_turnover_sheet(ws, gate: dict | None, lines: list[dict], fy: int) -> 
         ]
         for label, v in notes:
             ws.cell(row=row, column=1, value=label).font = _FONT_HEADER
-            c = ws.cell(row=row, column=5, value=float(v or 0))
+            c = ws.cell(row=row, column=5, value=D(v or 0))
             c.font, c.alignment, c.number_format = _FONT_TOTAL, _ALIGN_R, _FMT_AMT
             row += 1
         state = gate.get("state")
@@ -315,14 +316,14 @@ def generate_rcm_summary_excel(
         cell.border = _BORDER_ALL
 
     r = 3
-    t_taxable = 0.0
-    t_cgst = 0.0
-    t_sgst = 0.0
+    t_taxable = D(0)
+    t_cgst = D(0)
+    t_sgst = D(0)
     for row in rows:
         period = row.get("period_month")
-        taxable = float(row.get("taxable_value", 0) or 0)
-        cgst = float(row.get("cgst_amount", 0) or 0)
-        sgst = float(row.get("sgst_amount", 0) or 0)
+        taxable = D(row.get("taxable_value", 0) or 0)
+        cgst = D(row.get("cgst_amount", 0) or 0)
+        sgst = D(row.get("sgst_amount", 0) or 0)
         gstr_filed = row.get("gstr_filed", False)
 
         values = [

@@ -18,6 +18,7 @@ Following the pattern of income_tax_export.py and asset_export.py.
 """
 
 from __future__ import annotations
+from database.money import D
 import io
 from datetime import date
 
@@ -92,13 +93,13 @@ def _write_receipts_payments_sheet(ws, rows: list[dict], society_name: str, fy: 
 
     r = 5
     current_section = None
-    section_totals = {"Receipt": 0.0, "Payment": 0.0}
+    section_totals = {"Receipt": D(0), "Payment": D(0)}
 
     for row in rows:
         line_type = row.get("line_type", "")
         account_name = row.get("account_name", "")
-        dr_amount = float(row.get("dr_amount", 0) or 0)
-        cr_amount = float(row.get("cr_amount", 0) or 0)
+        dr_amount = D(row.get("dr_amount", 0) or 0)
+        cr_amount = D(row.get("cr_amount", 0) or 0)
 
         if line_type != current_section:
             if current_section in ("Receipt", "Payment") and section_totals[current_section] > 0:
@@ -109,7 +110,7 @@ def _write_receipts_payments_sheet(ws, rows: list[dict], society_name: str, fy: 
                     _write_row(ws, r, [total_label, 0, section_totals["Payment"]], _FONT_SUBTOTAL, _FILL_SECTION, fmt=_FMT_AMT)
                 r += 1
             current_section = line_type
-            section_totals = {"Receipt": 0.0, "Payment": 0.0}
+            section_totals = {"Receipt": D(0), "Payment": D(0)}
 
         if line_type == "Opening":
             _write_row(ws, r, [account_name, dr_amount, cr_amount], _FONT_BODY, fmt=_FMT_AMT)
@@ -131,8 +132,8 @@ def _write_receipts_payments_sheet(ws, rows: list[dict], society_name: str, fy: 
             _write_row(ws, r, [total_label, 0, section_totals["Payment"]], _FONT_SUBTOTAL, _FILL_SECTION, fmt=_FMT_AMT)
         r += 1
 
-    total_receipts = sum(float(row.get("dr_amount", 0) or 0) for row in rows if row.get("line_type") == "Receipt")
-    total_payments = sum(float(row.get("cr_amount", 0) or 0) for row in rows if row.get("line_type") == "Payment")
+    total_receipts = sum(D(row.get("dr_amount", 0) or 0) for row in rows if row.get("line_type") == "Receipt")
+    total_payments = sum(D(row.get("cr_amount", 0) or 0) for row in rows if row.get("line_type") == "Payment")
 
     _write_row(ws, r, ["Grand Total", total_receipts, total_payments], _FONT_TOTAL, _FILL_TOTAL, fmt=_FMT_AMT)
 
@@ -173,14 +174,14 @@ def _write_income_expenditure_sheet(ws, rows: list[dict], society_name: str, fy:
 
     r = 5
     current_section = None
-    section_total = 0.0
-    income_total = 0.0
-    expense_total = 0.0
+    section_total = D(0)
+    income_total = D(0)
+    expense_total = D(0)
 
     for row in rows:
         section = row.get("statement_section", "")
         account_name = row.get("account_name", "")
-        amount = float(row.get("amount", 0) or 0)
+        amount = D(row.get("amount", 0) or 0)
 
         if section != current_section:
             if current_section == "Income" and section_total > 0:
@@ -192,7 +193,7 @@ def _write_income_expenditure_sheet(ws, rows: list[dict], society_name: str, fy:
                 expense_total = section_total
                 r += 1
             current_section = section
-            section_total = 0.0
+            section_total = D(0)
 
         if section == "Income":
             _write_row(ws, r, [account_name, amount], _FONT_BODY, fmt=_FMT_AMT)
@@ -255,16 +256,16 @@ def _write_depreciation_account_sheet(ws, rows: list[dict], society_name: str, f
         cell.border = _BORDER_ALL
 
     r = 5
-    tot_op, tot_add1, tot_add2, tot_ded, tot_dep, tot_cl = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    tot_op, tot_add1, tot_add2, tot_ded, tot_dep, tot_cl = D(0), D(0), D(0), D(0), D(0), D(0)
     for row in rows:
         acc = row.get("account_name") or row.get("name") or "Asset"
-        op = float(row.get("opening_wdv") or row.get("own_bf") or 0)
-        add1 = float(row.get("additions_first_half") or 0)
-        add2 = float(row.get("additions_second_half") or 0)
-        ded = float(row.get("deductions") or 0)
-        rate = float(row.get("depreciation_percent") or row.get("depreciation_rate") or 0)
-        dep = float(row.get("depreciation_charge") or 0)
-        cl = float(row.get("closing_wdv") or row.get("own_closing") or (op + add1 + add2 - ded - dep))
+        op = D(row.get("opening_wdv") or row.get("own_bf") or 0)
+        add1 = D(row.get("additions_first_half") or 0)
+        add2 = D(row.get("additions_second_half") or 0)
+        ded = D(row.get("deductions") or 0)
+        rate = D(row.get("depreciation_percent") or row.get("depreciation_rate") or 0)
+        dep = D(row.get("depreciation_charge") or 0)
+        cl = D(row.get("closing_wdv") or row.get("own_closing") or (op + add1 + add2 - ded - dep))
 
         tot_op += op
         tot_add1 += add1
@@ -326,14 +327,14 @@ def _write_capital_account_sheet(
         cell.border = _BORDER_ALL
 
     r = 5
-    tot_bf, tot_add, tot_ded, tot_cl = 0.0, 0.0, 0.0, 0.0
+    tot_bf, tot_add, tot_ded, tot_cl = D(0), D(0), D(0), D(0)
     for row in rows:
         acc = row.get("account_name") or "Account"
-        bf = float(row.get("own_bf") or 0)
-        mov = float(row.get("own_movement") or 0)
-        add = float(row.get("additions") if "additions" in row else max(0.0, mov))
-        ded = float(row.get("deductions") if "deductions" in row else abs(min(0.0, mov)))
-        cl = float(row.get("own_closing") or row.get("total_closing") or row.get("amount") or (bf + add - ded))
+        bf = D(row.get("own_bf") or 0)
+        mov = D(row.get("own_movement") or 0)
+        add = D(row.get("additions") if "additions" in row else max(D(0), mov))
+        ded = D(row.get("deductions") if "deductions" in row else abs(min(D(0), mov)))
+        cl = D(row.get("own_closing") or row.get("total_closing") or row.get("amount") or (bf + add - ded))
 
         tot_bf += bf
         tot_add += add
@@ -381,17 +382,17 @@ def _write_holdings_style_sheet(
         cell.border = _BORDER_ALL
 
     r = 5
-    tot_purchase, tot_wdv, tot_sale, tot_stcg, tot_ltcg = 0.0, 0.0, 0.0, 0.0, 0.0
+    tot_purchase, tot_wdv, tot_sale, tot_stcg, tot_ltcg = D(0), D(0), D(0), D(0), D(0)
     for row in rows:
         name = row.get("name") or "—"
         ref_no = row.get("ref_no") or "—"
         pdate = row.get("purchase_date")
         edate = row.get("exit_date")
-        pval = float(row.get("purchase_value") or 0)
-        wdv = float(row.get("closing_wdv") or 0)
-        sval = float(row.get("sale_value") or 0)
-        stcg = float(row.get("stcg") or 0)
-        ltcg = float(row.get("ltcg") or 0)
+        pval = D(row.get("purchase_value") or 0)
+        wdv = D(row.get("closing_wdv") or 0)
+        sval = D(row.get("sale_value") or 0)
+        stcg = D(row.get("stcg") or 0)
+        ltcg = D(row.get("ltcg") or 0)
 
         tot_purchase += pval
         tot_wdv += wdv
@@ -625,7 +626,7 @@ def _write_balance_sheet_sheet(
                         ws.cell(row=r, column=col_date, value=fy_end).number_format = "DD-MMM-YYYY"
                         ws.cell(row=r, column=col_code, value=_account_tab_name(row))
                         ws.cell(row=r, column=col_name, value=row.get("account_name", ""))
-                        ws.cell(row=r, column=col_amt, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
+                        ws.cell(row=r, column=col_amt, value=D(row.get("amount", 0) or 0)).number_format = _FMT_AMT
                         for col in (col_date, col_code, col_name, col_amt):
                             cell = ws.cell(row=r, column=col)
                             cell.font = _FONT_BODY
@@ -638,7 +639,7 @@ def _write_balance_sheet_sheet(
                     ws.cell(row=r, column=col_date, value=fy_end).number_format = "DD-MMM-YYYY"
                     ws.cell(row=r, column=col_code, value=_account_tab_name(row))
                     ws.cell(row=r, column=col_name, value=row.get("account_name", ""))
-                    ws.cell(row=r, column=col_amt, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
+                    ws.cell(row=r, column=col_amt, value=D(row.get("amount", 0) or 0)).number_format = _FMT_AMT
                     for col in (col_date, col_code, col_name, col_amt):
                         cell = ws.cell(row=r, column=col)
                         cell.font = _FONT_BODY
@@ -651,7 +652,7 @@ def _write_balance_sheet_sheet(
                 ws.cell(row=r, column=col_date, value=fy_end).number_format = "DD-MMM-YYYY"
                 ws.cell(row=r, column=col_code, value=_account_tab_name(row))
                 ws.cell(row=r, column=col_name, value=row.get("account_name", ""))
-                ws.cell(row=r, column=col_amt, value=float(row.get("amount", 0) or 0)).number_format = _FMT_AMT
+                ws.cell(row=r, column=col_amt, value=D(row.get("amount", 0) or 0)).number_format = _FMT_AMT
                 for col in (col_date, col_code, col_name, col_amt):
                     cell = ws.cell(row=r, column=col)
                     cell.font = _FONT_BODY
@@ -673,7 +674,7 @@ def _write_balance_sheet_sheet(
         ws.cell(row=r, column=1, value=fy_end).number_format = "DD-MMM-YYYY"
         ws.cell(row=r, column=2, value=_equity_tab_name(row)).font = _FONT_BODY
         ws.cell(row=r, column=3, value=row.get("account_name", "")).font = _FONT_BODY
-        ws.cell(row=r, column=4, value=float(row.get("amount", 0) or 0)).font = _FONT_BODY
+        ws.cell(row=r, column=4, value=D(row.get("amount", 0) or 0)).font = _FONT_BODY
         ws.cell(row=r, column=4).number_format = _FMT_AMT
         for col in (1, 2, 3, 4):
             cell = ws.cell(row=r, column=col)
@@ -819,7 +820,7 @@ def _write_balance_sheet_hierarchical(
     for item in liabilities:
         kids = sorted(children_by_parent.get(item["account_id"], []),
                        key=lambda x: x.get("sort_path") or "")
-        amount = float(item.get("display_amount") or 0)
+        amount = D(item.get("display_amount") or 0)
 
         c1 = ws.cell(row=r, column=1, value=fy_end)
         c1.font, c1.number_format = _FONT_BODY, "DD-MMM-YYYY"
@@ -831,7 +832,7 @@ def _write_balance_sheet_hierarchical(
         r += 1
 
         for kid in kids:
-            kamt = float(kid.get("display_amount") or 0)
+            kamt = D(kid.get("display_amount") or 0)
             if kamt == 0:
                 continue
             c3 = ws.cell(row=r, column=3, value=kid.get("account_name", ""))
@@ -850,7 +851,7 @@ def _write_balance_sheet_hierarchical(
     for item in assets:
         kids = sorted(children_by_parent.get(item["account_id"], []),
                        key=lambda x: x.get("sort_path") or "")
-        amount = float(item.get("display_amount") or 0)
+        amount = D(item.get("display_amount") or 0)
 
         c1 = ws.cell(row=r, column=1, value=fy_end)
         c1.font, c1.number_format = _FONT_BODY, "DD-MMM-YYYY"
@@ -862,7 +863,7 @@ def _write_balance_sheet_hierarchical(
         r += 1
 
         for kid in kids:
-            kamt = float(kid.get("display_amount") or 0)
+            kamt = D(kid.get("display_amount") or 0)
             if kamt == 0:
                 continue
             ws.cell(row=r, column=8, value=kid.get("account_name", "")).font = _FONT_BODY
@@ -878,7 +879,7 @@ def _write_balance_sheet_hierarchical(
     
     # Capital Account
     if cap_ac:
-        cap_amount = float(cap_ac.get("own_closing") or 0)
+        cap_amount = D(cap_ac.get("own_closing") or 0)
         ws.cell(row=r, column=1, value=fy_end).number_format = "DD-MMM-YYYY"
         ws.cell(row=r, column=2, value=_account_tab_name(cap_ac)).font = _FONT_BODY
         ws.cell(row=r, column=3, value=cap_ac.get("account_name", "")).font = _FONT_BODY
@@ -890,7 +891,7 @@ def _write_balance_sheet_hierarchical(
         cap_kids = sorted(children_by_parent.get(cap_ac["account_id"], []),
                           key=lambda x: x.get("sort_path") or "")
         for kid in cap_kids:
-            kamt = float(kid.get("display_amount") or 0)
+            kamt = D(kid.get("display_amount") or 0)
             if kamt == 0:
                 continue
             c3 = ws.cell(row=r, column=3, value=kid.get("account_name", ""))

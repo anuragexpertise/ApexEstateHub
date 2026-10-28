@@ -1519,6 +1519,7 @@ CREATE TABLE transactions (
     created_by INTEGER REFERENCES users (id),
     journal_id INT,
     transaction_number VARCHAR(64) UNIQUE,
+    voucher_no INT,                      -- per-society voucher number shared by every leg of a journal (Plan v3 3.8); gapless
     bank_reconciled BOOLEAN NOT NULL DEFAULT TRUE,
     bank_line_id INT REFERENCES bank_statement_lines (id),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -5027,6 +5028,7 @@ DECLARE
     v_fallback_int_acc INT;
     v_total_take   NUMERIC(15,2) := 0;  -- running total actually applied to open dues this call — one Cr leg to the SDr leaf covers all of it (accrual basis, 2026-08)
     v_first_trx_id INT;
+    v_src          INT;  -- source document of the Cr legs when no originating record was given: the first bill settled (Plan v3 3.8)
     v_receipt_id   INT;  -- new (2026-08): the receipt this payment is recorded against — either newly
                           -- created here (admin-direct path) or the pre-existing self-reported receipt
                           -- being confirmed (p_source_id, when p_source_table='receipts')
@@ -5107,6 +5109,7 @@ BEGIN
              WHERE id = rec.id;
 
         v_total_take := v_total_take + v_take;
+        IF v_src IS NULL THEN v_src := rec.id; END IF;
         v_remaining  := v_remaining - v_take;
 
         -- Attribute this row's money to whatever bank account its own
@@ -5138,7 +5141,7 @@ BEGIN
         ) VALUES (
             v_society_id, 'Cr', CURRENT_DATE, fn_resolve_sdr_leg(v_society_id, p_mode), p_apartment_id, 'apartment',
             COALESCE(p_particulars, 'Maintenance Payment'),
-            v_total_take, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, p_source_id, v_journal_id
+            v_total_take, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_src), v_journal_id
         ) RETURNING id INTO v_trx_id;
         IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
     END IF;
@@ -5154,7 +5157,7 @@ BEGIN
         ) VALUES (
             v_society_id, 'Cr', CURRENT_DATE, v_maint_acc_id, p_apartment_id, 'apartment',
             COALESCE(p_particulars, 'Maintenance Payment') || ' (Advance)',
-            v_remaining, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, p_source_id, v_journal_id
+            v_remaining, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_src), v_journal_id
         ) RETURNING id INTO v_trx_id;
         IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
     END IF;
@@ -5189,7 +5192,7 @@ BEGIN
         ) VALUES (
             v_society_id, 'Dr', CURRENT_DATE, v_leg.bank_acc, p_apartment_id, 'apartment',
             'Cash received - Maintenance Payment',
-            v_leg.amt, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_first_trx_id), v_journal_id
+            v_leg.amt, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_src, v_first_trx_id), v_journal_id
         );
     END LOOP;
 
@@ -5386,6 +5389,7 @@ DECLARE
     v_fallback_int_acc INT;
     v_total_take   NUMERIC(15,2) := 0;
     v_first_trx_id INT;
+    v_src          INT;  -- source document of the Cr legs when no originating record was given: the first bill settled (Plan v3 3.8)
     v_receipt_id   INT;
     -- Per-bank-account split of the incoming money — see the identical
     -- accumulator in fn_apply_apartment_dues_fifo_core. Both "Pay Dues"
@@ -5449,6 +5453,7 @@ BEGIN
              WHERE id = rec.id;
 
         v_total_take := v_total_take + v_take;
+        IF v_src IS NULL THEN v_src := rec.id; END IF;
         v_remaining  := v_remaining - v_take;
 
         -- Attribute this row's money to whatever bank account its own
@@ -5471,7 +5476,7 @@ BEGIN
         ) VALUES (
             v_society_id, 'Cr', CURRENT_DATE, fn_resolve_sdr_leg(v_society_id, p_mode), p_apartment_id, 'apartment',
             COALESCE(p_particulars, 'Selective Maintenance Payment'),
-            v_total_take, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, p_source_id, v_journal_id
+            v_total_take, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_src), v_journal_id
         ) RETURNING id INTO v_trx_id;
         IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
     END IF;
@@ -5483,7 +5488,7 @@ BEGIN
         ) VALUES (
             v_society_id, 'Cr', CURRENT_DATE, v_maint_acc_id, p_apartment_id, 'apartment',
             COALESCE(p_particulars, 'Selective Maintenance Payment') || ' (Advance)',
-            v_remaining, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, p_source_id, v_journal_id
+            v_remaining, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_src), v_journal_id
         ) RETURNING id INTO v_trx_id;
         IF v_first_trx_id IS NULL THEN v_first_trx_id := v_trx_id; END IF;
     END IF;
@@ -5511,7 +5516,7 @@ BEGIN
         ) VALUES (
             v_society_id, 'Dr', CURRENT_DATE, v_leg.bank_acc, p_apartment_id, 'apartment',
             'Cash received - Selective Payment',
-            v_leg.amt, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_first_trx_id), v_journal_id
+            v_leg.amt, p_mode, 'paid', p_confirmed_by, NOW(), p_source_table, COALESCE(p_source_id, v_src, v_first_trx_id), v_journal_id
         );
     END LOOP;
 
@@ -20596,3 +20601,115 @@ LANGUAGE sql STABLE AS $$
      WHERE r.id = p_resolution_id
      ORDER BY a.flat_number
 $$;
+
+-- ── Phase 3.1: auditor checks, stored and signed ────────────────────────────────────────────────────────────────
+-- Each run of a check is kept with its date and the society's SIGNING_LEDGER signature over the exact result text.
+-- Rows are append-only: a later run is a new row, never an edit.
+CREATE TABLE audit_check_runs (
+    id            SERIAL PRIMARY KEY,
+    society_id    INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    batch_id      UUID NOT NULL,                      -- the checks run together by one click share a batch
+    check_key     VARCHAR(30) NOT NULL,
+    run_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    run_by        INT REFERENCES users (id),
+    status        VARCHAR(10) NOT NULL CHECK (status IN ('pass', 'finding', 'info', 'error', 'skipped')),
+    result_text   TEXT NOT NULL,                      -- canonical JSON that was signed
+    item_hash     CHAR(64) NOT NULL,
+    signature     TEXT NOT NULL,
+    key_version   INT NOT NULL,
+    key_id        TEXT NOT NULL,
+    algorithm     VARCHAR(30) NOT NULL
+);
+CREATE INDEX idx_audit_check_runs_society ON audit_check_runs (society_id, run_at DESC);
+CREATE OR REPLACE FUNCTION trg_audit_check_runs_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'Stored audit check results are append-only; run the check again instead.';
+END $$;
+CREATE TRIGGER trg_audit_check_runs_append_only BEFORE UPDATE OR DELETE ON audit_check_runs
+    FOR EACH ROW EXECUTE FUNCTION trg_audit_check_runs_append_only();
+
+-- ── Phase 3.2: tie-out report — statements = ledger = source documents ──────────────────────────────────────────
+-- Each row compares two figures that must agree and says whether they do. A difference is listed, never hidden.
+-- Source documents are matched to the ledger by (source_table, source_id); a document the ledger holds under no such
+-- reference is reported as 'not traceable' (info), because some receipts post through other documents (asset sales,
+-- deposits), and that is for the auditor to confirm.
+CREATE OR REPLACE FUNCTION fn_tieout_report(p_society_id INT, p_fy INT)
+RETURNS TABLE (check_key TEXT, label TEXT, left_amount NUMERIC, right_amount NUMERIC, difference NUMERIC, ok BOOLEAN, detail TEXT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_from DATE := make_date(p_fy, 4, 1);
+    v_to   DATE := make_date(p_fy + 1, 3, 31);
+    v_assets NUMERIC; v_le NUMERIC; v_inc NUMERIC; v_exp NUMERIC; v_sur NUMERIC;
+    v_n INT; v_l NUMERIC; v_r NUMERIC; v_nt INT;
+BEGIN
+    SELECT COALESCE(SUM(amount) FILTER (WHERE statement_section = 'Assets'), 0),
+           COALESCE(SUM(amount) FILTER (WHERE statement_section IN ('Liabilities', 'Equity')), 0)
+      INTO v_assets, v_le FROM fn_balance_sheet_fy(p_society_id, p_fy);
+    check_key := 'balance_sheet'; label := 'Balance sheet: assets = liabilities + equity';
+    left_amount := v_assets; right_amount := v_le; difference := v_assets - v_le; ok := ABS(v_assets - v_le) < 0.005;
+    detail := NULL; RETURN NEXT;
+
+    SELECT COALESCE(SUM(amount) FILTER (WHERE statement_section = 'Income'), 0),
+           COALESCE(SUM(amount) FILTER (WHERE statement_section = 'Expenditure'), 0),
+           COALESCE(SUM(amount) FILTER (WHERE statement_section = 'Surplus/Deficit'), 0)
+      INTO v_inc, v_exp, v_sur FROM fn_income_expenditure_fy(p_society_id, p_fy);
+    check_key := 'income_expenditure'; label := 'Income and expenditure: income - expenditure = surplus';
+    left_amount := v_inc - v_exp; right_amount := v_sur; difference := (v_inc - v_exp) - v_sur; ok := ABS(difference) < 0.005;
+    detail := NULL; RETURN NEXT;
+
+    -- Receipts: the amount on each confirmed receipt equals what the ledger holds against it.
+    SELECT COUNT(*), COALESCE(SUM(x.amount), 0), COALESCE(SUM(x.ledger), 0) INTO v_n, v_l, v_r FROM (
+        SELECT r.amount, GREATEST(COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Cr'), 0), COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr'), 0)) AS ledger
+          FROM receipts r JOIN transactions t ON t.society_id = r.society_id AND t.source_table = 'receipts' AND t.source_id = r.id
+         WHERE r.society_id = p_society_id AND r.status = 'confirmed' AND r.receipt_date BETWEEN v_from AND v_to
+         GROUP BY r.id, r.amount HAVING ABS(r.amount - GREATEST(COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Cr'), 0), COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr'), 0))) >= 0.005) x;
+    SELECT COUNT(*) INTO v_nt FROM receipts r WHERE r.society_id = p_society_id AND r.status = 'confirmed' AND r.receipt_date BETWEEN v_from AND v_to
+       AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.society_id = r.society_id AND t.source_table = 'receipts' AND t.source_id = r.id);
+    check_key := 'receipts_vs_ledger'; label := 'Confirmed receipts equal their ledger lines';
+    left_amount := v_l; right_amount := v_r; difference := v_l - v_r; ok := (v_n = 0);
+    detail := format('%s receipt(s) differ from the ledger; %s confirmed receipt(s) carry no ledger line under their own reference (posted through another document, or missing: confirm).', v_n, v_nt);
+    RETURN NEXT;
+
+    SELECT COUNT(*), COALESCE(SUM(x.amount), 0), COALESCE(SUM(x.ledger), 0) INTO v_n, v_l, v_r FROM (
+        SELECT e.amount, GREATEST(COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr'), 0), COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Cr'), 0)) AS ledger
+          FROM expenses e JOIN transactions t ON t.society_id = e.society_id AND t.source_table = 'expenses' AND t.source_id = e.id
+         WHERE e.society_id = p_society_id AND e.status = 'confirmed' AND e.expense_date BETWEEN v_from AND v_to
+         GROUP BY e.id, e.amount HAVING ABS(e.amount - GREATEST(COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr'), 0), COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Cr'), 0))) >= 0.005) x;
+    SELECT COUNT(*) INTO v_nt FROM expenses e WHERE e.society_id = p_society_id AND e.status = 'confirmed' AND e.expense_date BETWEEN v_from AND v_to
+       AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.society_id = e.society_id AND t.source_table = 'expenses' AND t.source_id = e.id);
+    check_key := 'expenses_vs_ledger'; label := 'Confirmed expenses equal their ledger lines';
+    left_amount := v_l; right_amount := v_r; difference := v_l - v_r; ok := (v_n = 0 AND v_nt = 0);
+    detail := format('%s expense(s) differ from the ledger; %s confirmed expense(s) have no ledger line.', v_n, v_nt);
+    RETURN NEXT;
+END $$;
+
+-- ── Phase 3.8: source-document guard and per-society voucher numbers ────────────────────────────────────────────
+-- A posting that says it comes from a bill (receivables / payables) must name that bill (source_id). Every
+-- journal gets one voucher number from its society's own gapless sequence; all legs of the journal share it.
+CREATE TABLE society_voucher_seq (
+    society_id INT PRIMARY KEY REFERENCES societies (id) ON DELETE CASCADE,
+    last_no    INT NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_transactions_voucher ON transactions (society_id, voucher_no);
+
+CREATE OR REPLACE FUNCTION trg_transactions_source_voucher() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_no INT;
+BEGIN
+    IF NEW.source_table IN ('receivables', 'payables') THEN
+        IF NEW.source_id IS NULL THEN
+            RAISE EXCEPTION 'A posting from % must name the document it is for (source_id is empty).', NEW.source_table;
+        END IF;
+    END IF;
+    IF NEW.journal_id IS NOT NULL THEN
+        SELECT voucher_no INTO v_no FROM transactions WHERE society_id = NEW.society_id AND journal_id = NEW.journal_id AND voucher_no IS NOT NULL LIMIT 1;
+    END IF;
+    IF v_no IS NULL THEN
+        INSERT INTO society_voucher_seq (society_id, last_no) VALUES (NEW.society_id, 1)
+        ON CONFLICT (society_id) DO UPDATE SET last_no = society_voucher_seq.last_no + 1
+        RETURNING last_no INTO v_no;
+    END IF;
+    NEW.voucher_no := v_no;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_transactions_a_source_voucher BEFORE INSERT ON transactions
+    FOR EACH ROW EXECUTE FUNCTION trg_transactions_source_voucher();

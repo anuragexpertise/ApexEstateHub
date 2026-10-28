@@ -185,6 +185,17 @@ def resolution_tally(sid, resolution_id):
     return _result("info", rows, "Compare the recorded percentages with the tally computed from the registers.", cols)
 
 
+# ── tie-out: statements = ledger = source documents (Plan v3 3.2) ──────────────────────────────────────────────
+def tieout(sid, fy=None):
+    today = date.today()
+    fy = int(fy) if fy else (today.year if today.month >= 4 else today.year - 1)
+    rows = _q("SELECT * FROM fn_tieout_report(%s, %s)", (sid, fy))
+    bad = [r for r in rows if not r["ok"]]
+    note = f"Financial year {fy}-{str(fy + 1)[2:]}: " + ("every figure ties out." if not bad else f"{len(bad)} of {len(rows)} comparisons differ.")
+    return _result("finding" if bad else "pass", rows, note,
+                   ["label", "left_amount", "right_amount", "difference", "ok", "detail"])
+
+
 # ── 8. legal instruments ───────────────────────────────────────────────────────
 def legal(sid=None):
     rows = _q("SELECT instrument_type, title, status, last_verified_on, verification, notification_no, opinion_ref FROM legal_instrument_catalog "
@@ -212,7 +223,7 @@ def run(check: str, sid: int, day=None, acc_id=None, resolution_id=None) -> dict
             return receipt_chain_one(sid, acc_id)
         if check == "resolution":
             return resolution_tally(sid, resolution_id)
-        fn = {"ledger_chain": ledger_chain, "anchors": anchors, "integrity": integrity,
+        fn = {"tieout": tieout, "ledger_chain": ledger_chain, "anchors": anchors, "integrity": integrity,
               "cash_vouchers": cash_vouchers, "receipt_chains": receipt_chains,
               "tamper_guards": tamper_guards, "legal": legal}.get(check)
         if fn is None:
