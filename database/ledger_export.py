@@ -48,6 +48,7 @@ fn_account_ledger_fy against the structural root itself.
 """
 
 from __future__ import annotations
+from database.money import D
 import io
 from datetime import date
 
@@ -147,10 +148,10 @@ def _children_rollup_rows(children_closing: list[dict], fy: int) -> list[dict]:
     """
     fy_end = date(fy + 1, 3, 31)
     rows = []
-    running = 0.0
+    running = D(0)
     for c in sorted(children_closing, key=lambda x: x.get("sort_path") or ""):
         side = c.get("display_side")
-        amount = float(c.get("display_amount") or 0)
+        amount = D(c.get("display_amount") or 0)
         if amount == 0:
             continue
         running += amount if side == "Cr" else -amount
@@ -178,7 +179,7 @@ def _closing_transfer_row(own_closing_row: dict, parent_tab_name: str | None, fy
     if not parent_tab_name or not own_closing_row:
         return None
     side = own_closing_row.get("display_side")
-    amount = float(own_closing_row.get("display_amount") or 0)
+    amount = D(own_closing_row.get("display_amount") or 0)
     if amount == 0:
         return None
     return {
@@ -190,7 +191,7 @@ def _closing_transfer_row(own_closing_row: dict, parent_tab_name: str | None, fy
         # fn_account_ledger_fy's own closing rows.
         "debit": amount if side == "Cr" else None,
         "credit": amount if side == "Dr" else None,
-        "running_balance": 0.0,
+        "running_balance": D(0),
         "row_type": "closing",
         "parent_name": parent_tab_name,
     }
@@ -236,9 +237,9 @@ def _write_ledger_sheet(ws, acc: dict, ledger_rows: list[dict], fy: int) -> int:
     for r in ledger_rows:
         row_type = r.get("row_type") or "txn"
         font, fill = _ROW_STYLE.get(row_type, (_FONT_BODY, PatternFill()))
-        debit  = float(r["debit"])  if r.get("debit")  else None
-        credit = float(r["credit"]) if r.get("credit") else None
-        balance = float(r.get("running_balance") or 0)
+        debit  = D(r["debit"])  if r.get("debit")  else None
+        credit = D(r["credit"]) if r.get("credit") else None
+        balance = D(r.get("running_balance") or 0)
         drcr = None
         if row_type in ("bf", "txn", "depreciation", "full_depreciation", "half_depreciation"):
             drcr = "Dr" if debit and not credit else ("Cr" if credit and not debit else None)
@@ -274,9 +275,9 @@ def _add_income_expenditure_footer(ws, ledger_rows: list[dict], next_row: int) -
     Receipts = sum of credit on 'txn' rows — B/F and closing rows are
     excluded since they're not the year's actual income/expenditure.
     """
-    expenditure = sum(float(r["debit"])  for r in ledger_rows
+    expenditure = sum(D(r["debit"])  for r in ledger_rows
                        if (r.get("row_type") or "txn") == "txn" and r.get("debit"))
-    receipts    = sum(float(r["credit"]) for r in ledger_rows
+    receipts    = sum(D(r["credit"]) for r in ledger_rows
                        if (r.get("row_type") or "txn") == "txn" and r.get("credit"))
 
     row = next_row + 1
@@ -368,7 +369,7 @@ def _write_balance_sheet_hierarchy(
     for item in liabilities:
         kids = sorted(children_by_parent.get(item["account_id"], []),
                        key=lambda x: x.get("sort_path") or "")
-        amount = float(item.get("display_amount") or 0)
+        amount = D(item.get("display_amount") or 0)
 
         c1 = ws.cell(row=liab_row, column=1, value=fy_end)
         c1.font, c1.number_format = _FONT_BODY, _FMT_DATE
@@ -380,7 +381,7 @@ def _write_balance_sheet_hierarchy(
         liab_row += 1
 
         for kid in kids:
-            kamt = float(kid.get("display_amount") or 0)
+            kamt = D(kid.get("display_amount") or 0)
             if kamt == 0:
                 continue
             c3 = ws.cell(row=liab_row, column=3, value=kid.get("account_name"))
@@ -397,7 +398,7 @@ def _write_balance_sheet_hierarchy(
     for item in assets:
         kids = sorted(children_by_parent.get(item["account_id"], []),
                        key=lambda x: x.get("sort_path") or "")
-        amount = float(item.get("display_amount") or 0)
+        amount = D(item.get("display_amount") or 0)
 
         c1 = ws.cell(row=asset_row, column=1, value=fy_end)
         c1.font, c1.number_format = _FONT_BODY, _FMT_DATE
@@ -409,7 +410,7 @@ def _write_balance_sheet_hierarchy(
         asset_row += 1
 
         for kid in kids:
-            kamt = float(kid.get("display_amount") or 0)
+            kamt = D(kid.get("display_amount") or 0)
             if kamt == 0:
                 continue
             ws.cell(row=asset_row, column=8, value=kid.get("account_name")).font = _FONT_BODY
@@ -557,7 +558,7 @@ def generate_ledger_index_excel(
             # aggregated fn_fy_closing_report entry (folds in every
             # child), rather than fn_account_ledger_fy's row (which
             # only sees direct postings and would be nil here).
-            transfer = _closing_transfer_row(closing_by_id.get(acc_id), parent_tab_name, fy, 0.0)
+            transfer = _closing_transfer_row(closing_by_id.get(acc_id), parent_tab_name, fy, D(0))
             if transfer:
                 rows.append(transfer)
         elif own_closing_row_from_ledger_fy:
@@ -698,11 +699,11 @@ def generate_fy_closing_excel(
         drcr = r.get("display_side")
         row = {
             1: r.get("account_name"),
-            2: float(r.get("own_bf") or 0),
-            3: float(r.get("own_movement") or 0),
-            4: float(r.get("depreciation_charge") or 0),
-            5: float(r.get("own_closing") or 0),
-            6: float(r.get("display_amount") or 0),
+            2: D(r.get("own_bf") or 0),
+            3: D(r.get("own_movement") or 0),
+            4: D(r.get("depreciation_charge") or 0),
+            5: D(r.get("own_closing") or 0),
+            6: D(r.get("display_amount") or 0),
             7: drcr,
         }
         for col, val in row.items():

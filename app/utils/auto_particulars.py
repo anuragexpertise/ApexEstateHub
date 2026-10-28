@@ -10,6 +10,7 @@ Generates human-readable particulars based on account type and context:
 """
 
 from __future__ import annotations
+from database.money import D
 from datetime import date
 from database.db_manager import db
 
@@ -104,7 +105,7 @@ def generate_expense_particulars(acc_id: int, entity_id: int | None, role: str,
 def get_pending_balance(entity_id: int | None, role: str, society_id: int) -> float:
     """Get the outstanding balance for an entity."""
     if not entity_id:
-        return 0.0
+        return D(0)
     try:
         row = db._execute(
             """SELECT COALESCE(SUM(amount - paid_amount), 0) AS balance
@@ -113,10 +114,10 @@ def get_pending_balance(entity_id: int | None, role: str, society_id: int) -> fl
                  AND status IN ('pending', 'partial')""",
             (society_id, entity_id, role), fetch_one=True,
         )
-        return float(row.get("balance", 0)) if row else 0.0
+        return D(row.get("balance", 0)) if row else D(0)
     except Exception as e:
         print(f"⚠️ get_pending_balance: {e}")
-        return 0.0
+        return D(0)
 
 
 def get_entity_summary(entity_id: int | None, role: str, society_id: int) -> str:

@@ -1,3 +1,4 @@
+from database.money import money
 import json
 import os
 from pywebpush import webpush, WebPushException
@@ -534,7 +535,7 @@ def notify_payment_received(user_id, amount, particulars=None):
     if row:
         notify_kpi_update(row["society_id"], "financials", exclude_user_id=user_id)
     title = "💰 Payment Received"
-    body = f"₹{float(amount):,.2f} received" + (f" — {particulars}" if particulars else "")
+    body = f"₹{money(amount):,.2f} received" + (f" — {particulars}" if particulars else "")
     return send_push_notification(user_id, title, body, url="/dashboard/owner-cashbook")
 
 
@@ -544,7 +545,7 @@ def notify_admin_payment_recorded(society_id, amount, particulars=None, exclude_
     targets = get_notification_targets(society_id, roles=["admin"], exclude_user_id=exclude_user_id)
     if not targets:
         return 0, 0
-    body = f"₹{float(amount):,.2f} recorded" + (f" — {particulars}" if particulars else "")
+    body = f"₹{money(amount):,.2f} recorded" + (f" — {particulars}" if particulars else "")
     return send_bulk_push(targets, "💰 Payment Recorded", body, url="/dashboard/financials", society_id=society_id)
 
 
@@ -558,7 +559,7 @@ def notify_dues_overdue(user_id, amount):
     if not user_id:
         return False, "No user_id"
     title = "⚠️ Dues Overdue"
-    body = f"₹{float(amount):,.2f} is now overdue. Please clear it to avoid a failed gate pass."
+    body = f"₹{money(amount):,.2f} is now overdue. Please clear it to avoid a failed gate pass."
     return send_push_notification(user_id, title, body, url="/dashboard/owner-receivables")
 
 

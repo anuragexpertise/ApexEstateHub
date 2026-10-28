@@ -9,6 +9,7 @@ Usage:
         --maintenance-amount 1500 \
         --maintenance-rate 3.0
 """
+from database.money import D
 import os
 import sys
 import argparse
@@ -32,7 +33,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Enroll apartment and calculate maintenance")
     parser.add_argument("--apartment-size", type=int, default=1000, help="Apartment size in sqft")
     parser.add_argument("--calc-start-date", type=str, default="01/07/2026", help="Calc start date (dd/mm/yyyy)")
-    parser.add_argument("--maintenance-amount", type=float, default=1500.0, help="Flat maintenance amount")
+    parser.add_argument("--maintenance-amount", type=D, default=D(1500), help="Flat maintenance amount")
     parser.add_argument("--maintenance-rate", type=float, default=3.0, help="Per sqft maintenance rate")
     return parser.parse_args()
 
@@ -141,12 +142,12 @@ def main():
     )
 
     print(f"\nGenerated receivables ({len(recs)}):")
-    total = 0.0
+    total = D(0)
     for r in recs:
         print(f"  id={r['id']} month={r['period_month']} base={r['base_amount']} "
               f"amount={r['amount']} due={r['due_date']} status={r['status']} "
               f"desc={r['description']}")
-        total += float(r['amount'] or 0)
+        total += D(r['amount'] or 0)
 
     print(f"\nTotal maintenance receivable: ₹{total:,.2f}")
 

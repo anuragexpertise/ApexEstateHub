@@ -247,7 +247,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/auditor_callbacks.py",
     "function": "load_resolutions",
-    "line": 35,
+    "line": 54,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -262,11 +262,30 @@
     "public": false
   },
   {
+    "id": "callback:auditor_callbacks.py::run_and_store",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/auditor_callbacks.py",
+    "function": "run_and_store",
+    "line": 36,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "aud-signed-msg"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:auditor_callbacks.py::run_checks",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/auditor_callbacks.py",
     "function": "run_checks",
-    "line": 57,
+    "line": 76,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -482,7 +501,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
     "function": "close_bulk_enroll_modal",
-    "line": 678,
+    "line": 684,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -501,7 +520,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
     "function": "download_bulk_enroll_template",
-    "line": 691,
+    "line": 697,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -520,7 +539,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
     "function": "open_bulk_enroll_modal",
-    "line": 660,
+    "line": 666,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -541,7 +560,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
     "function": "process_bulk_enroll_upload",
-    "line": 734,
+    "line": 740,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -564,7 +583,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
     "function": "validate_bulk_enroll_file",
-    "line": 712,
+    "line": 718,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"

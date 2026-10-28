@@ -14,6 +14,7 @@ The society always comes from the caller's server-side session. Nothing here tru
 Any edit puts the figures back to "pending" until someone entitled confirms them again.
 """
 from __future__ import annotations
+from database.money import D
 
 from datetime import date, datetime, timedelta
 
@@ -265,9 +266,9 @@ def add_tds_rate(society_id: int, d: dict) -> int:
         if not base:
             raise ValueError(f"Enter the single-bill threshold: there is no {act} rate for this section to take it from "
                              "(the limits differ between the 1961 and 2025 Acts, so they are not copied across).")
-        single = float(base["single_bill_threshold"])
+        single = D(base["single_bill_threshold"])
     if annual is None:
-        annual = float(base["annual_aggregate_threshold"]) if base else 0.0
+        annual = D(base["annual_aggregate_threshold"]) if base else D(0)
     nature = (d.get("nature_of_income") or "").strip() or (base or {}).get("nature_of_income")
     inclusive = bool(base["threshold_inclusive"]) if base else False
     basis = (base or {}).get("threshold_basis") or "bill"

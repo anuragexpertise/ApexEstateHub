@@ -67,6 +67,7 @@ import dash_bootstrap_components as dbc
 from database.db_manager import db
 from database import cashbook_export, ledger_export, tds_export, gst_export, rcm_export, income_tax_export, asset_export, financial_statements_export
 from database import tds_compliance
+from database.money import D, money
 from app.services import event_service
 from app.dash_apps.drilldown.registry import (
     DRILLDOWN_MAP,
@@ -1278,9 +1279,9 @@ def register_drilldown_callbacks(app):
                     toast = {"_toast": {"type": "error", "message": "Only society admin can verify"}}
                     return store, content, bc, {"display": "none"}, toast
                 rec = loaders.load_profile("receivable", pk, sid) or {}
-                residual = float(rec.get("amount") or 0) - float(rec.get("paid_amount") or 0)
+                residual = D(rec.get("amount") or 0) - D(rec.get("paid_amount") or 0)
                 prefill = {
-                    "amount": round(max(residual, 0), 2),
+                    "amount": money(max(residual, 0)),
                     "mode": "cash",
                 }
                 store = nav_state.navigate_to(
@@ -1293,11 +1294,11 @@ def register_drilldown_callbacks(app):
                 rec = loaders.load_profile("receivable", pk, sid) or {}
                 apt_id = rec.get("apt_id") or rec.get("apartment_id") or rec.get("entity_id")
                 apt = loaders.load_profile("apartment", apt_id, sid) or {} if apt_id else {}
-                pending = float(apt.get("pending_dues") or 0)
+                pending = D(apt.get("pending_dues") or 0)
                 prefill = {
                     "entity_id":   apt_id,
                     "role":        "apartment",
-                    "amount":      float(rec.get("amount_due") or rec.get("amount") or pending),
+                    "amount":      D(rec.get("amount_due") or rec.get("amount") or pending),
                     "mode":        "cash",
                     "particulars": (
                         f"Payment — {apt.get('flat_number','Flat')} — "
@@ -2461,7 +2462,7 @@ def register_drilldown_callbacks(app):
         if not sid:
             return no_update, no_update, no_update
         try:
-            amt = float(amount) if amount not in (None, "") else 0.0
+            amt = D(amount) if amount not in (None, "") else D(0)
         except (TypeError, ValueError):
             amt = 0.0
         # entity_id is polymorphic (vendor/security/assets/other) — only
@@ -3251,12 +3252,12 @@ def _render_card(
             rec_id  = (store.get("stack") or [{}])[-1].get("entity_pk")
             sid_val = filters.get("society_id")
             rec = loaders.load_profile("receivable", rec_id, sid_val) or {} if rec_id and sid_val else {}
-            residual = float(rec.get("amount") or 0) - float(rec.get("paid_amount") or 0)
+            residual = D(rec.get("amount") or 0) - D(rec.get("paid_amount") or 0)
             return renderers.render_verify_receivable_card(
                 receivable_id=rec_id,
                 description=rec.get("description", "Receivable"),
-                residual=round(max(residual, 0), 2),
-                prefill_amount=float(prefill.get("amount") or max(residual, 0)),
+                residual=money(max(residual, 0)),
+                prefill_amount=D(prefill.get("amount") or max(residual, 0)),
                 prefill_mode=prefill.get("mode", "cash"),
             )
 
@@ -3457,8 +3458,8 @@ def _render_card(
             apt_id  = prefill.get("entity_id") or prefill.get("apartment_id")
             sid_val = filters.get("society_id")
             apt = loaders.load_profile("apartment", apt_id, sid_val) or {} if apt_id and sid_val else {}
-            pending = float(apt.get("pending_dues") or 0)
-            overdue = float(apt.get("overdue_dues") or 0)
+            pending = D(apt.get("pending_dues") or 0)
+            overdue = D(apt.get("overdue_dues") or 0)
             # Fetch bill groups
             bill_groups = []
             if apt_id and sid_val:
@@ -3483,7 +3484,7 @@ def _render_card(
                 owner_name=apt.get("owner_name", ""),
                 pending_dues=pending,
                 overdue_dues=overdue,
-                prefill_amount=float(prefill.get("amount") or pending),
+                prefill_amount=D(prefill.get("amount") or pending),
                 prefill_mode=prefill.get("mode", "cash"),
                 prefill_particulars=prefill.get("particulars", f"Maintenance Payment — {apt.get('flat_number','')}"),
                 society_id=sid_val,
@@ -3521,9 +3522,9 @@ def _render_card(
                         (sid_val, ven_id), fetch_one=True,
                     ) or {}
                     rates = {
-                        "1day": float(row.get("vendor_1day") or 0),
-                        "7day": float(row.get("vendor_7day") or 0),
-                        "1mth": float(row.get("vendor_1mth") or 0),
+                        "1day": D(row.get("vendor_1day") or 0),
+                        "7day": D(row.get("vendor_7day") or 0),
+                        "1mth": D(row.get("vendor_1mth") or 0),
                         "free_1mth": 0.0,
                     }
                 except Exception as _e:
@@ -3598,8 +3599,8 @@ def _render_card(
                 event_date=event.get("event_date"),
                 ticket_name=event.get("ticket_name", "Adult"),
                 ticket_name2=event.get("ticket_name2", "Child"),
-                ticket_price=float(event.get("ticket_price") or 0),
-                ticket_price2=float(event.get("ticket_price2") or 0),
+                ticket_price=D(event.get("ticket_price") or 0),
+                ticket_price2=D(event.get("ticket_price2") or 0),
                 society_id=sid_val,
                 apt_user_id=apt_user_id,
                 flat_number=flat_number,
@@ -3672,7 +3673,7 @@ def _render_card(
                 society=society,
                 eligible=eligible,
                 reason=prefill.get("reason", ""),
-                outstanding=float(prefill.get("outstanding") or 0),
+                outstanding=D(prefill.get("outstanding") or 0),
                 noc_record=noc_record,
             )
 
@@ -4049,7 +4050,7 @@ def _save_receipt_v3(db, d, sid):
     if not amt:
         return False, "Amount is required", None
     try:
-        amt = float(amt)
+        amt = D(amt)
         if amt <= 0:
             return False, "Amount must be > 0", None
         if amt > 1000000:
@@ -4131,7 +4132,7 @@ def _save_expense_v3(db, d, sid):
     if not amt:
         return False, "Amount is required", None
     try:
-        amt = float(amt)
+        amt = D(amt)
         if amt <= 0:
             return False, "Amount must be > 0", None
         if amt > 1000000:
@@ -4156,7 +4157,7 @@ def _save_expense_v3(db, d, sid):
     # the dict, since a cleared/blank input field also arrives as "".
     tds_pct_raw = d.get("tds_pct")
     try:
-        tds_pct = float(tds_pct_raw) if tds_pct_raw not in (None, "") else 10
+        tds_pct = D(tds_pct_raw) if tds_pct_raw not in (None, "") else 10
     except (ValueError, TypeError):
         return False, "Invalid TDS %", None
     if tds_pct < 0 or tds_pct > 100:
@@ -4332,7 +4333,7 @@ def _save_pay_dues(db, d, sid):
     if not amt:
         return False, "Amount is required", None
     try:
-        amt = float(amt)
+        amt = D(amt)
         if amt <= 0:
             return False, "Amount must be > 0", None
     except (ValueError, TypeError):
@@ -4406,7 +4407,7 @@ def _save_pay_due_bg(db, d, sid):
     if not bg_id: return False, "Bill group ID is required", None
     amt = d.get("amount")
     if not amt: return False, "Amount is required", None
-    try: amt = float(amt)
+    try: amt = D(amt)
     except: return False, "Invalid amount", None
 
     mode = d.get("mode", "cash")
@@ -4468,7 +4469,7 @@ def _save_pay_due_selective(db, d, sid):
     amt = d.get("amount")
     if not amt: return False, "Amount is required", None
     try:
-        amt = float(amt)
+        amt = D(amt)
         if amt <= 0: return False, "Amount must be > 0", None
     except:
         return False, "Invalid amount", None
@@ -4533,7 +4534,7 @@ def _save_verify_receivable_amt(db, d, sid):
     if not amt:
         return False, "Amount is required", None
     try:
-        amt = float(amt)
+        amt = D(amt)
         if amt <= 0:
             return False, "Amount must be > 0", None
     except (ValueError, TypeError):
@@ -4557,7 +4558,7 @@ def _save_reject_receivable_amt(db, d, sid):
     if not p_id: return False, "ID is required", None
     
     penalty = d.get("penalty_amount")
-    try: penalty = float(penalty) if penalty else 0
+    try: penalty = D(penalty) if penalty else 0
     except: penalty = 0
     
     confirmed_by = d.get("user_id")
@@ -4597,7 +4598,7 @@ def _save_asset_dispose(db, d, sid):
     if not sale_value:
         return False, "Sale value is required", None
     try:
-        sale_value = float(sale_value)
+        sale_value = D(sale_value)
         if sale_value <= 0:
             return False, "Sale value must be > 0", None
     except (ValueError, TypeError):
@@ -4606,7 +4607,7 @@ def _save_asset_dispose(db, d, sid):
     tds_amount = d.get("tds_amount")
     if tds_amount:
         try:
-            tds_amount = float(tds_amount)
+            tds_amount = D(tds_amount)
             if tds_amount < 0:
                 return False, "TDS amount cannot be negative", None
             if tds_amount >= sale_value:
@@ -4843,7 +4844,7 @@ def _save_event_ticket(db, d, sid):
         if quantity_child > 0:
             parts.append(f"{quantity_child} child")
         qty_label  = " | ".join(parts) + " ticket" + ("s" if (quantity_adult + quantity_child) != 1 else "")
-        amt_label  = f" — ₹{float(amount):,.2f}" if amount else " — free"
+        amt_label  = f" — ₹{D(amount):,.2f}" if amount else " — free"
         msg = f"{qty_label} issued{amt_label}"
         if ticket_id:
             msg += f" [[ticket:{ticket_id}]]"
@@ -4885,7 +4886,7 @@ def _save_asset(db, d, sid, is_edit, pk):
     if not purchase_value:
         return False, "Purchase value is required", None
     try:
-        purchase_value = float(purchase_value)
+        purchase_value = D(purchase_value)
         if purchase_value <= 0:
             return False, "Purchase value must be > 0", None
     except (ValueError, TypeError):
@@ -5245,12 +5246,12 @@ def _save_event(db, d, sid, is_edit, pk):
     _acc_id = int(_acc_id) if _acc_id not in (None, "", "None") else None
 
     try:
-        _ticket_price = float(d.get("ticket_price") or 0)
+        _ticket_price = D(d.get("ticket_price") or 0)
     except (TypeError, ValueError):
         _ticket_price = 0
 
     try:
-        _ticket_price2 = float(d.get("ticket_price2") or 0)
+        _ticket_price2 = D(d.get("ticket_price2") or 0)
     except (TypeError, ValueError):
         _ticket_price2 = 0
 
@@ -5853,7 +5854,7 @@ def _save_account(db, d, sid, is_edit, pk):
         if isinstance(is_dep, str):
             is_dep = is_dep.lower() == "true"
 
-        bf_val = float(bf_amount) if bf_amount not in (None, "") else 0
+        bf_val = D(bf_amount) if bf_amount not in (None, "") else 0
 
         db._execute(
             "UPDATE accounts SET "
@@ -5862,7 +5863,7 @@ def _save_account(db, d, sid, is_edit, pk):
             "WHERE id=%s AND society_id=%s",
             (
                 bf_val != 0 or d.get("has_bf", False),
-                float(dep_pct)   if dep_pct   not in (None, "") else 100,
+                D(dep_pct)   if dep_pct   not in (None, "") else 100,
                 bool(is_dep)     if is_dep is not None else False,
                 d.get("parent_account_id"),
                 d.get("mutuality_nature"),
@@ -5891,8 +5892,8 @@ def _save_account(db, d, sid, is_edit, pk):
     if drcr not in ("Cr", "Dr", None):
         drcr = None
 
-    bf_amount = float(d.get("bf_amount") or 0)
-    dep_pct   = float(d.get("depreciation_percent") or 100)
+    bf_amount = D(d.get("bf_amount") or 0)
+    dep_pct   = D(d.get("depreciation_percent") or 100)
     is_dep_raw = d.get("is_depreciable", "false")
     is_dep = str(is_dep_raw).lower() == "true" if is_dep_raw is not None else False
     bf_side = "Cr" if drcr == "Cr" else "Dr"  # brought_forward.drcr_bf mirrors the account's own nature
@@ -5945,13 +5946,13 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
         charges_interest = charges_interest.lower() == "true"
 
     try:
-        maint_amount = float(d.get("apt_maintenance_amount") or 0)
-        rate         = float(d.get("apt_maintenance_rate") or 3.0)
+        maint_amount = D(d.get("apt_maintenance_amount") or 0)
+        rate         = D(d.get("apt_maintenance_rate") or 3.0)
         due_day      = int(d.get("apt_due_day") or 5)
         _ip = d.get("apt_interest_pct")      # no silent default: blank = no interest (bye-law 46(a): rate set by General Body)
-        interest_pct = float(_ip) if _ip not in (None, "") else None
-        sinking_rate = float(d.get("apt_sinking_fund_rate") or 0)
-        repair_rate  = float(d.get("apt_repair_fund_rate") or 0)
+        interest_pct = D(_ip) if _ip not in (None, "") else None
+        sinking_rate = D(d.get("apt_sinking_fund_rate") or 0)
+        repair_rate  = D(d.get("apt_repair_fund_rate") or 0)
     except ValueError:
         return False, "Invalid numeric value", None
 
@@ -6043,9 +6044,9 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
     ven_id = d.get("ven_id")
     start_date = d.get("start_date") or dt_date.today().isoformat()
     try:
-        v1day = float(d.get("vendor_1day") or 0)
-        v7day = float(d.get("vendor_7day") or 0)
-        v1mth = float(d.get("vendor_1mth") or 0)
+        v1day = D(d.get("vendor_1day") or 0)
+        v7day = D(d.get("vendor_7day") or 0)
+        v1mth = D(d.get("vendor_1mth") or 0)
         
     except ValueError:
         return False, "Invalid numeric value", None
@@ -6429,7 +6430,7 @@ def register_fy_close_callbacks(app):
                 banner_color, banner_icon = "success", "fa-check-circle"
                 message = (
                     f"FY {fy}-{str(fy + 1)[-2:]} closed. "
-                    f"₹{float(result.get('reserve_transferred') or 0):,.2f} appropriated "
+                    f"₹{D(result.get('reserve_transferred') or 0):,.2f} appropriated "
                     f"to {result.get('reserve_acc_name') or 'the Reserve Fund'} "
                     f"(journal #{result.get('journal_id')})."
                 )

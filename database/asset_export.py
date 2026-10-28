@@ -4,6 +4,7 @@ Fixed Asset Register Excel Generator — EstateHub
 """
 
 from __future__ import annotations
+from database.money import D
 import io
 
 from openpyxl import Workbook
@@ -52,18 +53,18 @@ def _write_block_summary_sheet(ws, rows: list[dict], fy: int) -> None:
         cell.border = _BORDER_ALL
 
     r = 3
-    t_op, t_a1, t_a2, t_ded, t_dep, t_cl, t_stcg, t_stcl = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    t_op, t_a1, t_a2, t_ded, t_dep, t_cl, t_stcg, t_stcl = D(0), D(0), D(0), D(0), D(0), D(0), D(0), D(0)
     for row in rows:
         acc_name = row.get("account_name", "")
-        pct = float(row.get("depreciation_percent") or 0)
-        op_wdv = float(row.get("opening_wdv") or 0)
-        a1 = float(row.get("additions_first_half") or 0)
-        a2 = float(row.get("additions_second_half") or 0)
-        ded = float(row.get("deductions") or 0)
-        dep = float(row.get("depreciation_charge") or 0)
-        cl_wdv = float(row.get("closing_wdv") or 0)
-        stcg = float(row.get("stcg_u_s_50") or 0)
-        stcl = float(row.get("stcl_u_s_50") or 0)
+        pct = D(row.get("depreciation_percent") or 0)
+        op_wdv = D(row.get("opening_wdv") or 0)
+        a1 = D(row.get("additions_first_half") or 0)
+        a2 = D(row.get("additions_second_half") or 0)
+        ded = D(row.get("deductions") or 0)
+        dep = D(row.get("depreciation_charge") or 0)
+        cl_wdv = D(row.get("closing_wdv") or 0)
+        stcg = D(row.get("stcg_u_s_50") or 0)
+        stcl = D(row.get("stcl_u_s_50") or 0)
 
         vals = [acc_name, pct, op_wdv, a1, a2, ded, dep, cl_wdv, stcg, stcl]
         for col, val in enumerate(vals, start=1):
@@ -130,10 +131,10 @@ def _write_asset_list_sheet(ws, rows: list[dict], fy: int) -> None:
         name = row.get("asset_name", "")
         sno = row.get("asset_sno", "")
         pdate = row.get("purchase_date")
-        pval = float(row.get("purchase_value") or 0)
+        pval = D(row.get("purchase_value") or 0)
         disp = bool(row.get("disposed"))
-        sval = float(row.get("sale_value") or 0)
-        gst_liab = float(row.get("gst_disposal_liability") or 0)
+        sval = D(row.get("sale_value") or 0)
+        gst_liab = D(row.get("gst_disposal_liability") or 0)
 
         status = "Disposed" if disp else "Active"
         vals = [acc, name, sno, pdate, pval, status, sval if disp else None, gst_liab if disp and gst_liab else None]

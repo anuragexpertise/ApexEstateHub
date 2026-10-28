@@ -43,6 +43,7 @@ moment a write touches user_role_assignments / role_permissions / delegations,
 so a grant/revoke within the same request is visible to the next can() call.
 """
 from __future__ import annotations
+from database.money import D
 
 import logging
 
@@ -248,7 +249,7 @@ def _check_threshold(grants, resource, action, society_id, amount):
         if scope is not None and scope != society_id:
             continue
         min_amt = g.get("min_amount")
-        if min_amt is not None and float(amount) >= float(min_amt):
+        if min_amt is not None and D(amount) >= D(min_amt):
             return False, (
                 f"amount {amount} >= approval floor {min_amt} for role "
                 f"{g.get('role_code') or ''} — requires higher approval"
