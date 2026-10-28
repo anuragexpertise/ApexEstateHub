@@ -187,9 +187,9 @@ def resolution_tally(sid, resolution_id):
 
 # ── 8. legal instruments ───────────────────────────────────────────────────────
 def legal(sid=None):
-    rows = _q("SELECT instrument_type, title, status, last_verified_on FROM legal_instrument_catalog "
+    rows = _q("SELECT instrument_type, title, status, last_verified_on, verification, notification_no, opinion_ref FROM legal_instrument_catalog "
               "ORDER BY display_order, instrument_type, title")
-    unverified = sum(1 for r in rows if not r.get("last_verified_on"))
+    unverified = sum(1 for r in rows if r.get("verification") != "verified")
     note = f"{len(rows)} instruments, {unverified} never verified." if rows else "Catalogue is empty."
     return _result("info", rows, note)
 

@@ -19,6 +19,7 @@ The society always comes from the caller's server-side session, never from a bro
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 
 from flask import has_request_context
@@ -178,8 +179,30 @@ def _grant(cur, user_id: int, role_code: str, society_id: int, granted_by) -> No
         {"u": user_id, "r": rd["id"], "s": society_id, "src": SOURCE, "g": granted_by})
 
 
+def clean_email(v):
+    """Normalised email, or False when it is not plausible."""
+    v = (v or "").strip().lower()
+    return v if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]{2,}", v) and len(v) <= 100 else False
+
+
+def clean_phone(v):
+    """Digits with an optional leading +, or False when it is not plausible."""
+    v = re.sub(r"[\s\-()]", "", (v or ""))
+    return v if re.fullmatch(r"\+?\d{8,15}", v) else False
+
+
+def owner_prefill(society_id, apartment_id) -> dict:
+    """Name / email / phone of the flat's owner login, to prefill the office-bearer form (the Secretary edits the phone)."""
+    r = _row("SELECT u.name, u.email, a.mobile AS phone FROM apartments a LEFT JOIN users u ON u.society_id=a.society_id "
+             "AND u.role='apartment' AND u.linked_id=a.id WHERE a.society_id=%s AND a.id=%s ORDER BY u.id LIMIT 1",
+             (society_id, apartment_id)) or {}
+    ph = clean_phone(r.get("phone"))
+    return {"name": r.get("name"), "email": r.get("email"), "phone": ph or None}
+
+
 def appoint(actor_id, actor_role, society_id, apartment_id, office_code, holder_name, user_id=None,
-            term_start=None, term_end=None, resolution_ref=None, actor_society_id=None) -> tuple[bool, str]:
+            term_start=None, term_end=None, resolution_ref=None, actor_society_id=None,
+            email=None, phone=None, signature_image=None) -> tuple[bool, str]:
     """Seat `holder_name` (the owner of `apartment_id`) in `office_code`. Returns (ok, message)."""
     _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
     if office_code not in OFFICE_LABEL:
@@ -200,12 +223,20 @@ def appoint(actor_id, actor_role, society_id, apartment_id, office_code, holder_
     uid = int(user_id) if user_id not in (None, "") else None
     ref = (resolution_ref or "").strip()[:255] or None
     role_code = OFFICE_ROLE[office_code]
+    pre = owner_prefill(sid, aid)
+    email = clean_email(email) if (email or "").strip() else pre.get("email")
+    phone = clean_phone(phone) if (phone or "").strip() else pre.get("phone")
+    if email is False or phone is False:
+        return False, "The email or phone number is not valid."
+    sig = (signature_image or "").strip()[:255] or None
     try:
         with db._conn() as conn:
             cur = conn.cursor()
             cur.execute("SELECT fn_appoint_office_bearer(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) AS id",
                         (sid, aid, office_code, name, uid, start, end, ref, None, actor_id))
             office_id = (cur.fetchone() or {}).get("id")
+            cur.execute("UPDATE committee_offices SET email=%s, phone=%s, signature_image=%s WHERE id=%s AND society_id=%s",
+                        (email, phone, sig, office_id, sid))
             if uid is not None:
                 _grant(cur, uid, role_code, sid, actor_id)
             _audit(cur, "committee.appoint", office_id,
@@ -261,7 +292,7 @@ def end_office(actor_id, actor_role, society_id, office_id, reason, actor_societ
 
 
 def update_office(actor_id, actor_role, society_id, office_id, holder_name=None, term_end=None,
-                  resolution_ref=None, actor_society_id=None) -> tuple[bool, str]:
+                  resolution_ref=None, actor_society_id=None, email=None, phone=None, signature_image=None) -> tuple[bool, str]:
     """Correct the details of an ACTIVE seat (name, planned term end, resolution reference).
 
     The office, the flat and the login are not editable: they decide who holds power, so changing them means ending
@@ -271,7 +302,7 @@ def update_office(actor_id, actor_role, society_id, office_id, holder_name=None,
         sid, oid = int(society_id), int(office_id)
     except (TypeError, ValueError):
         return False, "Choose the office to edit."
-    row = _row("SELECT holder_name, term_start, term_end, resolution_ref FROM committee_offices "
+    row = _row("SELECT holder_name, term_start, term_end, resolution_ref, email, phone, signature_image FROM committee_offices "
                "WHERE id = %s AND society_id = %s AND status = 'active'", (oid, sid))
     if not row:
         return False, "That office is not active in your society."
@@ -286,11 +317,17 @@ def update_office(actor_id, actor_role, society_id, office_id, holder_name=None,
     if end is not None and end < row["term_start"]:
         return False, "The term must not end before it starts."
     ref = row["resolution_ref"] if resolution_ref is None else ((resolution_ref or "").strip()[:255] or None)
+    em = row["email"] if email is None else (clean_email(email) if (email or "").strip() else None)
+    ph = row["phone"] if phone is None else (clean_phone(phone) if (phone or "").strip() else None)
+    if em is False or ph is False:
+        return False, "The email or phone number is not valid."
+    sg = row["signature_image"] if signature_image is None else ((signature_image or "").strip()[:255] or None)
     try:
         with db._conn() as conn:
             cur = conn.cursor()
-            cur.execute("UPDATE committee_offices SET holder_name = %s, term_end = %s, resolution_ref = %s "
-                        "WHERE id = %s AND society_id = %s AND status = 'active'", (name, end, ref, oid, sid))
+            cur.execute("UPDATE committee_offices SET holder_name = %s, term_end = %s, resolution_ref = %s, "
+                        "email = %s, phone = %s, signature_image = %s "
+                        "WHERE id = %s AND society_id = %s AND status = 'active'", (name, end, ref, em, ph, sg, oid, sid))
             _audit(cur, "committee.update", oid, {"holder_name": name, "term_end": str(end) if end else None,
                                                   "resolution_ref": ref})
     except Exception as exc:

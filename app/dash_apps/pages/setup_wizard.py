@@ -871,6 +871,29 @@ def _instrument_link(title, url, year=None):
                   href=u, target="_blank", rel="noopener noreferrer")
 
 
+def _office_bearer_status(society_id):
+    """Plan v3 2.10: every serving post needs flat, name, email, phone and a signature image, or shows as incomplete."""
+    if not society_id:
+        return html.Div()
+    try:
+        rows = db._execute(
+            """SELECT v.office_code, v.holder_name, v.complete, v.missing, a.flat_number
+                 FROM v_office_bearer_completeness v LEFT JOIN apartments a ON a.id = v.apartment_id
+                WHERE v.society_id = :s ORDER BY v.office_code, v.holder_name""", {"s": society_id}, fetch_all=True) or []
+    except Exception:
+        return html.Div()
+    seated = {r["office_code"] for r in rows}
+    items = [html.Li([f"{r['office_code'].replace('_', ' ').title()}: {r['holder_name']} (flat {r['flat_number'] or '?'}) - ",
+                      html.Span("complete", style={"color": "#17976e"}) if r["complete"]
+                      else html.Span("incomplete, missing " + ", ".join(r["missing"] or []), style={"color": "#b02a37"})]) for r in rows]
+    items += [html.Li([f"{o.replace('_', ' ').title()}: ", html.Span("not yet appointed", style={"color": "#b26a00"})])
+              for o in ("president", "secretary", "treasurer") if o not in seated]
+    return html.Div([html.Div("Serving office-bearers", style={"fontWeight": "600", "fontSize": "13px"}),
+                     html.Ul(items, style={"fontSize": "12px"}) if items else html.Div("None appointed yet.", style={"fontSize": "12px"}),
+                     html.Div("Contact details and the signature image are kept under Settings, Society governance, Managing Committee.",
+                              style={"fontSize": "11px", "color": "#888"})], className="mb-3")
+
+
 def legal_hierarchy_rows(society_id=None, state=None):
     """Body rows of the Legal Hierarchy table, driven by the society's regime (no hard-coded state)."""
     from app.services.statutory_rules import instruments_for_society, grouped_instruments, normalize_state
@@ -887,7 +910,10 @@ def legal_hierarchy_rows(society_id=None, state=None):
         out = []
         for t in types:
             for r in groups.get(t, []):
-                out.append(html.Div(_instrument_link(r["title"], r.get("source_url"), r.get("enactment_year")), className="mb-1"))
+                link = _instrument_link(r["title"], r.get("source_url") if r.get("verification") == "verified" else None, r.get("enactment_year"))
+                if r.get("verification") != "verified":          # unverified rows are labelled and carry no link
+                    link = html.Span([link, html.Span(" (unverified)", style={"color": "#b26a00", "fontSize": "11px"})])
+                out.append(html.Div(link, className="mb-1"))
         return out
 
     central = items(("Central Act", "Central Rules"))
@@ -1885,6 +1911,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 "exist: Settings → Society governance → Managing Committee. The details above are the Secretary's "
                 "letterhead details only.",
             ], color="info", className="mb-3", style={"fontSize": "12.5px"}),
+            _office_bearer_status(society_id),
             html.Hr(),
             html.P("Create this society's step-up password.", className="text-danger fw-bold mb-1"),
             html.P(
