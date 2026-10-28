@@ -583,6 +583,21 @@
     "callback:qr_reissue_callbacks.py::parse_reissue_qr": {
       "classification": "unclassified"
     },
+    "callback:ratification_callbacks.py::_decide": {
+      "classification": "legacy-gated"
+    },
+    "callback:ratification_callbacks.py::_download": {
+      "classification": "legacy-gated"
+    },
+    "callback:ratification_callbacks.py::_download_cert": {
+      "classification": "legacy-gated"
+    },
+    "callback:ratification_callbacks.py::_generate_cert": {
+      "classification": "legacy-gated"
+    },
+    "callback:ratification_callbacks.py::_verify_instrument": {
+      "classification": "legacy-gated"
+    },
     "callback:receipt_callbacks.py::_stamp_emailed": {
       "classification": "unclassified"
     },
@@ -733,6 +748,9 @@
     },
     "callback:shell_callbacks.py::update_global_card_search": {
       "classification": "unclassified"
+    },
+    "callback:signature_callbacks.py::_on_emergency": {
+      "classification": "legacy-gated"
     },
     "callback:signature_callbacks.py::_on_save_ref": {
       "classification": "legacy-gated"
@@ -888,6 +906,10 @@
     },
     "route:sse.py::events": {
       "classification": "unclassified"
+    },
+    "route:verify.py::verify_certificate": {
+      "classification": "exempt",
+      "reason": "Public by design: a regulator or buyer must be able to check a compliance certificate. Read-only; shows only the financial year, overall result and date (no check detail, no names); Cache-Control no-store."
     },
     "route:verify.py::verify_record": {
       "classification": "exempt",

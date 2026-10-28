@@ -391,6 +391,12 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
         success += 1
         slots_left -= 1
 
+    if success:
+        try:   # Plan v3 2.8: keep flats' undivided-interest shares summing to 100% (unless typed from the Declaration)
+            from app.services.up_aoa_actions import fill_after_enrolment
+            fill_after_enrolment(sid)
+        except Exception as exc:
+            print(f"undivided-interest fill after enrolment skipped: {exc}")
     return {"success": success, "failed": failed, "skipped": skipped}
 
 

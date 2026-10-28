@@ -279,11 +279,31 @@ def render_meetings_sections(society_id: int | None = None) -> list:
             f"Meeting #{r.get('meeting_id')}" if r.get('meeting_id') else "—",
             r.get('body')[:50] + "..." if r.get('body') and len(r['body']) > 50 else (r.get('body') or "—")])
     
+    # Signatures (Plan v3 2.2 / 2.12): passed resolutions and meeting minutes are signed here, by the people the
+    # society's signer rules name, each confirming with their own password. A sealed record cannot be edited.
+    from app.dash_apps.callbacks.signature_callbacks import signature_panel
+    sign_items = []
+    for r in resolutions[:15]:
+        if r.get("passed"):
+            sign_items.append(html.Details([html.Summary(f"Resolution #{r['id']} - sign / signatures", style={"fontSize": "12px"}),
+                                            signature_panel("resolution", r["id"], "Sign resolution")], className="mb-2"))
+    for m in meetings[:15]:
+        sign_items.append(html.Details([html.Summary(f"Minutes of meeting #{m['id']} ({m['type']}) - sign / signatures", style={"fontSize": "12px"}),
+                                        signature_panel("minutes", m["id"], "Sign minutes")], className="mb-2"))
+    from app.dash_apps.callbacks.ratification_callbacks import certificate_section, ratification_section
+    try:
+        rat = html.Div([ratification_section(society_id), html.Hr(), certificate_section(society_id)])
+    except Exception as exc:
+        rat = html.Div(f"Ratification register unavailable: {exc}", style={"fontSize": "12px", "color": "#b02a37"})
     return [
         _section("Meetings (GBM / EGM / MC)", "Record General Body and Managing Committee meetings.",
                   _table(["Meeting", "Status", "Minutes", "Created", "By"], meeting_rows, "No meetings recorded.")),
         _section("Resolutions", "Decisions passed at meetings. Each resolution links to a decision type and optionally a bye-law clause.",
                   _table(["Resolution", "Status", "Passed On", "Majority %", "Meeting", "Body"], resolution_rows, "No resolutions recorded.")),
+        _section("Ratification and rule register", "Irregular items waiting for a decision, and the register that links each posting to its rule.", rat),
+        _section("Signatures", "Who must sign each passed resolution and the minutes, and who has. The record is sealed when the last "
+                  "required signer confirms; after that it cannot be edited.",
+                  html.Div(sign_items or html.Div("Nothing to sign yet.", style={"fontSize": "12px", "color": "#888"}))),
     ]
 
 

@@ -23,6 +23,25 @@ _TEXT = {
 }
 
 
+def _page(title, note, rows=""):
+    return Response(f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+                    f"<title>Verify signed record</title><body style='font-family:sans-serif;max-width:32rem;margin:2rem auto;padding:0 1rem'>"
+                    f"<h2>{escape(title)}</h2><p>{escape(note)}</p>{rows}</body>", mimetype="text/html",
+                    headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
+
+
+@verify_bp.route("/verify/certificate/<int:cert_id>", methods=["GET"])
+def verify_certificate(cert_id):
+    from app.services import compliance_certificate as cc
+    res = cc.verify(cert_id)
+    title, note = _TEXT.get(res["status"], ("Unknown", "No certificate exists for this reference."))
+    rows = ""
+    if res.get("fy"):
+        rows = (f"<p>Financial year {escape(res['fy'])}</p><p>Overall result: {escape(res['overall'])}</p>"
+                f"<p>Generated on {escape(str(res['generated_on'])[:10])}</p>")
+    return _page(title, note, rows)
+
+
 @verify_bp.route("/verify/<kind>/<int:subject_id>", methods=["GET"])
 def verify_record(kind, subject_id):
     if kind not in ds.KINDS:

@@ -256,6 +256,9 @@ def _seal(d, society_id, kind, subject_id, item_hash, st) -> dict:
     d._execute("""INSERT INTO signed_records (society_id, subject_kind, subject_id, purpose, item_hash, signature, key_version, key_id, algorithm, signers)
                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)""",
                (society_id, kind, subject_id, purpose, item_hash, rec["signature"], rec["key_version"], rec["key_id"], rec["algorithm"], json.dumps(signers)))
+    if kind == "minutes":
+        names = ", ".join(f"{x['name']} ({x['office_code'].replace('_', ' ').title()})" for x in st["signed"])[:255]
+        d._execute("UPDATE meetings SET minutes_signed_by=%s WHERE id=%s", (names, subject_id))
     _audit(d, society_id, None, "DOCUMENT_SEALED", kind, subject_id, {"purpose": purpose, "key_version": rec["key_version"], "item_hash": item_hash})
     return d._execute("SELECT * FROM signed_records WHERE subject_kind=%s AND subject_id=%s AND status='valid'", (kind, subject_id), fetch_one=True)
 

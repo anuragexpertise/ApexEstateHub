@@ -64,6 +64,8 @@ def signature_panel(kind: str, subject_id, approve_label: str = "Sign") -> html.
         html.Div([
             dbc.Button(approve_label, id=_pid("sign", kind, subject_id), color="success", size="sm", n_clicks=0),
             dbc.Button("Decline", id=_pid("decline", kind, subject_id), color="outline-danger", size="sm", n_clicks=0, className="ms-2"),
+            *([dbc.Button("Post as emergency spend", id=_pid("emergency", kind, subject_id), color="outline-warning", size="sm", n_clicks=0, className="ms-2")]
+              if kind == "expense" else []),
         ], className="mt-2"),
         html.Div("Your password confirms who signed. It is not a legal e-signature; keep signed paper minutes.",
                  style={"fontSize": "10px", "color": "#999", "marginTop": "6px"}),
@@ -122,4 +124,24 @@ def register_signature_callbacks(app):
             ea.save_resolution_ref(subject_id, sid, uid, ref)
             return status_view("expense", subject_id, "Resolution reference saved.")
         except ds.SigningRefused as exc:
+            return status_view("expense", subject_id, str(exc), ok=False)
+
+    @app.callback(
+        Output({"type": "sig-status", "kind": MATCH, "id": MATCH}, "children", allow_duplicate=True),
+        Input({"type": "sig-emergency", "kind": MATCH, "id": MATCH}, "n_clicks"),
+        State({"type": "sig-reason", "kind": MATCH, "id": MATCH}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def _on_emergency(n, reason):
+        trig = ctx.triggered_id
+        uid, sid = get_current_user_id(), get_current_society_id()
+        if not n or not trig or trig["kind"] != "expense" or not uid or not sid:
+            return no_update
+        subject_id = int(trig["id"])
+        try:
+            from app.services import ratification_service as rs
+            msg = rs.emergency_verify_expense(sid, subject_id, uid, reason)
+            return status_view("expense", subject_id, msg)
+        except Exception as exc:                                   # RatificationRefused or a posting refusal
             return status_view("expense", subject_id, str(exc), ok=False)

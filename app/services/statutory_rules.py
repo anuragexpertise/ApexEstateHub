@@ -406,7 +406,7 @@ def instruments_for_regime(regime_code=DEFAULT_REGIME):
         rows = db._execute(
             """SELECT instrument_type, title, enactment_year, issuing_authority,
                       applicability, key_provisions, source_reference, source_url,
-                      display_order, status, last_verified_on
+                      display_order, status, last_verified_on, verification, notification_no
                FROM legal_instrument_catalog
                WHERE regime_code=%s
                ORDER BY display_order""",

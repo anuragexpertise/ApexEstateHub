@@ -3076,6 +3076,99 @@
     "public": false
   },
   {
+    "id": "callback:ratification_callbacks.py::_decide",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/ratification_callbacks.py",
+    "function": "_decide",
+    "line": 128,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:ratification_callbacks.py::_download",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/ratification_callbacks.py",
+    "function": "_download",
+    "line": 145,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "rule-register-download"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:ratification_callbacks.py::_download_cert",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/ratification_callbacks.py",
+    "function": "_download_cert",
+    "line": 108,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "cert-download"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:ratification_callbacks.py::_generate_cert",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/ratification_callbacks.py",
+    "function": "_generate_cert",
+    "line": 91,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "cert-msg"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:ratification_callbacks.py::_verify_instrument",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/ratification_callbacks.py",
+    "function": "_verify_instrument",
+    "line": 73,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "inst-msg"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:receipt_callbacks.py::_stamp_emailed",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/receipt_callbacks.py",
@@ -3921,11 +4014,28 @@
     "public": false
   },
   {
+    "id": "callback:signature_callbacks.py::_on_emergency",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/signature_callbacks.py",
+    "function": "_on_emergency",
+    "line": 136,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:signature_callbacks.py::_on_save_ref",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/signature_callbacks.py",
     "function": "_on_save_ref",
-    "line": 111,
+    "line": 113,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3942,7 +4052,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/signature_callbacks.py",
     "function": "_on_sign",
-    "line": 84,
+    "line": 86,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4673,11 +4783,25 @@
     "public": false
   },
   {
+    "id": "route:verify.py::verify_certificate",
+    "kind": "flask-route",
+    "file": "app/routes/verify.py",
+    "function": "verify_certificate",
+    "line": 34,
+    "route": "/verify/certificate/<int:cert_id>",
+    "methods": [
+      "GET"
+    ],
+    "guards": [],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "route:verify.py::verify_record",
     "kind": "flask-route",
     "file": "app/routes/verify.py",
     "function": "verify_record",
-    "line": 27,
+    "line": 46,
     "route": "/verify/<kind>/<int:subject_id>",
     "methods": [
       "GET"
