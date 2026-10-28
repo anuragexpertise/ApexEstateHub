@@ -303,6 +303,8 @@ def test_setup_wizard_no_longer_says_master_links_resolutions():
 def stub(monkeypatch):
     from app.dash_apps.pages import governance_settings as gs
     monkeypatch.setattr(gs, "get_current_society_id", lambda: 5)
+    from app.dash_apps.pages import tax_rates_page as trp          # the admin's TDS & GST tab reads the database: stub it out
+    monkeypatch.setattr(trp, "tax_rates_tab", lambda role, society_id: html.Div("tax rates") if role == "admin" else None)
     monkeypatch.setattr(rra, "clause_is_locked", lambda s, c: c in rra.STATUTE_BACKED_CLAUSES)
     monkeypatch.setattr(rra, "society_regime", lambda s: "UP_AOA_2010")
     monkeypatch.setattr(rra, "society_cash_mode", lambda s: "warn")
@@ -415,11 +417,12 @@ def _labels(node, acc=None):
 
 
 TABS = ["RWA Compliance (UP)", "Rules", "Society By-laws", "Meetings & Resolutions", "Managing Committee"]
+ADMIN_TABS = [*TABS, "TDS & GST Rates"]   # the admin also gets the read-only TDS & GST Rates tab
 
 
 def test_admin_has_the_five_tabs_and_the_governance_forms(stub):
     tree = stub.render_governance_tabs("admin", 5)
-    assert _labels(tree) == TABS
+    assert _labels(tree) == ADMIN_TABS
     ids = _ids(tree)
     assert {"gov-cash-save", "gov-bye-save", "gov-bye-clause", "gov-bye-status", "gov-bye-var-wrap",
             "gov-mtg-save", "gov-res-save", "gov-rule-save", "gov-rule-key"} <= ids

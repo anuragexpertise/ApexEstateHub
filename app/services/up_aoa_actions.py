@@ -490,6 +490,12 @@ def load_card_data(society_id: int) -> dict:
     one = lambda sql, *p: db._execute(sql, p, fetch_one=True)
     rules_on = (one("SELECT fn_regime_param_num(%s, 'transfer_fee_pct') AS v", society_id) or {}).get("v") is not None
     data = {"rules_on": rules_on, "society": one("SELECT name FROM societies WHERE id=%s", society_id) or {}}
+    # Task 1.8: provisional Sec 44AB warning. It is a tax matter, not a UP AOA rule, so it is read before the rules_on gate.
+    try:
+        today = date.today()
+        data["tax_audit"] = one("SELECT * FROM fn_tax_audit_flag(%s, %s)", society_id, today.year if today.month >= 4 else today.year - 1)
+    except Exception:                                                     # noqa: BLE001  (a warning must never stop the card loading)
+        data["tax_audit"] = None
     if not rules_on:
         return data
     data.update(

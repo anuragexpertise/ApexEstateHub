@@ -125,7 +125,7 @@ def test_wizard_brought_forward_hides_unopted_optional_funds():
     assert bf_info(3210, held, up=False)["hidden"] is True
     assert bf_info(3280, held)["hidden"] is True                          # depreciation fund not opted: no row
     opted = active_keys({"depreciation": "fy_close"})
-    assert bf_info(3280, opted)["hidden"] is False and bf_info(3280, opted)["label"] == "Depreciation Fund (DepFund)"
+    assert bf_info(3280, opted)["hidden"] is False and bf_info(3280, opted)["label"] == "Depreciation Fund (Society Policy / as applicable)"
 
 
 def test_ifms_is_statutory_major_repair_is_model_bye_law_sinking_is_optional():

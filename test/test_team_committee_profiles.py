@@ -73,7 +73,7 @@ def test_curated_meta_has_no_secret_columns():
 
 def test_curated_meta_covers_all_new_entities():
     meta = curated.curated_meta()
-    expected = {"accountants", "supervisors", "staff", "committee_bearers", *curated.REGISTERS}
+    expected = {*curated.TEAM_ENTITIES, "committee_bearers", *curated.REGISTERS}
     assert expected == set(meta)
     for plural in expected:
         assert meta[plural]["profile_fields"] and meta[plural]["list_columns"]

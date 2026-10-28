@@ -363,9 +363,17 @@ def test_engine_default_cash_limit_mode_is_block(cur):
 
 # ── single-source-of-SQL and inline-DDL guards ───────────────────────────────
 def test_estatehub_sql_is_the_only_sql_file():
-    found = [str(p.relative_to(ROOT)) for p in ROOT.rglob("*.sql")
-             if ".git" not in p.parts and "node_modules" not in p.parts]
-    assert found == ["database/estatehub.sql"], found
+    found = sorted(str(p.relative_to(ROOT)).replace("\\", "/") for p in ROOT.rglob("*.sql")
+                   if ".git" not in p.parts and "node_modules" not in p.parts)
+    # estatehub.sql is the single source of truth. database/migrations/*.sql are idempotent upgrade scripts for
+    # databases that already exist (plan task 4.3); each must only CREATE what estatehub.sql also defines.
+    migrations = [f for f in found if f.startswith("database/migrations/")]
+    assert [f for f in found if f not in migrations] == ["database/estatehub.sql"], found
+    main = (ROOT / "database" / "estatehub.sql").read_text(encoding="utf-8")
+    for f in migrations:
+        text = (ROOT / f).read_text(encoding="utf-8")
+        for name in re.findall(r"CREATE TABLE (?:IF NOT EXISTS )?(\w+)", text, flags=re.I):
+            assert re.search(rf"CREATE TABLE (?:IF NOT EXISTS )?{name}\b", main, flags=re.I), f"{f}: {name} is not in estatehub.sql"
 
 
 def test_only_the_unavoidable_forward_reference_is_an_alter_table():
