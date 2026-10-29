@@ -160,6 +160,30 @@ def end_form(society_id: int):
     ], style=_CARD)
 
 
+def withdrawals_section(society_id: int, role: str):
+    """Fund withdrawals waiting for approval, each with the Approve / Decline panel (password-confirmed, sealed). Shown only to
+    the administrator and serving office-bearers; the service decides who may actually approve."""
+    from app.dash_apps.callbacks.signature_callbacks import signature_panel
+    from app.security.audit_context import get_current_user_id
+    from app.services import fund_withdrawal_approval as fwa
+    if not fwa.may_view(society_id, get_current_user_id(), role):
+        return None
+    items = fwa.pending(society_id)
+    head = html.Div("Fund withdrawals awaiting approval", style={"fontWeight": "600", "fontSize": "13px", "margin": "14px 0 6px"})
+    if not items:
+        return html.Div([head, html.Div("Nothing is waiting for approval.", style=_MUTED)])
+    cards = []
+    for w in items:
+        cards.append(html.Div([
+            html.Div([html.Strong(f"{w['fund_name'] or 'Fund'} - {_money(w['amount'])}"),
+                      html.Span(f"   {w['approvals']} of {w['signatories_required']} approvals", style=_MUTED)]),
+            html.Div(f"{w['particulars']}", style={"fontSize": "12px"}),
+            html.Div(f"Resolution: {w['approval_ref'] or '-'}  |  Requested by {w['requested_by'] or '-'} on {_fmt(w['created_at'])}", style=_MUTED),
+            signature_panel("fund_withdrawal", w["id"], "Approve"),
+        ], style=_CARD))
+    return html.Div([head, *cards])
+
+
 def committee_tab(role: str, society_id):
     """Tab content: the committee for everyone; the forms for the society admin."""
     if not society_id:
@@ -168,6 +192,12 @@ def committee_tab(role: str, society_id):
     try:
         out = [html.Div(id=f"{P}-toast"),
                html.Div(committee_body(society_id), id=f"{P}-body")]
+        try:
+            wd = withdrawals_section(society_id, role)
+            if wd is not None:
+                out.append(wd)
+        except Exception:                                                  # noqa: BLE001  never take the committee list down
+            pass
         if is_admin:
             out += [appoint_form(society_id), end_form(society_id),
                     html.Div("The administrator's interim secretary / treasurer authority is not changed by these "

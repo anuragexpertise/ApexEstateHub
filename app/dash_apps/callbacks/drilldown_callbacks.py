@@ -4936,10 +4936,11 @@ def _safe_int(val, default=0):
         return default
 
 def _safe_float(val, default=0.0):
+    """A rupee amount from a form field as a Decimal (the name is kept for its callers)."""
     try:
-        return float(val)
+        return money(val)
     except (ValueError, TypeError):
-        return default
+        return D(default)
 
 def _save_user_entity(db, d, sid, role, is_edit, pk):
     from werkzeug.security import generate_password_hash

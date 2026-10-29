@@ -205,6 +205,12 @@ _FK_LABEL_OVERRIDES = {
     "payment_qr": "Payment QR Code (for collecting dues via UPI)",
 }
 
+# Columns that are real table columns (so they are on the profile) but which the list loader never returns.
+_LIST_ONLY_DROPS: dict[str, set] = {
+    # (the NOC list is handled upstream: its loader selects revoked_at and revoked_by is hidden, task 1.11)
+    "security": {"ptl_penalty"},
+}
+
 # Computed / joined fields appended to profile/list from load_profile / load_list.
 _COMPUTED_FIELDS: dict[str, list[dict]] = {
     "apartments": [
@@ -222,7 +228,7 @@ _COMPUTED_FIELDS: dict[str, list[dict]] = {
     ],
     "security": [
         {"label": "Shifts till date", "field": "shift_count",  "icon": "fa-clock", "format": "shift_count"},
-        {"label": "Shift Count", "field": "shifts_this_month", "icon": "fa-calendar-check", "format": "number"},
+        {"label": "Shifts This Month", "field": "shifts_this_month", "icon": "fa-calendar-check", "format": "number"},
         {"label": "Duty Status",      "field": "gate_pass",    "icon": "fa-shield-alt", "format": "duty_status"},
         {"label": "Salary Due",       "field": "salary_due",   "icon": "fa-rupee-sign"},
         {"label": "Salary Paid",      "field": "salary_paid",  "icon": "fa-check-circle"},
@@ -889,6 +895,14 @@ def build_entity_meta() -> dict:
                 "icon": "fa-edit",
                 "color": "secondary",
             })
+
+        # Plan v4, C.7: a list column must be one the list loader actually fills, once. fn_security_list does not return
+        # ptl_penalty, so that column rendered blank on every row; it stays on the profile, where load_profile reads the row.
+        _drop = _LIST_ONLY_DROPS.get(ekey)
+        if _drop:
+            list_columns = [c for c in list_columns if c.get("field") not in _drop]
+        _seen_fields: set = set()
+        list_columns = [c for c in list_columns if not (c.get("field") in _seen_fields or _seen_fields.add(c.get("field")))]
 
         singular = to_singular(ekey)
         meta[ekey] = {

@@ -6,6 +6,7 @@ from dash.exceptions import PreventUpdate
 from dash import Input, Output, State, ALL, MATCH, callback, no_update, html, ctx, clientside_callback
 import dash_bootstrap_components as dbc
 from database.db_manager import db
+from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 from database.seed import tds_wizard_rows, it2025_twin
 from app.dash_apps.pages.setup_wizard import (
     get_setup_wizard_layout, CATEGORIES, step_label, CONVERSATION_DATA, render_category_content, CATEGORY_ICONS,
@@ -777,10 +778,10 @@ def register_setup_wizard_callbacks(app):
             if bf_ids and bf_amts:
                 for idx, acc_dict in enumerate(bf_ids):
                     amt = bf_amts[idx]
-                    if amt is not None and float(amt) > 0:
+                    if amt is not None and D(amt) > 0:
                         bf_json.append({
                             "acc_id": acc_dict["acc_id"],
-                            "bf_amount": float(amt),
+                            "bf_amount": str(money(amt)),     # a string in the JSON, so no binary float on the way to NUMERIC
                             "remarks": bf_remarks[idx] if idx < len(bf_remarks) else ""
                         })
 

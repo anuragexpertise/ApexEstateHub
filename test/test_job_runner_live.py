@@ -73,3 +73,23 @@ def test_anchor_job_passes_on_an_intact_ledger(db):
 def test_unknown_job_is_refused(db):
     with pytest.raises(ValueError):
         jr.run_job("nope", db=db)
+
+
+def test_watchdog_alerts_when_a_job_has_never_run_and_passes_when_all_are_fresh(db, monkeypatch):
+    from app.services import job_runner as jr
+    alerts = []
+    for name in jr.MAX_AGE_HOURS:
+        db._execute("INSERT INTO job_runs (job_name, status, finished_at) VALUES (%s,'ok',NOW())", (name,))
+    assert jr.job_watchdog(db)["checked"] == sorted(jr.MAX_AGE_HOURS)
+    db._execute("UPDATE job_runs SET finished_at = NOW() - INTERVAL '30 hours' WHERE job_name='anchors'")   # inside the rolled-back test
+    with pytest.raises(jr.JobFailed, match="anchors"):
+        jr.job_watchdog(db)
+    res = jr.run_job("watchdog", db, alert=lambda n, e, d: alerts.append((n, e)))
+    assert res["status"] == "failed" and alerts and alerts[0][0] == "watchdog" and "anchors" in alerts[0][1]
+
+
+def test_owner_login_is_refused_by_the_restricted_login_check(db):
+    from app.services import job_runner as jr
+    why = jr.check_restricted_login(db)
+    assert why is None or "estatehub_app" in why or "restricted login" in why
+    assert why is not None, "the test database login is the owner or a superuser and must be refused"

@@ -58,6 +58,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pandas as pd
+from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 from dash import Input, Output, State, ALL, ctx, no_update, html, dcc
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
@@ -257,7 +258,7 @@ def _match_and_insert(df: pd.DataFrame, entity: str, sid: int, uploaded_by: int,
                   AND {date_col} BETWEEN %s AND %s
                 ORDER BY ABS({date_col} - %s::date) ASC""",
             (
-                sid, float(amount),
+                sid, D(amount),
                 txn_date - DATE_WINDOW_FUZZY, txn_date + DATE_WINDOW_FUZZY,
                 txn_date,
             ),
@@ -282,9 +283,9 @@ def _match_and_insert(df: pd.DataFrame, entity: str, sid: int, uploaded_by: int,
                     exact_hit = c
                     break
 
-        debit_val = None if pd.isna(row.get("debit")) else float(row.get("debit"))
-        credit_val = None if pd.isna(row.get("credit")) else float(row.get("credit"))
-        balance_val = None if pd.isna(row.get("balance")) else float(row.get("balance"))
+        debit_val = None if pd.isna(row.get("debit")) else money(row.get("debit"))
+        credit_val = None if pd.isna(row.get("credit")) else money(row.get("credit"))
+        balance_val = None if pd.isna(row.get("balance")) else money(row.get("balance"))
 
         line_r = db.execute(
             """INSERT INTO bank_statement_lines

@@ -127,6 +127,9 @@ class DatabaseManager:
         # urllib.parse.quote(), which is what the DSN's own `quote(pw)` above
         # already does for the password for the identical reason.
         tz = os.getenv("TZ", "Asia/Kolkata")
+        # "Asia/Calcutta" is the old name of the same zone and is a common TZ value on developer machines, but not every
+        # Postgres build ships that alias ("invalid value for parameter TimeZone"), which refuses every connection.
+        tz = {"Asia/Calcutta": "Asia/Kolkata"}.get(tz, tz)
         # Aiven's PgBouncer connection pools reject the "options" startup
         # parameter with "unsupported startup parameter: options", which
         # fails every connection. Set PG_SKIP_STARTUP_OPTIONS=1 on the host

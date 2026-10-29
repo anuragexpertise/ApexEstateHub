@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "unclassified_baseline": 138,
+  "unclassified_baseline": 132,
   "endpoints": {
     "callback:account_callbacks.py::handle_change_password": {
       "classification": "unclassified"
@@ -12,6 +12,15 @@
     "callback:account_callbacks.py::toggle_account_settings_modal": {
       "classification": "exempt",
       "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:adviser_callbacks.py::adv_init": {
+      "classification": "legacy-gated"
+    },
+    "callback:adviser_callbacks.py::adv_save": {
+      "classification": "legacy-gated"
+    },
+    "callback:adviser_callbacks.py::adv_sign": {
+      "classification": "legacy-gated"
     },
     "callback:agreement_callbacks.py::_stamp_agreement_emailed": {
       "classification": "unclassified"
@@ -422,6 +431,9 @@
     "callback:governance_callbacks.py::gov_save_rule_decision": {
       "classification": "legacy-gated"
     },
+    "callback:gst_class_callbacks.py::gsa_save": {
+      "classification": "legacy-gated"
+    },
     "callback:invite_to_callbacks.py::clear_invite_selections": {
       "classification": "exempt",
       "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
@@ -777,6 +789,9 @@
       "classification": "unclassified"
     },
     "callback:signature_callbacks.py::_on_emergency": {
+      "classification": "legacy-gated"
+    },
+    "callback:signature_callbacks.py::_on_link_resolution": {
       "classification": "legacy-gated"
     },
     "callback:signature_callbacks.py::_on_save_ref": {
