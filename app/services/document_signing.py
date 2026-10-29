@@ -1,5 +1,5 @@
 """
-Signatures on records (Gold-Standard Plan v3, tasks 2.1, 2.2, 2.11, 2.12).
+Signatures on records (Gold-Standard Plan v3, tasks 2.1, 2.2, 2.11, 2.12; Plan v4 C.4, C.5).
 
 Every person who signs, approves or declines confirms with THEIR OWN login password (the shared login lockout
 applies) and must hold a serving office that is eligible for that kind of record. Each confirmation stores the user,
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import date
 
 from app.services import signing_service
@@ -23,6 +24,7 @@ KINDS = ("noc", "agreement", "resolution", "minutes", "poll", "expense", "fund_w
 PURPOSE = {"noc": "SIGNING_NOC"}          # every other kind is sealed with SIGNING_AGREEMENT
 OFFICES = ("president", "vice_president", "secretary", "joint_secretary", "treasurer", "working_committee_member")
 ALL_BEARERS = list(OFFICES)
+LINKABLE = ("noc", "agreement", "minutes", "expense", "fund_withdrawal")   # records that can name an authorising resolution
 
 # Defaults (the plan's "planned signers"); a society overrides them in signer_policy.
 DEFAULT_POLICY = {
@@ -34,6 +36,9 @@ DEFAULT_POLICY = {
     "expense":         dict(eligible=["secretary", "treasurer", "president"], required=[], min=1),
     "fund_withdrawal": dict(eligible=["secretary", "treasurer", "president"], required=[], min=2),
 }
+
+
+log = logging.getLogger(__name__)
 
 
 class SigningRefused(RuntimeError):
@@ -99,6 +104,14 @@ def item_text(kind: str, subject_id: int, db=None) -> tuple[int, str]:
         if not r:
             raise SigningRefused("Expense not found.")
         return r["society_id"], f"expense|{subject_id}|{r['entity_id']}|{r['role']}|{r['acc_id']}|{r['amount']}|{r['mode']}|{r['particulars']}|{r['trx_date']}"
+    if kind == "fund_withdrawal":
+        # Status is deliberately not part of the signed text: it moves from pending to confirmed when the last approval posts it.
+        r = d._execute("SELECT society_id, fund_acc_id, expense_acc_id, amount, mode, particulars, approval_ref, approval_date FROM fund_utilizations WHERE id=%s",
+                       (subject_id,), fetch_one=True)
+        if not r:
+            raise SigningRefused("Fund withdrawal not found.")
+        return r["society_id"], (f"fund_withdrawal|{subject_id}|{r['fund_acc_id']}|{r['expense_acc_id']}|{r['amount']}|{r['mode']}|"
+                                 f"{r['particulars']}|{r['approval_ref']}|{r['approval_date']}")
     raise SigningRefused(f"Unsupported record kind {kind!r}.")
 
 
@@ -114,6 +127,13 @@ def policy(society_id: int, kind: str, db=None, subject_id: int | None = None) -
     if row:
         return dict(eligible=list(row["eligible_offices"]), required=list(row["required_offices"]), min=row["min_signers"])
     pol = dict(DEFAULT_POLICY[kind])
+    if kind == "fund_withdrawal" and subject_id:                  # frozen on the withdrawal; offices from the society's spend policy
+        u = d._execute("SELECT signatories_required FROM fund_utilizations WHERE id=%s AND society_id=%s", (subject_id, society_id), fetch_one=True)
+        sp = d._execute("SELECT signatory_offices FROM fund_spend_policy WHERE society_id=%s", (society_id,), fetch_one=True)
+        pol["eligible"] = list(sp["signatory_offices"]) if sp else ["president", "vice_president", "secretary", "joint_secretary", "treasurer"]
+        pol["required"] = []
+        if u:
+            pol["min"] = max(int(u["signatories_required"]), 1)
     if kind == "expense" and subject_id:                          # the amount-based ladder (expense_approval)
         from app.services import expense_approval as ea
         need, _why = ea.required_signers(subject_id, d)
@@ -180,8 +200,13 @@ def status(kind: str, subject_id: int, db=None) -> dict:
     declined = [x for x in sigs if x["action"] == "decline"]
     seal = d._execute("SELECT * FROM signed_records WHERE subject_kind=%s AND subject_id=%s AND status='valid'", (kind, subject_id), fetch_one=True)
     have = {x["office_code"] for x in signed}
+    waiting = None
+    if kind in LINKABLE:                                                  # C.4: the resolution that still blocks the seal
+        row = d._execute("SELECT fn_document_resolution_block(%s,%s,%s) AS r", (society_id, kind, subject_id), fetch_one=True)
+        waiting = (row or {}).get("r")
     return {"policy": pol, "signed": signed, "declined": declined, "missing_required": [o for o in pol["required"] if o not in have],
-            "people_signed": len({x["user_id"] for x in signed}), "min_signers": pol["min"], "sealed": bool(seal), "seal": seal, "item_hash": h}
+            "people_signed": len({x["user_id"] for x in signed}), "min_signers": pol["min"], "sealed": bool(seal), "seal": seal, "item_hash": h,
+            "awaiting_resolution": waiting}
 
 
 def _safe_item(d, kind, subject_id):
@@ -210,6 +235,8 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
     society_id, text = item_text(kind, subject_id, d)
     if d._execute("SELECT 1 FROM signed_records WHERE subject_kind=%s AND subject_id=%s AND status='valid'", (kind, subject_id), fetch_one=True):
         raise SigningRefused("This record is already sealed.")
+    if kind == "fund_withdrawal":
+        _check_withdrawal_open(d, society_id, subject_id, action)
     if action == "decline" and len((reason or "").strip()) < 10:
         raise SigningRefused("Say why you decline (at least 10 characters).")
     pol = policy(society_id, kind, d, subject_id)
@@ -224,19 +251,70 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
     office, coid = next((r for r in roles if r[0] in pol["required"] and r[0] not in have), roles[0])
     if _self_dealing(d, kind, subject_id, user_id, society_id):
         raise SigningRefused("You cannot sign an item concerning your own flat.")
-    try:
-        d._execute("""INSERT INTO document_signatures (society_id, subject_kind, subject_id, action, user_id, office_code, committee_office_id, item_hash, reason)
-                      VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (society_id, kind, subject_id, action, user_id, office, coid, h, (reason or None)))
-    except Exception as exc:                                               # noqa: BLE001
-        if "uq_doc_signature_person" in str(exc):
-            raise SigningRefused("You have already signed this item; one person counts once.") from exc
-        raise
-    _audit(d, society_id, user_id, f"DOCUMENT_{action.upper()}", kind, subject_id, {"office": office, "item_hash": h})
+    # One person counts once. Checked before inserting (rather than by catching the unique violation) so a refusal never
+    # leaves a failed statement behind. A withdrawal whose earlier approval was recorded but not counted (for example the
+    # fund could not cover it at that moment) may be approved again, to count it.
+    recount = False
+    if action != "decline" and d._execute(
+            "SELECT 1 FROM document_signatures WHERE subject_kind=%s AND subject_id=%s AND item_hash=%s AND user_id=%s AND action IN ('sign','approve')",
+            (kind, subject_id, h, user_id), fetch_one=True):
+        if kind == "fund_withdrawal" and not _has_signoff(d, subject_id, user_id):
+            recount = True
+        else:
+            raise SigningRefused("You have already signed this item; one person counts once.")
+    if not recount:
+        try:
+            d._execute("""INSERT INTO document_signatures (society_id, subject_kind, subject_id, action, user_id, office_code, committee_office_id, item_hash, reason)
+                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (society_id, kind, subject_id, action, user_id, office, coid, h, (reason or None)))
+        except Exception as exc:                                           # noqa: BLE001  (two clicks at once)
+            if "uq_doc_signature_person" in str(exc):
+                raise SigningRefused("You have already signed this item; one person counts once.") from exc
+            raise
+        _audit(d, society_id, user_id, f"DOCUMENT_{action.upper()}", kind, subject_id, {"office": office, "item_hash": h})
+    if kind == "fund_withdrawal":
+        _withdrawal_effect(d, society_id, subject_id, user_id, action)
     st = status(kind, subject_id, d)
-    if action != "decline" and _complete(st):
+    if action != "decline" and _complete(st) and not st["awaiting_resolution"]:
         st["seal"] = _seal(d, society_id, kind, subject_id, h, st)
         st["sealed"] = True
+        if kind == "resolution":                                           # documents that were only waiting for this seal
+            st["documents_sealed"] = _seal_linked(d, subject_id)
     return st
+
+
+# ── fund withdrawals (Plan v4, C.5) ───────────────────────────────────────────────────────────────────────────
+# Approve and Decline use the same password confirmation, office check, signature record and seal as expenses. On top of
+# that an approval counts towards the withdrawal in the database (which posts it when the last one arrives) and a
+# decline cancels it.
+def _has_signoff(d, util_id: int, user_id: int) -> bool:
+    return bool(d._execute("SELECT 1 FROM fund_utilization_signoffs WHERE utilization_id=%s AND user_id=%s", (util_id, user_id), fetch_one=True))
+
+
+def _check_withdrawal_open(d, society_id: int, util_id: int, action: str) -> None:
+    u = d._execute("SELECT status, signatories_required FROM fund_utilizations WHERE id=%s AND society_id=%s", (util_id, society_id), fetch_one=True)
+    if not u:
+        raise SigningRefused("Fund withdrawal not found.")
+    if u["status"] != "pending":
+        raise SigningRefused(f"This withdrawal is {u['status']}; it can no longer be approved or declined.")
+    if action != "decline":
+        have = d._execute("SELECT COUNT(*) AS n FROM fund_utilization_signoffs WHERE utilization_id=%s", (util_id,), fetch_one=True)["n"]
+        blocked = d._execute("SELECT fn_document_resolution_block(%s,'fund_withdrawal',%s) AS r", (society_id, util_id), fetch_one=True)["r"]
+        if blocked and have + 1 >= int(u["signatories_required"]):
+            raise SigningRefused(f"This withdrawal names resolution #{blocked}, which does not yet have every required signature. "
+                                 "The last approval can be given once it does.")
+
+
+def _withdrawal_effect(d, society_id: int, util_id: int, user_id: int, action: str) -> None:
+    """After the signature is recorded: count the approval (posting the money when it is the last) or cancel on a decline."""
+    try:
+        if action == "decline":
+            d._execute("SELECT fn_cancel_fund_utilization(%s,%s,%s)", (util_id, society_id, user_id), fetch_one=True)
+        else:
+            d._execute("SELECT * FROM fn_sign_fund_utilization(%s,%s,%s)", (util_id, society_id, user_id), fetch_one=True)
+    except Exception as exc:                                               # noqa: BLE001
+        lead = ("Your decline is recorded, but the withdrawal could not be cancelled: " if action == "decline"
+                else "Your approval is recorded, but it could not be counted: ")
+        raise SigningRefused(lead + _clean(exc)) from exc
 
 
 def _self_dealing(d, kind, subject_id, user_id, society_id) -> bool:
@@ -261,6 +339,81 @@ def _seal(d, society_id, kind, subject_id, item_hash, st) -> dict:
         d._execute("UPDATE meetings SET minutes_signed_by=%s WHERE id=%s", (names, subject_id))
     _audit(d, society_id, None, "DOCUMENT_SEALED", kind, subject_id, {"purpose": purpose, "key_version": rec["key_version"], "item_hash": item_hash})
     return d._execute("SELECT * FROM signed_records WHERE subject_kind=%s AND subject_id=%s AND status='valid'", (kind, subject_id), fetch_one=True)
+
+
+# ── C.4: a document names the resolution that authorises it ────────────────────────────────────────────────────
+def passed_resolutions(society_id: int, db=None) -> list[dict]:
+    """The society's passed resolutions, newest first (what a document may name as its authority)."""
+    return _db(db)._execute(
+        """SELECT x.id, x.body, x.passed_on, m.held_on, EXISTS (SELECT 1 FROM signed_records s WHERE s.subject_kind='resolution'
+                  AND s.subject_id = x.id AND s.status='valid') AS sealed
+             FROM resolutions x JOIN meetings m ON m.id = x.meeting_id
+            WHERE m.society_id=%s AND x.status='passed' ORDER BY x.passed_on DESC NULLS LAST, x.id DESC""", (society_id,), fetch_all=True) or []
+
+
+def linked_resolution(kind: str, subject_id: int, db=None) -> dict | None:
+    """The resolution this document names, and whether that resolution is sealed yet; None if it names none."""
+    return _db(db)._execute(
+        """SELECT l.resolution_id, l.linked_at, x.body, EXISTS (SELECT 1 FROM signed_records s WHERE s.subject_kind='resolution'
+                  AND s.subject_id = l.resolution_id AND s.status='valid') AS resolution_sealed
+             FROM document_resolution_links l JOIN resolutions x ON x.id = l.resolution_id
+            WHERE l.subject_kind=%s AND l.subject_id=%s""", (kind, subject_id), fetch_one=True)
+
+
+def documents_for_resolution(resolution_id: int, db=None) -> list[dict]:
+    """Documents that name this resolution, with whether each is sealed (for the resolution's Signatures panel)."""
+    return _db(db)._execute(
+        """SELECT l.subject_kind, l.subject_id, EXISTS (SELECT 1 FROM signed_records s WHERE s.subject_kind=l.subject_kind
+                  AND s.subject_id=l.subject_id AND s.status='valid') AS sealed
+             FROM document_resolution_links l WHERE l.resolution_id=%s ORDER BY l.id""", (resolution_id,), fetch_all=True) or []
+
+
+def _clean(exc) -> str:
+    return (str(exc).split("\n")[0].replace("ERROR:", "").strip()) or "Could not save."
+
+
+def link_resolution(society_id: int, kind: str, subject_id: int, resolution_id: int, user_id: int, db=None) -> None:
+    """Name the resolution that authorises this document. The administrator or a serving office-bearer may do it, until the
+    document is sealed. The rule that stops a seal until the resolution is sealed lives in the database."""
+    d = _db(db)
+    if kind not in LINKABLE:
+        raise SigningRefused("This kind of record does not take an authorising resolution.")
+    owner, _ = item_text(kind, subject_id, d)
+    if owner != society_id:
+        raise SigningRefused("Record not found.")
+    u = d._execute("SELECT role FROM users WHERE id=%s AND society_id=%s", (user_id, society_id), fetch_one=True) or {}
+    if u.get("role") != "admin" and not serving_offices(society_id, user_id, db=d):
+        raise SigningRefused("Only the administrator or a serving office-bearer can name the authorising resolution.")
+    try:
+        d._execute("""INSERT INTO document_resolution_links (society_id, subject_kind, subject_id, resolution_id, linked_by)
+                      VALUES (%s,%s,%s,%s,%s)
+                      ON CONFLICT (society_id, subject_kind, subject_id)
+                      DO UPDATE SET resolution_id = EXCLUDED.resolution_id, linked_by = EXCLUDED.linked_by, linked_at = NOW()""",
+                   (society_id, kind, subject_id, int(resolution_id), user_id))
+    except Exception as exc:                                               # noqa: BLE001
+        raise SigningRefused(_clean(exc)) from exc
+    _audit(d, society_id, user_id, "DOCUMENT_RESOLUTION_LINKED", kind, subject_id, {"resolution_id": int(resolution_id)})
+    st = status(kind, subject_id, d)                                       # the resolution may already be sealed: seal if ready
+    if _complete(st) and not st["awaiting_resolution"] and not st["sealed"]:
+        _seal(d, society_id, kind, subject_id, st["item_hash"], st)
+
+
+def _seal_linked(d, resolution_id: int) -> list[tuple[str, int]]:
+    """A resolution has just been sealed: seal every document that names it and already holds its own full set of
+    signatures. One document failing does not stop the others."""
+    done = []
+    for r in d._execute("SELECT society_id, subject_kind, subject_id FROM document_resolution_links WHERE resolution_id=%s ORDER BY id",
+                        (resolution_id,), fetch_all=True) or []:
+        if r["subject_kind"] == "fund_withdrawal":
+            continue          # sealed with its posting, by the last approval (which the database holds back until now)
+        try:
+            st = status(r["subject_kind"], r["subject_id"], d)
+            if not st["sealed"] and not st["awaiting_resolution"] and _complete(st):
+                _seal(d, r["society_id"], r["subject_kind"], r["subject_id"], st["item_hash"], st)
+                done.append((r["subject_kind"], r["subject_id"]))
+        except Exception as exc:                                           # noqa: BLE001 - reported, never hides the resolution's own seal
+            log.error("could not seal %s %s after resolution %s: %s", r["subject_kind"], r["subject_id"], resolution_id, exc)
+    return done
 
 
 # ── verification (also behind the public page) ─────────────────────────────────────────────────────────────────

@@ -37,12 +37,56 @@ def status_view(kind: str, subject_id: int, message: str | None = None, ok: bool
         head = dbc.Badge("Awaiting signatures", color="warning", text_color="dark", className="me-2")
         miss = ", ".join(o.replace("_", " ").title() for o in st["missing_required"]) or "none"
         need = f"{st['people_signed']} of {st['min_signers']} signatures. Still required: {miss}."
+        if st.get("awaiting_resolution"):
+            need += (f" It will be sealed once resolution #{st['awaiting_resolution']} has every required signature"
+                     " (sign it from the resolution).")
     out = [html.Div([head, html.Span(need, style={"fontSize": "12px"})])]
+    link = _link_line(kind, int(subject_id))
+    if link:
+        out.append(link)
+    if kind == "fund_withdrawal":
+        try:
+            from app.services import fund_withdrawal_approval as fwa
+            out.append(html.Div({"pending": "Withdrawal pending: money moves when the last approval is given.",
+                                 "confirmed": "Withdrawal approved and posted to the ledger.",
+                                 "cancelled": "Withdrawal declined and cancelled; nothing was posted."}.get(fwa.state(int(subject_id)), ""),
+                                style={"fontSize": "12px", "marginTop": "6px", "fontWeight": "600"}))
+        except Exception:                                                  # noqa: BLE001
+            pass
     if rows:
         out.append(html.Ul(rows, style={"fontSize": "12px", "margin": "6px 0 0 0", "paddingLeft": "18px"}))
     if message:
         out.insert(0, dbc.Alert(message, color="success" if ok else "danger", className="py-2 mb-2"))
     return html.Div(out)
+
+
+def _link_line(kind: str, subject_id: int):
+    """Which resolution authorises this record, or which records wait for this resolution."""
+    try:
+        if kind in ds.LINKABLE:
+            lr = ds.linked_resolution(kind, subject_id)
+            if not lr:
+                return None
+            state = "sealed" if lr["resolution_sealed"] else "not yet fully signed"
+            return html.Div(f"Authorised by resolution #{lr['resolution_id']} ({state}).", style={"fontSize": "12px", "marginTop": "6px"})
+        if kind == "resolution":
+            docs = ds.documents_for_resolution(subject_id)
+            if not docs:
+                return None
+            names = ", ".join(f"{LABEL.get(x['subject_kind'], x['subject_kind'])} #{x['subject_id']}" + (" (sealed)" if x["sealed"] else " (waiting)") for x in docs)
+            return html.Div(f"Records that name this resolution: {names}.", style={"fontSize": "12px", "marginTop": "6px"})
+    except Exception:                                                      # noqa: BLE001  the panel still works without this line
+        return None
+    return None
+
+
+def _resolution_options():
+    try:
+        sid = get_current_society_id()
+        return [{"label": f"#{r['id']} - {str(r['body'])[:60]}" + (" (sealed)" if r["sealed"] else ""), "value": r["id"]}
+                for r in ds.passed_resolutions(sid)[:100]] if sid else []
+    except Exception:                                                      # noqa: BLE001
+        return []
 
 
 def signature_panel(kind: str, subject_id, approve_label: str = "Sign") -> html.Div:
@@ -52,6 +96,11 @@ def signature_panel(kind: str, subject_id, approve_label: str = "Sign") -> html.
     return html.Div([
         html.Div(f"Signatures - {LABEL.get(kind, kind)}", style={"fontWeight": "600", "fontSize": "12px", "marginBottom": "6px"}),
         html.Div(status_view(kind, subject_id), id=_pid("status", kind, subject_id)),
+        *([html.Div([
+            dcc.Dropdown(id=_pid("res", kind, subject_id), options=_resolution_options(), placeholder="Authorising resolution (optional)",
+                         clearable=False, style={"maxWidth": "420px", "fontSize": "12px", "display": "inline-block", "width": "100%"}),
+            dbc.Button("Name resolution", id=_pid("linkres", kind, subject_id), color="outline-secondary", size="sm", n_clicks=0, className="ms-2"),
+        ], className="mt-2")] if kind in ds.LINKABLE else []),
         dbc.Input(id=_pid("pw", kind, subject_id), type="password", placeholder="Your login password", autoComplete="current-password",
                   size="sm", className="mt-2", style={"maxWidth": "260px"}),
         dbc.Input(id=_pid("reason", kind, subject_id), type="text", placeholder="Reason (only if declining)", size="sm",
@@ -102,6 +151,27 @@ def register_signature_callbacks(app):
         except ds.SigningRefused as exc:
             return status_view(kind, subject_id, str(exc), ok=False), ""
 
+
+    @app.callback(
+        Output({"type": "sig-status", "kind": MATCH, "id": MATCH}, "children", allow_duplicate=True),
+        Input({"type": "sig-linkres", "kind": MATCH, "id": MATCH}, "n_clicks"),
+        State({"type": "sig-res", "kind": MATCH, "id": MATCH}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def _on_link_resolution(n, resolution_id):
+        trig = ctx.triggered_id
+        uid, sid = get_current_user_id(), get_current_society_id()
+        if not n or not trig or trig["kind"] not in ds.LINKABLE or not uid or not sid:
+            return no_update
+        kind, subject_id = trig["kind"], int(trig["id"])
+        if not resolution_id:
+            return status_view(kind, subject_id, "Choose the resolution first.", ok=False)
+        try:
+            ds.link_resolution(sid, kind, subject_id, int(resolution_id), uid)           # checks society, role and seal state
+            return status_view(kind, subject_id, "Authorising resolution recorded.")
+        except ds.SigningRefused as exc:
+            return status_view(kind, subject_id, str(exc), ok=False)
 
     @app.callback(
         Output({"type": "sig-status", "kind": MATCH, "id": MATCH}, "children", allow_duplicate=True),

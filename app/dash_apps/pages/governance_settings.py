@@ -235,10 +235,17 @@ def render_governance_tabs(role: str, sid, color: str = "#1859b8"):
     from app.dash_apps.pages.tax_rates_page import tax_rates_tab
     tax = tax_rates_tab(role, society_id)
 
-    return _wrap(role, compliance, rules, bye, mtg, committee, tax)
+    # -- Adviser Decisions (read by everyone in the society; filled in by the admin / Secretary / Treasurer) and
+    #    GST Accounts (the CA / Treasurer / Secretary, read-only for the Admin).
+    from app.dash_apps.pages.adviser_page import adviser_tab
+    from app.dash_apps.pages.gst_accounts_page import gst_accounts_tab
+    adviser = adviser_tab(role, society_id)
+    gst_accounts = gst_accounts_tab(role, society_id)
+
+    return _wrap(role, compliance, rules, bye, mtg, committee, tax, adviser, gst_accounts)
 
 
-def _wrap(role, compliance, rules, bye, mtg, committee, tax=None):
+def _wrap(role, compliance, rules, bye, mtg, committee, tax=None, adviser=None, gst_accounts=None):
     head = [html.H5("Society governance", id="society-governance", style={"fontWeight": "700", "marginTop": "8px"})]
     if role != "admin":
         head.append(html.Small("Read-only view for your society.", className="text-muted"))
@@ -252,5 +259,7 @@ def _wrap(role, compliance, rules, bye, mtg, committee, tax=None):
             dcc.Tab(label="Meetings & Resolutions", value="tab-mtg", children=html.Div(mtg)),
             dcc.Tab(label="Managing Committee", value="tab-committee", children=html.Div(committee)),
             *([dcc.Tab(label="TDS & GST Rates", value="tab-tax-rates", children=html.Div(tax))] if tax is not None else []),
+            *([dcc.Tab(label="Adviser Decisions", value="tab-adviser", children=html.Div(adviser))] if adviser is not None else []),
+            *([dcc.Tab(label="GST Accounts", value="tab-gst-accounts", children=html.Div(gst_accounts))] if gst_accounts is not None else []),
         ]),
     ])

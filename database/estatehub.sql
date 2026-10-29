@@ -18197,6 +18197,11 @@ BEGIN
     SELECT * INTO u FROM fund_utilizations WHERE id = p_util_id AND society_id = p_society_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'Fund utilization % not found for this society', p_util_id; END IF;
     IF u.status <> 'pending' THEN RAISE EXCEPTION 'Fund utilization % is % and cannot be signed', p_util_id, u.status; END IF;
+    -- Plan v4 C.5: an office-bearer's Decline stops the withdrawal. The decline is recorded (document_signatures) before
+    -- the withdrawal is cancelled, so even if that second step were lost no further approval can move the money.
+    IF EXISTS (SELECT 1 FROM document_signatures WHERE subject_kind = 'fund_withdrawal' AND subject_id = p_util_id AND action = 'decline') THEN
+        RAISE EXCEPTION 'An office-bearer has declined this withdrawal; it cannot be approved.';
+    END IF;
 
     SELECT signatory_offices INTO v_offices FROM fund_spend_policy WHERE society_id = p_society_id;
     IF v_offices IS NULL THEN
@@ -18212,6 +18217,11 @@ BEGIN
     SELECT COUNT(*) INTO v_count FROM fund_utilization_signoffs WHERE utilization_id = p_util_id;
 
     IF v_count >= u.signatories_required THEN
+        -- Plan v4 C.4: a withdrawal that names an authorising resolution is not paid before that resolution is fully signed.
+        IF fn_document_resolution_block(p_society_id, 'fund_withdrawal', p_util_id) IS NOT NULL THEN
+            RAISE EXCEPTION 'This withdrawal names resolution #%, which does not yet have every required signature. The last approval can be given once it does.',
+                fn_document_resolution_block(p_society_id, 'fund_withdrawal', p_util_id);
+        END IF;
         UPDATE fund_utilizations SET status = 'confirmed', confirmed_by = p_user_id, confirmed_at = NOW() WHERE id = p_util_id;
         v_journal := fn_post_fund_utilization_journal(p_util_id);
         u.status := 'confirmed';
@@ -18219,6 +18229,30 @@ BEGIN
 
     signatures := v_count; required := u.signatories_required; status := u.status; journal_id := v_journal;
     RETURN NEXT;
+END $$;
+
+-- Plan v4 C.5: an office-bearer who declines a pending withdrawal cancels it (nothing was posted while it was pending).
+-- Only a serving office-bearer of a signing office may do it, and only while it is still pending.
+CREATE OR REPLACE FUNCTION fn_cancel_fund_utilization(p_util_id INT, p_society_id INT, p_user_id INT)
+RETURNS VARCHAR LANGUAGE plpgsql AS $$
+DECLARE
+    u fund_utilizations%ROWTYPE;
+    v_offices TEXT[];
+    v_office RECORD;
+BEGIN
+    SELECT * INTO u FROM fund_utilizations WHERE id = p_util_id AND society_id = p_society_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Fund utilization % not found for this society', p_util_id; END IF;
+    IF u.status <> 'pending' THEN RAISE EXCEPTION 'Fund utilization % is % and cannot be declined', p_util_id, u.status; END IF;
+    SELECT signatory_offices INTO v_offices FROM fund_spend_policy WHERE society_id = p_society_id;
+    IF v_offices IS NULL THEN
+        v_offices := ARRAY['president', 'vice_president', 'secretary', 'joint_secretary', 'treasurer'];
+    END IF;
+    SELECT * INTO v_office FROM fn_office_for_user(p_society_id, p_user_id, CURRENT_DATE, v_offices);
+    IF v_office.office_id IS NULL THEN
+        RAISE EXCEPTION 'Only a serving office-bearer (President, Vice-President, Secretary, Joint Secretary or Treasurer) can decline a fund withdrawal';
+    END IF;
+    UPDATE fund_utilizations SET status = 'cancelled' WHERE id = p_util_id;
+    RETURN 'cancelled';
 END $$;
 
 -- 4. Move money between two bank accounts. UPI/QR collections for a fund land in the primary bank (only the primary has
@@ -20709,6 +20743,69 @@ CREATE TRIGGER trg_polls_sealed BEFORE UPDATE OR DELETE ON polls
     FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('poll', 'title,choice_1,choice_2,choice_3,choice_4,choice_5,majority_pct,quorum_pct,vote_basis');
 CREATE TRIGGER trg_resolutions_sealed BEFORE UPDATE OR DELETE ON resolutions
     FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('resolution', 'body,clause_id,majority_required,votes_for_pct,owners_present_pct,passed_on,status');
+CREATE TRIGGER trg_fund_utilizations_sealed BEFORE UPDATE OR DELETE ON fund_utilizations
+    FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('fund_withdrawal', 'fund_acc_id,expense_acc_id,amount,mode,particulars,approval_ref,approval_date');
+
+-- ── Plan v4 C.4 (v3 task 2.12): a document is tied to the resolution that authorises it ─────────────────────────
+-- A NOC, agreement, minutes, expense or fund withdrawal can name its authorising resolution. A document that names one
+-- cannot be sealed ("marked signed") until that resolution is itself sealed, i.e. every signer the resolution requires
+-- has signed it. The rule is enforced here, on signed_records, so no code path can seal around it. A document that
+-- names no resolution is unaffected.
+CREATE TABLE document_resolution_links (
+    id            SERIAL PRIMARY KEY,
+    society_id    INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    subject_kind  VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'minutes', 'expense', 'fund_withdrawal')),
+    subject_id    INT NOT NULL,
+    resolution_id INT NOT NULL REFERENCES resolutions (id) ON DELETE RESTRICT,
+    linked_by     INT REFERENCES users (id),
+    linked_at     TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (society_id, subject_kind, subject_id)
+);
+CREATE INDEX idx_doc_resolution_links_resolution ON document_resolution_links (resolution_id);
+
+-- The link may only name a PASSED resolution of the same society, and is fixed once the document is sealed.
+CREATE OR REPLACE FUNCTION trg_document_resolution_link_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_soc INT; v_status TEXT; v_kind TEXT; v_id INT;
+BEGIN
+    v_kind := CASE WHEN TG_OP = 'DELETE' THEN OLD.subject_kind ELSE NEW.subject_kind END;
+    v_id   := CASE WHEN TG_OP = 'DELETE' THEN OLD.subject_id   ELSE NEW.subject_id   END;
+    IF EXISTS (SELECT 1 FROM signed_records WHERE subject_kind = v_kind AND subject_id = v_id AND status = 'valid')
+       OR (TG_OP = 'UPDATE' AND EXISTS (SELECT 1 FROM signed_records WHERE subject_kind = OLD.subject_kind AND subject_id = OLD.subject_id AND status = 'valid')) THEN
+        RAISE EXCEPTION 'This % is sealed: its authorising resolution can no longer be named or changed.', v_kind;
+    END IF;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    SELECT m.society_id, r.status INTO v_soc, v_status FROM resolutions r JOIN meetings m ON m.id = r.meeting_id WHERE r.id = NEW.resolution_id;
+    IF v_soc IS DISTINCT FROM NEW.society_id THEN RAISE EXCEPTION 'That resolution belongs to another society.'; END IF;
+    IF v_status <> 'passed' THEN RAISE EXCEPTION 'Only a passed resolution can authorise a document.'; END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_document_resolution_link_guard BEFORE INSERT OR UPDATE OR DELETE ON document_resolution_links
+    FOR EACH ROW EXECUTE FUNCTION trg_document_resolution_link_guard();
+
+-- The resolution that still blocks this document: NULL when it names none, or when that resolution is sealed.
+CREATE OR REPLACE FUNCTION fn_document_resolution_block(p_society_id INT, p_kind TEXT, p_subject_id INT) RETURNS INT
+LANGUAGE sql STABLE AS $$
+    SELECT l.resolution_id FROM document_resolution_links l
+     WHERE l.society_id = p_society_id AND l.subject_kind = p_kind AND l.subject_id = p_subject_id
+       AND NOT EXISTS (SELECT 1 FROM signed_records s
+                        WHERE s.subject_kind = 'resolution' AND s.subject_id = l.resolution_id AND s.status = 'valid')
+$$;
+
+CREATE OR REPLACE FUNCTION trg_signed_record_needs_resolution() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_res INT;
+BEGIN
+    IF NEW.status = 'valid' AND NEW.subject_kind <> 'resolution' THEN
+        v_res := fn_document_resolution_block(NEW.society_id, NEW.subject_kind, NEW.subject_id);
+        IF v_res IS NOT NULL THEN
+            RAISE EXCEPTION 'This % cannot be marked signed until every required signer has signed resolution #%.', NEW.subject_kind, v_res;
+        END IF;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_signed_record_needs_resolution BEFORE INSERT ON signed_records
+    FOR EACH ROW EXECUTE FUNCTION trg_signed_record_needs_resolution();
+CREATE TRIGGER trg_document_resolution_links_no_truncate BEFORE TRUNCATE ON document_resolution_links
+    FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
 
 
 -- ── Phase 2.5: approval ladder for expenses (bye-law 49: Rs 20,000) ─────────────────────────────────────────────
@@ -21057,11 +21154,19 @@ BEGIN
 
     SELECT COUNT(*), COALESCE(SUM(x.amount), 0), COALESCE(SUM(x.ledger), 0) INTO v_n, v_l, v_r FROM (
         SELECT e.amount, GREATEST(COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr'), 0), COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Cr'), 0)) AS ledger
-          FROM expenses e JOIN transactions t ON t.society_id = e.society_id AND t.source_table = 'expenses' AND t.source_id = e.id
+          FROM expenses e JOIN transactions t ON t.society_id = e.society_id
+               AND ((t.source_table = 'expenses' AND t.source_id = e.id)
+                 -- fn_buy_asset / fn_buy_deposit post under the asset or deposit (named on the expense by entity_id): the
+                 -- purchase is the debit to its own account; a later sale credits that account and is not part of the expense
+                 OR (e.role IN ('assets', 'deposits') AND t.source_table = e.role AND t.source_id = e.entity_id
+                     AND t.entry_side = 'Dr' AND t.acc_id = e.acc_id))
          WHERE e.society_id = p_society_id AND e.status = 'confirmed' AND e.expense_date BETWEEN v_from AND v_to
          GROUP BY e.id, e.amount HAVING ABS(e.amount - GREATEST(COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr'), 0), COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Cr'), 0))) >= 0.005) x;
     SELECT COUNT(*) INTO v_nt FROM expenses e WHERE e.society_id = p_society_id AND e.status = 'confirmed' AND e.expense_date BETWEEN v_from AND v_to
-       AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.society_id = e.society_id AND t.source_table = 'expenses' AND t.source_id = e.id);
+       AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.society_id = e.society_id
+                          AND ((t.source_table = 'expenses' AND t.source_id = e.id)
+                            OR (e.role IN ('assets', 'deposits') AND t.source_table = e.role AND t.source_id = e.entity_id
+                                AND t.entry_side = 'Dr' AND t.acc_id = e.acc_id)));
     check_key := 'expenses_vs_ledger'; label := 'Confirmed expenses equal their ledger lines';
     left_amount := v_l; right_amount := v_r; difference := v_l - v_r; ok := (v_n = 0 AND v_nt = 0);
     detail := format('%s expense(s) differ from the ledger; %s confirmed expense(s) have no ledger line.', v_n, v_nt);

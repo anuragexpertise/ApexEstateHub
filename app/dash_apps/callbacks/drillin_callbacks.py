@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from dash import Input, Output, State, no_update, html, ctx, ALL
 from dash.exceptions import PreventUpdate
+from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 import dash_bootstrap_components as dbc
 
 from app.dash_apps.drilldown.drillin import (
@@ -596,7 +597,7 @@ def register_pay_dues_bill_callbacks(app):
         bill_error = "" if bill_group_id else "Select an unpaid bill before submitting."
         amount_error = ""
         try:
-            if amount in (None, "") or float(amount) <= 0:
+            if amount in (None, "") or D(amount) <= 0:
                 amount_error = "Enter an amount greater than zero."
         except (TypeError, ValueError):
             amount_error = "Enter a valid amount."

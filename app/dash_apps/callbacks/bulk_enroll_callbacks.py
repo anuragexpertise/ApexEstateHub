@@ -42,6 +42,7 @@ from app.security.password_policy import validate_password
 import base64
 import io
 import pandas as pd
+from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 
 from dash import Input, Output, State, ALL, ctx, no_update, html, dcc
 from dash.exceptions import PreventUpdate
@@ -276,10 +277,11 @@ def _safe_int(v, default: int = 0) -> int:
         return default
 
 
-def _safe_float(v) -> float | None:
+def _safe_float(v):
+    """A rupee amount from a spreadsheet cell, as a Decimal (the name is kept for its callers); None when blank or not a number."""
     try:
-        return float(v) if v not in (None, "") else None
-    except (TypeError, ValueError):
+        return money(v) if v not in (None, "") else None
+    except ValueError:
         return None
 
 

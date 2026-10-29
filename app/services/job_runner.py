@@ -10,6 +10,10 @@ application login (database/app_role.py), not the owner.
     anchors      daily   anchor every society's ledger chain and verify every anchor signature
     patrol       hourly  mark missed patrols and assign new ones
     ratification daily   expire overdue ratifications (fn_expire_overdue_ratifications)
+    watchdog     hourly  alert the masters when any of the above has not run lately (a scheduler that never fires
+                         leaves no failed row, so only a check on the log can notice it)
+
+Plan v4, C.8. The schedule itself lives on the host: see docs/SCHEDULER.md.
 """
 from __future__ import annotations
 
@@ -55,7 +59,46 @@ def job_ratification(db=None) -> dict:
     return {"expired": int(row["n"])}
 
 
-JOBS = {"anchors": job_anchors, "patrol": job_patrol, "ratification": job_ratification}
+# How long each job may go without a finished, successful run before the watchdog complains. Daily jobs get a little over a
+# day (a late scheduler start is not an outage); hourly jobs get a little over two hours.
+MAX_AGE_HOURS = {"anchors": 26, "patrol": 2.5, "ratification": 26}
+
+
+def job_watchdog(db=None) -> dict:
+    d = _db(db)
+    stale = []
+    for name, hours in MAX_AGE_HOURS.items():
+        row = d._execute("SELECT MAX(finished_at) AS last_ok FROM job_runs WHERE job_name=%s AND status='ok'", (name,), fetch_one=True)
+        age = d._execute("SELECT EXTRACT(EPOCH FROM (NOW() - %s::timestamp)) / 3600.0 AS h", ((row or {}).get("last_ok"),), fetch_one=True) \
+            if (row or {}).get("last_ok") else None
+        if age is None or float(age["h"]) > hours:
+            stale.append({"job": name, "last_ok": str((row or {}).get("last_ok")), "max_age_hours": hours})
+    if stale:
+        raise JobFailed("not run on time: " + ", ".join(x["job"] for x in stale), {"stale": stale})
+    return {"checked": sorted(MAX_AGE_HOURS)}
+
+
+def check_restricted_login(db=None) -> str | None:
+    """None when the connection is the restricted application login; otherwise why it is not. The scheduler must not run
+    as the owner or a superuser, because that is the login the append-only protections are meant to hold against."""
+    row = _db(db)._execute(
+        "SELECT r.rolsuper AS su, current_user AS who, "
+        "       EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'estatehub_app') AS role_exists, "
+        "       CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'estatehub_app') "
+        "            THEN pg_has_role(current_user, 'estatehub_app', 'member') ELSE FALSE END AS app_member "
+        "FROM pg_roles r WHERE r.rolname = current_user", fetch_one=True)
+    if not row:
+        return "could not read the database login"
+    if row["su"]:
+        return f"connected as superuser {row['who']!r}; use the restricted login (database/app_role.py)"
+    if not row["role_exists"]:
+        return "the estatehub_app role does not exist; run database/app_role.py --apply"
+    if not row["app_member"]:
+        return f"login {row['who']!r} is not a member of estatehub_app (database/app_role.py)"
+    return None
+
+
+JOBS = {"anchors": job_anchors, "patrol": job_patrol, "ratification": job_ratification, "watchdog": job_watchdog}
 
 
 class JobFailed(RuntimeError):

@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import datetime, date, time, timezone
 from pathlib import Path
 from decimal import Decimal
+from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 
 from dash import html, dcc, no_update
 import dash_bootstrap_components as dbc
@@ -5518,8 +5519,8 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
         income_rows = [r for r in rows if r.get("statement_section") == "Income"]
         expense_rows = [r for r in rows if r.get("statement_section") == "Expenditure"]
 
-        income_total = sum(float(r.get("amount") or 0) for r in income_rows)
-        expense_total = sum(float(r.get("amount") or 0) for r in expense_rows)
+        income_total = sum((D(r.get("amount")) for r in income_rows), Decimal(0))
+        expense_total = sum((D(r.get("amount")) for r in expense_rows), Decimal(0))
         surplus = income_total - expense_total
         sd_label = "Surplus" if surplus >= 0 else "Deficit"
 
@@ -5906,8 +5907,8 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
     def _build_ie_html():
         income_rows = [r for r in ie_rows if r.get("statement_section") == "Income"]
         expense_rows = [r for r in ie_rows if r.get("statement_section") == "Expenditure"]
-        income_total = sum(float(r.get("amount") or 0) for r in income_rows)
-        expense_total = sum(float(r.get("amount") or 0) for r in expense_rows)
+        income_total = sum((D(r.get("amount")) for r in income_rows), Decimal(0))
+        expense_total = sum((D(r.get("amount")) for r in expense_rows), Decimal(0))
         surplus = income_total - expense_total
         sd_label = "Surplus" if surplus >= 0 else "Deficit"
 
@@ -8205,7 +8206,7 @@ def render_expense_card(expense: dict, society: dict) -> html.Div:
     role_lbl   = (expense.get("role") or "").title() or "—"
     particulars = expense.get("particulars", "—")
     account    = expense.get("account_name", "—")
-    amount     = float(expense.get("amount") or 0)
+    amount     = D(expense.get("amount"))
     mode       = (expense.get("mode") or "cash").title()
     ref        = expense.get("transaction_id") or expense.get("cheque_no") or ""
     status     = (expense.get("status") or "confirmed").title()
@@ -8226,9 +8227,11 @@ def render_expense_card(expense: dict, society: dict) -> html.Div:
         except Exception as e:
             print(f"⚠️  expense QR render failed: {e}")
 
-    tds_pct = float(expense.get("tds_pct") or 0)
+    tds_pct = float(expense.get("tds_pct") or 0)                  # a percentage, shown and put in the JSON store
     tds_section = expense.get("tds_section") or ""
-    tds_amount = (amount * tds_pct / 100) if tds_pct else 0
+    # TDS is rounded to the whole rupee (database/money.py); the amount the books hold wins over a recomputation.
+    tds_amount = D(expense.get("tds_amount")) if expense.get("tds_amount") is not None else (
+        rupee(amount * D(expense.get("tds_pct")) / 100) if tds_pct else Decimal(0))
     net_amount = amount - tds_amount
 
     print_data = {

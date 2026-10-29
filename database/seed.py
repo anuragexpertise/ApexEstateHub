@@ -95,6 +95,7 @@ Usage
 """
 
 import os
+from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 import sys
 import logging
 import random
@@ -148,6 +149,20 @@ def _seed_signing_keys(conn, society_id: int):
     except Exception as e:  # noqa: BLE001
         conn.rollback()
         print(f"  ⚠️  Skipping signing keys (SECRET_VAULT_KEY not configured?): {e}")
+
+
+def _seed_ledger_anchor(conn, society_id: int):
+    """Anchor and sign the finished demo ledger, so the signed-anchor check and the compliance certificate start
+    from a real anchor (Plan v4, C.2). Runs after the chain is rebuilt; needs the society's SIGNING_LEDGER key
+    (so SECRET_VAULT_KEY). A seed without the key still completes, and the anchor check then reports no anchor."""
+    try:
+        from app.security.ledger_anchor import anchor_society
+        a = anchor_society(society_id, None, "manual", db=_ConnDB(conn))
+        conn.commit()
+        print(f"  ✓ Ledger anchored and signed: seq {a['ledger_seq']} ({a['row_count']} entries)")
+    except Exception as e:  # noqa: BLE001
+        conn.rollback()
+        print(f"  ⚠️  Skipping ledger anchor (needs SECRET_VAULT_KEY and the society's signing keys): {e}")
 
 
 logging.basicConfig(level=logging.INFO, format="  %(message)s")
@@ -2708,7 +2723,7 @@ def seed_advance_credit_demo(cur, conn, society_id: int, apt2_id: int, admin_uid
         print("  · Advance-credit overpayment already seeded — skipped.")
         return
 
-    overpay = round(float(outstanding) + 500.00, 2)
+    overpay = money(D(outstanding) + 500)
     # Paid by UPI, not cash: the amount is far above CASH_LIMIT. The SQL function
     # dates its postings CURRENT_DATE, so they are re-dated right after the call.
     _guard("advance overpayment B-202", SEED_CUTOFF_DATE, overpay, "upi")
@@ -3337,8 +3352,10 @@ def run_seed(conn):
     if suspended:
         cur.execute(f"ALTER TABLE transactions DISABLE TRIGGER {_LEDGER_GUARD_TRIGGER}")
         conn.commit()
+    seeded = False
     try:
         _run_seed_unguarded(conn)
+        seeded = True
     finally:
         try:
             conn.rollback()
@@ -3347,6 +3364,8 @@ def run_seed(conn):
                 cur.execute(f"ALTER TABLE transactions ENABLE TRIGGER {_LEDGER_GUARD_TRIGGER}")
                 cur.execute("SELECT fn_rebuild_ledger_chain(NULL, TRUE)")
                 conn.commit()
+            if seeded:
+                _seed_ledger_anchor(conn, SOCIETY_ID)
         finally:
             conn.close()
 
