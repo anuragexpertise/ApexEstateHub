@@ -769,15 +769,70 @@ def master_portal_page(active_tab="dashboard", sid=None) -> html.Div:
     ], className="portal-page")
 
 
+def _categorize_test(name: str) -> str:
+    """Categorize test files by semantic purpose."""
+    n = name.lower()
+    if "plan_v3" in n or "plan_v4" in n or "gold_standard" in n:
+        return "Plan Mapping (Gold Standard v3/v4)"
+    if n.endswith("_live.py"):
+        return "Live/Postgres Integration"
+    if any(k in n for k in ["auth", "identity", "role", "guard", "security", "authorization", "authorization_core"]):
+        return "Security & Authorization"
+    if any(k in n for k in ["ledger", "accounting", "money", "fy_lock", "tie_out", "voucher", "cash_voucher", "balance"]):
+        return "Accounting & Ledger"
+    if any(k in n for k in ["gst", "itc", "tds", "tax", "26as", "ais", "turnover"]):
+        return "GST & Tax"
+    if any(k in n for k in ["audit", "compliance", "ratif", "certificate", "anchor", "signing", "document_sign", "verif"]):
+        return "Audit, Compliance & Govt"
+    if any(k in n for k in ["committee", "govern", "bye", "aoa", "poll", "election"]):
+        return "Governance & Committee"
+    if any(k in n for k in ["fund", "expense", "payment", "dispute", "receiv", "payable", "withdrawal", "approv"]):
+        return "Fund & Payments"
+    if any(k in n for k in ["workflow", "alert", "push", "qr", "notification", "job", "schedule"]):
+        return "Operations & Workflow"
+    if any(k in n for k in ["wizard", "setup", "enrol", "onboard"]):
+        return "Setup/Onboarding"
+    if any(k in n for k in ["callback", "page", "portal", "render", "drill"]):
+        return "UI/Pages/Callbacks"
+    if any(k in n for k in ["schema", "migration", "db", "config", "conftest", "fixture"]):
+        return "Infra/DB/Fixtures"
+    return "Other"
+
+
 def _discover_tests():
-    """List discoverable test files under the project test/ directory."""
+    """List discoverable test files under the project test/ directory with categories."""
     from pathlib import Path
     root = Path(__file__).resolve().parents[3]  # app/dash_apps/pages/ -> project root
     test_dir = root / "test"
     tests = []
     if test_dir.is_dir():
         for f in sorted(test_dir.glob("test_*.py")):
-            tests.append({"name": f.name, "file": f.name})
+            name = f.name
+            cat = _categorize_test(name)
+            tests.append({"name": name, "file": name, "category": cat})
+    order = [
+        "Plan Mapping (Gold Standard v3/v4)",
+        "Live/Postgres Integration",
+        "Security & Authorization",
+        "Accounting & Ledger",
+        "GST & Tax",
+        "Audit, Compliance & Govt",
+        "Governance & Committee",
+        "Fund & Payments",
+        "Operations & Workflow",
+        "Setup/Onboarding",
+        "UI/Pages/Callbacks",
+        "Infra/DB/Fixtures",
+        "Other",
+    ]
+
+    def key(x):
+        try:
+            return (order.index(x["category"]), x["name"])
+        except ValueError:
+            return (len(order), x["name"])
+
+    tests.sort(key=key)
     return tests
 
 
@@ -785,10 +840,26 @@ def master_tests_page(c) -> html.Div:
     """Master portal Tests tab — list test files with Run buttons + output pane."""
     tests = _discover_tests()
     rows = []
+    current_cat = None
     for t in tests:
+        cat = t.get("category", "Other")
+        if cat != current_cat:
+            current_cat = cat
+            rows.append(
+                html.Tr([
+                    html.Td(
+                        html.Div([
+                            html.I(className="fas fa-folder-open me-2", style={"color": "#c96a19"}),
+                            html.Span(cat, style={"fontSize": "11px", "fontWeight": "700", "color": "#15304f"}),
+                        ]),
+                        colSpan=4,
+                        style={"backgroundColor": "#f8f9fa", "padding": "6px 10px"},
+                    )
+                ])
+            )
         rows.append(
             html.Tr([
-                html.Td(t["name"], style={"fontSize": "12px", "fontWeight": "600", "color": "#15304f"}),
+                html.Td(t["name"], style={"fontSize": "12px", "fontWeight": "600", "color": "#15304f", "paddingLeft": "18px"}),
                 html.Td(t["file"], style={"fontSize": "11px", "color": "#666", "fontFamily": "monospace"}),
                 html.Td(
                     dbc.Button(
