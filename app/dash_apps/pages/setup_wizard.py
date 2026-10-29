@@ -3,6 +3,7 @@ import os
 from dash import html, dcc, Input, Output, State, ALL, callback, no_update
 from app.utils.fiscal import fy_start_date, fy_start_year
 import dash_bootstrap_components as dbc
+from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 from database.db_manager import db
 
 
@@ -740,7 +741,7 @@ def funds_error(plan, sink_rate, repair_rate, project_cost):
             return f"Funds: the {name} rate is below the statutory minimum of {f['min_pct']}% of construction cost per year."
         if f["basis"] == "construction_cost":
             try:
-                ok = float(project_cost or 0) > 0
+                ok = D(project_cost) > 0
             except (TypeError, ValueError):
                 ok = False
             if not ok:
@@ -837,7 +838,7 @@ def apt_charges_error(basis, budget, rate, amt):
         return "Apartment Charges: choose a Maintenance Billing Basis."
     label, key = need
     try:
-        ok = float({"budget": budget, "rate": rate, "amt": amt}[key] or 0) > 0
+        ok = D({"budget": budget, "rate": rate, "amt": amt}[key]) > 0
     except (TypeError, ValueError):
         ok = False
     if not ok:

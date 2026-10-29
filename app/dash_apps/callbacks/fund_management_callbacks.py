@@ -8,6 +8,7 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from app.dash_apps.drilldown import loaders
 from database.db_manager import db
+from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 from app.security.audit_context import get_current_user_role, get_current_user_id, get_current_society_id
 from app.security.guards import require_session
 
@@ -187,7 +188,7 @@ def register_fund_management_callbacks(app):
 
         # ── Phase 1: the write. Only a failure here means nothing was saved.
         try:
-            amount = float(amount)
+            amount = money(amount)
             if amount <= 0:
                 raise ValueError("Amount must be > 0")
 
@@ -309,7 +310,7 @@ def register_fund_management_callbacks(app):
 
         # ── Phase 1: the write. Only a failure here means nothing was saved.
         try:
-            amount = float(amount)
+            amount = money(amount)
             if amount <= 0:
                 raise ValueError("Amount must be > 0")
             result = db._execute(
@@ -525,14 +526,14 @@ def fund_drawable_amount(fb: dict) -> float:
         locked    = round(balance * lock_pct / 100, 2)
         available = max(balance - locked, 0)
     """
-    balance = float(fb.get("balance") or 0)
+    balance = D(fb.get("balance"))
     supplied = fb.get("available_amount")
     if supplied is not None:
-        return float(supplied)
-    locked = float(fb.get("locked_amount") or 0)
-    if not locked and float(fb.get("statutory_lock_pct") or 0):
-        locked = round(balance * float(fb["statutory_lock_pct"]) / 100, 2)
-    return max(balance - locked, 0)
+        return D(supplied)
+    locked = D(fb.get("locked_amount"))
+    if not locked and D(fb.get("statutory_lock_pct")):
+        locked = money(balance * D(fb["statutory_lock_pct"]) / 100)
+    return max(balance - locked, D(0))
 
 
 def build_fund_options(fund_balances):
@@ -548,7 +549,7 @@ def build_fund_options(fund_balances):
     options = []
     for fb in fund_balances:
         acc_id = fb.get("acc_id")
-        balance = float(fb.get("balance") or 0)
+        balance = D(fb.get("balance"))
         if balance <= 0:
             continue
         lock_pct = float(fb.get("statutory_lock_pct") or 0)
@@ -578,9 +579,9 @@ def build_balances_table(fund_balances):
     any_locked = False
     for fb in fund_balances:
         info = resolve_fund_type_info(fb.get("name"))
-        balance = float(fb.get("balance") or 0)
-        lock_pct = float(fb.get("statutory_lock_pct") or 0)
-        locked = float(fb.get("locked_amount") or 0)
+        balance = D(fb.get("balance"))
+        lock_pct = float(fb.get("statutory_lock_pct") or 0)      # a percentage, not a rupee amount
+        locked = D(fb.get("locked_amount"))
         # Headroom, not the gross figure. The column used to be headed
         # "Available Balance" while showing the gross balance, which told an
         # admin the whole Corpus Fund was spendable right up until the
@@ -729,7 +730,7 @@ def build_income_source_options(income_accounts):
     """
     options = []
     for a in (income_accounts or []):
-        bal = float(a.get("balance") or 0)
+        bal = D(a.get("balance"))
         options.append({
             "label": f"{a.get('name')} — ₹{bal:,.2f} available" if bal > 0
                      else f"{a.get('name')} — nothing available yet",

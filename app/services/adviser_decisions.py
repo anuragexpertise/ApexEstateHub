@@ -214,3 +214,19 @@ def sign(society_id: int, kind: str, subject_id: int, user_id: int, role: str, p
         first = str(exc).strip().splitlines()[0] if str(exc).strip() else "could not approve"
         return False, first
     return True, row["m"]
+
+
+# ── who may do what on the screen (Plan v4, C.6) ─────────────────────────────────────────────────────────────────
+def signing_roles(society_id: int, user_id: int | None, db=None) -> list[str]:
+    """'secretary' and/or 'treasurer' when this user is a serving holder of that office today. The database enforces it
+    again on every approval; this only decides what the screen offers."""
+    if not user_id:
+        return []
+    from app.services import document_signing as ds
+    held = {o["office_code"] for o in ds.serving_offices(society_id, user_id, db=_db(db))}
+    return [r for r in ROLES if r in held]
+
+
+def may_prepare(society_id: int, user_id: int | None, role: str | None, db=None) -> bool:
+    """The society's administrator and its serving Secretary or Treasurer fill in the adviser's reference and PDF."""
+    return bool(user_id) and (role == "admin" or bool(signing_roles(society_id, user_id, db)))
