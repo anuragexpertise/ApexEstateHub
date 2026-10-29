@@ -63,6 +63,7 @@ On a **test** copy, try to alter a posted entry (`UPDATE transactions SET amount
 - **Not a return filer.** No income-tax computation, no return, no TRACES filing, no GST return. Exports are working papers for the CA.
 - **Section 80P / 80AC, Form 26AS reconciliation and e-invoicing are not built.** The mutuality summary does not apportion common expenses, and takes no account of depreciation or carried-forward losses.
 - **Not yet DPDP Act, 2023 compliant.** There is no consent record, erasure or retention workflow, or breach procedure (see §6).
+- **Not independently assured, and not "audit-grade".** No external CA review, advocate opinion per rule, or penetration test has been recorded (plan tasks 5.1 to 5.3). See [`docs/PHASE5_ASSURANCE.md`](docs/PHASE5_ASSURANCE.md).
 - **Provisional citations stay provisional** until an advocate confirms each against the gazette text.
 - **Some inputs are still typed by people.** The attendance register is keyed in by the Secretary, and Managing Committee decisions rest on the minutes. TDS rates and thresholds must be re-confirmed by the CA each year.
 - **A database owner holding the signing key is outside these controls.** Against anyone with the owner login alone, the signed and filed anchors catch a rewrite, but only up to the last anchor, so anchoring must be scheduled and the application deployed on its restricted login. The repository does neither for you.
@@ -180,6 +181,7 @@ Everything below is produced from the ledger on demand. It is not re-keyed, so t
 | **Owner loans (bye-law 3(1)(f))** | ✅ | `fn_disburse_owner_loan`, `fn_repay_owner_loan` | A **passed General Body resolution is mandatory**; the cash limit applies. |
 | **Rule-Application Register; signed per-FY Compliance Certificate** | ⬜ | Not built. The review recommends an export linking each posting to the rule key, layer, decision, resolution number, advocate-opinion reference and effective dates, and a signed snapshot per financial year. | |
 | **Member-wise ledger / Form 26AS match** | 🟡 / ⬜ | Receivables and payment history are available in the apartment profile and the account ledger. 26AS match: not built (see §2). | |
+| **Independent assurance (plan 5.1 to 5.4): CA review, advocate opinions per rule, penetration test, per-release check of the Income-tax Act 2025 transition and the July 2026 IFMS amendment** | 🟡 | `assurance_engagements`, `assurance_findings`, `rule_opinion_references`, `release_verifications`, `app/services/assurance.py`, `scripts/release_check.py`, [`docs/PHASE5_ASSURANCE.md`](docs/PHASE5_ASSURANCE.md) | The records and gates are built and tested; **no review, opinion or penetration test has been done yet**, so all of it is provisional. `fn_assurance_label()` says so, and "audit-grade" may be used only when `scripts/release_check.py status` exits 0. A stored reference proves a document was filed, not that it is sound. |
 
 ---
 

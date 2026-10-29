@@ -21203,3 +21203,314 @@ BEGIN
 END $$;
 CREATE TRIGGER trg_transactions_a_source_voucher BEFORE INSERT ON transactions
     FOR EACH ROW EXECUTE FUNCTION trg_transactions_source_voucher();
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Phase 5 (Plan v4): independent assurance - tasks 5.1 to 5.4
+-- ════════════════════════════════════════════════════════════════════════════
+-- This code cannot BE assurance: a review, an opinion or a penetration test is done by people outside this
+-- repository. What lives here is the record that proves it happened, and the rules that stop anyone from saying
+-- "audit-grade" before it did. Everything stays PROVISIONAL until the evidence is stored:
+--   5.1 / 5.3  assurance_engagements + assurance_findings (a report hash, every finding closed or accepted in writing,
+--              and for 5.3 a passed retest). The reviewer must declare independence. [Verify the credential
+--              (ICAI membership no., CERT-In empanelment or similar) with the person engaging the reviewer.]
+--   5.2        rule_opinion_references: one stored advocate/CA opinion per rule pack row and per bye-law decision type.
+--   5.4        release_verifications: a dated check of the Income-tax Act 2025 transition and the July 2026 IFMS
+--              amendment, recorded per release. Reading a notification is NOT a legal opinion, so a record without an
+--              adviser's reference is flagged provisional.
+-- Limit stated plainly: the database checks that a reference, a document hash and a date were stored. It cannot judge
+-- whether an opinion or a report is any good. A stored reference is evidence for a human to check, not a verdict.
+
+CREATE TABLE assurance_engagements (
+    id                    SERIAL PRIMARY KEY,
+    task                  VARCHAR(3) NOT NULL CHECK (task IN ('5.1', '5.2', '5.3')),
+    title                 VARCHAR(200) NOT NULL,
+    scope                 TEXT NOT NULL CHECK (LENGTH(TRIM(scope)) >= 20),
+    reviewed_commit       VARCHAR(40),
+    reviewer_name         VARCHAR(120),
+    reviewer_firm         VARCHAR(160),
+    reviewer_credential   VARCHAR(120),         -- e.g. ICAI membership no.; Bar enrolment no.; testing-body empanelment
+    independence_declared BOOLEAN NOT NULL DEFAULT FALSE,   -- reviewer states they did not build or operate this system
+    status                VARCHAR(16) NOT NULL DEFAULT 'planned'
+                          CHECK (status IN ('planned', 'in_progress', 'report_received', 'closed', 'withdrawn')),
+    engaged_on            DATE,
+    report_received_on    DATE,
+    report_ref            VARCHAR(100),
+    report_sha256         CHAR(64),
+    retest_passed_on      DATE,                 -- 5.3 only
+    closed_on             DATE,
+    closed_by             INT REFERENCES users (id) ON DELETE SET NULL,
+    note                  TEXT,
+    created_at            TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_assurance_retest_only_53 CHECK (retest_passed_on IS NULL OR task = '5.3'),
+    CONSTRAINT ck_assurance_hash_shape CHECK (report_sha256 IS NULL OR report_sha256 ~ '^[0-9a-f]{64}$')
+);
+CREATE INDEX idx_assurance_engagements_task ON assurance_engagements (task, status);
+
+CREATE TABLE assurance_findings (
+    id              SERIAL PRIMARY KEY,
+    engagement_id   INT NOT NULL REFERENCES assurance_engagements (id) ON DELETE RESTRICT,
+    ref             VARCHAR(30) NOT NULL,       -- the reviewer's own number for the finding
+    severity        VARCHAR(8) NOT NULL CHECK (severity IN ('critical', 'high', 'medium', 'low', 'info')),
+    title           VARCHAR(200) NOT NULL,
+    detail          TEXT,
+    status          VARCHAR(8) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed', 'accepted')),
+    closure_ref     VARCHAR(200),               -- commit, change or evidence that fixed it
+    closed_on       DATE,
+    accepted_ref    VARCHAR(100),               -- reference of the written acceptance (5.1 only)
+    accepted_by     VARCHAR(120),
+    accepted_on     DATE,
+    retest_result   VARCHAR(4) CHECK (retest_result IN ('pass', 'fail')),
+    retested_on     DATE,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (engagement_id, ref)
+);
+
+-- One stored opinion per rule-pack row or bye-law decision type. conclusion = 'disputes' is stored (it is evidence)
+-- but does NOT count as covering the rule.
+CREATE TABLE rule_opinion_references (
+    id               SERIAL PRIMARY KEY,
+    subject_kind     VARCHAR(13) NOT NULL CHECK (subject_kind IN ('rule', 'decision_type')),
+    regime_code      VARCHAR(30),                -- rule rows only
+    subject_key      VARCHAR(40) NOT NULL,       -- rule_parameter_defs.rule_key or decision_types.code
+    adviser_kind     VARCHAR(10) NOT NULL CHECK (adviser_kind IN ('Advocate', 'CA')),
+    adviser_name     VARCHAR(120) NOT NULL,
+    opinion_ref      VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(opinion_ref)) >= 5),
+    opinion_date     DATE NOT NULL CHECK (opinion_date <= CURRENT_DATE),
+    document_sha256  CHAR(64) NOT NULL CHECK (document_sha256 ~ '^[0-9a-f]{64}$'),
+    conclusion       VARCHAR(20) NOT NULL CHECK (conclusion IN ('confirms', 'confirms_with_change', 'disputes')),
+    covers           TEXT NOT NULL CHECK (LENGTH(TRIM(covers)) >= 10),   -- what the opinion says about THIS rule
+    recorded_by      INT REFERENCES users (id) ON DELETE SET NULL,
+    recorded_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    status           VARCHAR(10) NOT NULL DEFAULT 'current' CHECK (status IN ('current', 'superseded', 'withdrawn')),
+    CONSTRAINT ck_rule_opinion_regime CHECK ((subject_kind = 'rule') = (regime_code IS NOT NULL))
+);
+CREATE UNIQUE INDEX uq_rule_opinion_current
+    ON rule_opinion_references (subject_kind, COALESCE(regime_code, ''), subject_key) WHERE status = 'current';
+
+CREATE TABLE release_verifications (
+    id                  SERIAL PRIMARY KEY,
+    release_tag         VARCHAR(60) NOT NULL CHECK (LENGTH(TRIM(release_tag)) >= 1),
+    item                VARCHAR(30) NOT NULL CHECK (item IN ('it_act_2025_transition', 'ifms_july_2026_amendment')),
+    checked_on          DATE NOT NULL CHECK (checked_on <= CURRENT_DATE),
+    checked_by          INT REFERENCES users (id) ON DELETE SET NULL,
+    source_ref          TEXT NOT NULL CHECK (LENGTH(TRIM(source_ref)) >= 10),   -- the notification / section text actually read
+    outcome             VARCHAR(13) NOT NULL CHECK (outcome IN ('no_change', 'rules_updated', 'blocked')),
+    rules_touched       TEXT[] NOT NULL DEFAULT '{}',
+    adviser_opinion_ref VARCHAR(100),           -- NULL = engineer's reading only: the record is provisional
+    note                TEXT,
+    recorded_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_release_rules_touched CHECK (outcome <> 'rules_updated' OR cardinality(rules_touched) > 0)
+);
+CREATE INDEX idx_release_verifications_tag ON release_verifications (release_tag, item, checked_on DESC);
+
+-- ── guards ─────────────────────────────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION fn_rule_covered(p_kind TEXT, p_regime TEXT, p_key TEXT) RETURNS BOOLEAN
+LANGUAGE sql STABLE AS $$
+    SELECT EXISTS (SELECT 1 FROM rule_opinion_references o
+                   WHERE o.subject_kind = p_kind AND COALESCE(o.regime_code, '') = COALESCE(p_regime, '')
+                     AND o.subject_key = p_key AND o.status = 'current' AND o.conclusion <> 'disputes');
+$$;
+
+-- Everything 5.2 must cover: the platform's rule pack rows and the decision types (bye-law figures).
+CREATE OR REPLACE VIEW v_rule_assurance AS
+SELECT 'rule'::TEXT AS subject_kind, d.regime_code, d.rule_key AS subject_key, d.verification,
+       o.opinion_ref, o.adviser_kind, o.opinion_date, o.conclusion,
+       CASE WHEN o.id IS NULL THEN 'provisional: no opinion on file'
+            WHEN o.conclusion = 'disputes' THEN 'provisional: opinion disputes the rule'
+            ELSE 'opinion on file' END AS assurance_state,
+       fn_rule_covered('rule', d.regime_code, d.rule_key) AS covered
+  FROM rule_parameter_defs d
+  LEFT JOIN rule_opinion_references o ON o.subject_kind = 'rule' AND o.regime_code = d.regime_code
+       AND o.subject_key = d.rule_key AND o.status = 'current'
+ WHERE d.society_id IS NULL
+UNION ALL
+SELECT 'decision_type', NULL, t.code, t.verification,
+       o.opinion_ref, o.adviser_kind, o.opinion_date, o.conclusion,
+       CASE WHEN o.id IS NULL THEN 'provisional: no opinion on file'
+            WHEN o.conclusion = 'disputes' THEN 'provisional: opinion disputes the rule'
+            ELSE 'opinion on file' END,
+       fn_rule_covered('decision_type', NULL, t.code)
+  FROM decision_types t
+  LEFT JOIN rule_opinion_references o ON o.subject_kind = 'decision_type' AND o.subject_key = t.code AND o.status = 'current';
+
+CREATE OR REPLACE FUNCTION trg_rule_opinion_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'A stored opinion cannot be deleted; supersede or withdraw it.'; END IF;
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.subject_kind = 'rule' THEN
+            IF NOT EXISTS (SELECT 1 FROM rule_parameter_defs WHERE society_id IS NULL AND regime_code = NEW.regime_code AND rule_key = NEW.subject_key) THEN
+                RAISE EXCEPTION 'No platform rule % / % exists to attach an opinion to.', NEW.regime_code, NEW.subject_key;
+            END IF;
+        ELSIF NOT EXISTS (SELECT 1 FROM decision_types WHERE code = NEW.subject_key) THEN
+            RAISE EXCEPTION 'No decision type % exists to attach an opinion to.', NEW.subject_key;
+        END IF;
+        -- A new current opinion retires the old one in the same statement; the history stays.
+        IF NEW.status = 'current' THEN
+            UPDATE rule_opinion_references SET status = 'superseded'
+             WHERE subject_kind = NEW.subject_kind AND COALESCE(regime_code, '') = COALESCE(NEW.regime_code, '')
+               AND subject_key = NEW.subject_key AND status = 'current';
+        END IF;
+        INSERT INTO audit_events (actor_id, action, resource_type, resource_id, after_value, source)
+        VALUES (NEW.recorded_by, 'RULE_OPINION_RECORDED', 'rule_opinion_references',
+                NEW.subject_kind || ':' || COALESCE(NEW.regime_code || '/', '') || NEW.subject_key,
+                jsonb_build_object('opinion_ref', NEW.opinion_ref, 'adviser_kind', NEW.adviser_kind, 'conclusion', NEW.conclusion,
+                                   'document_sha256', NEW.document_sha256), 'app');
+        RETURN NEW;
+    END IF;
+    -- UPDATE: only the status may move, and never back to current.
+    IF ROW(NEW.subject_kind, NEW.regime_code, NEW.subject_key, NEW.adviser_kind, NEW.adviser_name, NEW.opinion_ref, NEW.opinion_date,
+           NEW.document_sha256, NEW.conclusion, NEW.covers, NEW.recorded_by, NEW.recorded_at)
+       IS DISTINCT FROM ROW(OLD.subject_kind, OLD.regime_code, OLD.subject_key, OLD.adviser_kind, OLD.adviser_name, OLD.opinion_ref, OLD.opinion_date,
+           OLD.document_sha256, OLD.conclusion, OLD.covers, OLD.recorded_by, OLD.recorded_at) THEN
+        RAISE EXCEPTION 'A stored opinion cannot be edited; record a new one.';
+    END IF;
+    IF OLD.status <> 'current' AND NEW.status = 'current' THEN RAISE EXCEPTION 'A superseded or withdrawn opinion cannot be made current again.'; END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_rule_opinion_guard BEFORE INSERT OR UPDATE OR DELETE ON rule_opinion_references
+    FOR EACH ROW EXECUTE FUNCTION trg_rule_opinion_guard();
+
+CREATE OR REPLACE FUNCTION trg_assurance_finding_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_eng assurance_engagements%ROWTYPE;
+BEGIN
+    IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'A finding cannot be deleted; it is part of the report.'; END IF;
+    SELECT * INTO v_eng FROM assurance_engagements WHERE id = NEW.engagement_id;
+    IF v_eng.status IN ('closed', 'withdrawn') THEN
+        RAISE EXCEPTION 'Engagement % is % and its findings are fixed.', v_eng.id, v_eng.status;
+    END IF;
+    IF v_eng.task = '5.2' THEN RAISE EXCEPTION 'Task 5.2 is closed by stored opinions, not by findings.'; END IF;
+    IF TG_OP = 'UPDATE' AND (NEW.ref IS DISTINCT FROM OLD.ref OR NEW.severity IS DISTINCT FROM OLD.severity
+                             OR NEW.title IS DISTINCT FROM OLD.title OR NEW.engagement_id IS DISTINCT FROM OLD.engagement_id) THEN
+        RAISE EXCEPTION 'A finding''s reference, severity and title come from the report and cannot be edited.';
+    END IF;
+    IF NEW.status = 'closed' THEN
+        IF LENGTH(COALESCE(TRIM(NEW.closure_ref), '')) < 5 OR NEW.closed_on IS NULL THEN
+            RAISE EXCEPTION 'Closing finding % needs the fix reference (commit or evidence) and the date.', NEW.ref;
+        END IF;
+    ELSIF NEW.status = 'accepted' THEN
+        IF v_eng.task = '5.3' THEN
+            RAISE EXCEPTION 'Penetration-test finding % must be fixed and retested; it cannot be accepted.', NEW.ref;
+        END IF;
+        IF LENGTH(COALESCE(TRIM(NEW.accepted_ref), '')) < 5 OR LENGTH(COALESCE(TRIM(NEW.accepted_by), '')) < 3 OR NEW.accepted_on IS NULL THEN
+            RAISE EXCEPTION 'Accepting finding % needs the written-acceptance reference, who accepted it and the date.', NEW.ref;
+        END IF;
+    END IF;
+    IF NEW.retest_result IS NOT NULL AND (v_eng.task <> '5.3' OR NEW.status <> 'closed' OR NEW.retested_on IS NULL) THEN
+        RAISE EXCEPTION 'A retest result belongs to a closed penetration-test finding and needs the retest date.';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_assurance_finding_guard BEFORE INSERT OR UPDATE OR DELETE ON assurance_findings
+    FOR EACH ROW EXECUTE FUNCTION trg_assurance_finding_guard();
+
+CREATE OR REPLACE FUNCTION trg_assurance_engagement_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_open INT; v_not_retested INT; v_uncovered INT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'An assurance engagement cannot be deleted; withdraw it instead.'; END IF;
+    IF TG_OP = 'UPDATE' THEN
+        IF OLD.status IN ('closed', 'withdrawn') THEN
+            IF NEW IS DISTINCT FROM OLD THEN RAISE EXCEPTION 'Engagement % is % and cannot be changed.', OLD.id, OLD.status; END IF;
+            RETURN NEW;
+        END IF;
+        IF NEW.task IS DISTINCT FROM OLD.task THEN RAISE EXCEPTION 'The task of an engagement cannot change.'; END IF;
+    END IF;
+    IF NEW.status IN ('in_progress', 'report_received', 'closed') THEN
+        IF LENGTH(COALESCE(TRIM(NEW.reviewer_name), '')) < 3 OR LENGTH(COALESCE(TRIM(NEW.reviewer_credential), '')) < 3 OR NEW.engaged_on IS NULL THEN
+            RAISE EXCEPTION 'An engagement under way needs the reviewer''s name and credential and the date engaged.';
+        END IF;
+    END IF;
+    -- 5.2 has no report file: its evidence is the stored opinions, one per rule.
+    IF NEW.task <> '5.2' AND NEW.status IN ('report_received', 'closed') THEN
+        IF LENGTH(COALESCE(TRIM(NEW.report_ref), '')) < 5 OR NEW.report_sha256 IS NULL OR NEW.report_received_on IS NULL THEN
+            RAISE EXCEPTION 'The report needs its reference, its date and the SHA-256 of the report file before it is recorded as received.';
+        END IF;
+    END IF;
+    IF NEW.status = 'closed' THEN
+        IF NEW.task <> '5.2' AND NOT NEW.independence_declared THEN
+            RAISE EXCEPTION 'The reviewer must declare independence (not a builder or operator of this system) before the engagement is closed.';
+        END IF;
+        IF NEW.closed_on IS NULL THEN RAISE EXCEPTION 'Closing needs the closing date.'; END IF;
+        IF NEW.task = '5.2' THEN
+            SELECT COUNT(*) INTO v_uncovered FROM v_rule_assurance WHERE NOT covered;
+            IF v_uncovered > 0 THEN
+                RAISE EXCEPTION 'Task 5.2 cannot close: % rule(s) or decision type(s) still have no stored opinion that covers them (see v_rule_assurance).', v_uncovered;
+            END IF;
+        ELSE
+            SELECT COUNT(*) INTO v_open FROM assurance_findings WHERE engagement_id = NEW.id AND status = 'open';
+            IF v_open > 0 THEN RAISE EXCEPTION '% finding(s) are still open; close each, or accept it in writing (5.1 only).', v_open; END IF;
+            IF NEW.task = '5.3' THEN
+                IF NEW.retest_passed_on IS NULL OR NEW.retest_passed_on < NEW.report_received_on THEN
+                    RAISE EXCEPTION 'Task 5.3 needs a passed retest dated on or after the report.';
+                END IF;
+                SELECT COUNT(*) INTO v_not_retested FROM assurance_findings
+                 WHERE engagement_id = NEW.id AND severity <> 'info' AND COALESCE(retest_result, 'fail') <> 'pass';
+                IF v_not_retested > 0 THEN
+                    RAISE EXCEPTION '% finding(s) have not passed the retest.', v_not_retested;
+                END IF;
+            END IF;
+        END IF;
+    END IF;
+    IF NEW.status <> 'planned' AND (TG_OP = 'INSERT' OR NEW.status IS DISTINCT FROM OLD.status) THEN
+        INSERT INTO audit_events (actor_id, action, resource_type, resource_id, after_value, source)
+        VALUES (NEW.closed_by, 'ASSURANCE_' || UPPER(NEW.status), 'assurance_engagements', NEW.id::TEXT,
+                jsonb_build_object('task', NEW.task, 'reviewer', NEW.reviewer_name, 'report_ref', NEW.report_ref,
+                                   'report_sha256', NEW.report_sha256), 'app');
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_assurance_engagement_guard BEFORE INSERT OR UPDATE OR DELETE ON assurance_engagements
+    FOR EACH ROW EXECUTE FUNCTION trg_assurance_engagement_guard();
+
+CREATE OR REPLACE FUNCTION trg_release_verification_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP <> 'INSERT' THEN RAISE EXCEPTION 'A release verification is a dated record; add a new one instead of changing it.'; END IF;
+    INSERT INTO audit_events (actor_id, action, resource_type, resource_id, after_value, source)
+    VALUES (NEW.checked_by, 'RELEASE_VERIFIED', 'release_verifications', NEW.release_tag || ':' || NEW.item,
+            jsonb_build_object('outcome', NEW.outcome, 'checked_on', NEW.checked_on, 'adviser_opinion_ref', NEW.adviser_opinion_ref), 'app');
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_release_verification_guard BEFORE INSERT OR UPDATE OR DELETE ON release_verifications
+    FOR EACH ROW EXECUTE FUNCTION trg_release_verification_guard();
+
+-- ── status and gates ───────────────────────────────────────────────────────────────────────────────────────────
+-- One row per independent task. 5.2 is judged live: a rule added after the engagement closed, with no opinion, un-satisfies it.
+CREATE OR REPLACE VIEW v_assurance_status AS
+SELECT t.task,
+       CASE t.task WHEN '5.1' THEN 'External CA review of the books engine and statements'
+                   WHEN '5.2' THEN 'Advocate review of rule packs and bye-law figures'
+                   ELSE 'Penetration test (key vault and verification pages in scope)' END AS label,
+       (e.id IS NOT NULL AND (t.task <> '5.2' OR NOT EXISTS (SELECT 1 FROM v_rule_assurance WHERE NOT covered))) AS satisfied,
+       e.id AS engagement_id, e.reviewer_name, e.reviewed_commit, e.report_ref, e.closed_on
+  FROM (VALUES ('5.1'), ('5.2'), ('5.3')) AS t (task)
+  LEFT JOIN LATERAL (SELECT * FROM assurance_engagements x WHERE x.task = t.task AND x.status = 'closed'
+                      ORDER BY x.closed_on DESC, x.id DESC LIMIT 1) e ON TRUE;
+
+-- "Audit-grade" may be said only after 5.1 to 5.3 are all satisfied. 5.4 is a per-release check, not a one-off.
+CREATE OR REPLACE FUNCTION fn_audit_grade_claim_allowed() RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
+    SELECT NOT EXISTS (SELECT 1 FROM v_assurance_status WHERE NOT satisfied);
+$$;
+
+CREATE OR REPLACE FUNCTION fn_assurance_label() RETURNS TEXT LANGUAGE sql STABLE AS $$
+    SELECT CASE WHEN fn_audit_grade_claim_allowed() THEN 'Independently assured (tasks 5.1 to 5.3 complete)'
+                ELSE 'Provisional: independent assurance incomplete (' ||
+                     (SELECT string_agg(task, ', ' ORDER BY task) FROM v_assurance_status WHERE NOT satisfied) || ' outstanding)' END;
+$$;
+
+-- Release gate (5.4). One row per item for the tag: ok = checked within p_max_age_days before today, outcome not 'blocked'.
+-- provisional = no adviser reference on that record. The newest record for the item wins.
+CREATE OR REPLACE FUNCTION fn_release_gate(p_tag TEXT, p_max_age_days INT DEFAULT 30)
+RETURNS TABLE (item TEXT, ok BOOLEAN, checked_on DATE, outcome TEXT, provisional BOOLEAN, reason TEXT)
+LANGUAGE sql STABLE AS $$
+    SELECT i.item,
+           (r.id IS NOT NULL AND r.outcome <> 'blocked' AND r.checked_on >= CURRENT_DATE - p_max_age_days),
+           r.checked_on, r.outcome::TEXT,
+           (r.id IS NULL OR r.adviser_opinion_ref IS NULL),
+           CASE WHEN r.id IS NULL THEN 'no check recorded for this release'
+                WHEN r.outcome = 'blocked' THEN 'last check found a blocking change'
+                WHEN r.checked_on < CURRENT_DATE - p_max_age_days THEN 'check is older than ' || p_max_age_days || ' days'
+                ELSE NULL END
+      FROM (VALUES ('it_act_2025_transition'), ('ifms_july_2026_amendment')) AS i (item)
+      LEFT JOIN LATERAL (SELECT * FROM release_verifications v WHERE v.release_tag = p_tag AND v.item = i.item
+                          ORDER BY v.checked_on DESC, v.id DESC LIMIT 1) r ON TRUE;
+$$;
