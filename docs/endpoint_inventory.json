@@ -2372,6 +2372,114 @@
     "public": false
   },
   {
+    "id": "callback:itc_callbacks.py::_compute",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/itc_callbacks.py",
+    "function": "_compute",
+    "line": 172,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "itc-compute-msg"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:itc_callbacks.py::_confirm",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/itc_callbacks.py",
+    "function": "_confirm",
+    "line": 153,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "itc-ca-msg"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:itc_callbacks.py::_csv",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/itc_callbacks.py",
+    "function": "_csv",
+    "line": 239,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "itc-csv"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:itc_callbacks.py::_discard",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/itc_callbacks.py",
+    "function": "_discard",
+    "line": 208,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:itc_callbacks.py::_post",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/itc_callbacks.py",
+    "function": "_post",
+    "line": 191,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:itc_callbacks.py::_reverse",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/itc_callbacks.py",
+    "function": "_reverse",
+    "line": 226,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:list_inspector_callbacks.py::export_list_sql",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/list_inspector_callbacks.py",

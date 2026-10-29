@@ -35,6 +35,21 @@ def _is_admin(d, society_id, user_id) -> bool:
     return u.get("role") == "admin"
 
 
+def may_act(society_id, user_id, db=None) -> bool:
+    """Who may compute, post, reverse or discard: the administrator, or a serving office-bearer."""
+    return bool(user_id and society_id and _may_act(_db(db), society_id, user_id))
+
+
+def is_admin(society_id, user_id, db=None) -> bool:
+    """Only the administrator records the CA's confirmation."""
+    return bool(user_id and society_id and _is_admin(_db(db), society_id, user_id))
+
+
+def accounts(society_id, db=None) -> list[dict]:
+    """The society's accounts, for the CA's choice of the two journal accounts."""
+    return _db(db)._execute("SELECT id, name FROM accounts WHERE society_id=%s ORDER BY name, id", (society_id,), fetch_all=True) or []
+
+
 def _clean(exc) -> str:
     msg = str(exc).split("\n")[0].replace("ERROR:", "").strip()
     if "uq_itc_register_live" in msg:
@@ -154,3 +169,20 @@ def register(society_id, fy=None, db=None) -> list[dict]:
         """SELECT * FROM itc_reversal_register WHERE society_id=%s AND (%s::INT IS NULL OR financial_year=%s)
             ORDER BY financial_year DESC, tax_head, kind DESC, period_start NULLS LAST, id""",
         (society_id, fy, fy), fetch_all=True) or []
+
+
+_CSV_COLUMNS = ("id", "financial_year", "tax_head", "kind", "period_start", "period_end", "t_total", "t1_non_business", "t2_exempt_only",
+                "t3_blocked", "t4_taxable_only", "e_exempt_value", "f_total_turnover", "nonbusiness_pct", "c1", "c2", "d1", "d2",
+                "reversal", "already_reversed", "net_amount", "formula_status", "status", "journal_id", "reversal_journal_id", "basis")
+
+
+def export_csv(society_id, fy=None, db=None) -> str:
+    """The register as CSV for the CA: every step of every row, with its basis and status."""
+    import csv
+    import io
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(_CSV_COLUMNS)
+    for r in register(society_id, fy, db=db):
+        w.writerow(["" if r.get(c) is None else r.get(c) for c in _CSV_COLUMNS])
+    return out.getvalue()

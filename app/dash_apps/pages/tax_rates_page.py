@@ -172,6 +172,13 @@ def tax_rates_tab(role: str, society_id: int | None):
     if not can_edit and role != "admin":
         return None
     out = [html.Div(id=f"{P}-toast"), html.Div(tax_rates_body(society_id, can_edit), id=f"{P}-body")]
+    from app.dash_apps.callbacks.itc_callbacks import itc_section          # task 1.7: only for those who may act
+    try:
+        itc_part = itc_section(society_id)
+    except Exception as exc:                                               # noqa: BLE001  (never stop the rates tab loading)
+        itc_part = html.Div(f"ITC reversal register unavailable: {exc}", style={**_MUTED, "color": "#b02a37"})
+    if itc_part is not None:
+        out.append(itc_part)
     if role == "admin" and not can_edit:
         out.insert(0, html.Div("Read-only. You enter the first figures in the Setup Wizard; after setup the CA, the "
                                "Treasurer (or the Secretary when no Treasurer is seated) edit and confirm them.",

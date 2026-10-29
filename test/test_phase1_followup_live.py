@@ -605,3 +605,17 @@ def test_itc_service_end_to_end_through_a_real_cursor(cur, svc, monkeypatch):
     assert row["status"] == "posted" and row["reversal"] == 15000 and row["formula_status"] == "confirmed"
     assert itc.reverse(SOC, uid, rid, "wrong turnover", db=db) is not None
     assert [r for r in itc.register(SOC, FY, db=db) if r["id"] == rid][0]["status"] == "reversed"
+
+
+def test_itc_csv_of_real_rows_carries_the_oracle_figures(cur, svc):
+    import csv
+    import io
+    from app.services import itc_reversal_service as itc
+    db, uid = _CursorDB(cur), _admin_id(cur)
+    rid = itc.compute(SOC, uid, "period", FY, "cgst", 200000, 0, 50000, 10000, 50000, 200000, 1200000, "GSTR-2B, \"turnover\" worksheet",
+                      period_start=date(FY, 4, 1), period_end=date(FY, 4, 30), db=db)
+    rows = list(csv.DictReader(io.StringIO(itc.export_csv(SOC, FY, db=db))))
+    r = [x for x in rows if x["id"] == str(rid)][0]
+    assert (r["c1"], r["c2"], r["d1"], r["d2"], r["reversal"], r["net_amount"]) == ("140000.00", "90000.00", "15000.00", "0.00", "15000.00", "15000.00")
+    assert r["status"] == "draft" and r["formula_status"] == "provisional" and r["basis"] == 'GSTR-2B, "turnover" worksheet' and r["journal_id"] == ""
+    assert itc.export_csv(SOC, FY + 50, db=db).strip().count("\n") == 0        # another year: header only
