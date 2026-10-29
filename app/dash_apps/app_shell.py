@@ -259,9 +259,10 @@ def _sidebar() -> html.Aside:
             html.Nav(
                 html.Ul(
                     id="sb-nav-list",
-                    style={"listStyle": "none", "margin": "0", "padding": "10px 8px"},
+                    style={"listStyle": "none", "margin": "0", "padding": "10px 8px 120px"},
                     children=[],
-                )
+                ),
+                style={"flex": "1", "overflowY": "auto", "overflowX": "hidden", "minHeight": "0"},
             ),
             html.Div(
                 [
@@ -322,6 +323,7 @@ def _sidebar() -> html.Aside:
         ],
         id="app-sidebar",
         className="app-sidebar",
+        style={"display": "flex", "flexDirection": "column", "overflow": "hidden"},
     )
 
 
