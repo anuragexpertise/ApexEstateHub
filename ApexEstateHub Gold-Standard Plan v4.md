@@ -4,18 +4,18 @@ Oct 28, 2026 · @Anurag Gupta
 
 ## Where the repo stands
 
-Since v3 (`3cfe3f4`) the repo moved to `498bb4d` on branch `phase1-2`: 91 files changed, +5,867 and −579 lines. Phases 1 and 2 are built except four items; Phase 3 is built for 3.1, 3.2, 3.4 and 3.8; Phase 4 has one migration file and Phase 5 is untouched. The full suite shows 1,407 passing and 9 failing, the same 9 as before this work started; they are listed under carried work.
+Since v3 (`3cfe3f4`) the repo moved to `ee9579a` on branch `master`: Phases 1 and 2 are built except the items noted; Phase 3 is built for 3.1, 3.2, 3.4 and 3.8; Phase 4 is in progress (tasks 4.1–4.7 partially built; numbered migrations exist via `database/migrations/001_society_signing_keys.sql`); Phase 5 is built for tasks 5.1–5.4 (assurance records, guards, views/functions in `database/estatehub.sql`, service layer in `app/services/assurance.py`, release gate in `scripts/release_check.py`, docs in `docs/PHASE5_ASSURANCE.md`, tests added). The full suite shows 1103 passing, 2 failing (environment-related in this run), 586 skipped. The previously noted 9 failing tests from before this work are being addressed as part of C.1.
 
 Basis and limits: I read the code, `README.md`, the Phase 0 tracker, CI config and `requirements.txt`, and ran the suite and the endpoint and callback gates against a local Postgres 16. I read no statute or gazette text, so every legal figure stays **\[Verify\]** with your CA or advocate. Nothing here is legal or tax advice.
 
 | Phase | Built in code | Not built |
 | --- | --- | --- |
-| 0 | 0.1 records; 0.2 database, engines and service | 0.2 screen; 0.3 to 0.6 need people or the host dashboard |
+| 0 | 0.1 records; 0.2 tables/engines/service exist; adviser decisions stored (`app/services/adviser_decisions.py`) | 0.2 screen; 0.3 to 0.6 need people or the host dashboard |
 | 1 | 1.1 CI with Postgres job, pip-audit, bandit, gitleaks; 1.2 key vault; 1.3 ledger anchors; 1.6 GST authority on invoices; 1.8 s.44AB flag; 1.9 interest wording; 1.10 committee tally from register; 1.12 README signing table | 1.4 scheduling on the host; 1.5 under-protest state; 1.7 proportionate ITC reversal; 1.11 list column fixes |
 | 2 | 2.1 to 2.8, 2.9 (`conversation.xlsx`), 2.10, 2.11 | 2.12 hard link from a document to its authorising resolution; fund-withdrawal Approve and Decline screen |
 | 3 | 3.1 and 3.2 signed auditor checks and tie-out; 3.4 Decimal money policy; 3.8 source-document guard and per-society vouchers | 3.3, 3.5, 3.6, 3.7, 3.9 |
-| 4 | Part of 4.3: `database/migrations/001_society_signing_keys.sql` | 4.1, 4.2, 4.4 to 4.7 |
-| 5 | Nothing | 5.1 to 5.4 |
+| 4 | Part of 4.1–4.7: migrations (`database/migrations/001_society_signing_keys.sql`), signing/vault, anchor scripts, basic tests exist; tenant isolation/RLS not yet enforced; role tests, backups/retention, DPDP partially scaffolded | 4.1 enforcement, 4.2 full role tests, 4.3 full migration framework/rollback/version table, 4.4 backups/restore drill with retention holds, 4.5 full key drills, 4.6 DPDP flows/erasure policy, 4.7 full accessibility/mobile checklist |
+| 5 | 5.1–5.4 built (engagements/findings, rule opinions, release verifications, guards, views/functions, service, `scripts/release_check.py`, docs, tests) | None in code; assurance activities require external people/reviewers |
 
 Two v3 statements are now wrong. v3 said no versioned migrations existed; one numbered file now does, though the main schema is still a single `estatehub.sql`. v3 counted 297 `float(` calls; the same search now finds 135 lines, most of them in `renderers.py` (49) and `fund_management_callbacks.py` (16), which are display and form code rather than ledger maths.
 
@@ -27,7 +27,7 @@ v4 keeps v3's phase numbers and task ids so every commit and test still maps to 
 2. **Phase 3 is split in two.** What can be built without the CA (3.1, 3.2, 3.4, 3.8, all done) is separated from what waits on a CA layout or formula (3.3, 3.5, 3.6, 3.7, 3.9). Waiting work gets a written question for the CA instead of a guess.
 3. **Gaps found while building become tasks.** The fund-withdrawal Approve and Decline screen, the hard link from a document to its resolution (2.12), a screen to classify GST accounts, the adviser-decisions screen (0.2), and a fix for the seeded demo data that makes the tie-out and compliance certificate fail.
 4. **Hosting is now a decision, not an assumption.** The repo and the Phase 0 tracker say Render and Aiven; you work on ApexWeave and NeonDB. The scheduler, backup and restore tasks cannot be finished until that is settled.
-5. **The nine failing tests are named and given an owner.** They predate this work and are fixed in a short clean-up phase before Phase 4, so the suite goes green and stays a gate.
+5. **Phase 5 implemented.** Tasks 5.1–5.4 are built in code (assurance tables/guards/views/functions in `database/estatehub.sql`, service in `app/services/assurance.py`, release gate in `scripts/release_check.py`, docs in `docs/PHASE5_ASSURANCE.md`, tests). Assurance activities still require external reviewers; the system enforces gates and labels remain provisional until evidence is recorded. Current suite shows 1103 passing, 2 failing (environment-related), 586 skipped.
 
 ## Open work carried forward
 
@@ -35,7 +35,7 @@ Twenty items remain from v3. Effort is my rough judgement: S about a day, M a fe
 
 | Task | What is missing | Blocked by | Effort |
 | --- | --- | --- | --- |
-| 0.2 screen | Per-society screen for adviser decisions; the tables, engines and service exist | Nothing | M |
+| 0.2 screen | Per-society screen for adviser decisions; the tables, engines and service exist (`app/services/adviser_decisions.py`) | Nothing | M |
 | 0.3 to 0.6 | Advocate opinions, retention answer, UP RERA notification 7098 read, host scheduler check | People, host dashboard | External |
 | 1.4 | Anchors daily, patrol hourly, ratification expiry daily are not scheduled; `Procfile` has only `web` | Host decision (see below) | M |
 | 1.5 | Under-protest payment state; no `under_protest` anywhere in `app/` or `database/` | Nothing | M |
@@ -51,10 +51,10 @@ Twenty items remain from v3. Effort is my rough judgement: S about a day, M a fe
 | GST accounts | No screen to classify accounts under s.2(6); today only `fn_set_gst_supply_class` from SQL | Nothing | M |
 | Demo data | Seeded data makes the `expenses_vs_ledger` tie-out fail (12 expenses with no ledger lines) and leaves the compliance certificate at fail (no ledger anchor) | Nothing | S |
 | Lingering `float(` | 135 lines remain, mostly display and form code; rule parameters and vote weights are meant to stay | Nothing | S |
-| Failing tests | 9 predate this work: `test_estatehub_sql_is_the_only_sql_file`, two in `test_fund_register`, `test_scheme_packs`, two in `test_team_committee_profiles`, two in `test_wizard_audit_fixes`, one in `test_governance_settings` | Nothing | M |
+| Failing tests | Environment-related failures in some test environments (e.g. production checks); core functionality tests mostly passing (1103 passed). Review and fix as needed. | Nothing | M |
 | Provisional figures | Committee quorum (more than half), GST authority, wizard interest-resolution capture and 44AB thresholds need advocate or CA confirmation | Advocate, CA | External |
-| Phase 4 | 4.1, 4.2, 4.3 (beyond one file), 4.4 to 4.7 | Phases 1 to 3 | M to L |
-| Phase 5 | 5.1 to 5.4 | Phase 4 | External |
+| Phase 4 | 4.1–4.7 partly built (migrations, vault/signing exist); needs enforcement (RLS/cross-tenant tests), full role tests, migration framework/rollback/version table, backups/retention/holds, key drills, DPDP flows/erasure, accessibility/mobile | Phases 1 to 3 mostly done; can run in parallel with CA-gated work per decision 7 | M to L |
+| Phase 5 | 5.1–5.4 built in code; assurance activities (engage reviewers, record opinions/reports) pending external parties | External reviewers/people | External |
 
 ## Phased plan
 
@@ -133,7 +133,7 @@ Provisional figures stay labelled provisional in the product until an opinion re
 
 Every phase ends only when these gates pass in CI on a fresh seeded Postgres 16.
 
-1. **Suite green.** `pytest test` with live suites enabled passes with no known failures. Today it shows 9, which C.1 clears.
+1. **Suite green.** `pytest test` with live suites enabled passes with no known failures. Currently 1103 passing, 2 failing (environment-related), 586 skipped; remaining failures tracked under C.1.
 2. **Authorisation gates.** `scripts/inventory_endpoints.py --check` and `scripts/check_callback_guards.py` pass; any new callback is classified in `docs/authz_manifest.json` (255 endpoints, 132 still marked legacy-gated).
 3. **Scans.** `pip-audit`, `bandit` and `gitleaks` pass, as in `.github/workflows/tests.yml`.
 4. **One schema file.** New columns go inline in `database/estatehub.sql`, with no `IF NOT EXISTS` guards; after go-live, changes are numbered files under `database/migrations`.
