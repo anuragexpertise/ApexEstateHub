@@ -207,7 +207,7 @@ _FK_LABEL_OVERRIDES = {
 
 # Columns that are real table columns (so they are on the profile) but which the list loader never returns.
 _LIST_ONLY_DROPS: dict[str, set] = {
-    "nocs": {"revoked_at", "revoked_by"},
+    # (the NOC list is handled upstream: its loader selects revoked_at and revoked_by is hidden, task 1.11)
     "security": {"ptl_penalty"},
 }
 
@@ -896,9 +896,8 @@ def build_entity_meta() -> dict:
                 "color": "secondary",
             })
 
-        # Plan v4, C.7: a list column must be one the list loader actually fills, once. The NOC loader does not select
-        # revoked_at / revoked_by and fn_security_list does not return ptl_penalty, so those columns rendered blank on every
-        # row; they stay on the profile, where load_profile reads the whole row.
+        # Plan v4, C.7: a list column must be one the list loader actually fills, once. fn_security_list does not return
+        # ptl_penalty, so that column rendered blank on every row; it stays on the profile, where load_profile reads the row.
         _drop = _LIST_ONLY_DROPS.get(ekey)
         if _drop:
             list_columns = [c for c in list_columns if c.get("field") not in _drop]

@@ -21,11 +21,10 @@ def test_no_column_appears_twice(meta, entity):
     assert len(names) == len(set(names)), names
 
 
-def test_noc_list_has_only_columns_the_loader_returns(meta):
+def test_noc_list_has_the_columns_its_loader_selects(meta):
     fields = [c["field"] for c in meta["nocs"]["list_columns"]]
-    assert fields == ["apartment_id", "certificate_no", "status", "issued_date", "valid_until"]
+    assert fields == ["apartment_id", "certificate_no", "status", "issued_date", "valid_until", "revoked_at"]
     assert meta["nocs"]["list_columns"][0]["alias"] == "flat_number"
-    assert {"revoked_at", "revoked_by"} <= {f["field"] for f in meta["nocs"]["profile_fields"]}   # still on the profile
 
 
 def test_security_list_drops_the_blank_penalty_and_renames_the_month_count(meta):
