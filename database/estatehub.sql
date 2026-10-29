@@ -824,7 +824,10 @@ CREATE TABLE receivables (
     -- transfer fee: payable by the TRANSFEROR on a sale, so it is not a common-expense arrear for
     -- bye-law 7 or the s.22 six-month test (and does not pass to a purchaser under s.23).
     charge_kind VARCHAR(20) NOT NULL DEFAULT 'common_expense'
-        CHECK (charge_kind IN ('common_expense', 'transfer_fee', 'depreciation_fund', 'other'))
+        CHECK (charge_kind IN ('common_expense', 'transfer_fee', 'depreciation_fund', 'other')),
+    -- Task 1.6: the GST exemption authority this line relied on when it was issued, copied then so that a later change
+    -- to the settings cannot rewrite what an old bill said. NULL on a line that relies on no exemption.
+    gst_exempt_authority TEXT
 );
 
 -- ── Task 1.5: disputed / under-protest bills ──────────────────────────────────────────────────────────────────────
@@ -890,6 +893,17 @@ BEGIN
 END $$;
 CREATE TRIGGER trg_receivable_dispute_guard BEFORE UPDATE OR DELETE ON receivable_disputes
     FOR EACH ROW EXECUTE FUNCTION fn_trg_receivable_dispute_guard();
+
+-- Task 1.6: the one wording of the fund GST exemption authority (resolution, opinion, who gave it). NULL when the
+-- society does not rely on the exemption. Receipts, bills and the billing run all read it from here.
+CREATE OR REPLACE FUNCTION fn_gst_exemption_authority(p_society_id INT) RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN (SELECT CASE WHEN c.fund_gst_exempt
+                        THEN 'Resolution ' || BTRIM(c.fund_gst_exempt_resolution_ref)
+                          || '; opinion ' || BTRIM(c.fund_gst_exempt_opinion_ref) || ' given by ' || BTRIM(c.fund_gst_exempt_opinion_by)
+                          || ' (sinking/repair fund contributions excluded from the GST base)' END
+              FROM society_compliance_settings c WHERE c.society_id = p_society_id);
+END $$;
 
 -- ── PAYMENT LOG ────────────────────────────────────────────────────
 -- Bye-law 7 tests arrears ON A PAST DATE (last day of the year before the election), so the
@@ -2151,10 +2165,27 @@ CREATE TABLE society_compliance_settings (
     fund_gst_exempt BOOLEAN NOT NULL DEFAULT FALSE,
     fund_gst_exempt_resolution_ref VARCHAR(100),
     fund_gst_exempt_opinion_ref VARCHAR(100),
+    fund_gst_exempt_opinion_by  VARCHAR(150),     -- task 1.6: who gave the opinion (name and capacity, e.g. "CA R. Gupta, Gupta & Co")
     CONSTRAINT ck_fund_gst_exempt_authority CHECK (
         NOT fund_gst_exempt
         OR (NULLIF(BTRIM(fund_gst_exempt_resolution_ref), '') IS NOT NULL
-            AND NULLIF(BTRIM(fund_gst_exempt_opinion_ref), '') IS NOT NULL)),
+            AND NULLIF(BTRIM(fund_gst_exempt_opinion_ref), '') IS NOT NULL
+            AND NULLIF(BTRIM(fund_gst_exempt_opinion_by), '') IS NOT NULL)),
+    -- Task 1.7: the CA's confirmation of the ITC reversal formula, and the two accounts the CA chose for its journal.
+    -- All-or-nothing; nothing is posted until both are on file (fn_post_itc_reversal).
+    itc_reversal_confirmed_by    VARCHAR(150),
+    itc_reversal_confirmed_ref   VARCHAR(100),
+    itc_reversal_confirmed_on    DATE,
+    itc_reversal_debit_acc_id    INT,
+    itc_reversal_credit_acc_id   INT,
+    itc_reversal_nonbusiness_pct NUMERIC(5, 2) NOT NULL DEFAULT 0 CHECK (itc_reversal_nonbusiness_pct BETWEEN 0 AND 100),
+    CONSTRAINT fk_itc_reversal_debit_acc  FOREIGN KEY (society_id, itc_reversal_debit_acc_id)  REFERENCES accounts (society_id, id),
+    CONSTRAINT fk_itc_reversal_credit_acc FOREIGN KEY (society_id, itc_reversal_credit_acc_id) REFERENCES accounts (society_id, id),
+    CONSTRAINT ck_itc_reversal_confirmation CHECK (
+        (itc_reversal_confirmed_by IS NULL) = (itc_reversal_confirmed_ref IS NULL)
+        AND (itc_reversal_confirmed_ref IS NULL) = (itc_reversal_confirmed_on IS NULL)
+        AND (itc_reversal_confirmed_by IS NULL OR (LENGTH(BTRIM(itc_reversal_confirmed_by)) > 0 AND LENGTH(BTRIM(itc_reversal_confirmed_ref)) > 0))
+        AND (itc_reversal_debit_acc_id IS NULL OR itc_reversal_credit_acc_id IS NULL OR itc_reversal_debit_acc_id <> itc_reversal_credit_acc_id)),
     fund_charges_interest BOOLEAN DEFAULT TRUE,
     gst_filing_cadence VARCHAR(20) DEFAULT 'monthly' CHECK (
         gst_filing_cadence IN ('monthly', 'qrmp')
@@ -3890,6 +3921,7 @@ DECLARE
     v_sgst_rate           NUMERIC(5,2);
     v_total_taxable       NUMERIC(10,2);
     v_fund_gst_exempt     BOOLEAN;
+    v_exempt_authority    TEXT;      -- task 1.6: printed on the fund lines that rely on the exemption
     v_sink_mode           TEXT;      -- fn_fund_rule: 'on_bill' | 'fy_close' | 'none'
     v_sink_basis          TEXT;      -- fn_fund_rule: 'per_sq_ft' | 'construction_cost' | 'undivided_interest' | 'none'
     v_repair_mode         TEXT;
@@ -3905,6 +3937,12 @@ BEGIN
     -- Read fund_gst_exempt setting (default FALSE = funds are in the GST base; X-01)
     SELECT fund_gst_exempt INTO v_fund_gst_exempt FROM society_compliance_settings WHERE society_id = p_society_id;
     v_fund_gst_exempt := COALESCE(v_fund_gst_exempt, FALSE);
+    IF v_fund_gst_exempt THEN
+        v_exempt_authority := fn_gst_exemption_authority(p_society_id);
+        IF v_exempt_authority IS NULL THEN
+            RAISE EXCEPTION 'Funds are marked GST-exempt but the exemption authority (resolution, opinion, who gave it) is not on file: bills cannot be issued.';
+        END IF;
+    END IF;
 
     -- Project construction cost (society-default row): base of a 'construction_cost' fund levy.
     SELECT project_construction_cost INTO v_project_cost FROM apt_charges_fines_basis
@@ -4228,13 +4266,13 @@ BEGIN
                     society_id, entity_id, role, bill_group_id,
                     acc_id, interest_acc_id,
                     description, period_month,
-                    base_amount, amount, paid_principal, due_date, status, created_at
+                    base_amount, amount, paid_principal, due_date, status, created_at, gst_exempt_authority
                 ) VALUES (
                     p_society_id, apt.id, 'apartment', v_bill_group_id,
                     v_sinking_acc_id,
                     CASE WHEN charge.charges_interest THEN v_fallback_int_acc ELSE NULL END,
                     'Sinking Fund ' || TO_CHAR(v_month, 'Mon-YYYY'), v_month,
-                    v_base_sinking, v_base_sinking, 0, v_due_date, 'pending', NOW()
+                    v_base_sinking, v_base_sinking, 0, v_due_date, 'pending', NOW(), v_exempt_authority
                 )
                 ON CONFLICT DO NOTHING
                 RETURNING id INTO v_new_rec_id;
@@ -4252,13 +4290,13 @@ BEGIN
                     society_id, entity_id, role, bill_group_id,
                     acc_id, interest_acc_id,
                     description, period_month,
-                    base_amount, amount, paid_principal, due_date, status, created_at
+                    base_amount, amount, paid_principal, due_date, status, created_at, gst_exempt_authority
                 ) VALUES (
                     p_society_id, apt.id, 'apartment', v_bill_group_id,
                     v_repair_acc_id,
                     CASE WHEN charge.charges_interest THEN v_fallback_int_acc ELSE NULL END,
                     'Repair Fund ' || TO_CHAR(v_month, 'Mon-YYYY'), v_month,
-                    v_base_repair, v_base_repair, 0, v_due_date, 'pending', NOW()
+                    v_base_repair, v_base_repair, 0, v_due_date, 'pending', NOW(), v_exempt_authority
                 )
                 ON CONFLICT DO NOTHING
                 RETURNING id INTO v_new_rec_id;
@@ -8946,7 +8984,7 @@ RETURNS TABLE (
     base_amount NUMERIC(10,2), interest_amount NUMERIC(10,2),
     amount NUMERIC(10,2), paid_amount NUMERIC(10,2), residual NUMERIC(10,2),
     due_date DATE, status VARCHAR(20), days_overdue INT,
-    confirmed_by INT, confirmed_at TIMESTAMP, created_at TIMESTAMP
+    confirmed_by INT, confirmed_at TIMESTAMP, created_at TIMESTAMP, gst_exempt_authority TEXT
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -8967,7 +9005,7 @@ BEGIN
         (r.amount - r.paid_amount)::NUMERIC(10,2),
         r.due_date::DATE, r.status::VARCHAR(20),
         GREATEST(EXTRACT(DAY FROM AGE(CURRENT_DATE, r.due_date)),0)::INT,
-        r.confirmed_by::INT, r.confirmed_at::TIMESTAMP, r.created_at::TIMESTAMP
+        r.confirmed_by::INT, r.confirmed_at::TIMESTAMP, r.created_at::TIMESTAMP, r.gst_exempt_authority::TEXT
     FROM receivables r
     LEFT JOIN accounts a    ON a.id  = r.acc_id
     LEFT JOIN accounts ia   ON ia.id = r.interest_acc_id
@@ -8998,7 +9036,8 @@ RETURNS TABLE (
     acc_id INT, account_name TEXT,
     description TEXT, roster_id INT, shift_date DATE,
     amount NUMERIC(10,2), status VARCHAR(20), due_date DATE, days_overdue INT,
-    paid_at TIMESTAMP, confirmed_by INT, confirmed_at TIMESTAMP, created_at TIMESTAMP
+    paid_at TIMESTAMP, confirmed_by INT, confirmed_at TIMESTAMP, created_at TIMESTAMP,
+    shift_fraction NUMERIC, mode VARCHAR(20)      -- task 1.11: the list shows both columns, so the function must return them
 )
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -9011,7 +9050,8 @@ BEGIN
         p.description::TEXT, p.roster_id::INT, p.shift_date::DATE,
         p.amount::NUMERIC(10,2), p.status::VARCHAR(20), p.due_date::DATE,
         GREATEST(EXTRACT(DAY FROM AGE(CURRENT_DATE, p.due_date)),0)::INT,
-        p.paid_at::TIMESTAMP, p.confirmed_by::INT, p.confirmed_at::TIMESTAMP, p.created_at::TIMESTAMP
+        p.paid_at::TIMESTAMP, p.confirmed_by::INT, p.confirmed_at::TIMESTAMP, p.created_at::TIMESTAMP,
+        p.shift_fraction::NUMERIC, p.mode::VARCHAR(20)
     FROM payables p
     LEFT JOIN accounts a       ON a.id = p.acc_id
     LEFT JOIN security_staff s ON s.id = p.entity_id AND p.role='security'
@@ -18958,6 +18998,204 @@ BEGIN
         ELSE                  'withdrawn; the bill stands and interest resumes' END;
 END $$;
 
+-- ── Task 1.7: proportionate ITC reversal for exempt supplies (CGST Rules, Rule 42) ────────────────────────────────────
+-- PROVISIONAL until the CA signs the formula off (plan task 0.3). What this does and does not do:
+--   * fn_itc_rule42 is the formula of Rule 42(1) as published: C1 = T - (T1+T2+T3); C2 = C1 - T4; D1 = (E/F) x C2;
+--     D2 = C2 x the non-business % (the Rule's 5%, only where the common credit is also used for non-business purposes;
+--     0 unless the CA says otherwise); the amount to reverse is D1 + D2. Each of D1 and D2 is rounded to the paisa
+--     (half away from zero) once, after the full multiplication, never on an intermediate ratio.
+--   * The books do not hold a purchase-side input-credit ledger, so T, T1..T4, E and F are ENTERED for the period, with the
+--     source they came from (GSTR-2B, the turnover worksheet...). One row per tax head (cgst / sgst / igst), as Rule 42(1)(l).
+--   * A draft can be computed at any time. It can be POSTED only when the CA's confirmation (who, reference, date) and the
+--     two accounts the CA chose are on file. The journal is Dr debit account / Cr credit account.
+--   * 'annual' rows are the Rule 42(2) true-up: the final D1/D2 for the year, against what the monthly rows already reversed.
+--     A positive net is a further reversal; a negative net is credit that may be reclaimed (the journal runs the other way).
+--     Interest on a short reversal is NOT computed here.
+--   * A posted row is never edited or deleted. A wrong one is reversed (fn_reverse_itc_reversal) and recomputed.
+-- (the ITC-reversal columns of society_compliance_settings are declared inline in that table, above)
+
+CREATE OR REPLACE FUNCTION fn_itc_rule42(
+    p_t NUMERIC, p_t1 NUMERIC, p_t2 NUMERIC, p_t3 NUMERIC, p_t4 NUMERIC, p_e NUMERIC, p_f NUMERIC,
+    p_nonbusiness_pct NUMERIC DEFAULT 0
+) RETURNS TABLE (c1 NUMERIC, c2 NUMERIC, d1 NUMERIC, d2 NUMERIC, reversal NUMERIC)
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE v_c1 NUMERIC; v_c2 NUMERIC; v_d1 NUMERIC; v_d2 NUMERIC;
+BEGIN
+    IF p_t IS NULL OR p_t1 IS NULL OR p_t2 IS NULL OR p_t3 IS NULL OR p_t4 IS NULL OR p_e IS NULL OR p_f IS NULL THEN
+        RAISE EXCEPTION 'Give every figure: T, T1, T2, T3, T4, E and F (use 0 where there is none).';
+    END IF;
+    IF LEAST(p_t, p_t1, p_t2, p_t3, p_t4, p_e, p_f) < 0 THEN RAISE EXCEPTION 'No figure can be negative.'; END IF;
+    IF p_f = 0 THEN RAISE EXCEPTION 'Total turnover (F) must be above zero.'; END IF;
+    IF p_e > p_f THEN RAISE EXCEPTION 'Exempt supplies (E) cannot exceed total turnover (F).'; END IF;
+    IF COALESCE(p_nonbusiness_pct, 0) NOT BETWEEN 0 AND 100 THEN RAISE EXCEPTION 'The non-business percentage must be between 0 and 100.'; END IF;
+    v_c1 := p_t - (p_t1 + p_t2 + p_t3);
+    IF v_c1 < 0 THEN RAISE EXCEPTION 'T1 + T2 + T3 cannot exceed the total credit T.'; END IF;
+    v_c2 := v_c1 - p_t4;
+    IF v_c2 < 0 THEN RAISE EXCEPTION 'T4 cannot exceed T - (T1 + T2 + T3).'; END IF;
+    v_d1 := ROUND(p_e * v_c2 / p_f, 2);
+    v_d2 := ROUND(v_c2 * COALESCE(p_nonbusiness_pct, 0) / 100, 2);
+    c1 := v_c1; c2 := v_c2; d1 := v_d1; d2 := v_d2; reversal := v_d1 + v_d2;
+    RETURN NEXT;
+END $$;
+
+CREATE TABLE itc_reversal_register (
+    id                  SERIAL PRIMARY KEY,
+    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    kind                VARCHAR(7) NOT NULL CHECK (kind IN ('period', 'annual')),
+    financial_year      INT NOT NULL CHECK (financial_year BETWEEN 2017 AND 2200),     -- the year starting 1 April of this year
+    period_start        DATE,
+    period_end          DATE,
+    tax_head            VARCHAR(4) NOT NULL CHECK (tax_head IN ('cgst', 'sgst', 'igst')),
+    t_total             NUMERIC(16, 2) NOT NULL,
+    t1_non_business     NUMERIC(16, 2) NOT NULL,
+    t2_exempt_only      NUMERIC(16, 2) NOT NULL,
+    t3_blocked          NUMERIC(16, 2) NOT NULL,
+    t4_taxable_only     NUMERIC(16, 2) NOT NULL,
+    e_exempt_value      NUMERIC(16, 2) NOT NULL,
+    f_total_turnover    NUMERIC(16, 2) NOT NULL,
+    nonbusiness_pct     NUMERIC(5, 2) NOT NULL,
+    c1                  NUMERIC(16, 2) NOT NULL,
+    c2                  NUMERIC(16, 2) NOT NULL,
+    d1                  NUMERIC(16, 2) NOT NULL,
+    d2                  NUMERIC(16, 2) NOT NULL,
+    reversal            NUMERIC(16, 2) NOT NULL,
+    already_reversed    NUMERIC(16, 2) NOT NULL DEFAULT 0,    -- annual rows: what the posted period rows had reversed
+    net_amount          NUMERIC(16, 2) NOT NULL,              -- period: = reversal; annual: reversal - already_reversed
+    basis               TEXT NOT NULL CHECK (LENGTH(BTRIM(basis)) >= 5),
+    formula_status      VARCHAR(12) NOT NULL DEFAULT 'provisional' CHECK (formula_status IN ('provisional', 'confirmed')),
+    status              VARCHAR(8) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'posted', 'reversed')),
+    journal_id          INT,
+    reversal_journal_id INT,
+    created_by          INT REFERENCES users (id),
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    posted_by           INT REFERENCES users (id),
+    posted_on           DATE,
+    CONSTRAINT ck_itc_period_dates CHECK (
+        (kind = 'annual' AND period_start IS NULL AND period_end IS NULL)
+        OR (kind = 'period' AND period_start IS NOT NULL AND period_end >= period_start
+            AND period_start >= make_date(financial_year, 4, 1) AND period_end <= make_date(financial_year + 1, 3, 31)))
+);
+CREATE UNIQUE INDEX uq_itc_register_live ON itc_reversal_register
+    (society_id, kind, financial_year, COALESCE(period_start, DATE '1900-01-01'), tax_head) WHERE status <> 'reversed';
+CREATE INDEX idx_itc_register_society ON itc_reversal_register (society_id, financial_year, tax_head);
+
+CREATE OR REPLACE FUNCTION fn_trg_itc_register_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.status = 'draft' OR pg_trigger_depth() > 1 THEN RETURN OLD; END IF;
+        RAISE EXCEPTION 'A posted ITC reversal cannot be deleted; reverse it.';
+    END IF;
+    IF OLD.status = 'reversed' THEN RAISE EXCEPTION 'A reversed ITC reversal cannot be changed.'; END IF;
+    IF NEW.id <> OLD.id OR NEW.society_id <> OLD.society_id OR NEW.kind <> OLD.kind OR NEW.financial_year <> OLD.financial_year
+       OR NEW.period_start IS DISTINCT FROM OLD.period_start OR NEW.period_end IS DISTINCT FROM OLD.period_end
+       OR NEW.tax_head <> OLD.tax_head OR NEW.t_total <> OLD.t_total OR NEW.t1_non_business <> OLD.t1_non_business
+       OR NEW.t2_exempt_only <> OLD.t2_exempt_only OR NEW.t3_blocked <> OLD.t3_blocked OR NEW.t4_taxable_only <> OLD.t4_taxable_only
+       OR NEW.e_exempt_value <> OLD.e_exempt_value OR NEW.f_total_turnover <> OLD.f_total_turnover
+       OR NEW.nonbusiness_pct <> OLD.nonbusiness_pct OR NEW.c1 <> OLD.c1 OR NEW.c2 <> OLD.c2 OR NEW.d1 <> OLD.d1 OR NEW.d2 <> OLD.d2
+       OR NEW.reversal <> OLD.reversal OR NEW.already_reversed <> OLD.already_reversed OR NEW.net_amount <> OLD.net_amount
+       OR NEW.basis <> OLD.basis OR NEW.created_by IS DISTINCT FROM OLD.created_by THEN
+        RAISE EXCEPTION 'The figures of an ITC reversal cannot be edited; discard the draft or reverse it and compute again.';
+    END IF;
+    IF OLD.status = 'posted' AND NEW.status NOT IN ('posted', 'reversed') THEN
+        RAISE EXCEPTION 'A posted ITC reversal can only be reversed.';
+    END IF;
+    IF OLD.status = 'posted' AND (NEW.journal_id IS DISTINCT FROM OLD.journal_id OR NEW.posted_by IS DISTINCT FROM OLD.posted_by
+                                  OR NEW.posted_on IS DISTINCT FROM OLD.posted_on OR NEW.formula_status <> OLD.formula_status) THEN
+        RAISE EXCEPTION 'The posting of an ITC reversal cannot be changed.';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_itc_register_guard BEFORE UPDATE OR DELETE ON itc_reversal_register
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_itc_register_guard();
+
+-- Work out one row (one tax head, one month or the year) and keep it as a draft. Returns the row id.
+CREATE OR REPLACE FUNCTION fn_compute_itc_reversal(
+    p_society_id INT, p_kind TEXT, p_fy INT, p_period_start DATE, p_period_end DATE, p_tax_head TEXT,
+    p_t NUMERIC, p_t1 NUMERIC, p_t2 NUMERIC, p_t3 NUMERIC, p_t4 NUMERIC, p_e NUMERIC, p_f NUMERIC,
+    p_basis TEXT, p_user_id INT
+) RETURNS INT LANGUAGE plpgsql AS $$
+DECLARE v_pct NUMERIC := 0; v_r RECORD; v_already NUMERIC := 0; v_net NUMERIC; v_id INT;
+BEGIN
+    SELECT COALESCE(itc_reversal_nonbusiness_pct, 0) INTO v_pct FROM society_compliance_settings WHERE society_id = p_society_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Society not found.'; END IF;
+    IF LENGTH(BTRIM(COALESCE(p_basis, ''))) < 5 THEN
+        RAISE EXCEPTION 'Say where the figures came from (for example GSTR-2B for the month, and the turnover worksheet).';
+    END IF;
+    SELECT * INTO v_r FROM fn_itc_rule42(p_t, p_t1, p_t2, p_t3, p_t4, p_e, p_f, v_pct);
+    v_net := v_r.reversal;
+    IF p_kind = 'annual' THEN
+        SELECT COALESCE(SUM(net_amount), 0) INTO v_already FROM itc_reversal_register
+         WHERE society_id = p_society_id AND kind = 'period' AND financial_year = p_fy AND tax_head = p_tax_head AND status = 'posted';
+        v_net := v_r.reversal - v_already;
+    END IF;
+    INSERT INTO itc_reversal_register (society_id, kind, financial_year, period_start, period_end, tax_head,
+        t_total, t1_non_business, t2_exempt_only, t3_blocked, t4_taxable_only, e_exempt_value, f_total_turnover, nonbusiness_pct,
+        c1, c2, d1, d2, reversal, already_reversed, net_amount, basis, created_by)
+    VALUES (p_society_id, p_kind, p_fy, p_period_start, p_period_end, p_tax_head,
+        p_t, p_t1, p_t2, p_t3, p_t4, p_e, p_f, v_pct,
+        v_r.c1, v_r.c2, v_r.d1, v_r.d2, v_r.reversal, v_already, v_net, BTRIM(p_basis), p_user_id)
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END $$;
+
+-- Post a draft. Refused until the CA's confirmation and both accounts are on file. Returns the journal id (NULL when the net is nil).
+CREATE OR REPLACE FUNCTION fn_post_itc_reversal(p_society_id INT, p_register_id INT, p_user_id INT) RETURNS INT
+LANGUAGE plpgsql AS $$
+DECLARE s society_compliance_settings%ROWTYPE; r itc_reversal_register%ROWTYPE; v_j INT := NULL; v_dr INT; v_cr INT; v_txt TEXT;
+BEGIN
+    SELECT * INTO r FROM itc_reversal_register WHERE id = p_register_id AND society_id = p_society_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'ITC reversal row not found for this society.'; END IF;
+    IF r.status <> 'draft' THEN RAISE EXCEPTION 'Only a draft can be posted (this one is %).', r.status; END IF;
+    SELECT * INTO s FROM society_compliance_settings WHERE society_id = p_society_id;
+    IF s.itc_reversal_confirmed_by IS NULL THEN
+        RAISE EXCEPTION 'The CA has not confirmed the ITC reversal formula, so nothing can be posted yet. The draft is kept as a working.';
+    END IF;
+    IF s.itc_reversal_debit_acc_id IS NULL OR s.itc_reversal_credit_acc_id IS NULL THEN
+        RAISE EXCEPTION 'The two accounts for the ITC reversal journal have not been chosen.';
+    END IF;
+    v_txt := format('ITC reversal, Rule 42 CGST Rules, FY %s %s %s', r.financial_year, UPPER(r.tax_head),
+                    CASE r.kind WHEN 'annual' THEN 'annual true-up' ELSE to_char(r.period_start, 'Mon-YYYY') END);
+    IF r.net_amount <> 0 THEN
+        IF r.net_amount > 0 THEN v_dr := s.itc_reversal_debit_acc_id; v_cr := s.itc_reversal_credit_acc_id;
+        ELSE v_dr := s.itc_reversal_credit_acc_id; v_cr := s.itc_reversal_debit_acc_id; v_txt := v_txt || ' (credit reclaimed)'; END IF;
+        v_j := NEXTVAL('seq_transaction_number');
+        INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, acc_particulars, amount, mode, status, created_by,
+                                  created_at, source_table, source_id, journal_id)
+        VALUES (p_society_id, 'Dr', CURRENT_DATE, v_dr, v_txt, ABS(r.net_amount), 'journal', 'paid', p_user_id, NOW(), 'itc_reversal_register', r.id, v_j),
+               (p_society_id, 'Cr', CURRENT_DATE, v_cr, v_txt, ABS(r.net_amount), 'journal', 'paid', p_user_id, NOW(), 'itc_reversal_register', r.id, v_j);
+    END IF;
+    UPDATE itc_reversal_register SET status = 'posted', journal_id = v_j, posted_by = p_user_id, posted_on = CURRENT_DATE,
+           formula_status = 'confirmed' WHERE id = r.id;
+    RETURN v_j;
+END $$;
+
+-- A posted row is corrected by reversal, never by editing: its journal is reversed and the row is closed so it can be computed again.
+CREATE OR REPLACE FUNCTION fn_reverse_itc_reversal(p_society_id INT, p_register_id INT, p_user_id INT, p_reason TEXT) RETURNS INT
+LANGUAGE plpgsql AS $$
+DECLARE r itc_reversal_register%ROWTYPE; v_new INT := NULL;
+BEGIN
+    IF LENGTH(BTRIM(COALESCE(p_reason, ''))) = 0 THEN RAISE EXCEPTION 'Say why it is being reversed.'; END IF;
+    SELECT * INTO r FROM itc_reversal_register WHERE id = p_register_id AND society_id = p_society_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'ITC reversal row not found for this society.'; END IF;
+    IF r.status <> 'posted' THEN RAISE EXCEPTION 'Only a posted row can be reversed (this one is %).', r.status; END IF;
+    IF r.kind = 'period' AND EXISTS (SELECT 1 FROM itc_reversal_register a WHERE a.society_id = r.society_id AND a.kind = 'annual'
+                                      AND a.financial_year = r.financial_year AND a.tax_head = r.tax_head AND a.status = 'posted') THEN
+        RAISE EXCEPTION 'The annual true-up for this year is already posted and counted this row; reverse the annual row first.';
+    END IF;
+    IF r.journal_id IS NOT NULL THEN
+        v_new := fn_post_reversal_journal(p_society_id, r.journal_id, 'ITC reversal reversed: ' || BTRIM(p_reason), p_user_id);
+    END IF;
+    UPDATE itc_reversal_register SET status = 'reversed', reversal_journal_id = v_new WHERE id = r.id;
+    RETURN v_new;
+END $$;
+
+-- A draft is only a working, so it may be thrown away.
+CREATE OR REPLACE FUNCTION fn_discard_itc_draft(p_society_id INT, p_register_id INT) RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+    DELETE FROM itc_reversal_register WHERE id = p_register_id AND society_id = p_society_id AND status = 'draft';
+    IF NOT FOUND THEN RAISE EXCEPTION 'Only a draft of this society can be discarded.'; END IF;
+END $$;
+
 
 -- ---------------------------------------------------------------------------
 -- A-02 (completed)  All-cash vouchers: no Cash-in-Hand leg, so what do they balance against?
@@ -19746,6 +19984,7 @@ CREATE TRIGGER trg_fy_locks_no_truncate          BEFORE TRUNCATE ON fy_locks    
 CREATE TRIGGER trg_anchors_no_truncate           BEFORE TRUNCATE ON ledger_chain_anchors    FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
 CREATE TRIGGER trg_gst_ws_no_truncate            BEFORE TRUNCATE ON gst_turnover_worksheets FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
 CREATE TRIGGER trg_receivable_disputes_no_truncate BEFORE TRUNCATE ON receivable_disputes FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+CREATE TRIGGER trg_itc_register_no_truncate BEFORE TRUNCATE ON itc_reversal_register FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SOCIETY-SCOPED ADVISER DECISIONS (Gold-Standard Plan v3, Phase 0)

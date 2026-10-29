@@ -337,8 +337,13 @@ _HIDDEN_ON_LIST: dict[str, set[str]] = {
         "itc_claimed", "gst_disposal_liability"
     },
     "nocs": {
-        "body_text"
-    }
+        "body_text",
+        "revoked_by",      # task 1.11: a raw user id, and the loader does not join it; revoked_at carries the fact
+    },
+    # Task 1.6: the authority is a long sentence; it belongs on the bill's profile, not as a column on every row.
+    "receivables": {
+        "gst_exempt_authority"
+    },
 }
 
 _SCHEMA_CACHE: dict | None = None
@@ -857,8 +862,13 @@ def build_entity_meta() -> dict:
 
         # Append computed/joined fields to profile + list
         if ekey in _COMPUTED_FIELDS:
+            # Task 1.11: never add a computed field whose label a real column already shows (receivables and assets
+            # showed "Account" twice: once from acc_id's alias, once from the computed account_name).
+            _have_profile = {pf["label"].strip().lower() for pf in profile_fields}
+            _have_list = {lc["name"].strip().lower() for lc in list_columns}
             extra = _COMPUTED_FIELDS[ekey]
-            profile_fields = profile_fields + [dict(f) for f in extra]
+            profile_fields = profile_fields + [dict(f) for f in extra if f["label"].strip().lower() not in _have_profile]
+            extra = [f for f in extra if f["label"].strip().lower() not in _have_list]
             list_columns   = list_columns + [
                 {
                     "name": f["label"],

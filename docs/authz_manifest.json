@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "unclassified_baseline": 132,
+  "unclassified_baseline": 134,
   "endpoints": {
     "callback:account_callbacks.py::handle_change_password": {
       "classification": "unclassified"
@@ -234,6 +234,12 @@
       "actions": [
         "platform.sql.inspect"
       ]
+    },
+    "callback:dispute_callbacks.py::_decide": {
+      "classification": "legacy-gated"
+    },
+    "callback:dispute_callbacks.py::_raise": {
+      "classification": "legacy-gated"
     },
     "callback:drilldown_callbacks.py::close_fy_with_reserve": {
       "classification": "unclassified"

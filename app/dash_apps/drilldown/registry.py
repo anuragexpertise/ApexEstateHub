@@ -301,17 +301,22 @@ DRILLDOWN_MAP: dict = {
     },
 
     "kpi_payables_total": {"target": "list_payables", "label": "Payables Total"},
+    # Task 1.11: each card's total is a SUM over (role, status) in card_catalogue.py; the list it opens must use the same
+    # filter. With no role the payables loader returns an empty list on purpose, so these three opened an empty list.
     "kpi_vendors_payables_due": {
         "target": "list_payables",
         "label": "Vendor Payables Due",
+        "filter": {"role": "vendor", "status": "pending"},
     },
     "kpi_security_salaries_due": {
         "target": "list_payables",
         "label": "Security Salaries Due",
+        "filter": {"role": "security", "status": "pending"},
     },
     "kpi_security_salaries_paid": {
         "target": "list_payables",
         "label": "Security Salaries Paid",
+        "filter": {"role": "security", "status": "verified"},
     },
     "kpi_amc_due": {"target": "list_expenses", "label": "AMC Due"},
     "kpi_maintenance_charges": {

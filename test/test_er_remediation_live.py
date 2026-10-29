@@ -280,7 +280,8 @@ def test_fund_gst_exemption_needs_an_authority_on_file(cur):
         "UPDATE society_compliance_settings SET fund_gst_exempt=TRUE WHERE society_id=%s", (SOC,)),
         "ck_fund_gst_exempt_authority")
     cur.execute("UPDATE society_compliance_settings SET fund_gst_exempt=TRUE, "
-                "fund_gst_exempt_resolution_ref='GBM-12/2026', fund_gst_exempt_opinion_ref='CA/2026/41' "
+                "fund_gst_exempt_resolution_ref='GBM-12/2026', fund_gst_exempt_opinion_ref='CA/2026/41', "
+                "fund_gst_exempt_opinion_by='CA R. Gupta, Gupta & Co' "
                 "WHERE society_id=%s", (SOC,))
     assert cur.rowcount == 1
 

@@ -5796,6 +5796,22 @@ def _save_compliance_settings(db, d, sid, is_edit, pk):
         "default_export_format": d.get("default_export_format"),
     }
 
+    # Task 1.6: the exemption's authority (resolution, opinion, who gave it). A field absent from the form keeps its stored
+    # value; switching the exemption ON without all three on file is refused here with a clear message, before the database
+    # constraint would refuse it with a technical one.
+    _auth_cols = ("fund_gst_exempt_resolution_ref", "fund_gst_exempt_opinion_ref", "fund_gst_exempt_opinion_by")
+    stored = db._execute("SELECT fund_gst_exempt, " + ", ".join(_auth_cols) + " FROM society_compliance_settings "
+                         "WHERE society_id=%s AND id=%s", (sid, pk), fetch_one=True) or {}
+    for col in _auth_cols:
+        if col in d:
+            fields[col] = (d.get(col) or "").strip() or None
+    exempt_after = fields["fund_gst_exempt"] if fields["fund_gst_exempt"] is not None else bool(stored.get("fund_gst_exempt"))
+    if exempt_after:
+        missing = [lbl for col, lbl in zip(_auth_cols, ("resolution reference", "opinion reference", "who gave the opinion"))
+                   if not (fields.get(col) if col in fields else stored.get(col))]
+        if missing:
+            return False, "To treat the funds as GST-exempt, record the authority: " + ", ".join(missing) + ".", None
+
     set_parts, params = [], []
     for col, val in fields.items():
         set_parts.append(f"{col}=%s")

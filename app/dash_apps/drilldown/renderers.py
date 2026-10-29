@@ -8097,12 +8097,9 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
     # Task 1.6: a receipt/invoice that relies on the fund GST exemption names its authority (resolution, opinion, who gave it).
     gst_authority = ""
     try:
-        _a = db._execute(
-            "SELECT fund_gst_exempt, fund_gst_exempt_resolution_ref, fund_gst_exempt_opinion_ref FROM societies WHERE id = %s",
-            (society_id,), fetch_one=True) if society_id else None
-        if _a and _a.get("fund_gst_exempt"):
-            gst_authority = (f"Resolution {_a['fund_gst_exempt_resolution_ref']}; opinion {_a['fund_gst_exempt_opinion_ref']} "
-                             "(sinking/repair fund contributions excluded from the GST base)")
+        # One wording, one source: fn_gst_exemption_authority (NULL when the society relies on no exemption).
+        _a = db._execute("SELECT fn_gst_exemption_authority(%s) AS a", (society_id,), fetch_one=True) if society_id else None
+        gst_authority = (_a or {}).get("a") or ""
     except Exception as e:  # noqa: BLE001
         print(f"⚠️  GST authority lookup failed: {e}")
 
