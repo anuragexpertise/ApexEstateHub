@@ -1535,8 +1535,8 @@ def load_list(
         # ── NOCS ────────────────────────────────────────────────────────────
         if entity == "nocs":
             base_sql = """
-                SELECT n.id, n.certificate_no, a.flat_number, a.owner_name, 
-                       n.issued_date, n.valid_until, n.status
+                SELECT n.id, n.certificate_no, a.flat_number, a.owner_name,
+                       n.issued_date, n.valid_until, n.revoked_at, n.status
                 FROM nocs n
                 LEFT JOIN apartments a ON a.id = n.apartment_id
                 WHERE n.society_id=%s

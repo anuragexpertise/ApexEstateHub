@@ -295,12 +295,19 @@ def render_meetings_sections(society_id: int | None = None) -> list:
         rat = html.Div([ratification_section(society_id), html.Hr(), certificate_section(society_id)])
     except Exception as exc:
         rat = html.Div(f"Ratification register unavailable: {exc}", style={"fontSize": "12px", "color": "#b02a37"})
+    from app.dash_apps.callbacks.dispute_callbacks import dispute_section
+    try:
+        dsp = dispute_section(society_id)
+    except Exception as exc:
+        dsp = html.Div(f"Disputed bills unavailable: {exc}", style={"fontSize": "12px", "color": "#b02a37"})
     return [
         _section("Meetings (GBM / EGM / MC)", "Record General Body and Managing Committee meetings.",
                   _table(["Meeting", "Status", "Minutes", "Created", "By"], meeting_rows, "No meetings recorded.")),
         _section("Resolutions", "Decisions passed at meetings. Each resolution links to a decision type and optionally a bye-law clause.",
                   _table(["Resolution", "Status", "Passed On", "Majority %", "Meeting", "Body"], resolution_rows, "No resolutions recorded.")),
         _section("Ratification and rule register", "Irregular items waiting for a decision, and the register that links each posting to its rule.", rat),
+        *([_section("Disputed bills", "Bills a member disputes: held with a reason and a resolution, left out of interest and default status until decided.", dsp)]
+          if dsp is not None else []),
         _section("Signatures", "Who must sign each passed resolution and the minutes, and who has. The record is sealed when the last "
                   "required signer confirms; after that it cannot be edited.",
                   html.Div(sign_items or html.Div("Nothing to sign yet.", style={"fontSize": "12px", "color": "#888"}))),

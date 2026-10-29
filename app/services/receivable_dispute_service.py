@@ -31,6 +31,24 @@ def _may_act(d, society_id, user_id) -> bool:
     return bool(ds.serving_offices(society_id, user_id, db=d))
 
 
+def may_act(society_id, user_id, db=None) -> bool:
+    """Who may hold or decide a bill: the administrator, or a serving office-bearer."""
+    return bool(user_id and society_id and _may_act(_db(db), society_id, user_id))
+
+
+def holdable_bills(society_id, db=None, limit: int = 200) -> list[dict]:
+    """Unpaid apartment bills that are not already held, oldest due date first: what the 'hold a bill' list offers."""
+    return _db(db)._execute(
+        """SELECT r.id, r.description, r.due_date, r.amount - r.paid_amount AS outstanding, a.flat_number, a.owner_name
+             FROM receivables r
+             LEFT JOIN apartments a ON a.id = r.entity_id
+            WHERE r.society_id = %s AND r.role = 'apartment' AND r.status IN ('pending', 'partial')
+              AND r.amount - r.paid_amount > 0
+              AND NOT EXISTS (SELECT 1 FROM receivable_disputes d WHERE d.receivable_id = r.id AND d.status = 'open')
+            ORDER BY r.due_date, r.id
+            LIMIT %s""", (society_id, limit), fetch_all=True) or []
+
+
 def _clean(exc) -> str:
     msg = str(exc).split("\n")[0].replace("ERROR:", "").strip()
     if "uq_receivable_dispute_open" in msg:
