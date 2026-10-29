@@ -42,6 +42,7 @@ def register_callbacks(app):
         "agreement_callbacks",        # 10b. Agreement card buttons
         "ratification_callbacks",     # 10d. To-ratify register + rule-application register
         "dispute_callbacks",          # 10e. Disputed / under-protest bills (task 1.5)
+        "itc_callbacks",              # 10f. ITC reversal register (task 1.7)
         "signature_callbacks",        # 10c. Sign / Decline panel (NOC, agreements, resolutions...)
         "admin_callbacks",            # 11. Admin callbacks
         "form_autofill_callbacks",    # 12. Form autofill

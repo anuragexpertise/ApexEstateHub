@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "unclassified_baseline": 134,
+  "unclassified_baseline": 138,
   "endpoints": {
     "callback:account_callbacks.py::handle_change_password": {
       "classification": "unclassified"
@@ -441,6 +441,24 @@
     },
     "callback:invite_to_callbacks.py::toggle_invite_selection": {
       "classification": "unclassified"
+    },
+    "callback:itc_callbacks.py::_compute": {
+      "classification": "legacy-gated"
+    },
+    "callback:itc_callbacks.py::_confirm": {
+      "classification": "legacy-gated"
+    },
+    "callback:itc_callbacks.py::_csv": {
+      "classification": "legacy-gated"
+    },
+    "callback:itc_callbacks.py::_discard": {
+      "classification": "legacy-gated"
+    },
+    "callback:itc_callbacks.py::_post": {
+      "classification": "legacy-gated"
+    },
+    "callback:itc_callbacks.py::_reverse": {
+      "classification": "legacy-gated"
     },
     "callback:list_inspector_callbacks.py::export_list_sql": {
       "classification": "exempt",
