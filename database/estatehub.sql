@@ -117,7 +117,7 @@ CREATE TABLE onboarding_declarations (
         CHECK (status IN ('draft', 'submitted', 'superseded', 'posted')),
     created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by        INT REFERENCES users (id),
+    created_by        INT,
     submitted_at      TIMESTAMP
 );
 CREATE INDEX idx_onboarding_declarations_society ON onboarding_declarations (society_id);
@@ -145,8 +145,8 @@ CREATE TABLE onboarding_annexes (
         CHECK (status IN ('draft', 'submitted', 'sealed', 'superseded')),
     controls_json   JSONB NOT NULL DEFAULT '{}'::jsonb,   -- control results: {control_id: {passed, reason}}
     blocking          BOOLEAN NOT NULL DEFAULT FALSE,   -- TRUE when any control fails (signing blocked)
-    submitted_by    INT REFERENCES users (id),
-    submitted_at    TIMESTAMP,
+    submitted_by      INT,
+    submitted_at      TIMESTAMP,
     sealed_at       TIMESTAMP,
     created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
