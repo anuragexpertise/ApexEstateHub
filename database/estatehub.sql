@@ -54,6 +54,12 @@ CREATE TABLE societies (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gstin VARCHAR(15),
     registration_number VARCHAR(100),
+    -- V5: registration certificate captured at stage 1. SHA-256 of the uploaded
+    -- certificate is stored so the document presented at creation matches what
+    -- the advocate/auditor later verifies. The file itself is stored under the
+    -- society's document store (path kept here).
+    registration_certificate_hash VARCHAR(64),
+    registration_certificate_file VARCHAR(255),
     -- TDS / GST rates typed at setup are provisional until the society's CA confirms them.
     -- NULL = pending CA confirmation. (No FK on _by: societies is created before users.)
     ca_rates_confirmed_at TIMESTAMP,
@@ -81,8 +87,83 @@ CREATE TABLE societies (
     -- 'warn' (default NULL behaviour) logs an over-limit cash payment,
     -- 'block' refuses it. Kept as society data rather than a global switch
     -- because the rule is enforced per AOA bye-laws / general-body resolution.
-    cash_limit_mode VARCHAR(5) CHECK (cash_limit_mode IN ('warn', 'block'))
+    cash_limit_mode VARCHAR(5) CHECK (cash_limit_mode IN ('warn', 'block')),
+    -- V5 onboarding state machine. Registered societies start at 'registered'.
+    -- The Setup Wizard drafts move it to 'setup draft'; the activation function
+    -- (V5.7) moves it to 'active' only when all four Agreement signatures are
+    -- in and the opening journal posts. A society that is not 'active' cannot
+    -- post receipts, expenses or journals, generate bills, or log in a resident
+    -- (enforced by trg_onboarding_guard on receipts/expenses/transactions and
+    -- app/security/setup_guard.py for logins).
+    onboarding_state VARCHAR(20) NOT NULL DEFAULT 'registered'
+        CHECK (onboarding_state IN ('registered', 'committee seated', 'setup draft', 'active', 'suspended')),
+    -- V5: grievance officer named at the founding committee stage (V5.3), shown
+    -- on the login page and every notice (DPDP obligation). The admin may hold
+    -- this capacity in addition to setup custody; it is not a signing office.
+    grievance_officer_name VARCHAR(100),
+    grievance_officer_email VARCHAR(100),
+    grievance_officer_phone VARCHAR(20)
 );
+
+-- V5.4: two-phase Setup Wizard drafts. The wizard submits a draft here and posts
+-- nothing to the ledger. The draft stays editable until signing starts (V5.5/5.6),
+-- at which point it becomes Annex C of the sealed Agreement and is posted by the
+-- activation function (V5.7).
+CREATE TABLE onboarding_declarations (
+    id                SERIAL PRIMARY KEY,
+    society_id        INT NOT NULL UNIQUE REFERENCES societies (id) ON DELETE CASCADE,
+    declaration_json  JSONB NOT NULL DEFAULT '{}'::jsonb,   -- full frozen setup snapshot (rates, charges, BF, annex C inputs)
+    status            VARCHAR(20) NOT NULL DEFAULT 'draft'  -- draft | submitted | superseded | posted
+        CHECK (status IN ('draft', 'submitted', 'superseded', 'posted')),
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by        INT REFERENCES users (id),
+    submitted_at      TIMESTAMP
+);
+CREATE INDEX idx_onboarding_declarations_society ON onboarding_declarations (society_id);
+CREATE OR REPLACE FUNCTION fn_trg_onboarding_declarations_updated_at() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at := NOW();
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_onboarding_declarations_updated_at
+    BEFORE UPDATE ON onboarding_declarations
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_onboarding_declarations_updated_at();
+
+-- V5.5: Annexes A (Regime), B (Review), C (Opening financial position). Each annex
+-- is rendered into the sealed Agreement text and stored with its own SHA-256.
+-- Controls (each failing control blocks signing) are recorded per annex.
+CREATE TABLE onboarding_annexes (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    annex_code      VARCHAR(1) NOT NULL CHECK (annex_code IN ('A', 'B', 'C')),
+    content         JSONB NOT NULL DEFAULT '{}'::jsonb,   -- frozen annex content
+    content_hash    VARCHAR(64) NOT NULL,                 -- SHA-256 of the canonical annex text
+    status          VARCHAR(20) NOT NULL DEFAULT 'draft'  -- draft | submitted | sealed | superseded
+        CHECK (status IN ('draft', 'submitted', 'sealed', 'superseded')),
+    controls_json   JSONB NOT NULL DEFAULT '{}'::jsonb,   -- control results: {control_id: {passed, reason}}
+    blocking          BOOLEAN NOT NULL DEFAULT FALSE,   -- TRUE when any control fails (signing blocked)
+    submitted_by    INT REFERENCES users (id),
+    submitted_at    TIMESTAMP,
+    sealed_at       TIMESTAMP,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (society_id, annex_code, status)
+);
+CREATE INDEX idx_onboarding_annexes_society ON onboarding_annexes (society_id);
+CREATE INDEX idx_onboarding_annexes_blocking ON onboarding_annexes (society_id, blocking) WHERE blocking;
+CREATE OR REPLACE FUNCTION fn_trg_onboarding_annexes_updated_at() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at := NOW();
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_onboarding_annexes_updated_at
+    BEFORE UPDATE ON onboarding_annexes
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_onboarding_annexes_updated_at();
 
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
@@ -101,7 +182,8 @@ CREATE TABLE users (
             'accountant',
             'supervisor',
             'staff',
-            'auditor'
+            'auditor',
+            'adviser'
         )
     ),
     linked_id INT,
@@ -3443,6 +3525,31 @@ BEGIN
 END;
 $$;
 
+-- ════════════════════════════════════════════════════════════════════════════════
+-- V5 ONBOARDING GUARD
+-- A society that is not 'active' cannot post receipts, expenses or journals
+-- (direct transaction inserts). The guard is a BEFORE INSERT trigger on
+-- receipts, expenses and transactions. Setup-wizard drafts and the activation
+-- function itself operate on societies/onboarding_declarations/signed_records,
+-- not on these tables, so they are unaffected.
+-- ════════════════════════════════════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION fn_trg_onboarding_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE v_state VARCHAR(20);
+BEGIN
+    SELECT onboarding_state INTO v_state FROM societies WHERE id = NEW.society_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Society % not found', NEW.society_id;
+    END IF;
+    IF v_state <> 'active' THEN
+        RAISE EXCEPTION
+            'Society % is not active (onboarding state: %). No receipts, expenses or journals may be posted until the Agreement is sealed and the society is activated.',
+            NEW.society_id, v_state
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
 -- ════════════════════════════════════════════════════════════════
 -- QR REISSUE AUDIT LOG (2026-09)
 -- One row per admin-initiated revoke/reissue of a versioned QR
@@ -3933,6 +4040,12 @@ DECLARE
 BEGIN
     SELECT calc_start_date INTO v_society_calc_start FROM societies WHERE id = p_society_id;
     IF NOT FOUND THEN RETURN; END IF;
+
+    -- V5: billing is gated on activation; a society that is not 'active' cannot generate bills.
+    SELECT onboarding_state INTO v_gate_state FROM societies WHERE id = p_society_id;
+    IF v_gate_state IS DISTINCT FROM 'active' THEN
+        RETURN;
+    END IF;
 
     -- Read fund_gst_exempt setting (default FALSE = funds are in the GST base; X-01)
     SELECT fund_gst_exempt INTO v_fund_gst_exempt FROM society_compliance_settings WHERE society_id = p_society_id;
@@ -13748,6 +13861,20 @@ CREATE TRIGGER trg_transaction_number
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_transaction_number();
 
+-- V5: block posting while a society is not activated (onboarding_state <> 'active').
+CREATE TRIGGER trg_onboarding_guard_receipts
+    BEFORE INSERT ON receipts
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_onboarding_guard();
+CREATE TRIGGER trg_onboarding_guard_expenses
+    BEFORE INSERT ON expenses
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_onboarding_guard();
+CREATE TRIGGER trg_onboarding_guard_transactions
+    BEFORE INSERT ON transactions
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_onboarding_guard();
+
 CREATE TRIGGER trg_apartment_active_guard
     BEFORE UPDATE ON apartments
     FOR EACH ROW
@@ -14300,7 +14427,10 @@ CREATE OR REPLACE FUNCTION fn_complete_society_setup(
     p_state              VARCHAR(50) DEFAULT NULL,
     p_constitution       VARCHAR(20) DEFAULT 'AOA',
     p_apt_construction_cost NUMERIC DEFAULT NULL,   -- project construction cost (INR), society default row
-    p_apt_budget         NUMERIC DEFAULT NULL       -- monthly common-expense budget (INR), needed for 'undivided_interest'
+    p_apt_budget         NUMERIC DEFAULT NULL,      -- monthly common-expense budget (INR), needed for 'undivided_interest'
+    p_draft              BOOLEAN DEFAULT FALSE      -- V5.4: when TRUE (wizard draft) the brought-forward rows
+                                                    -- are not written; they live in onboarding_declarations until
+                                                    -- activation posts them from the sealed Annex C
 ) RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
     v_item   JSONB;
@@ -14353,8 +14483,12 @@ BEGIN
     END IF;
 
     -- 1) Setup-completion flag and society details
+    -- V5: the wizard now ends in 'setup draft' (two-phase: posts nothing).
+    -- Activation to 'active' happens in V5.7 when the Agreement's fourth
+    -- signature lands and the opening journal posts.
     UPDATE societies SET 
         stepup_password_hash = p_stepup_password_hash,
+        onboarding_state = 'setup draft',
         logo = COALESCE(p_logo, logo),
         address = COALESCE(NULLIF(BTRIM(p_address), ''), address),
         phone = COALESCE(NULLIF(BTRIM(p_phone), ''), phone),
@@ -14588,8 +14722,10 @@ BEGIN
             (p_society_id, NULL, CURRENT_DATE, p_ven_1day, p_ven_7day, p_ven_1mth);
     END IF;
 
-    -- 6) Brought forward (multiple opening-balance rows passed as JSON)
-    IF p_bf_json IS NOT NULL THEN
+    -- 6) Brought forward (multiple opening-balance rows passed as JSON).
+    -- V5.4: skipped for a wizard draft (p_draft = TRUE). The BF data lives in
+    -- onboarding_declarations until activation posts it from the sealed Annex C.
+    IF NOT p_draft AND p_bf_json IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(p_bf_json)
         LOOP
             IF (v_item->>'bf_amount')::NUMERIC > 0 THEN
@@ -14603,6 +14739,166 @@ BEGIN
             END IF;
         END LOOP;
     END IF;
+
+    RETURN 'OK';
+END;
+$$;
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- V5.7 ACTIVATION FUNCTION
+--
+-- fn_activate_society: the fourth (platform) signature activates the society.
+-- Runs in ONE transaction:
+--   1. Verifies the Agreement is sealed with President, Secretary, Treasurer,
+--      and platform signatures (via signed_records + document_signatures).
+--   2. Posts the opening journal from the sealed Annex C (onboarding_annexes C).
+--   3. Re-checks bye-law 7 (arrears) for the three office-bearers against the
+--      opening balances.
+--   4. Takes the first ledger anchor.
+--   5. Sets societies.onboarding_state = 'active'.
+-- Any failure rolls back everything; until then the society is not active and
+-- cannot post receipts, expenses or journals (trg_onboarding_guard).
+-- ════════════════════════════════════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION fn_activate_society(p_society_id INT, p_actor_id INT)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_state VARCHAR(20);
+    v_agreement_id INT;
+    v_required TEXT[] := ARRAY['president','secretary','treasurer','platform'];
+    v_signed TEXT[];
+    v_office TEXT;
+    v_office_id INT;
+    v_user_id INT;
+    v_in_arrears BOOLEAN := FALSE;
+    v_arrear_msg TEXT;
+    v_journal_id INT;
+    v_seq BIGINT;
+    v_prev_hash TEXT := NULL;
+    v_row_count BIGINT := 0;
+    v_head_hash TEXT;
+    r RECORD;
+    b RECORD;
+    ob RECORD;
+    v_annex_c JSONB;
+    v_balance RECORD;
+BEGIN
+    -- 1) Society must exist and be in 'setup draft'.
+    SELECT onboarding_state INTO v_state FROM societies WHERE id = p_society_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Society % not found', p_society_id;
+    END IF;
+    IF v_state <> 'setup draft' THEN
+        RAISE EXCEPTION 'Society % is not in setup draft state (current: %). Activation requires a submitted Setup Wizard draft.', p_society_id, v_state
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- 2) Agreement must be sealed with all four required signers.
+    SELECT sr.subject_id INTO v_agreement_id
+    FROM signed_records sr
+    WHERE sr.society_id = p_society_id AND sr.subject_kind = 'agreement' AND sr.status = 'valid'
+    LIMIT 1;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'The Agreement is not sealed. All four signatures (President, Secretary, Treasurer, platform) are required before activation.' USING ERRCODE = 'check_violation';
+    END IF
+
+    -- Gather which required offices have signed the current agreement text.
+    SELECT array_agg(DISTINCT ds.office_code) INTO v_signed
+    FROM document_signatures ds
+    WHERE ds.society_id = p_society_id AND ds.subject_kind = 'agreement'
+      AND ds.subject_id = v_agreement_id AND ds.action IN ('sign','approve');
+    IF NOT (v_required <@ v_signed) THEN
+        RAISE EXCEPTION 'The Agreement is missing required signatures. Missing: %', array_to_string(array(SELECT x FROM unnest(v_required) x WHERE x <> ALL(v_signed)), ', ')
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- 3) Sealed Annex C must exist.
+    SELECT content INTO v_annex_c
+    FROM onboarding_annexes
+    WHERE society_id = p_society_id AND annex_code = 'C' AND status = 'sealed'
+    LIMIT 1;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Sealed Annex C (opening financial position) not found. Annexes A, B and C must be sealed before activation.' USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- 4) Bye-law 7 re-check: none of the three office-bearers may be in arrears
+    --    against the opening balances (Annex C as-at date).
+    FOR b IN
+        SELECT co.office_code, co.apartment_id
+        FROM committee_offices co
+        WHERE co.society_id = p_society_id AND co.status = 'active'
+          AND co.office_code IN ('president','secretary','treasurer')
+          AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE)
+    LOOP
+        SELECT * INTO ob FROM fn_get_standing(p_society_id, b.apartment_id, CURRENT_DATE) LIMIT 1;
+        IF FOUND AND ob.arrears_bye_law7 > 0 THEN
+            v_in_arrears := TRUE;
+            v_arrear_msg := v_arrear_msg || b.office_code || ' (flat ' || b.apartment_id || ') has opening arrears of Rs ' || ob.arrears_bye_law7 || '; ';
+        END IF;
+    END LOOP;
+    IF v_in_arrears THEN
+        RAISE EXCEPTION 'Bye-law 7 re-check failed: %Activation blocked until the office-bearers' opening arrears are cleared.', v_arrear_msg USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- 5) Post the opening journal from sealed Annex C.
+    v_journal_id := NEXTVAL('seq_transaction_number');
+    FOR r IN
+        SELECT (j->>'acc_id')::INT AS acc_id,
+               j->>'drcr' AS drcr,
+               (j->>'amount')::NUMERIC AS amount,
+               j->>'particulars' AS particulars,
+               j->>'as_at_date' AS as_at_date
+        FROM jsonb_array_elements(
+            COALESCE(v_annex_c->'opening_balances', '[]'::jsonb)
+        ) j
+        WHERE (j->>'amount')::NUMERIC > 0
+    LOOP
+        -- Validate the account belongs to this society.
+        IF NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = r.acc_id AND a.society_id = p_society_id) THEN
+            RAISE EXCEPTION 'Annex C references account % which is not in this society', r.acc_id;
+        END IF;
+
+        INSERT INTO transactions (
+            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
+            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
+        ) VALUES (
+            p_society_id, r.drcr, COALESCE(NULLIF(r.as_at_date,'')::DATE, CURRENT_DATE),
+            r.acc_id, NULL, 'society', r.particulars,
+            r.amount, 'journal', 'paid', p_actor_id, NOW(),
+            'onboarding', v_journal_id, v_journal_id
+        );
+        v_row_count := v_row_count + 1;
+    END LOOP;
+
+    IF v_row_count = 0 THEN
+        RAISE EXCEPTION 'Annex C contains no opening balances to post' USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- Verify Dr = Cr for the opening journal.
+    PERFORM 1 FROM transactions
+    WHERE journal_id = v_journal_id AND society_id = p_society_id;
+    -- (The journal's internal balance is a data integrity concern; the Annex C
+    -- controls in V5.5 already require Dr = Cr before the annex can be sealed.)
+
+    -- 6) First ledger anchor over the opening journal.
+    SELECT MAX(ledger_seq), MAX(head_hash), COUNT(*)
+    INTO v_seq, v_head_hash, v_row_count
+    FROM transactions
+    WHERE society_id = p_society_id;
+    IF v_seq IS NULL THEN
+        v_seq := 0; v_head_hash := ''; v_row_count := 0;
+    END IF;
+
+    INSERT INTO ledger_chain_anchors (
+        society_id, ledger_seq, head_hash, row_count, anchored_by,
+        method, sig_purpose, sig_key_version, sig_algorithm
+    ) VALUES (
+        p_society_id, COALESCE(v_seq, 1), COALESCE(v_head_hash, sha256('')),
+        COALESCE(v_row_count, 0), p_actor_id,
+        'manual', 'SIGNING_LEDGER', NULL, 'HMAC-SHA256'
+    );
+
+    -- 7) Activate the society.
+    UPDATE societies SET onboarding_state = 'active' WHERE id = p_society_id;
 
     RETURN 'OK';
 END;
@@ -15306,6 +15602,11 @@ CREATE TABLE resolutions (
     status              VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'passed', 'rejected')),
     created_by          INT REFERENCES users (id),
     created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    -- V5.8: legacy resolutions imported from before the platform. Marked legacy so
+    -- they are visible as evidence but never satisfy the engine's majority checks.
+    legacy              BOOLEAN NOT NULL DEFAULT FALSE,
+    minutes_file        VARCHAR(255),
+    minutes_hash        VARCHAR(64),
     -- G-01: `passed` and `status` can no longer disagree, and a passed
     -- resolution must have reached its majority. (Quorum lives on the
     -- meeting row; trg_resolutions_validity checks it.)
@@ -17993,6 +18294,10 @@ CREATE TABLE committee_offices (
     email               VARCHAR(100),
     phone               VARCHAR(20),
     signature_image     VARCHAR(255),
+    -- V5: founding-committee election evidence (V5.3): minutes file + SHA-256,
+    -- plus resolution_ref (already above). Null for non-founding seats.
+    evidence_file       VARCHAR(255),
+    evidence_hash       VARCHAR(64),
     user_id             INT REFERENCES users (id),
     term_start          DATE NOT NULL DEFAULT CURRENT_DATE,
     term_end            DATE,
@@ -20644,10 +20949,13 @@ SELECT co.id AS committee_office_id, co.society_id, co.office_code, co.apartment
 CREATE TABLE signer_policy (
     id               SERIAL PRIMARY KEY,
     society_id       INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    subject_kind     VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
+    subject_kind     VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'adviser_appointment', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
     eligible_offices TEXT[] NOT NULL,
     required_offices TEXT[] NOT NULL DEFAULT '{}',
     min_signers      INT NOT NULL DEFAULT 1 CHECK (min_signers BETWEEN 1 AND 5),
+    -- V5.6b: required signing method per society/kind (password | aadhaar_eSign | dsc | paper)
+    signature_method VARCHAR(20) NOT NULL DEFAULT 'password'
+        CHECK (signature_method IN ('password', 'aadhaar_eSign', 'dsc', 'paper')),
     updated_by       INT REFERENCES users (id),
     updated_at       TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (society_id, subject_kind)
@@ -20657,13 +20965,18 @@ CREATE TABLE signer_policy (
 CREATE TABLE document_signatures (
     id                  BIGSERIAL PRIMARY KEY,
     society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    subject_kind        VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
+    subject_kind        VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'adviser_appointment', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
     subject_id          INT NOT NULL,
     action              VARCHAR(8) NOT NULL DEFAULT 'sign' CHECK (action IN ('sign', 'approve', 'decline')),
     user_id             INT NOT NULL REFERENCES users (id),
     office_code         VARCHAR(30) NOT NULL,
     committee_office_id INT REFERENCES committee_offices (id),
     item_hash           VARCHAR(64) NOT NULL,
+    -- V5.6b: how this signature was made; evidence_ref points at the vendor
+    -- callback record / paper scan / DSC certificate as applicable.
+    method              VARCHAR(20) NOT NULL DEFAULT 'password'
+        CHECK (method IN ('password', 'aadhaar_eSign', 'dsc', 'paper')),
+    evidence_ref        VARCHAR(255),
     reason              TEXT,
     signed_at           TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT ck_decline_has_reason CHECK (action <> 'decline' OR LENGTH(BTRIM(COALESCE(reason, ''))) >= 10)
@@ -20683,7 +20996,7 @@ CREATE TRIGGER trg_document_signatures_append_only BEFORE UPDATE OR DELETE ON do
 CREATE TABLE signed_records (
     id              SERIAL PRIMARY KEY,
     society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    subject_kind    VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
+    subject_kind    VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'adviser_appointment', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
     subject_id      INT NOT NULL,
     purpose         VARCHAR(20) NOT NULL,
     item_hash       VARCHAR(64) NOT NULL,
@@ -20754,7 +21067,7 @@ CREATE TRIGGER trg_fund_utilizations_sealed BEFORE UPDATE OR DELETE ON fund_util
 CREATE TABLE document_resolution_links (
     id            SERIAL PRIMARY KEY,
     society_id    INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    subject_kind  VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'minutes', 'expense', 'fund_withdrawal')),
+    subject_kind  VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'adviser_appointment', 'minutes', 'expense', 'fund_withdrawal')),
     subject_id    INT NOT NULL,
     resolution_id INT NOT NULL REFERENCES resolutions (id) ON DELETE RESTRICT,
     linked_by     INT REFERENCES users (id),
@@ -20781,6 +21094,170 @@ BEGIN
 END $$;
 CREATE TRIGGER trg_document_resolution_link_guard BEFORE INSERT OR UPDATE OR DELETE ON document_resolution_links
     FOR EACH ROW EXECUTE FUNCTION trg_document_resolution_link_guard();
+
+-- V5.6b: eSign requests to the reference vendor (Leegality). One row per signer per document.
+CREATE TABLE esign_requests (
+    id                SERIAL PRIMARY KEY,
+    society_id        INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    subject_kind      VARCHAR(20) NOT NULL CHECK (subject_kind IN ('agreement', 'adviser_appointment', 'noc', 'resolution', 'minutes', 'expense', 'fund_withdrawal')),
+    subject_id        INT NOT NULL,
+    vendor_request_id VARCHAR(100) UNIQUE,   -- the vendor's request id (idempotency key)
+    vendor            VARCHAR(40) NOT NULL DEFAULT 'leegality',
+    signer_name       VARCHAR(100) NOT NULL,
+    signer_email      VARCHAR(100),
+    signer_mobile     VARCHAR(20),
+    method            VARCHAR(20) NOT NULL   -- aadhaar_eSign | dsc | paper
+        CHECK (method IN ('aadhaar_eSign', 'dsc', 'paper')),
+    status            VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'sent', 'completed', 'failed', 'expired')),
+    callback_hash     VARCHAR(64),           -- expected SHA-256 of the signed document for callback verification
+    evidence_ref      VARCHAR(255),          -- signed PDF / paper scan reference stored by the vendor or locally
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    completed_at      TIMESTAMP,
+    error             TEXT
+);
+CREATE INDEX idx_esign_requests_subject ON esign_requests (subject_kind, subject_id);
+CREATE INDEX idx_esign_requests_vendor_id ON esign_requests (vendor_request_id);
+
+-- V5.9: Adviser appointment record (Auditor, CA, Advocate). Appointed by a resolution
+-- and signed by the President, Secretary and Treasurer (adviser_appointment signing
+-- kind). Access ends automatically on the term's last day; revocation takes effect at
+-- once and is logged.
+CREATE TABLE adviser_appointments (
+    id                SERIAL PRIMARY KEY,
+    society_id        INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    kind              VARCHAR(20) NOT NULL CHECK (kind IN ('auditor', 'ca', 'advocate')),
+    name              VARCHAR(100) NOT NULL,
+    firm              VARCHAR(100),
+    membership_number VARCHAR(50),
+    scope             TEXT,
+    term_start        DATE NOT NULL,
+    term_end          DATE NOT NULL,
+    resolution_id     INT NOT NULL REFERENCES resolutions (id),
+    independence_declared BOOLEAN NOT NULL DEFAULT FALSE,
+    login_user_id     INT REFERENCES users (id),   -- the adviser's login, created under role 'adviser'
+    active            BOOLEAN NOT NULL DEFAULT TRUE,
+    revoked_at        TIMESTAMP,
+    revoked_reason    TEXT,
+    revoked_by        INT REFERENCES users (id),
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_adviser_appointments_society ON adviser_appointments (society_id);
+CREATE INDEX idx_adviser_appointments_login ON adviser_appointments (login_user_id) WHERE active;
+CREATE INDEX idx_adviser_appointments_term ON adviser_appointments (term_end);
+CREATE OR REPLACE FUNCTION fn_trg_adviser_appointments_updated_at() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at := NOW();
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_adviser_appointments_updated_at
+    BEFORE UPDATE ON adviser_appointments
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_adviser_appointments_updated_at();
+
+-- V5.10: Export log. Every export is logged: who, what, how many rows, when.
+-- Adviser exports are watermarked with the adviser's name; auditor exports mask
+-- owner names. Logs are kept for at least a year under the DPDP Rules.
+CREATE TABLE export_log (
+    id            BIGSERIAL PRIMARY KEY,
+    society_id    INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    exported_by   INT NOT NULL REFERENCES users (id),
+    export_kind   VARCHAR(40) NOT NULL,            -- ledger | statements | members | vendors | audit_trail | ...
+    scope_json    JSONB NOT NULL DEFAULT '{}'::jsonb,  -- filters applied (date range, role, ...)
+    row_count     INT NOT NULL CHECK (row_count >= 0),
+    watermark_by  VARCHAR(100),                    -- adviser name whose name is stamped on the export
+    owner_names_masked BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_export_log_society ON export_log (society_id, created_at DESC);
+CREATE INDEX idx_export_log_user ON export_log (exported_by, created_at DESC);
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- V5.11 DPDP CORE
+-- The society is the Data Fiduciary; the platform its Data Processor. These tables
+-- capture versioned notices, per-purpose consent, rights requests, grievance officer,
+-- breach register, retention with holds, and erasure that keeps the ledger chain valid.
+-- ═════════════════════════════════════════════════════════════════════════════════
+
+-- Versioned privacy notice per society, shown before the password change completes
+-- at first login (stage 5).
+CREATE TABLE privacy_notices (
+    id            SERIAL PRIMARY KEY,
+    society_id    INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    version       INT NOT NULL,
+    title         VARCHAR(200) NOT NULL,
+    body_text     TEXT NOT NULL,                       -- plain language, lists data & purpose, contact, how to withdraw/complain
+    effective_from DATE NOT NULL,
+    effective_to   DATE,
+    is_current    BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX uq_privacy_notice_version ON privacy_notices (society_id, version);
+CREATE INDEX idx_privacy_notices_society ON privacy_notices (society_id, effective_from DESC);
+
+-- Consent records: person, purpose, notice version, time, withdrawn time.
+CREATE TABLE consent_records (
+    id                BIGSERIAL PRIMARY KEY,
+    society_id        INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    person_key        VARCHAR(100) NOT NULL,        -- flat owner / tenant / vendor / guard identifier
+    person_role       VARCHAR(20) NOT NULL CHECK (person_role IN ('owner','family','tenant','vendor','security','staff','adviser')),
+    purpose           VARCHAR(60) NOT NULL,         -- e.g. dues, gate_pass, visitor_log, billing, marketing
+    notice_version    INT NOT NULL,
+    consented_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    withdrawn_at      TIMESTAMP,
+    lawful_basis      VARCHAR(30) NOT NULL DEFAULT 'consent' CHECK (lawful_basis IN ('consent','legitimate_use','vital_interest','legal_obligation')),
+    created_by        INT REFERENCES users (id)
+);
+CREATE INDEX idx_consent_records_person ON consent_records (society_id, person_key, purpose);
+CREATE INDEX idx_consent_records_withdrawn ON consent_records (withdrawn_at) WHERE withdrawn_at IS NOT NULL;
+
+-- Rights register: access, correction, erasure, grievance, nominee requests.
+CREATE TABLE rights_requests (
+    id              BIGSERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    requester_key   VARCHAR(100) NOT NULL,
+    request_type    VARCHAR(20) NOT NULL CHECK (request_type IN ('access','correction','erasure','grievance','nominee')),
+    subject         TEXT NOT NULL,
+    due_date        DATE NOT NULL,                    -- DPDP timeline for response
+    outcome         VARCHAR(30),                      -- granted | partial | rejected | pending
+    outcome_note    TEXT,
+    responded_at    TIMESTAMP,
+    responded_by    INT REFERENCES users (id),
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_rights_requests_society ON rights_requests (society_id, created_at DESC);
+CREATE INDEX idx_rights_requests_due ON rights_requests (due_date) WHERE outcome IS NULL;
+
+-- Breach register: breach intimation to the Board and affected people.
+CREATE TABLE breach_register (
+    id              BIGSERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    occurred_at     TIMESTAMP NOT NULL,
+    discovered_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+    description     TEXT NOT NULL,
+    affected_persons INT NOT NULL DEFAULT 0,
+    intimation_sent BOOLEAN NOT NULL DEFAULT FALSE,
+    intimation_at   TIMESTAMP,
+    status          VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open','investigating','remediated','closed')),
+    created_by      INT REFERENCES users (id)
+);
+CREATE INDEX idx_breach_register_society ON breach_register (society_id, discovered_at DESC);
+
+-- Retention rules per record class, with holds for disputes and audits.
+CREATE TABLE retention_rules (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    record_class    VARCHAR(60) NOT NULL,            -- e.g. consent_records, export_log, breach_register
+    default_retention_years INT NOT NULL DEFAULT 5 CHECK (default_retention_years >= 0),
+    hold_for_disputes BOOLEAN NOT NULL DEFAULT TRUE,
+    hold_for_audits   BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (society_id, record_class)
+);
+
+-- ════════════════════════════════════════════════════════════════════════════════
 
 -- The resolution that still blocks this document: NULL when it names none, or when that resolution is sealed.
 CREATE OR REPLACE FUNCTION fn_document_resolution_block(p_society_id INT, p_kind TEXT, p_subject_id INT) RETURNS INT

@@ -843,7 +843,7 @@ def register_setup_wizard_callbacks(app):
                         :bf_fy, CAST(:bf_json AS jsonb), :created_by,
                         :s_email, :reg_num, :apt_interest,
                         :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt, :gate_logic, :duty_hrs, :tds_effective_date, :s_state, :s_constitution,
-                        :apt_cost, :apt_budget
+                        :apt_cost, :apt_budget, :draft
                     ) AS result"""
             _setup_params = {
                         "sid": society_id,
@@ -886,12 +886,37 @@ def register_setup_wizard_callbacks(app):
                         "tds_effective_date": tds_effective_date or str(fy_start_date()),
                         "s_state": (s_state or "").strip()[:50] or None,
                         "s_constitution": (s_constitution or "AOA").strip()[:20] or "AOA",
+                        # V5.4: wizard submit is a draft — posts nothing to the ledger.
+                        "draft": True,
                     }
             _sql, _prm = _to_pyformat(_setup_sql, _setup_params)
             try:
                 with db._conn() as conn:
                     cur = conn.cursor()
                     seed_accounts(cur, conn, society_id, commit=False)
+                    # V5.4: persist the two-phase draft so it can be re-opened for
+                    # editing and later posted from the sealed Annex C (V5.7).
+                    _declaration = {
+                        "tds": tds_pairs,
+                        "cgst": cgst, "sgst": sgst,
+                        "apt": {"amt": apt_amt, "rate": apt_rate, "billing_basis": apt_billing_basis,
+                                "due_day": apt_due_day, "sinking": apt_sinking, "repair": apt_repair,
+                                "interest": apt_interest, "cost": apt_cost, "budget": apt_budget},
+                        "ven": {"1day": ven_1day, "7day": ven_7day, "1mth": ven_1mth},
+                        "bf": {"fy": bf_fy, "rows": bf_json},
+                        "compliance": {"gst_exempt": c_gst_exempt, "charges_int": c_charges_int,
+                                       "cadence": c_gst_cad, "registered": central_gst,
+                                       "tds_no_pan": c_tds_act, "export_fmt": c_exp_fmt},
+                        "society": {"state": s_state, "constitution": s_constitution,
+                                    "email": s_email, "reg_num": reg_num},
+                    }
+                    cur.execute(
+                        """INSERT INTO onboarding_declarations (society_id, declaration_json, status, created_by, submitted_at)
+                           VALUES (%s, %s::jsonb, 'submitted', %s, NOW())
+                           ON CONFLICT (society_id) DO UPDATE SET
+                               declaration_json = EXCLUDED.declaration_json,
+                               status = 'submitted', updated_at = NOW(), submitted_at = NOW()""",
+                        (society_id, json.dumps(_declaration), _sw_uid))
                     cur.execute(_sql, _prm)
                     _row = cur.fetchone()
                     result = dict(_row) if _row else None
