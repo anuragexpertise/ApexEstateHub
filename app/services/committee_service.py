@@ -202,8 +202,8 @@ def owner_prefill(society_id, apartment_id) -> dict:
 
 def appoint(actor_id, actor_role, society_id, apartment_id, office_code, holder_name, user_id=None,
             term_start=None, term_end=None, resolution_ref=None, actor_society_id=None,
-            email=None, phone=None, signature_image=None) -> tuple[bool, str]:
-    """Seat `holder_name` (the owner of `apartment_id`) in `office_code`. Returns (ok, message)."""
+            email=None, phone=None, signature_image=None, evidence_file=None, evidence_hash=None) -> tuple[bool, str]:
+    """Seat `holder_name` (the owner of `apartment_id`) in `office_code`. Returns (ok, str)."""
     _require_writer(actor_role, actor_society_id, society_id, master_ok=False)
     if office_code not in OFFICE_LABEL:
         return False, "Choose an office."
@@ -229,19 +229,25 @@ def appoint(actor_id, actor_role, society_id, apartment_id, office_code, holder_
     if email is False or phone is False:
         return False, "The email or phone number is not valid."
     sig = (signature_image or "").strip()[:255] or None
+    ev_file = (evidence_file or "").strip()[:255] or None
+    ev_hash = (evidence_hash or "").strip() or None
+    if ev_hash and len(ev_hash) != 64:
+        return False, "Evidence hash must be a 64-character SHA-256."
     try:
         with db._conn() as conn:
             cur = conn.cursor()
             cur.execute("SELECT fn_appoint_office_bearer(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) AS id",
                         (sid, aid, office_code, name, uid, start, end, ref, None, actor_id))
             office_id = (cur.fetchone() or {}).get("id")
-            cur.execute("UPDATE committee_offices SET email=%s, phone=%s, signature_image=%s WHERE id=%s AND society_id=%s",
-                        (email, phone, sig, office_id, sid))
+            cur.execute("UPDATE committee_offices SET email=%s, phone=%s, signature_image=%s, "
+                        "evidence_file=%s, evidence_hash=%s WHERE id=%s AND society_id=%s",
+                        (email, phone, sig, ev_file, ev_hash, office_id, sid))
             if uid is not None:
                 _grant(cur, uid, role_code, sid, actor_id)
             _audit(cur, "committee.appoint", office_id,
                    {"office": office_code, "apartment_id": aid, "user_id": uid, "term_start": str(start),
-                    "term_end": str(end) if end else None, "resolution_ref": ref, "role_conferred": role_code})
+                    "term_end": str(end) if end else None, "resolution_ref": ref,
+                    "evidence_file": ev_file, "evidence_hash": ev_hash, "role_conferred": role_code})
     except Exception as exc:
         return False, _db_message(exc)
     _invalidate_permission_cache()

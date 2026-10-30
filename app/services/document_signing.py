@@ -20,7 +20,7 @@ from datetime import date
 
 from app.services import signing_service
 
-KINDS = ("noc", "agreement", "resolution", "minutes", "poll", "expense", "fund_withdrawal")
+KINDS = ("noc", "agreement", "resolution", "minutes", "poll", "expense", "fund_withdrawal", "adviser_appointment")
 PURPOSE = {"noc": "SIGNING_NOC"}          # every other kind is sealed with SIGNING_AGREEMENT
 OFFICES = ("president", "vice_president", "secretary", "joint_secretary", "treasurer", "working_committee_member")
 ALL_BEARERS = list(OFFICES)
@@ -29,7 +29,7 @@ LINKABLE = ("noc", "agreement", "minutes", "expense", "fund_withdrawal")   # rec
 # Defaults (the plan's "planned signers"); a society overrides them in signer_policy.
 DEFAULT_POLICY = {
     "noc":             dict(eligible=["secretary"], required=["secretary"], min=1),
-    "agreement":       dict(eligible=["president", "secretary", "platform"], required=["president", "secretary", "platform"], min=3),
+    "agreement":       dict(eligible=["president", "secretary", "treasurer", "platform"], required=["president", "secretary", "treasurer", "platform"], min=4),
     "resolution":      dict(eligible=["president", "vice_president", "secretary", "joint_secretary", "chair"], required=["secretary", "chair"], min=2),
     "minutes":         dict(eligible=["president", "vice_president", "secretary", "joint_secretary", "chair"], required=["secretary", "chair"], min=2),
     "poll":            dict(eligible=["secretary", "president"], required=[], min=1),
@@ -112,6 +112,13 @@ def item_text(kind: str, subject_id: int, db=None) -> tuple[int, str]:
             raise SigningRefused("Fund withdrawal not found.")
         return r["society_id"], (f"fund_withdrawal|{subject_id}|{r['fund_acc_id']}|{r['expense_acc_id']}|{r['amount']}|{r['mode']}|"
                                  f"{r['particulars']}|{r['approval_ref']}|{r['approval_date']}")
+    if kind == "adviser_appointment":
+        r = d._execute("SELECT society_id, kind, name, firm, membership_number, scope, term_start, term_end, resolution_id FROM adviser_appointments WHERE id=%s",
+                       (subject_id,), fetch_one=True)
+        if not r:
+            raise SigningRefused("Adviser appointment not found.")
+        return r["society_id"], (f"adviser_appointment|{subject_id}|{r['kind']}|{r['name']}|{r['firm']}|{r['membership_number']}|"
+                                 f"{r['scope']}|{r['term_start']}|{r['term_end']}|{r['resolution_id']}")
     raise SigningRefused(f"Unsupported record kind {kind!r}.")
 
 
@@ -122,10 +129,10 @@ def _has_col(d, table, col) -> bool:
 # ── policy ──────────────────────────────────────────────────────────────────────────────────────────────────────
 def policy(society_id: int, kind: str, db=None, subject_id: int | None = None) -> dict:
     d = _db(db)
-    row = d._execute("SELECT eligible_offices, required_offices, min_signers FROM signer_policy WHERE society_id=%s AND subject_kind=%s",
+    row = d._execute("SELECT eligible_offices, required_offices, min_signers, signature_method FROM signer_policy WHERE society_id=%s AND subject_kind=%s",
                      (society_id, kind), fetch_one=True)
     if row:
-        return dict(eligible=list(row["eligible_offices"]), required=list(row["required_offices"]), min=row["min_signers"])
+        return dict(eligible=list(row["eligible_offices"]), required=list(row["required_offices"]), min=row["min_signers"], signature_method=row["signature_method"])
     pol = dict(DEFAULT_POLICY[kind])
     if kind == "fund_withdrawal" and subject_id:                  # frozen on the withdrawal; offices from the society's spend policy
         u = d._execute("SELECT signatories_required FROM fund_utilizations WHERE id=%s AND society_id=%s", (subject_id, society_id), fetch_one=True)
@@ -141,16 +148,19 @@ def policy(society_id: int, kind: str, db=None, subject_id: int | None = None) -
     return pol
 
 
-def set_policy(society_id: int, kind: str, eligible, required, min_signers: int, actor_id: int, db=None) -> None:
+def set_policy(society_id: int, kind: str, eligible, required, min_signers: int, actor_id: int,
+               signature_method: str = "password", db=None) -> None:
     d = _db(db)
     bad = [o for o in list(eligible) + list(required) if o not in ALL_BEARERS + ["chair", "platform"]]
+    if signature_method not in ("password", "aadhaar_eSign", "dsc", "paper"):
+        raise SigningRefused("Invalid signature method.")
     if bad or not set(required) <= set(eligible) or not (1 <= int(min_signers) <= 5) or int(min_signers) < len(required):
         raise SigningRefused("Invalid signer list: required offices must be eligible and min_signers must cover them (1 to 5).")
-    d._execute("""INSERT INTO signer_policy (society_id, subject_kind, eligible_offices, required_offices, min_signers, updated_by)
-                  VALUES (%s,%s,%s,%s,%s,%s)
+    d._execute("""INSERT INTO signer_policy (society_id, subject_kind, eligible_offices, required_offices, min_signers, signature_method, updated_by)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s)
                   ON CONFLICT (society_id, subject_kind) DO UPDATE SET eligible_offices=EXCLUDED.eligible_offices,
-                  required_offices=EXCLUDED.required_offices, min_signers=EXCLUDED.min_signers, updated_by=EXCLUDED.updated_by, updated_at=NOW()""",
-               (society_id, kind, list(eligible), list(required), int(min_signers), actor_id))
+                  required_offices=EXCLUDED.required_offices, min_signers=EXCLUDED.min_signers, signature_method=EXCLUDED.signature_method, updated_by=EXCLUDED.updated_by, updated_at=NOW()""",
+               (society_id, kind, list(eligible), list(required), int(min_signers), signature_method, actor_id))
 
 
 # ── who is this user for this record? ───────────────────────────────────────────────────────────────────────────
@@ -224,7 +234,8 @@ def _complete(st: dict) -> bool:
     return not st["missing_required"] and st["people_signed"] >= st["min_signers"] and not st["declined"]
 
 
-def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, action: str = "sign", reason: str | None = None) -> dict:
+def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, action: str = "sign",
+         reason: str | None = None, method: str = "password", evidence_ref: str | None = None) -> dict:
     """Record this user's confirmation ('sign'/'approve') or refusal ('decline', needs a written reason).
     Returns the new status; the record is sealed when the last required signature arrives."""
     if kind not in KINDS:
@@ -240,6 +251,10 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
     if action == "decline" and len((reason or "").strip()) < 10:
         raise SigningRefused("Say why you decline (at least 10 characters).")
     pol = policy(society_id, kind, d, subject_id)
+    # V5.6b: enforce the required signing method before a confirmation may be made.
+    required_method = pol.get("signature_method", "password")
+    if required_method != "password" and method != required_method:
+        raise SigningRefused(f"This record requires a {required_method} signature; {method} is not accepted.")
     roles = [r for r in _signer_roles(d, society_id, kind, subject_id, user_id) if r[0] in pol["eligible"]]
     if not roles:
         raise SigningRefused("You do not hold an office that may sign this record.")
@@ -247,7 +262,7 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
     h = sha256(text)
     # Prefer a REQUIRED capacity not yet covered, else the first eligible one.
     have = {x["office_code"] for x in d._execute("SELECT office_code FROM document_signatures WHERE subject_kind=%s AND subject_id=%s AND item_hash=%s AND action IN ('sign','approve')",
-                                                  (kind, subject_id, h), fetch_all=True) or []}
+                                                   (kind, subject_id, h), fetch_all=True) or []}
     office, coid = next((r for r in roles if r[0] in pol["required"] and r[0] not in have), roles[0])
     if _self_dealing(d, kind, subject_id, user_id, society_id):
         raise SigningRefused("You cannot sign an item concerning your own flat.")
@@ -264,13 +279,13 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
             raise SigningRefused("You have already signed this item; one person counts once.")
     if not recount:
         try:
-            d._execute("""INSERT INTO document_signatures (society_id, subject_kind, subject_id, action, user_id, office_code, committee_office_id, item_hash, reason)
-                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (society_id, kind, subject_id, action, user_id, office, coid, h, (reason or None)))
+            d._execute("""INSERT INTO document_signatures (society_id, subject_kind, subject_id, action, user_id, office_code, committee_office_id, item_hash, method, evidence_ref, reason)
+                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (society_id, kind, subject_id, action, user_id, office, coid, h, method, evidence_ref, (reason or None)))
         except Exception as exc:                                           # noqa: BLE001  (two clicks at once)
             if "uq_doc_signature_person" in str(exc):
                 raise SigningRefused("You have already signed this item; one person counts once.") from exc
             raise
-        _audit(d, society_id, user_id, f"DOCUMENT_{action.upper()}", kind, subject_id, {"office": office, "item_hash": h})
+        _audit(d, society_id, user_id, f"DOCUMENT_{action.upper()}", kind, subject_id, {"office": office, "item_hash": h, "method": method})
     if kind == "fund_withdrawal":
         _withdrawal_effect(d, society_id, subject_id, user_id, action)
     st = status(kind, subject_id, d)

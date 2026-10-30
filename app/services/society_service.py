@@ -6,6 +6,7 @@ Password hashing uses werkzeug (consistent with auth_service + seed).
 """
 
 import logging
+import re
 from werkzeug.security import generate_password_hash
 from database.db_manager import db
 from app.security.audit_context import get_current_user_id
@@ -81,14 +82,39 @@ def create_society_checked(data: dict) -> int:
             f"The admin email '{admin_email}' is already registered to another user. "
             "Use a different email. No society was created.")
 
+    # V5: registration number + certificate hash are mandatory at creation.
+    pan = (data.get("pan") or "").strip().upper()
+    reg_num = (data.get("reg_num") or "").strip()
+    reg_cert_hash = (data.get("reg_cert_hash") or "").strip()
+    reg_cert_file = (data.get("reg_cert_file") or "").strip()
+    state = (data.get("state") or "").strip() or None
+    constitution = (data.get("constitution") or "AOA").strip().upper() or "AOA"
+
+    if not reg_num:
+        raise SocietyCreateError("Registration number is required to register a society.")
+    if not state:
+        raise SocietyCreateError("State is required to assign the society's legal regime at creation.")
+    if not reg_cert_hash:
+        raise SocietyCreateError("Registration certificate (SHA-256 hash) is required to register a society.")
+    if len(reg_cert_hash) != 64 or not all(c in "0123456789abcdef" for c in reg_cert_hash):
+        raise SocietyCreateError("Registration certificate hash must be a 64-character hex SHA-256.")
+    if pan and not re.fullmatch(r"[A-Z]{5}[0-9]{4}[A-Z]", pan):
+        raise SocietyCreateError("PAN must be in the form ABCDE1234F (5 letters, 4 digits, 1 letter).")
+    if constitution not in ("AOA", "REG_SOCIETY", "COOP", "GENERIC"):
+        raise SocietyCreateError("Constitution must be one of: AOA, REG_SOCIETY, COOP, GENERIC.")
+
     today = __import__("datetime").date.today().isoformat()
     try:
         result = db._execute(
             """INSERT INTO societies
                (name,email,phone,address,secretary_name,secretary_phone,
-                plan,plan_validity,calc_start_date, PAN_number, registration_number)
+                plan,plan_validity,calc_start_date, PAN_number, registration_number,
+                registration_certificate_hash, registration_certificate_file,
+                state, constitution)
                VALUES (:name,:email,:phone,:address,:sec_name,:sec_phone,
-                       :plan,:validity,:Calc, :pan, :reg_num)
+                       :plan,:validity,:Calc, :pan, :reg_num,
+                       :reg_cert_hash, :reg_cert_file,
+                       :state, :constitution)
                RETURNING id""",
             {
                 "name":     data["name"],
@@ -100,8 +126,12 @@ def create_society_checked(data: dict) -> int:
                 "plan":     data.get("plan", "Free"),
                 "validity": data.get("validity") or today,
                 "Calc":     data.get("Calc") or today,
-                "pan":      data.get("pan"),
-                "reg_num":  data.get("reg_num"),
+                "pan":      pan or None,
+                "reg_num":  reg_num or None,
+                "reg_cert_hash": reg_cert_hash or None,
+                "reg_cert_file": reg_cert_file or None,
+                "state":    state,
+                "constitution": constitution,
             },
             fetch_one=True,
         )
