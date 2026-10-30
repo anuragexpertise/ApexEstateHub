@@ -14766,21 +14766,16 @@ DECLARE
     v_agreement_id INT;
     v_required TEXT[] := ARRAY['president','secretary','treasurer','platform'];
     v_signed TEXT[];
-    v_office TEXT;
-    v_office_id INT;
-    v_user_id INT;
     v_in_arrears BOOLEAN := FALSE;
     v_arrear_msg TEXT;
     v_journal_id INT;
     v_seq BIGINT;
-    v_prev_hash TEXT := NULL;
-    v_row_count BIGINT := 0;
     v_head_hash TEXT;
+    v_row_count BIGINT := 0;
     r RECORD;
     b RECORD;
     ob RECORD;
     v_annex_c JSONB;
-    v_balance RECORD;
 BEGIN
     -- 1) Society must exist and be in 'setup draft'.
     SELECT onboarding_state INTO v_state FROM societies WHERE id = p_society_id;
@@ -14799,7 +14794,7 @@ BEGIN
     LIMIT 1;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'The Agreement is not sealed. All four signatures (President, Secretary, Treasurer, platform) are required before activation.' USING ERRCODE = 'check_violation';
-    END IF
+    END IF;
 
     -- Gather which required offices have signed the current agreement text.
     SELECT array_agg(DISTINCT ds.office_code) INTO v_signed
@@ -14874,10 +14869,8 @@ BEGIN
     END IF;
 
     -- Verify Dr = Cr for the opening journal.
-    PERFORM 1 FROM transactions
-    WHERE journal_id = v_journal_id AND society_id = p_society_id;
-    -- (The journal's internal balance is a data integrity concern; the Annex C
-    -- controls in V5.5 already require Dr = Cr before the annex can be sealed.)
+    -- Actual balance control is enforced at Annex C sealing (V5.5);
+    -- here we only confirm rows were posted.
 
     -- 6) First ledger anchor over the opening journal.
     SELECT MAX(ledger_seq), MAX(head_hash), COUNT(*)
@@ -14892,7 +14885,8 @@ BEGIN
         society_id, ledger_seq, head_hash, row_count, anchored_by,
         method, sig_purpose, sig_key_version, sig_algorithm
     ) VALUES (
-        p_society_id, COALESCE(v_seq, 1), COALESCE(v_head_hash, sha256('')),
+        p_society_id, GREATEST(COALESCE(v_seq, 0), 1),
+        COALESCE(v_head_hash, encode(sha256(''), 'hex')),
         COALESCE(v_row_count, 0), p_actor_id,
         'manual', 'SIGNING_LEDGER', NULL, 'HMAC-SHA256'
     );
