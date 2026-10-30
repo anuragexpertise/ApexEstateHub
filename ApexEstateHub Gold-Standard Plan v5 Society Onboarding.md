@@ -61,6 +61,47 @@ The Agreement is a two-party contract with four signatures: the society, acting 
 
 **To confirm with your advocate \[Verify\]:** the operator's exact legal entity (the code says "EstateHub, LLC"; an LLC is not an Indian entity form), stamp duty on a software licence in UP, whether a password confirmation is enough for an electronic signature under the IT Act or whether paper counterparts or Aadhaar eSign must be added, and whether a Managing Committee resolution can authorise the contract or the General Body must.
 
+## eSign vendor and signing methods
+
+**Reference vendor: Leegality, Basic Plan, subject to the checks below.** This rests on the vendor's published pricing page and search snippets. No contract, sandbox or account has been opened, so every figure needs reconfirming. Leegality is the reference for the design, not a lock-in: the code talks to an adapter with one interface (create request, check status, fetch signed document), so another vendor can replace it.
+
+| Item | What the vendor's pages say | Cost for one society |
+| --- | --- | --- |
+| Licence | Zero licence fee on the Basic Plan, which includes Aadhaar eSign, digital stamping and API access | 0 |
+| Aadhaar eSign | INR 25 per signatory; minimum purchase INR 100 of credits; pay only for successful eSigns | About INR 100 for the four signatures |
+| Non-Aadhaar eSign | INR 15 per signatory | n/a |
+| Digital stamping | INR 45 per stamp paper, plus stamp duty, plus INR 500 per stamp order; Uttar Pradesh appears in its state list **\[Verify\]** | INR 545 plus duty, if the advocate says the Agreement needs stamping |
+
+**Signing methods by signer**
+
+| Signer | Primary | Fallback |
+| --- | --- | --- |
+| President, Secretary, Treasurer | Aadhaar eSign | Digital signature certificate (DSC), then signed paper with the scan's SHA-256 |
+| Operator's authorised signatory | DSC | Aadhaar eSign, if the advocate accepts it for a company |
+
+The password confirmation stays in every case as evidence of who acted and when. It is not the legal signature.
+
+**Where the vendor is used in v5**
+
+| Record | Method | Why |
+| --- | --- | --- |
+| Agreement | eSign (Aadhaar or DSC) | The licence, the data-protection terms and the society's declared position |
+| Adviser appointment | eSign (Aadhaar or DSC) | A contract carrying a confidentiality undertaking |
+| Legacy resolution import, resolutions, minutes, polls | Password confirmation, as today | Signed paper minutes remain the legal record; eSign on every resolution adds cost and friction |
+| Expenses, fund withdrawals | Password confirmation | Routine approvals; an Aadhaar OTP for each is not proportionate |
+| NOC | Password confirmation in v5 | An NOC a bank or registrar relies on could move to eSign later, as a separate decision |
+
+Each signature records its method in `document_signatures.method` (`password`, `aadhaar_eSign`, `dsc`, `paper`), so the sealed Agreement shows how each person signed.
+
+**Questions to put to the vendor before signing up**
+
+1. Is there a free sandbox, and does it cover sequential multi-signer on one document?
+2. Does the callback return the Aadhaar-verified name, so it can be matched to the office-bearer on record?
+3. Is Uttar Pradesh stamping available on the Basic Plan, and which network serves it?
+4. Does the vendor receive the PDF, and where is it stored? If yes it is a sub-processor, named in the Agreement's data-protection part.
+5. Can the operator's signatory sign as an organisation with a DSC through the vendor?
+6. Is the Verifier API usable for the public verification page?
+
 ## Founding committee, enrollment and adoption
 
 **Founding committee (stage 2).** The admin enrols only the flats of the three office-bearers and seats them with their election evidence: the resolution reference, the minutes as an uploaded file with its hash, and the term dates. The seat and its role grant happen in one transaction, as they do today. One catch for the Treasurer's eye: bye-law 7 bars members in arrears from office **\[Verify\]**, and at this point no receivables exist, so the check passes trivially. Annex C therefore declares the three office-bearers' arrears, and activation re-runs the eligibility check against the opening balances.
@@ -164,7 +205,7 @@ Two links to the rest of the plan. The retention answer from Phase 0.4 (5 years 
 
 ## Build plan
 
-Thirteen tasks, numbered V5.n so they sit beside v4's ids. Effort is my rough judgement: S about a day, M a few days, L a week or more. The order is the dependency order; V5.8 to V5.12 can run in parallel once V5.7 lands.
+Fourteen tasks, numbered V5.n so they sit beside v4's ids. Effort is my rough judgement: S about a day, M a few days, L a week or more. The order is the dependency order; V5.8 to V5.12 can run in parallel once V5.7 lands.
 
 | # | Task | Done when | Effort | Depends on |
 | --- | --- | --- | --- | --- |
@@ -174,9 +215,10 @@ Thirteen tasks, numbered V5.n so they sit beside v4's ids. Effort is my rough ju
 | V5.4 | Two-phase Setup Wizard: save a draft (`onboarding_declarations`), post nothing | Submitting the wizard posts no ledger entry; the draft stays editable until signing starts | L | V5.1 |
 | V5.5 | Annexes A, B and C rendered and checked: regime assigned, Review clean, opening-position controls from the financial section | Each failing control blocks signing; a valid seeded set passes | L | V5.4 |
 | V5.6 | Agreement v2: one text (retire the mismatch with `database/AGREEMENT.md`), parties, data-protection terms, Treasurer required, annexes hashed in | The sealed Agreement shows President, Secretary, Treasurer and platform; editing after a signature voids them | M | V5.5, advocate's wording |
-| V5.7 | Activation function: opening journal from sealed Annex C, bye-law 7 re-check, first ledger anchor, state active, in one transaction | The fourth signature activates the society; a failed step rolls everything back | M | V5.1, V5.5, V5.6 |
+| V5.6b | eSign adapter (reference vendor Leegality): `esign_requests` table, `signer_policy.signature_method`, `document_signatures.method` and `evidence_ref`, a deterministic PDF of the text and annexes with the item hash embedded, an authenticated and idempotent callback, an expiry job, and the DSC and paper fallbacks | The Agreement cannot seal until each of the three office-bearers has signed by the method the policy requires; a callback with a wrong hash or signer is refused; the signed PDF re-verifies | L | V5.6, decision 3 |
+| V5.7 | Activation function: opening journal from sealed Annex C, bye-law 7 re-check, first ledger anchor, state active, in one transaction | The fourth signature activates the society; a failed step rolls everything back | M | V5.1, V5.5, V5.6, V5.6b |
 | V5.8 | Legacy resolution register import with minutes hash, marked `legacy` | An imported resolution is visible as evidence and never satisfies a majority check | S | V5.7 |
-| V5.9 | Adviser appointment record and `adviser` role (Auditor, CA, Advocate) with scope, term end and automatic expiry; new `adviser_appointment` signing kind; a ruling needs an active appointment | A login stops at its term end; an Advocate is refused every ledger read; refusals proven | L | V5.7 |
+| V5.9 | Adviser appointment record and `adviser` role (Auditor, CA, Advocate) with scope, term end and automatic expiry; new `adviser_appointment` signing kind; a ruling needs an active appointment; the appointment is signed by the method set in V5.6b | A login stops at its term end; an Advocate is refused every ledger read; refusals proven | L | V5.7 |
 | V5.10 | Export log and masking: who, what, rows, time; adviser watermark; owner names masked for auditors | Every export has a log row; an auditor export holds no owner names | M | V5.9 |
 | V5.11 | DPDP core: versioned notices, consent records, rights register, grievance officer, breach register, retention with holds, erasure that keeps the ledger chain valid. Replaces v4 task 4.6 | A test erasure leaves the chain valid; a rights request has a due date and an outcome | L | V5.7 |
 | V5.12 | Enrollment minimisation: ID proof and photo optional and role-restricted; adults-only family records; notice and consent at first login | A new resident cannot reach the dashboard before accepting the notice | S | V5.11 |
@@ -192,7 +234,7 @@ Ten decisions hold up work. Decisions 1 to 4 block the Agreement text itself.
 | --- | --- | --- | --- | --- |
 | 1 | The operator's exact legal entity, place of registration, address and authorised signatory. The code says "EstateHub, LLC"; the product is called ApexEstateHub | The Agreement's first line; an LLC is not an Indian entity form | V5.6 | You |
 | 2 | May a Managing Committee resolution authorise the contract, or must the General Body | A contract signed on a defective authority can be disowned later | V5.6 | Advocate |
-| 3 | Is a login-password confirmation enough as the signature, or must the Agreement add Aadhaar eSign, a digital signature or signed paper counterparts | The code records who confirmed; it is not a legal e-signature | V5.6 | Advocate |
+| 3 | Is Aadhaar eSign by the three office-bearers (through Leegality or a similar vendor), plus a DSC for the operator's signatory, enough for the Agreement, or must signed paper counterparts or stamping be added | The code records who confirmed by password; that is not a legal e-signature | V5.6b | Advocate |
 | 4 | Stamp duty on the licence in UP | An unstamped agreement may be inadmissible in evidence | V5.6 | Advocate |
 | 5 | The Treasurer is a required signer. What happens when the Treasurer seat is vacant at onboarding: wait, or allow a named substitute | A small society may not have all three seats filled on day one | V5.7 | You, advocate |
 | 6 | Who appoints which adviser: General Body for the statutory auditor, committee for a CA or advocate; wording of the independence declaration | Sets the appointment check in V5.9 | V5.9 | Advocate |
