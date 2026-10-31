@@ -36,8 +36,8 @@ def _drop_society(db, sid):
 
 @pytest.fixture(scope="module")
 def world():
-    os.environ["OPERATOR_LEGAL_NAME"] = "Test Operator Pvt Ltd"
-    os.environ["OPERATOR_ADDRESS"] = "1 Test Road, Lucknow"
+    os.environ["OPERATOR_LEGAL_NAME"] = "EstateHub LLP"
+    os.environ["OPERATOR_ADDRESS"] = "Agra, UP, India"
     from database.db_manager import db
     from app.services import document_signing as ds
     from app.services import onboarding_service as ob

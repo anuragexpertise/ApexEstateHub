@@ -47,8 +47,8 @@ RECEIVABLE_TABS = ("SDr", "SDrCash", "SDrDig")
 # is not set. Signing is gated on the real environment values (see
 # assert_ready_to_sign): nobody signs until OPERATOR_LEGAL_NAME and
 # OPERATOR_ADDRESS are actually configured.
-OPERATOR_LEGAL_NAME_DEFAULT = "EsateHub LLP"
-OPERATOR_ADDRESS_DEFAULT = "Agra, UP"
+OPERATOR_LEGAL_NAME_DEFAULT = "EstateHub LLP"
+OPERATOR_ADDRESS_DEFAULT = "Agra, UP, India"
 OPERATOR_PLACEHOLDER = "[OPERATOR LEGAL ENTITY - TO BE CONFIRMED BY ADVOCATE BEFORE SIGNING]"
 EVIDENCE_MAX_BYTES = 5 * 1024 * 1024
 EVIDENCE_TYPES = {".pdf": b"%PDF-", ".png": b"\x89PNG", ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff"}
@@ -436,6 +436,7 @@ def appoint_adviser(actor_id: int, society_id: int, kind: str, name: str, firm: 
     passwords (adviser_appointment signing kind) before the adviser can act.
     """
     from werkzeug.security import generate_password_hash
+    from app.security.password_policy import validate_password
     from app.services import committee_service as cs
 
     if kind not in ("auditor", "ca", "advocate"):

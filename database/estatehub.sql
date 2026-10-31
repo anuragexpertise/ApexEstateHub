@@ -14780,6 +14780,7 @@ DECLARE
     v_rows         INT := 0;
     v_arrears_days INT;
     v_msg          TEXT := '';
+    v_rec_acc      INT;
     r              RECORD;
     b              RECORD;
     ob             RECORD;
@@ -14896,12 +14897,18 @@ BEGIN
           JOIN apartments ap ON ap.flat_number = j->>'flat_number' AND ap.society_id = p_society_id
      LOOP
         IF r.amount > 0 THEN
+            SELECT id INTO v_rec_acc
+              FROM accounts
+             WHERE society_id = p_society_id AND tab_name = 'SDr'
+             LIMIT 1;
+            IF v_rec_acc IS NULL THEN
+                RAISE EXCEPTION 'Cannot post opening dues: no Sundry Debtors (SDr) account exists for this society. Add one in Setup Wizard > Accounts before activating.'
+                    USING ERRCODE = 'check_violation';
+            END IF;
             INSERT INTO receivables (society_id, entity_id, role, acc_id, description, period_month,
                                      base_amount, interest_amount, interest_months_applied, amount,
                                      paid_amount, paid_principal, due_date, status)
-            VALUES (p_society_id, r.apartment_id, 'apartment',
-                    COALESCE((SELECT id FROM accounts WHERE society_id = p_society_id AND tab_name = 'SDr' LIMIT 1),
-                             (SELECT id FROM accounts WHERE society_id = p_society_id AND id <> 1 LIMIT 1)),
+            VALUES (p_society_id, r.apartment_id, 'apartment', v_rec_acc,
                     'Opening dues - Annex C arrears', v_as_at, r.amount, 0, 0, r.amount, 0, 0, v_as_at, 'pending');
         END IF;
     END LOOP;
