@@ -43,16 +43,20 @@ Store schema (id="drilldown-store"):
 """
 
 from __future__ import annotations
-from datetime import date as dt_date, datetime
-from decimal import Decimal
-from app.security.password_policy import validate_password
-import json
-import io
-import re
-import pandas as pd
+
 import base64
-import os
+import io
+import json
+import logging
+import re
+from datetime import date as dt_date
+from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
+
+import pandas as pd
+
+from app.security.password_policy import validate_password
 
 # Absolute, CWD-independent assets root. These used to be Path("app/assets"),
 # i.e. relative to whatever directory the server process was started from,
@@ -60,33 +64,96 @@ from pathlib import Path
 # app/assets folder — so on a host whose working directory isn't the repo root,
 # images were written to one place and looked up in another.
 ASSETS_ROOT = Path(__file__).resolve().parents[2] / "assets"
-from PIL import Image
-from dash import Input, Output, State, ALL, MATCH, no_update, html, dcc, ctx
-from dash.exceptions import PreventUpdate
+from datetime import date
+
 import dash_bootstrap_components as dbc
-from database.db_manager import db
-from database import cashbook_export, ledger_export, tds_export, gst_export, rcm_export, income_tax_export, asset_export, financial_statements_export
-from database import tds_compliance
-from database.money import D, money
-from app.services import event_service
+from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
+from dash.exceptions import PreventUpdate
+from dateutil.relativedelta import relativedelta
+
 from app.dash_apps.drilldown.registry import (
     DRILLDOWN_MAP,
-    to_singular,
-    to_plural,
     build_prefill,
+    to_plural,
+    to_singular,
 )
-from datetime import date
-from dateutil.relativedelta import relativedelta
-from app.security.guards import require_session
 from app.security.audit_context import (
+    get_current_linked_id,
+    get_current_society_id,
     get_current_user_id,
     get_current_user_role,
-    get_current_society_id,
-    get_current_linked_id,
     get_server_auth,
 )
-from app.utils.ux_toasts import error_toast
+from app.security.guards import require_session
+from app.services import event_service
 from app.utils.field_config import DEFAULT_CONCERN_TYPE
+from app.utils.ux_toasts import error_toast
+from database import (
+    asset_export,
+    cashbook_export,
+    financial_statements_export,
+    gst_export,
+    income_tax_export,
+    ledger_export,
+    rcm_export,
+    tds_compliance,
+    tds_export,
+)
+from database.db_manager import db
+from database.money import D, money
+
+log = logging.getLogger(__name__)
+
+
+def _log_export(entity: str, sid: int, fy, scope: dict) -> None:
+    """V5.10: record every export in export_log (who, what, how many rows, when).
+
+    Adviser/auditor exports are watermarked with the exporter's name and flag
+    owner_names_masked so consumers know owner names were blanked in the file.
+    The row count is a best-effort count of the rows actually exported.
+    """
+    try:
+        uid = get_current_user_id()
+        role = get_current_user_role()
+    except Exception:                                                   # pragma: no cover - outside a request
+        return
+    if not uid or not sid:
+        return
+    export_kind = {"ledger": "ledger", "ledger_index": "ledger", "cashbook": "cashbook",
+                   "tds_summary": "tds", "gst_summary": "gst", "rcm_liability": "rcm",
+                   "fixed_asset_register": "assets", "member_ledger": "members",
+                   "financial_statements": "statements", "4_statements": "statements",
+                   "5_statements": "statements", "6_statements": "statements",
+                   "asset_holdings": "statements", "deposit_holdings": "statements",
+                   "depreciation_account": "statements", "funds_account": "statements",
+                   "capital_account": "statements", "receipts_payments": "statements",
+                   "income_expenditure": "statements", "balance_sheet": "statements",
+                   "mutuality_summary": "income_tax"}.get(entity, entity)
+    is_adviser = role in ("auditor", "adviser", "accountant")
+    row_count = 0
+    try:
+        rows = scope.get("_export_rows")
+        if rows is not None:
+            row_count = len(rows)
+    except Exception:
+        pass
+    watermark = None
+    try:
+        me = db._execute("SELECT name FROM users WHERE id=%s", (uid,), fetch_one=True)
+        watermark = (me or {}).get("name")
+    except Exception:
+        pass
+    try:
+        db._execute(
+            """INSERT INTO export_log (society_id, exported_by, export_kind, scope_json, row_count,
+                                       watermark_by, owner_names_masked)
+               VALUES (%s,%s,%s,%s::jsonb,%s,%s,%s)""",
+            (sid, uid, export_kind, json.dumps(scope or {}), int(row_count or 0),
+             watermark if is_adviser else None, is_adviser))
+    except Exception:                                                   # noqa: BLE001 - an export log outage must not block the export
+        log.exception("export_log write failed for society %s kind %s", sid, export_kind)
+
+
 def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) -> dict:
     """Return extra filter dict for time-relative KPIs."""
     today = dt_date.today()
@@ -137,10 +204,12 @@ def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) 
         }
 
     return {}
-from app.dash_apps.drilldown import loaders, renderers, state as nav_state
-import  app.services.push_service as PushService
-from app.security.audit_context import get_current_user_id
+import app.services.push_service as PushService
 from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
+from app.dash_apps.drilldown import loaders, renderers
+from app.dash_apps.drilldown import state as nav_state
+from app.security.audit_context import get_current_user_id
+
 DB_ERROR_KEYWORDS = [
     "no database connection",
     "error in processing",
@@ -1046,7 +1115,9 @@ def register_drilldown_callbacks(app):
                 ok, msg = loaders.decline_concern_assignment(int(pk), sid, "ADM", int(caller_entity_id))
                 if ok:
                     try:
-                        from app.services.push_service import notify_concern_declined_by_admin
+                        from app.services.push_service import (
+                            notify_concern_declined_by_admin,
+                        )
                         concern_row = db._execute(
                             "SELECT apartment_id, concern_type FROM concerns WHERE id=%s AND society_id=%s",
                             (pk, sid), fetch_one=True,
@@ -1088,7 +1159,9 @@ def register_drilldown_callbacks(app):
                             (pk, sid), fetch_one=True,
                         )
                         if concern_row:
-                            from app.services.push_service import notify_concern_resolved_by_admin
+                            from app.services.push_service import (
+                                notify_concern_resolved_by_admin,
+                            )
                             notify_concern_resolved_by_admin(
                                 sid, concern_row.get("apartment_id"), concern_row.get("concern_type"),
                             )
@@ -1250,7 +1323,7 @@ def register_drilldown_callbacks(app):
                     return store, content, bc, {"display": "none"}, toast
                 actor_user_id = get_current_user_id()
                 if role == "admin":
-                    from app.services.workflow_service import authorize, Permission
+                    from app.services.workflow_service import Permission, authorize
                     ok_auth, reason = authorize(actor_user_id, Permission.CONCERN_RESOLVE, sid)
                     if not ok_auth:
                         toast = {"_toast": {"type": "error", "message": f"Permission denied: {reason}"}}
@@ -1575,10 +1648,15 @@ def register_drilldown_callbacks(app):
                     toast = {"_toast": {"type": "error", "message": "Apartment not found. Please log in again."}}
                     return store, content, bc, {"display": "none"}, toast
 
-                from app.services.alert_service import list_channels, subscribe_channel, unsubscribe_channel
                 from app.security.authorization import Cap as _Cap
-                from app.security.service_guard import (
-                    audit_event as _audit, authorize_resource as _authz_res, blocks as _blocks)
+                from app.security.service_guard import audit_event as _audit
+                from app.security.service_guard import authorize_resource as _authz_res
+                from app.security.service_guard import blocks as _blocks
+                from app.services.alert_service import (
+                    list_channels,
+                    subscribe_channel,
+                    unsubscribe_channel,
+                )
 
                 # Action-level authorization (RWA3 WP4 item 2): resolve the
                 # channel in the caller's own society before any write, so a
@@ -2049,7 +2127,6 @@ def register_drilldown_callbacks(app):
                     if _webp_bytes is None:
                         raise ValueError("Could not compress image below 50 KB")
 
-                    from pathlib import Path as _Path
                     if sid:
                         _dir = ASSETS_ROOT / str(sid)
                     else:
@@ -2158,7 +2235,10 @@ def register_drilldown_callbacks(app):
                         {"type": "error", "message": "Password must be at least 8 characters."}, 
                         no_update)
             
-            from app.services.society_service import create_society_checked, SocietyCreateError
+            from app.services.society_service import (
+                SocietyCreateError,
+                create_society_checked,
+            )
             try:
                 nsid = create_society_checked({
                     "name": name,
@@ -2717,11 +2797,13 @@ def register_drilldown_callbacks(app):
                 export_df["Billed (Dr)"] = df.apply(lambda r: r["amount"] if r["entry_side"] == "Dr" else "", axis=1)
                 export_df["Paid (Cr)"] = df.apply(lambda r: r["amount"] if r["entry_side"] == "Cr" else "", axis=1)
                 export_df["Balance Owed"] = df["running_balance"]
-            
+
+            _log_export("member_ledger", sid, fy, {"entity": "member_ledger", "fy": fy})
             return dcc.send_data_frame(export_df.to_excel, f"My_Transactions_FY{fy}-{fy+1}.xlsx", index=False)
         else:
             return no_update
 
+        _log_export(entity, sid, fy, {"entity": entity, "fy": fy, "filters": dict(filters or {})})
         return dcc.send_bytes(lambda buf: buf.write(data), filename=filename)
 
     # ── 4. XLS DOWNLOAD ───────────────────────────────────────────────────────
@@ -2737,17 +2819,33 @@ def register_drilldown_callbacks(app):
         if not n_clicks:
             return no_update
         entity = ctx.triggered_id.get("entity", "data")
+        sid = get_current_society_id()
         filters = nav_state.get_filters(store or {})
-        filters["society_id"] = get_current_society_id()
+        filters["society_id"] = sid
         filters = _apply_portal_filters(filters, auth or {})
         rows, _ = loaders.load_list(entity, filters, page=1, page_size=10_000)
         if not rows:
             return no_update
         df = pd.DataFrame(rows)
+        try:
+            uid = get_current_user_id()
+            role = get_current_user_role()
+            is_adviser = role in ("auditor", "adviser", "accountant")
+        except Exception:
+            uid, is_adviser = None, False
+        if is_adviser:
+            for col in ("owner_name", "name", "holder_name", "contact_name", "email", "mobile", "phone"):
+                if col in df.columns:
+                    df[col] = "REDACTED"
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             df.to_excel(writer, sheet_name=entity.title(), index=False)
         output.seek(0)
+        try:
+            _log_export(entity, sid, None, {"entity": entity, "filters": dict(filters or {}),
+                                            "_export_rows": df})
+        except Exception:
+            pass
         return dcc.send_bytes(
             output.getvalue(), filename=f"{entity}_{dt_date.today()}.xlsx"
         )
@@ -2857,7 +2955,8 @@ def register_drilldown_callbacks(app):
         # server-resolved apartment. Starts in shadow mode (policy: owners only).
         from app.security.audit_context import get_current_linked_id as _linked
         from app.security.authorization import Cap as _Cap
-        from app.security.service_guard import authorize_resource as _authz_res, blocks as _blocks
+        from app.security.service_guard import authorize_resource as _authz_res
+        from app.security.service_guard import blocks as _blocks
         _decision, _ = _authz_res(_Cap.POLL_VOTE, "poll", "polls", poll_id,
                                   extra={"voter_unit_id": _linked()})
         if _blocks(_decision):
@@ -3286,9 +3385,9 @@ def _render_card(
             lock_state, can_lock = None, False
             if sid_val and selected_fy:
                 try:
-                    from app.services import fy_lock_service
                     from app.security import service_guard as _sg
                     from app.security.authorization import Cap as _LockCap
+                    from app.services import fy_lock_service
                     lock_state = fy_lock_service.get_lock_state(sid_val, selected_fy)
                     can_lock = _sg.check(_LockCap.FINANCE_PERIOD_CLOSE, "fy_lock", target_society_id=sid_val,
                                          audit_denials=False).allowed
@@ -3354,8 +3453,8 @@ def _render_card(
             sid_val = filters.get("society_id")
             if not sid_val:
                 return html.Div("Society not resolved.", className="text-danger p-3")
-            from app.services import up_aoa_actions
             from app.dash_apps.pages.up_compliance_card import render_up_compliance_card
+            from app.services import up_aoa_actions
             return render_up_compliance_card(up_aoa_actions.load_card_data(sid_val))
 
         # ── Fund Management — custom card (Admin only)
@@ -3835,7 +3934,6 @@ def _label_for(entity_plural: str, record: dict) -> str:
 
 
 def _move_temp_images(entity, new_id, society_id, form_data):
-    from pathlib import Path
 
     temp_dir = (ASSETS_ROOT / "default") / entity
     if not temp_dir.exists():
@@ -5169,7 +5267,8 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
 
 def _save_apartment_user(db, d, sid, is_edit, pk):
     from werkzeug.security import generate_password_hash
-    from app.dash_apps.auth_layer import get_current_user_id, get_current_linked_id
+
+    from app.dash_apps.auth_layer import get_current_linked_id, get_current_user_id
     
     email = (d.get("email") or "").strip().lower()
     if not email:
@@ -5478,8 +5577,8 @@ def _save_concern(db, d, sid, is_edit, pk):
 
 
 def _save_channel(db, d, sid, is_edit, pk):
+    from app.security.audit_context import get_current_linked_id, get_current_user_role
     from app.services.alert_service import create_alert_channel
-    from app.security.audit_context import get_current_user_role, get_current_linked_id
     ch_type = d.get("channel_type", "school_bus")
     ch_name = (d.get("name") or "").strip()
     identifier = (d.get("identifier") or "").strip() or None
@@ -5635,8 +5734,6 @@ def _save_gate_log(db, d, sid):
 
 
 def _save_society(db, d, sid, is_edit, pk):
-    from werkzeug.security import generate_password_hash
-    from pathlib import Path
 
     if is_edit:
         society_dir = ASSETS_ROOT / str(pk)
@@ -6158,7 +6255,11 @@ def _team_actor():
     """((actor_id, society_id), None) for an admin holding roles.manage in their OWN society, else (None, message).
 
     The society is always the server-side session's, never the form's: a posted society_id is ignored."""
-    from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
+    from app.security.audit_context import (
+        get_current_society_id,
+        get_current_user_id,
+        get_current_user_role,
+    )
     from app.security.authorization import Cap
     from app.security.service_guard import blocks, check
     if get_current_user_role() != "admin":
@@ -6344,8 +6445,7 @@ def _apply_portal_filters(filters: dict, auth: dict) -> dict:
 # ════════════════════════════════════════════════════════════════════════════
 
 def register_member_ledger_callbacks(app):
-    import pandas as pd
-    from dash import Input, Output, State, callback_context, no_update, dcc
+    from dash import Input, Output, State, callback_context, no_update
 
     @app.callback(
         Output("drilldown-store", "data", allow_duplicate=True),

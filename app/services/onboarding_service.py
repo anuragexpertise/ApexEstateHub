@@ -43,6 +43,12 @@ OFFICE_LABEL = {"president": "President", "secretary": "Secretary", "treasurer":
 FUND_TABS = ("SinkFund", "RepFund", "CorpusFund", "MajRepFund", "DepFund")
 BANK_TABS = ("BkAc", "SBI", "ICICI", "CiH", "Dp")
 RECEIVABLE_TABS = ("SDr", "SDrCash", "SDrDig")
+# Hard-coded operator defaults, used in the Agreement text when the environment
+# is not set. Signing is gated on the real environment values (see
+# assert_ready_to_sign): nobody signs until OPERATOR_LEGAL_NAME and
+# OPERATOR_ADDRESS are actually configured.
+OPERATOR_LEGAL_NAME_DEFAULT = "EsateHub LLP"
+OPERATOR_ADDRESS_DEFAULT = "Agra, UP"
 OPERATOR_PLACEHOLDER = "[OPERATOR LEGAL ENTITY - TO BE CONFIRMED BY ADVOCATE BEFORE SIGNING]"
 EVIDENCE_MAX_BYTES = 5 * 1024 * 1024
 EVIDENCE_TYPES = {".pdf": b"%PDF-", ".png": b"\x89PNG", ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff"}
@@ -389,8 +395,161 @@ def seal_annexes(society_id: int, actor_id: int) -> dict:
 
 
 def _operator() -> tuple[str, str]:
-    return (os.getenv("OPERATOR_LEGAL_NAME", "").strip() or OPERATOR_PLACEHOLDER,
-            os.getenv("OPERATOR_ADDRESS", "").strip() or "[operator address]")
+    return (os.getenv("OPERATOR_LEGAL_NAME") or OPERATOR_LEGAL_NAME_DEFAULT,
+            os.getenv("OPERATOR_ADDRESS") or OPERATOR_ADDRESS_DEFAULT)
+
+
+def set_esign_required(society_id: int, actor_id: int, required: bool) -> None:
+    """V5.6b: per-society eSign toggle.
+
+    Flips the Agreement signer policy between a password confirmation and the
+    eSign adapter method (aadhaar_eSign / dsc / paper). The adapter itself
+    (app/services/esign_adapter.py) is vendor-neutral: its HTTP client is
+    injected at signing time, so no vendor account is required to operate it.
+    When eSign is required, a password confirmation on the Agreement is refused
+    until the adapter reports a completed signature.
+    """
+    from app.services import document_signing as ds
+    method = "aadhaar_eSign" if required else "password"
+    db._execute("UPDATE societies SET esign_required=%s WHERE id=%s", (bool(required), society_id))
+    ds.set_policy(society_id, "agreement",
+                  eligible=["president", "secretary", "treasurer", "platform"],
+                  required=["president", "secretary", "treasurer", "platform"],
+                  min_signers=4, actor_id=actor_id, signature_method=method)
+
+
+# ── stage 7: adviser appointment (V5.9) ─────────────────────────────────────
+def list_advisers(society_id: int) -> list[dict]:
+    return _rows("""SELECT id, kind, name, firm, membership_number, scope, term_start, term_end,
+                           resolution_id, independence_declared, active, revoked_at, revoked_reason, login_user_id
+                      FROM adviser_appointments WHERE society_id=%s ORDER BY kind, name""", (society_id,)) or []
+
+
+def appoint_adviser(actor_id: int, society_id: int, kind: str, name: str, firm: str | None,
+                    membership_number: str | None, scope: str | None, term_start, term_end,
+                    resolution_id: int, login_email: str | None, login_password: str | None) -> str:
+    """Appoint an auditor, CA or advocate (V5.9).
+
+    Records the adviser appointment (tied to a passed resolution), creates the
+    adviser's read-only login (role='adviser'), and returns a message. The
+    President, Secretary and Treasurer then sign the appointment with their own
+    passwords (adviser_appointment signing kind) before the adviser can act.
+    """
+    from werkzeug.security import generate_password_hash
+    from app.services import committee_service as cs
+
+    if kind not in ("auditor", "ca", "advocate"):
+        raise OnboardingError("Choose Auditor, CA or Advocate.")
+    name = (name or "").strip()
+    if not name:
+        raise OnboardingError("The adviser's name is required.")
+    res = _row("SELECT id, status, society_id FROM resolutions WHERE id=%s", (resolution_id,))
+    if not res or res["society_id"] != society_id:
+        raise OnboardingError("That resolution does not belong to this society.")
+    if res["status"] != "passed":
+        raise OnboardingError("The appointment needs a passed resolution.")
+    try:
+        ts = term_start if isinstance(term_start, date) else date.fromisoformat(str(term_start)[:10])
+        te = term_end if isinstance(term_end, date) else date.fromisoformat(str(term_end)[:10])
+    except ValueError:
+        raise OnboardingError("Give the term start and end dates as YYYY-MM-DD.")
+    if te < ts:
+        raise OnboardingError("The term end must be on or after the term start.")
+    login_id = None
+    if login_email:
+        e = cs.clean_email(login_email)
+        if e is False:
+            raise OnboardingError("Enter a valid adviser email address.")
+        if _row("SELECT 1 AS x FROM users WHERE lower(email)=%s", (e,)):
+            raise OnboardingError("That email is already registered to another login.")
+        pw_err = validate_password(login_password or "")
+        if pw_err:
+            raise OnboardingError(pw_err)
+        login_id = _row("INSERT INTO users (society_id, email, password_hash, role, login_method, name, created_by) "
+                        "VALUES (%s,%s,%s,'adviser','password',%s,%s) RETURNING id",
+                        (society_id, e, generate_password_hash(login_password), name[:100], actor_id))["id"]
+    try:
+        row = _row("""INSERT INTO adviser_appointments
+                       (society_id, kind, name, firm, membership_number, scope, term_start, term_end, resolution_id,
+                        login_user_id, active)
+                      VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
+                      RETURNING id""",
+                     (society_id, kind, name[:100], firm, membership_number, scope, ts, te,
+                      resolution_id, login_id))
+    except Exception:
+        if login_id:
+            db._execute("DELETE FROM users WHERE id=%s", (login_id,))
+        raise
+    _audit_adviser(society_id, actor_id, "ADVISER_APPOINTED", row["id"], {"kind": kind, "name": name})
+    return f"{name} appointed as {kind.title()} (term {ts:%d %b %Y} to {te:%d %b %Y})."
+
+
+def revoke_adviser(society_id: int, actor_id: int, adviser_id: int, reason: str | None) -> str:
+    """End an adviser's appointment and switch off their login."""
+    if len((reason or "").strip()) < 5:
+        raise OnboardingError("Say why the appointment is being revoked.")
+    row = _row("SELECT id, active, login_user_id FROM adviser_appointments WHERE id=%s AND society_id=%s",
+               (adviser_id, society_id))
+    if not row:
+        raise OnboardingError("Adviser appointment not found.")
+    if not row["active"]:
+        raise OnboardingError("That adviser is already revoked.")
+    db._execute("UPDATE adviser_appointments SET active=FALSE, revoked_at=NOW(), revoked_reason=%s, revoked_by=%s WHERE id=%s",
+                ((reason or "").strip()[:200], actor_id, adviser_id))
+    if row["login_user_id"]:
+        db._execute("UPDATE users SET active=FALSE WHERE id=%s", (row["login_user_id"],))
+    _audit_adviser(society_id, actor_id, "ADVISER_REVOKED", adviser_id, {"reason": reason})
+    return "Adviser appointment revoked and their login switched off."
+
+
+def _audit_adviser(society_id: int, actor_id: int, action: str, adviser_id: int, extra: dict) -> None:
+    import json
+    db._execute("INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source) "
+                "VALUES (%s,%s,%s,'adviser_appointment',%s,%s::jsonb,'app')",
+                (society_id, actor_id, action, str(adviser_id), json.dumps(extra)))
+
+
+# ── stage: legacy resolution import (V5.8) ──────────────────────────────────
+def list_legacy_resolutions(society_id: int) -> list[dict]:
+    return _rows("""SELECT r.id, r.body, r.text, r.resolution_type, r.status, r.passed_on,
+                           r.minutes_file, r.minutes_hash, r.created_at,
+                           m.held_on, m.type AS meeting_type
+                      FROM resolutions r
+                      JOIN meetings m ON m.id = r.meeting_id
+                     WHERE m.society_id=%s AND r.legacy
+                     ORDER BY r.created_at DESC""", (society_id,)) or []
+
+
+def import_legacy_resolution(society_id: int, actor_id: int, meeting_id: int,
+                             decision_type_id: int, body: str, minutes_file: str | None,
+                             minutes_hash: str | None) -> str:
+    """Record a resolution imported from before the platform (V5.8).
+
+    Marked legacy=TRUE so it is visible as evidence but never satisfies the
+    engine's majority checks. Requires an existing meeting and decision type in
+    this society.
+    """
+    body = (body or "").strip()
+    if not body:
+        raise OnboardingError("The resolution body is required.")
+    m = _row("SELECT id FROM meetings WHERE id=%s AND society_id=%s", (meeting_id, society_id))
+    if not m:
+        raise OnboardingError("That meeting does not belong to this society.")
+    dt = _row("SELECT id FROM decision_types WHERE id=%s", (decision_type_id,))
+    if not dt:
+        raise OnboardingError("That decision type does not exist.")
+    row = _row("""INSERT INTO resolutions
+                   (society_id, meeting_id, decision_type_id, body, majority_required,
+                    votes_for_pct, owners_present_pct, passed, passed_on, status, legacy,
+                    minutes_file, minutes_hash, created_by)
+                 VALUES (%s,%s,%s,%s,100.00,NULL,NULL,TRUE,CURRENT_DATE,'passed',TRUE,%s,%s,%s)
+                 RETURNING id""",
+                (society_id, meeting_id, decision_type_id, body, minutes_file, minutes_hash, actor_id))
+    db._execute("INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source) "
+                "VALUES (%s,%s,%s,'resolution',%s,%s::jsonb,'app')",
+                (society_id, actor_id, "LEGACY_RESOLUTION_IMPORTED", str(row["id"]),
+                 json.dumps({"meeting_id": meeting_id, "legacy": True})))
+    return f"Legacy resolution imported (marked legacy; evidence only, not a majority check)."
 
 
 def agreement_text(society_id: int, agreement_no: str, annex_hashes: dict, annexes: dict) -> str:
@@ -472,8 +631,12 @@ def assert_ready_to_sign(society_id: int) -> None:
         raise OnboardingError("Annexes A, B and C must be sealed before the Agreement is signed.")
     if any(h not in (ag["body_text"] or "") for h in sealed.values()):
         raise OnboardingError("The Agreement text no longer matches the sealed annexes; reissue it from the annexes.")
-    if OPERATOR_PLACEHOLDER in (ag["body_text"] or ""):
-        raise OnboardingError("The operator's legal entity is not set (OPERATOR_LEGAL_NAME). Settle it with the advocate before anyone signs.")
+    if any(h not in (ag["body_text"] or "") for h in sealed.values()):
+        raise OnboardingError("The Agreement text no longer matches the sealed annexes; reissue it from the annexes.")
+    missing = [v for v in ("OPERATOR_LEGAL_NAME", "OPERATOR_ADDRESS") if not os.getenv(v)]
+    if missing:
+        raise OnboardingError("Signing is blocked until these are set in the environment: " + ", ".join(missing) +
+                              ". Settle them with the advocate before anyone signs.")
 
 
 # ── activation ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -485,8 +648,14 @@ def activate(society_id: int, actor_id: int) -> str:
     try:
         from app.services import dpdp_service
         dpdp_service.ensure_notice(society_id, actor_id)
+        dpdp_service.init_dpdp_review(society_id, actor_id)
     except Exception:                                                  # noqa: BLE001 - the notice can be published later from the register
         log.exception("could not publish the first privacy notice for society %s", society_id)
+    try:
+        from app.security import ledger_anchor as _la
+        _la.anchor_society(society_id, actor_id, method="manual")      # first ledger anchor, signed
+    except Exception:                                                  # noqa: BLE001 - no chain yet; the scheduled job anchors after the first entry
+        log.exception("could not take the first ledger anchor for society %s", society_id)
     return (r or {}).get("r") or "OK"
 
 

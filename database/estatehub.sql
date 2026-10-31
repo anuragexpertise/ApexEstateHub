@@ -98,11 +98,16 @@ CREATE TABLE societies (
     onboarding_state VARCHAR(20) NOT NULL DEFAULT 'registered'
         CHECK (onboarding_state IN ('registered', 'committee seated', 'setup draft', 'active', 'suspended')),
     -- V5: grievance officer named at the founding committee stage (V5.3), shown
-    -- on the login page and every notice (DPDP obligation). The admin may hold
+    -- on the login page and in every notice (DPDP obligation). The admin may hold
     -- this capacity in addition to setup custody; it is not a signing office.
     grievance_officer_name VARCHAR(100),
     grievance_officer_email VARCHAR(100),
     grievance_officer_phone VARCHAR(20)
+    -- V5.6b: per-society eSign toggle. When TRUE the Agreement (and any record whose
+    -- signer_policy demands it) must be signed by the eSign adapter (aadhaar_eSign /
+    -- dsc / paper) instead of a password confirmation. Default No (FALSE).
+    ,
+    esign_required BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 -- V5.4: two-phase Setup Wizard drafts. The wizard submits a draft here and posts
@@ -14882,6 +14887,25 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
+    -- 5.5) Turn Annex C arrears into opening dues receivables, one per flat
+    -- (role='apartment', entity_id = the flat). These are the opening dues the
+    -- society carries forward; billing and interest pick them up once active.
+    FOR r IN
+        SELECT ap.id AS apartment_id, (j->>'amount')::NUMERIC AS amount
+          FROM jsonb_array_elements(COALESCE(v_annex_c->'arrears_by_flat', '[]'::jsonb)) j
+          JOIN apartments ap ON ap.flat_number = j->>'flat_number' AND ap.society_id = p_society_id
+     LOOP
+        IF r.amount > 0 THEN
+            INSERT INTO receivables (society_id, entity_id, role, acc_id, description, period_month,
+                                     base_amount, interest_amount, interest_months_applied, amount,
+                                     paid_amount, paid_principal, due_date, status)
+            VALUES (p_society_id, r.apartment_id, 'apartment',
+                    COALESCE((SELECT id FROM accounts WHERE society_id = p_society_id AND tab_name = 'SDr' LIMIT 1),
+                             (SELECT id FROM accounts WHERE society_id = p_society_id AND id <> 1 LIMIT 1)),
+                    'Opening dues - Annex C arrears', v_as_at, r.amount, 0, 0, r.amount, 0, 0, v_as_at, 'pending');
+        END IF;
+    END LOOP;
+
     -- 6) Activate. One transaction: any failure above leaves the society exactly as it was.
     UPDATE societies SET onboarding_state = 'active' WHERE id = p_society_id;
     UPDATE onboarding_declarations SET status = 'posted' WHERE society_id = p_society_id;
@@ -14890,8 +14914,15 @@ BEGIN
             jsonb_build_object('agreement_id', v_agreement_id, 'opening_rows', v_rows,
                                'opening_total', v_dr, 'as_at', v_as_at, 'financial_year', v_fy), 'app');
 
-    -- 7) First ledger anchor, only when the ledger already has lines. An anchor needs at least one row, so a society
-    --    that opens with no postings is anchored by the scheduled job after its first entry.
+    -- 7) First ledger anchor, taken at activation when the chain already has lines.
+    --    An anchor needs at least one row, so a society that opens with no postings
+    --    is anchored by the scheduled job after its first entry. The anchor is
+    --    inserted unsigned here; the platform signs it (app/services/ledger_anchor.py)
+    --    right after activation succeeds.
+    IF EXISTS (SELECT 1 FROM transactions WHERE society_id = p_society_id AND ledger_seq IS NOT NULL) THEN
+        PERFORM fn_anchor_ledger_chain(p_society_id, p_actor_id, 'manual');
+    END IF;
+
     RETURN 'OK';
 END;
 $$;
@@ -21256,7 +21287,25 @@ CREATE TABLE retention_rules (
     UNIQUE (society_id, record_class)
 );
 
--- ════════════════════════════════════════════════════════════════════════════════
+-- DPDP [Verify] items awaiting legal review. One row per review item per
+-- society; reviewed=TRUE once the advocate has confirmed it. While any row is
+-- unreviewed, dpdp_pending_legal_review(society_id) returns True and the admin
+-- sees the 'pending legal review' flag.
+CREATE TABLE dpdp_legal_review (
+    id          SERIAL PRIMARY KEY,
+    society_id  INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    item_key    VARCHAR(40) NOT NULL,               -- one of dpdp_service.REVIEW_ITEMS
+    detail      TEXT,                               -- what the advocate is being asked to confirm
+    reviewed    BOOLEAN NOT NULL DEFAULT FALSE,
+    reviewed_at TIMESTAMP,
+    reviewed_by INT REFERENCES users (id),
+    created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (society_id, item_key)
+);
+CREATE INDEX idx_dpdp_legal_review_society ON dpdp_legal_review (society_id, reviewed);
+
+
+-- ═════════════════════════════════════════════════════════════════════════════
 
 -- ── V5.11 DPDP functions ─────────────────────────────────────────────────────────────────────────────────────────
 -- Why an erasure may NOT go ahead yet. One row per reason; no rows means the profile can be blanked. A serving

@@ -156,7 +156,7 @@ def _stage_annexes(society_id: int):
     return out
 
 
-def signing_panel(society_id: int, user_id: int | None):
+def signing_panel(society_id: int, user_id: int | None, role: str | None = None):
     ag = ob.db._execute("SELECT id, body_text FROM society_agreements WHERE society_id=%s", (society_id,), fetch_one=True)
     sealed = ob.annex_status(society_id)
     if not ag or not ag["body_text"] or any(sealed.get(c, {}).get("status") != "sealed" for c in "ABC"):
@@ -179,22 +179,130 @@ def signing_panel(society_id: int, user_id: int | None):
             dbc.Input(id=f"{P}-pw", type="password", placeholder="Your login password", autoComplete="current-password", size="sm",
                       style={"maxWidth": "240px", "display": "inline-block", "marginRight": "8px"}),
             dbc.Button(f"Sign as {mine[0].title()}", id=f"{P}-sign", color="success", size="sm", n_clicks=0)])
+    # V5.6b: per-society eSign toggle (admin only). When on, the Agreement must be
+    # signed through the eSign adapter instead of a password confirmation.
+    esign_row = html.Div()
+    if role == "admin":
+        row = ob.db._execute("SELECT esign_required FROM societies WHERE id=%s", (society_id,), fetch_one=True)
+        on = bool((row or {}).get("esign_required"))
+        esign_row = html.Div([
+            html.Strong("eSign required for signing", style={"fontSize": "12px", "color": "#556", "marginRight": "8px"}),
+            dbc.Switch(id=f"{P}-esign", value=on, size="sm"),
+            html.Span("Vendor-neutral adapter; no password confirmation is accepted while this is on.",
+                      style={"fontSize": "11.5px", "color": "#667", "marginLeft": "6px"})],
+            style={"marginTop": "8px", "display": "flex", "alignItems": "center", "gap": "8px"})
     return html.Div([
         html.Strong("The Agreement"),
         html.Div("Each signature records who signed, when, and the SHA-256 of this exact text and its annex hashes.", style=_MUTED),
         html.Details([html.Summary("Read the Agreement text", style={"fontSize": "12.5px", "cursor": "pointer"}),
                       html.Pre(ag["body_text"], style={"whiteSpace": "pre-wrap", "fontSize": "11.5px", "maxHeight": "320px", "overflow": "auto",
                                                        "background": "#fff", "border": "1px solid #e1e7ef", "padding": "8px"})]),
-        html.Ul(rows, style={"padding": "0", "margin": "8px 0"}), control], style=_CARD)
+        html.Ul(rows, style={"padding": "0", "margin": "8px 0"}), control, esign_row], style=_CARD)
 
 
-def _stage_active(society_id: int):
+# ── stage 7: advisers (V5.9) ────────────────────────────────────────────────
+def _adviser_badge(active: bool) -> dbc.Badge:
+    return dbc.Badge("Active" if active else "Revoked", color="success" if active else "danger", size="sm")
+
+
+def advisers_section(society_id: int, role: str | None, user_id: int | None) -> list:
+    """Adviser appointments (Auditor / CA / Advocate). Admin appoints; the three
+    office-bearers sign the appointment; advisers hold read-only logins."""
+    rows = ob.list_advisers(society_id)
+    cards = []
+    for a in rows:
+        signed = {x["office_code"] for x in ds.status("adviser_appointment", int(a["id"])).get("signed", [])}
+        mine = [r[0] for r in ds._signer_roles(ob.db, society_id, "adviser_appointment", int(a["id"]), user_id or 0)
+                if r[0] in ("president", "secretary", "treasurer") and r[0] not in signed] if user_id else []
+        ctrl = html.Div()
+        if mine:
+            ctrl = html.Div([
+                dbc.Input(id={"type": f"{P}-adv-pw", "id": int(a["id"])}, type="password",
+                          placeholder="Your login password", autoComplete="current-password", size="sm",
+                          style={"maxWidth": "200px", "display": "inline-block", "marginRight": "6px"}),
+                dbc.Button(f"Sign as {mine[0].title()}", id={"type": f"{P}-adv-sign", "id": int(a["id"])},
+                           color="success", size="sm", n_clicks=0)])
+        elif a["active"]:
+            ctrl = html.Span("signed by " + ", ".join(sorted(signed)) or "—", style=_MUTED)
+        cards.append(html.Div([
+            html.Strong(f"{a['kind'].title()}: {a['name']}"),
+            html.Div(f"firm={a['firm'] or '-'}  membership={a['membership_number'] or '-'}  "
+                     f"term {a['term_start']:%d %b %Y} to {a['term_end']:%d %b %Y}  "
+                     f"{_adviser_badge(bool(a['active']))}", style=_MUTED),
+            html.Div(f"scope: {a['scope'] or '-'}   resolution #{a['resolution_id']}   "
+                     f"login: {'yes' if a['login_user_id'] else 'no'}", style=_MUTED),
+            html.Div(ctrl, style={"marginTop": "6px"}),
+        ], style=_CARD))
+    out = [html.H6("Adviser appointments"), html.Div(cards or [html.Div("No advisers appointed yet.", style=_MUTED)])]
+    if role == "admin":
+        def fid(f):
+            return {"type": f"{P}-adv", "field": f}
+        out.append(html.Div([
+            html.Strong("Appoint a new adviser"),
+            dbc.Row([
+                dbc.Col(_field("Role", dbc.Select(id=fid("kind"), size="sm", options=[{"label": a, "value": a} for a in ("auditor", "ca", "advocate")])), md=2),
+                dbc.Col(_field("Name", dbc.Input(id=fid("name"), size="sm", maxLength=100)), md=3),
+                dbc.Col(_field("Firm", dbc.Input(id=fid("firm"), size="sm", maxLength=100)), md=3),
+                dbc.Col(_field("Membership no.", dbc.Input(id=fid("mno"), size="sm", maxLength=50)), md=2),
+            ], className="g-2"),
+            dbc.Row([
+                dbc.Col(_field("Scope", dbc.Input(id=fid("scope"), size="sm", maxLength=300)), md=4),
+                dbc.Col(_field("Term start", dbc.Input(id=fid("ts"), size="sm", type="date")), md=2),
+                dbc.Col(_field("Term end", dbc.Input(id=fid("te"), size="sm", type="date")), md=2),
+                dbc.Col(_field("Passed resolution #", dbc.Input(id=fid("res"), size="sm", type="number")), md=2),
+            ], className="g-2"),
+            dbc.Row([
+                dbc.Col(_field("Adviser email (their login)", dbc.Input(id=fid("email"), size="sm", type="email", maxLength=100)), md=4),
+                dbc.Col(_field("Temporary password", dbc.Input(id=fid("pw"), size="sm", type="password", autoComplete="new-password")), md=3),
+                dbc.Col(dbc.Button("Appoint", id=fid("appoint"), color="success", size="sm", n_clicks=0), md=2),
+            ], className="g-2"),
+            html.Div(id=fid("msg")), html.Div(id=fid("marker"), style={"display": "none"}),
+        ], style=_CARD))
+    return out
+
+
+def _stage_active(society_id: int, role: str | None = None, user_id: int | None = None):
     return [dbc.Alert([html.I(className="fas fa-check-circle me-2"), "The society is active. The Agreement is sealed and the opening position is posted."],
                       color="success", className="py-2"),
             html.H6("What is next"),
             html.Ul([html.Li("Stage 5, Enrollment: enrol owners, vendors, guards and staff from the Enrolled tab. Each person accepts the privacy notice at first sign-in."),
                      html.Li("Stage 6, Adoption: adopt bye-laws and record resolutions under Settings, Society By-laws and Meetings & Resolutions."),
-                     html.Li("Stage 7, Advisers: appoint the auditor, CA and advocate once a resolution is recorded.")], style={"fontSize": "13px"})]
+                     html.Li("Stage 7, Advisers: appoint the auditor, CA and advocate once a resolution is recorded.")], style={"fontSize": "13px"}),
+            html.Hr(), advisers_section(society_id, role, user_id),
+            html.Hr(), legacy_resolutions_section(society_id, role)]
+
+
+# ── stage: legacy resolutions (V5.8) ────────────────────────────────────────
+def legacy_resolutions_section(society_id: int, role: str | None) -> list:
+    rows = ob.list_legacy_resolutions(society_id)
+    cards = [html.Div([
+        html.Strong(f"{r['resolution_type'] or 'Resolution'} (#{r['id']})"),
+        html.Div(f"{r['meeting_type']} on {r['held_on']:%d %b %Y}  passed {r['passed_on']:%d %b %Y}  "
+                 f"status={r['status']}", style=_MUTED),
+        html.Div((r['body'] or r['text'] or "")[:200] + ("…" if (r['body'] or r['text'] or "") and len(r['body'] or r['text'] or "") > 200 else ""),
+                 style={"fontSize": "12px", "color": "#445", "marginTop": "4px"}),
+        html.Div(f"minutes: {r['minutes_file'] or '-'}  hash: {r['minutes_hash'] or '-'}", style=_MUTED),
+    ], style=_CARD) for r in rows]
+    out = [html.H6("Legacy resolutions imported (V5.8 — evidence only, never a majority check)"),
+           html.Div(cards or [html.Div("None imported yet.", style=_MUTED)])]
+    if role == "admin":
+        def fid(f):
+            return {"type": f"{P}-leg", "field": f}
+        out.append(html.Div([
+            html.Strong("Import a legacy resolution"),
+            dbc.Row([
+                dbc.Col(_field("Meeting #", dbc.Input(id=fid("meeting"), size="sm", type="number")), md=2),
+                dbc.Col(_field("Decision type #", dbc.Input(id=fid("dtype"), size="sm", type="number")), md=2),
+                dbc.Col(_field("Minutes file ref", dbc.Input(id=fid("mfile"), size="sm", maxLength=255)), md=3),
+                dbc.Col(_field("Minutes SHA-256", dbc.Input(id=fid("mhash"), size="sm", maxLength=64)), md=3),
+            ], className="g-2"),
+            dbc.Row([
+                dbc.Col(_field("Resolution body", dbc.Textarea(id=fid("body"), size="sm", rows=3)), md=8),
+                dbc.Col(dbc.Button("Import", id=fid("import"), color="success", size="sm", n_clicks=0), md=2),
+            ], className="g-2"),
+            html.Div(id=fid("msg")), html.Div(id=fid("marker"), style={"display": "none"}),
+        ], style=_CARD))
+    return out
 
 
 def hub_body(role: str, society_id: int, user_id: int | None) -> list:
@@ -206,11 +314,11 @@ def hub_body(role: str, society_id: int, user_id: int | None) -> list:
     elif st == "setup draft":
         if is_admin:
             out += _stage_annexes(society_id)
-        out.append(signing_panel(society_id, user_id))
+        out.append(signing_panel(society_id, user_id, role))
         if not is_admin:
             out.append(html.Div("You sign here once the annexes are sealed. Until the Agreement is sealed the society cannot bill, receive or post.", style=_MUTED))
     elif st == "active":
-        out += _stage_active(society_id)
+        out += _stage_active(society_id, role, user_id)
     else:
         out.append(dbc.Alert("This society is suspended. Contact the platform operator.", color="warning"))
     return out

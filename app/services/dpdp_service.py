@@ -24,12 +24,20 @@ from database.db_manager import db
 
 log = logging.getLogger(__name__)
 
-RESPONSE_DAYS = 30            # [Verify] against the Rules; the register shows the due date either way
-REQUEST_TYPES = ("access", "correction", "erasure", "grievance", "nominee")
-OUTCOMES = ("granted", "partial", "rejected")
-BREACH_STATUS = ("open", "investigating", "remediated", "closed")
-ROLE_MAP = {"apartment": None, "vendor": "vendor", "security": "security", "accountant": "staff", "supervisor": "staff",
-            "staff": "staff", "auditor": "adviser", "adviser": "adviser", "admin": "admin"}
+# ═════════════════════════════════════════════════════════════════════════════
+# DPDP legal-parameter block — centralised so the dates, response period and
+# lawful bases can be changed in one place and reviewed by legal.
+#
+# Items marked [Verify] are held against the DPDP Act 2023 / Rules and are
+# NOT yet legally confirmed. While any item is unverified the society's admin
+# sees an admin-visible 'pending legal review' flag (dpdp_pending_legal_review).
+# ═════════════════════════════════════════════════════════════════════════════
+
+# [Verify] Days within which the society must answer a rights request.
+RESPONSE_DAYS = 30
+
+# [Verify] Lawful basis the advocate has confirmed for each purpose, and whether
+# the purpose is mandatory (cannot be switched off by the person).
 # purpose -> (label, lawful basis, required)
 PURPOSES = {
     "notice_ack":    ("Read and understood the privacy notice", "consent", True),
@@ -37,6 +45,11 @@ PURPOSES = {
     "gate_safety":   ("Gate passes, visitor log and safety", "legitimate_use", True),
     "announcements": ("Society announcements by push notification and email", "consent", False),
 }
+
+# [Verify] Legal-effect dates held per society in dpdp_legal_review. Until the
+# advocate signs them off, dpdp_pending_legal_review(society_id) returns True
+# and every notice carries a pending-review banner.
+REVIEW_ITEMS = ("response_days", "lawful_basis_dues", "lawful_basis_gate_safety", "notice_effective_date")
 
 
 class DpdpError(ValueError):
@@ -49,6 +62,63 @@ def _rows(sql, params=None):
 
 def _row(sql, params=None):
     return db._execute(sql, params, fetch_one=True)
+
+
+def _table_exists(d, name: str) -> bool:
+    return bool(d._execute("SELECT 1 FROM information_schema.tables WHERE table_name=%s", (name,), fetch_one=True))
+
+
+def init_dpdp_review(society_id: int, actor_id: int | None = None) -> int:
+    """Create one unreviewed row per DPDP [Verify] item (idempotent). Returns rows created."""
+    created = 0
+    with db._conn() as conn:
+        cur = conn.cursor()
+        for key in REVIEW_ITEMS:
+            cur.execute(
+                """INSERT INTO dpdp_legal_review (society_id, item_key, detail, reviewed)
+                   VALUES (%s,%s,%s,FALSE)
+                   ON CONFLICT (society_id, item_key) DO NOTHING""",
+                (society_id, key, {"response_days": f"Rights requests must be answered within {RESPONSE_DAYS} days.",
+                                   "lawful_basis_dues": "Dues and gate-safety are recorded as legitimate_use.",
+                                   "lawful_basis_gate_safety": "Gate passes and visitor log are legitimate_use.",
+                                   "notice_effective_date": "The privacy notice is effective from first publication."}[key]))
+            if cur.rowcount:
+                created += 1
+    return created
+
+
+def dpdp_pending_legal_review(society_id: int) -> bool:
+    """Admin-visible flag: True while any DPDP [Verify] item awaits legal review.
+
+    Stored per society in dpdp_legal_review(reviewed=FALSE). An admin with the
+    grievance-officer/secretary capacity sees the banner and can clear it once
+    the advocate has confirmed the items.
+    """
+    try:
+        row = _row("""SELECT COUNT(*) AS n FROM dpdp_legal_review
+                      WHERE society_id=%s AND NOT reviewed""", (society_id,))
+        return bool(row and row["n"])
+    except Exception:                                                   # table may not exist on old schemas
+        log.exception("dpdp_pending_legal_review check failed")
+        return True
+
+
+def mark_dpdp_reviewed(society_id: int, item_key: str, actor_id: int,
+                       reviewed: bool = True) -> bool:
+    """Mark a DPDP [Verify] item reviewed (or unreviewed). Only a manager may do it."""
+    if item_key not in REVIEW_ITEMS:
+        raise DpdpError("Unknown review item.")
+    _require_manager(society_id, actor_id, None)
+    try:
+        row = _row("""UPDATE dpdp_legal_review
+                      SET reviewed=%s, reviewed_at=CASE WHEN %s THEN NOW() ELSE reviewed_at END,
+                          reviewed_by=CASE WHEN %s THEN %s ELSE reviewed_by END
+                      WHERE society_id=%s AND item_key=%s RETURNING id""",
+                   (reviewed, reviewed, reviewed, actor_id, society_id, item_key), fetch_one=True)
+        return bool(row)
+    except Exception:                                                   # table may not exist
+        log.exception("mark_dpdp_reviewed failed")
+        return False
 
 
 # ── the notice ────────────────────────────────────────────────────────────────────────────────────────────────────

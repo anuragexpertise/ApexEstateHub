@@ -206,6 +206,95 @@ def register_onboarding_callbacks(app):
         return s if s and s[2] == "master" else None
 
     @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input(f"{P}-esign", "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_esign_toggle(required):
+        s = _session()
+        if not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        try:
+            ob.set_esign_required(sid, uid, bool(required))
+        except Exception as exc:                                       # noqa: BLE001
+            return no_update, _alert(f"eSign toggle could not be saved: {exc}", False), no_update
+        body, mk = _body(sid, uid, role)
+        return body, _alert("eSign required is now " + ("ON" if required else "OFF") + "."), mk
+
+    # ── stage 7: adviser appointment / signing ──────────────────────────────
+    ADV_FIELDS = ("kind", "name", "firm", "mno", "scope", "ts", "te", "res", "email", "pw")
+
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input({"type": f"{P}-adv", "field": "appoint"}, "n_clicks"),
+        [State({"type": f"{P}-adv", "field": f}, "value") for f in ADV_FIELDS],
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_adviser_appoint(n, kind, name, firm, mno, scope, ts, te, res, email, pw):
+        s = _session()
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        try:
+            msg = ob.appoint_adviser(uid, sid, kind, name, firm, mno, scope, ts, te,
+                                     int(res) if res not in (None, "") else None, email, pw)
+        except ob.OnboardingError as exc:
+            return no_update, _alert(str(exc), False), no_update
+        body, mk = _body(sid, uid, role)
+        return body, _alert(msg), mk
+
+    @app.callback(
+        Output({"type": f"{P}-mmsg", "sid": MATCH}, "children", allow_duplicate=True),
+        Input({"type": f"{P}-adv-sign", "id": MATCH}, "n_clicks"),
+        State({"type": f"{P}-adv-pw", "id": MATCH}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_adviser_sign(n, password):
+        s = _session()
+        if not n or not s or not ctx.triggered_id:
+            return no_update
+        _sid, uid, _role = s
+        appt_id = int(ctx.triggered_id["id"])
+        try:
+            st = ds.sign("adviser_appointment", appt_id, uid, password or "")
+        except ds.SigningRefused as exc:
+            return _alert(str(exc), False)
+        return _alert("Adviser appointment signed." + (" Sealed." if st.get("sealed") else ""))
+
+    # ── stage: legacy resolution import (V5.8) ──────────────────────────────
+    LEG_FIELDS = ("meeting", "dtype", "mfile", "mhash", "body")
+
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input({"type": f"{P}-leg", "field": "import"}, "n_clicks"),
+        [State({"type": f"{P}-leg", "field": f}, "value") for f in LEG_FIELDS],
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_legacy_import(n, meeting, dtype, mfile, mhash, body):
+        s = _session()
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        try:
+            msg = ob.import_legacy_resolution(sid, uid, int(meeting) if meeting not in (None, "") else None,
+                                              int(dtype) if dtype not in (None, "") else None, body, mfile, mhash)
+        except (ob.OnboardingError, ValueError, TypeError) as exc:
+            return no_update, _alert(str(exc), False), no_update
+        body_html, mk = _body(sid, uid, role)
+        return body_html, _alert(msg), mk
+
+    @app.callback(
         Output({"type": f"{P}-mmsg", "sid": MATCH}, "children"),
         Input({"type": f"{P}-msign", "sid": MATCH}, "n_clicks"),
         State({"type": f"{P}-mpw", "sid": MATCH}, "value"),
