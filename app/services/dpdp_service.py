@@ -46,6 +46,17 @@ PURPOSES = {
     "announcements": ("Society announcements by push notification and email", "consent", False),
 }
 
+# [Verify] Rights-request types, outcomes and breach statuses — mirror the SQL
+# CHECK constraints on rights_requests and breach_register.
+REQUEST_TYPES = ("access", "correction", "erasure", "grievance", "nominee")
+OUTCOMES = ("granted", "partial", "rejected")
+BREACH_STATUS = ("open", "investigating", "remediated", "closed")
+
+# Person role used by _person(): map login role -> person role, falling back to
+# the user_type column (owner / family / tenant / visitor).
+ROLE_MAP = {"apartment": None, "vendor": "vendor", "security": "security", "accountant": "staff", "supervisor": "staff",
+            "staff": "staff", "auditor": "adviser", "adviser": "adviser", "admin": "admin"}
+
 # [Verify] Legal-effect dates held per society in dpdp_legal_review. Until the
 # advocate signs them off, dpdp_pending_legal_review(society_id) returns True
 # and every notice carries a pending-review banner.
