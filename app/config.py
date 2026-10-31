@@ -1,6 +1,6 @@
 # app/config.py
 """
-Configuration module for EsateHub.
+Configuration module for EstateHub.
 
 KEY FIX: get_database_url() is called INSIDE each Config class via
 a classmethod-style function, not at module-import time.  This means

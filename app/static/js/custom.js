@@ -1,5 +1,5 @@
-// Custom JavaScript for EsateHub
-console.log('EsateHub - Custom JS loaded');
+// Custom JavaScript for EstateHub
+console.log('EstateHub - Custom JS loaded');
 
 // Handle sidebar toggle for mobile
 function initSidebarToggle() {
