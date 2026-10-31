@@ -8,7 +8,7 @@ self.addEventListener('push', function (event) {
         }
     }
 
-    const title = data.title || 'EsateHub';
+    const title = data.title || 'EstateHub';
     const options = {
         body: data.body || 'You have a new notification',
         icon: data.icon || '/static/assets/EH_logo.png',

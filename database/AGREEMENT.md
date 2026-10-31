@@ -4,7 +4,7 @@ This Agreement is a two-party contract between:
 
 **1. The Society** — a residential / commercial apartment owners' association (or registered society / co-operative) registered under the applicable law, acting through its Managing Committee. The society is the Data Fiduciary for the personal data of its owners, tenants, vendors and guards.
 
-**2. The Platform Operator** — EsateHub LLP, a limited liability partnership registered in Agra, Uttar Pradesh (the "Operator"), represented for this Agreement by its authorised signatory. The Operator is the Data Processor for the society's books on the ApexEstateHub platform.
+**2. The Platform Operator** — EstateHub LLP, a limited liability partnership registered in Agra, Uttar Pradesh (the "Operator"), represented for this Agreement by its authorised signatory. The Operator is the Data Processor for the society's books on the ApexEstateHub platform.
 
 Together, the "Parties".
 

@@ -69,7 +69,7 @@ def send_test():
         
         success, message = send_push_notification(
             user_id,
-            title="🔔 Test Notification from EsateHub",
+            title="🔔 Test Notification from EstateHub",
             body="This is a test message! Your push notifications are working correctly.",
             url="/dashboard/"
         )
