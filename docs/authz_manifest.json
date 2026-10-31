@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "unclassified_baseline": 132,
+  "unclassified_baseline": 150,
   "endpoints": {
     "callback:account_callbacks.py::handle_change_password": {
       "classification": "unclassified"
@@ -579,6 +579,35 @@
     "callback:noc_callbacks.py::_stamp_noc_printed": {
       "classification": "unclassified"
     },
+    "callback:onboarding_callbacks.py::onb_grievance": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_master_retry": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_master_sign": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_open_wizard": {
+      "classification": "exempt",
+      "reason": "Pure UI trigger: bumps pwd-gate-store so the wizard re-checks. Server re-verifies admin role and 'committee seated' state before anything opens; writes nothing."
+    },
+    "callback:onboarding_callbacks.py::onb_poll": {
+      "classification": "exempt",
+      "reason": "Session-guarded read-only refresh of the caller's OWN society's onboarding state (society from the server session); writes nothing."
+    },
+    "callback:onboarding_callbacks.py::onb_prepare": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_seal": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_seat": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_sign": {
+      "classification": "legacy-gated"
+    },
     "callback:poll_callbacks.py::save_poll": {
       "classification": "action",
       "actions": [
@@ -588,6 +617,38 @@
     "callback:poll_callbacks.py::toggle_extra_choices": {
       "classification": "exempt",
       "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
+    },
+    "callback:privacy_callbacks.py::privacy_accept": {
+      "classification": "exempt",
+      "reason": "Session-guarded (@require_session). Reads and writes only the signed-in user's own rows (identity from the server session, never the browser); no other person's data is reachable."
+    },
+    "callback:privacy_callbacks.py::privacy_breach": {
+      "classification": "legacy-gated"
+    },
+    "callback:privacy_callbacks.py::privacy_erasure": {
+      "classification": "legacy-gated"
+    },
+    "callback:privacy_callbacks.py::privacy_gate": {
+      "classification": "exempt",
+      "reason": "Session-guarded read of the caller's own notice-acknowledgement status; writes nothing."
+    },
+    "callback:privacy_callbacks.py::privacy_open": {
+      "classification": "exempt",
+      "reason": "Session-guarded; renders the caller's own privacy panel (register shown only if dpdp_service.can_manage); writes nothing."
+    },
+    "callback:privacy_callbacks.py::privacy_publish": {
+      "classification": "legacy-gated"
+    },
+    "callback:privacy_callbacks.py::privacy_raise": {
+      "classification": "exempt",
+      "reason": "Session-guarded (@require_session). Reads and writes only the signed-in user's own rows (identity from the server session, never the browser); no other person's data is reachable. Raises the caller's own rights request."
+    },
+    "callback:privacy_callbacks.py::privacy_respond": {
+      "classification": "legacy-gated"
+    },
+    "callback:privacy_callbacks.py::privacy_toggle": {
+      "classification": "exempt",
+      "reason": "Session-guarded (@require_session). Reads and writes only the signed-in user's own rows (identity from the server session, never the browser); no other person's data is reachable. Statutory purposes cannot be switched off."
     },
     "callback:qr_callbacks.py::refresh_atd_qr": {
       "classification": "unclassified"

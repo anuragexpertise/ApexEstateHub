@@ -251,6 +251,10 @@ def appoint(actor_id, actor_role, society_id, apartment_id, office_code, holder_
     except Exception as exc:
         return False, _db_message(exc)
     _invalidate_permission_cache()
+    try:                                       # plan v5 stage 2: all three core offices seated with evidence -> 'committee seated'
+        db._execute("SELECT fn_mark_committee_seated(%s) AS ok", (sid,), fetch_one=True)
+    except Exception:                          # noqa: BLE001 - the seat is recorded; the state move can be retried
+        pass
     powers = "" if uid is not None else (" No login is linked, so this office-bearer cannot sign or approve "
                                          "anything until a flat owner login is chosen.")
     return True, f"{name} is now {OFFICE_LABEL[office_code]}.{powers}"

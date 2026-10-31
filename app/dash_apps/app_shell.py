@@ -146,6 +146,7 @@ ROLE_CONFIG = {
         "icon": "fa-crown",
         "tabs": [
             {"label": "Societies",      "href": "/dashboard/master-societies",   "icon": "fa-building"},
+            {"label": "Onboarding",     "href": "/dashboard/master-onboarding",  "icon": "fa-clipboard-check"},
             {"label": "RWA Compliance (UP)", "href": "/dashboard/master-compliance-up", "icon": "fa-gavel"},
             {"label": "AOA Rule Editor", "href": "/dashboard/master-aoa-rules", "icon": "fa-sliders-h"},
             {"label": "Tests",          "href": "/dashboard/master-tests",   "icon": "fa-flask"},
@@ -934,6 +935,25 @@ def _concern_bid_modal() -> dbc.Modal:
     )
 
 
+def _privacy_modals() -> list:
+    """DPDP: the notice every person accepts before their dashboard, and the Privacy & data rights panel (privacy_callbacks.py)."""
+    return [
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Your privacy"), close_button=False),
+            dbc.ModalBody([html.Div(id="privacy-notice-body"),
+                           dbc.Checkbox(id="privacy-opt-announcements", label="Send me society announcements by push notification and email (optional)",
+                                        value=False, className="mt-3")]),
+            dbc.ModalFooter(dbc.Button("I have read this", id="privacy-accept-btn", color="primary", n_clicks=0)),
+        ], id="privacy-notice-modal", size="lg", is_open=False, centered=True, backdrop="static", keyboard=False, scrollable=True,
+            style={"zIndex": "20070"}),
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Privacy & data rights"), close_button=False),
+            dbc.ModalBody(html.Div(id="privacy-rights-body")),
+            dbc.ModalFooter(dbc.Button("Close", id="close-privacy-rights-btn", color="secondary", n_clicks=0)),
+        ], id="privacy-rights-modal", size="xl", is_open=False, centered=True, scrollable=True, style={"zIndex": "20060"}),
+    ]
+
+
 def _account_settings_modal() -> dbc.Modal:
     return dbc.Modal(
         [
@@ -960,6 +980,9 @@ def _account_settings_modal() -> dbc.Modal:
                         "Must be at least 8 characters.",
                         style={"color": "#7d8ea3"},
                     ),
+                    html.Hr(),
+                    dbc.Button([html.I(className="fas fa-user-shield me-2"), "Privacy & data rights"],
+                               id="open-privacy-rights-btn", n_clicks=0, color="link", size="sm", className="p-0"),
                 ])
             ),
             dbc.ModalFooter([
@@ -1326,6 +1349,7 @@ def shell_layout() -> html.Div:
 
             # ── Society Onboarding Agreement modal ────────────────────────────
             _agreement_modal(),
+            *_privacy_modals(),
 
             # ── Assign-To modal ──────────────────────────────────────────────────
             _assign_to_modal(),

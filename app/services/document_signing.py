@@ -175,8 +175,11 @@ def serving_offices(society_id: int, user_id: int, on: date | None = None, db=No
 def _signer_roles(d, society_id, kind, subject_id, user_id) -> list[tuple[str, int | None]]:
     """The signing capacities this user has for this record: [(office_code, committee_office_id)]."""
     roles = [(o["office_code"], o["id"]) for o in serving_offices(society_id, user_id, db=d)]
-    u = d._execute("SELECT role FROM users WHERE id=%s", (user_id,), fetch_one=True) or {}
-    if u.get("role") == "master":
+    # The platform operator is the master login: stored as role 'admin' with no society and is_master_admin set
+    # (resolve_role turns that into the virtual "master"). Testing users.role == 'master' could never be true, so the
+    # fourth Agreement signature could never be given and no society could be activated.
+    u = d._execute("SELECT is_master_admin, society_id FROM users WHERE id=%s", (user_id,), fetch_one=True) or {}
+    if u.get("is_master_admin") and u.get("society_id") is None:
         roles.append(("platform", None))
     if kind in ("resolution", "minutes"):
         mid = subject_id if kind == "minutes" else (d._execute("SELECT meeting_id FROM resolutions WHERE id=%s", (subject_id,), fetch_one=True) or {}).get("meeting_id")
@@ -250,6 +253,13 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
         _check_withdrawal_open(d, society_id, subject_id, action)
     if action == "decline" and len((reason or "").strip()) < 10:
         raise SigningRefused("Say why you decline (at least 10 characters).")
+    if kind == "agreement" and action != "decline":
+        # Plan v5 stage 4: nobody signs before the committee is seated and annexes A, B, C are sealed inside the text.
+        from app.services import onboarding_service as ob
+        try:
+            ob.assert_ready_to_sign(society_id)
+        except ob.OnboardingError as exc:
+            raise SigningRefused(str(exc)) from exc
     pol = policy(society_id, kind, d, subject_id)
     # V5.6b: enforce the required signing method before a confirmation may be made.
     required_method = pol.get("signature_method", "password")
@@ -264,6 +274,10 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
     have = {x["office_code"] for x in d._execute("SELECT office_code FROM document_signatures WHERE subject_kind=%s AND subject_id=%s AND item_hash=%s AND action IN ('sign','approve')",
                                                    (kind, subject_id, h), fetch_all=True) or []}
     office, coid = next((r for r in roles if r[0] in pol["required"] and r[0] not in have), roles[0])
+    if kind == "agreement" and office == "platform" and action != "decline":
+        waiting = [o for o in ("president", "secretary", "treasurer") if o not in have]
+        if waiting:                                                        # plan v5: the platform signs last, which accepts and activates
+            raise SigningRefused("The platform signs last. Still to sign: " + ", ".join(w.title() for w in waiting) + ".")
     if _self_dealing(d, kind, subject_id, user_id, society_id):
         raise SigningRefused("You cannot sign an item concerning your own flat.")
     # One person counts once. Checked before inserting (rather than by catching the unique violation) so a refusal never
@@ -292,6 +306,9 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
     if action != "decline" and _complete(st) and not st["awaiting_resolution"]:
         st["seal"] = _seal(d, society_id, kind, subject_id, h, st)
         st["sealed"] = True
+        if kind == "agreement":                                            # the sealed Agreement IS the activation event (plan v5)
+            from app.services import onboarding_service as ob
+            st["activation"] = ob.try_activate(society_id, user_id)
         if kind == "resolution":                                           # documents that were only waiting for this seal
             st["documents_sealed"] = _seal_linked(d, subject_id)
     return st

@@ -916,8 +916,9 @@ def seed_society(cur, conn) -> int:
         """INSERT INTO societies
            (id, name, PAN_number, TAN_number, gstin, address, state, email, phone, secretary_name,
             secretary_phone, secretary_email, secretary_sign, plan, plan_validity, calc_start_date,
-            payment_qr, logo, login_background, stepup_password_hash, duty_hrs, primary_bank_account_id, registration_number)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            payment_qr, logo, login_background, stepup_password_hash, duty_hrs, primary_bank_account_id, registration_number,
+            onboarding_state)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'active')
            ON CONFLICT (id) DO NOTHING""",
         (SOCIETY_ID, SOCIETY["name"], SOCIETY["PAN_number"], SOCIETY["TAN_number"], SOCIETY["gstin"], SOCIETY["address"], SOCIETY.get("state"),
          SOCIETY["email"], SOCIETY["phone"], SOCIETY["secretary_name"],

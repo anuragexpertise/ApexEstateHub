@@ -1978,6 +1978,11 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 [dcc.Markdown(agreement_txt)],
                 style={"backgroundColor": "#f8f9fa", "padding": "15px", "borderRadius": "5px", "border": "1px solid #ced4da", "marginBottom": "20px"}
             ),
+            dbc.Alert([html.Strong("This is the standard template, not the signature. "),
+                       "After you submit, the binding Agreement is issued with three annexes (legal regime, this review, and the opening "
+                       "position). The President, Secretary and Treasurer sign it with their own passwords, then the platform signs and "
+                       "your society goes live. Until then nothing is posted to the ledger."], color="info", className="py-2 mb-3",
+                      style={"fontSize": "12.5px"}),
             _label("Type 'I AGREE' below to proceed"),
             dbc.Input(id="sw-i-agree", type="text", placeholder="I AGREE", className="mb-4"),
             _field_feedback("sw-i-agree-feedback"),
