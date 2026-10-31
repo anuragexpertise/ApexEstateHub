@@ -103,6 +103,11 @@ def _fetch_user(email: str, society_id: int | None) -> dict | None:
     if row and row.get("active") is False:
         log.warning("Disabled account attempt: %s", email)
         return None
+    if row and row.get("role") == "adviser":                      # V5.9: an adviser signs in only while the appointment is in force
+        from app.security import adviser_access
+        if not adviser_access.in_force(row["id"]):
+            log.warning("Adviser sign-in outside an appointment: %s", email)
+            return None
     return row
 
 

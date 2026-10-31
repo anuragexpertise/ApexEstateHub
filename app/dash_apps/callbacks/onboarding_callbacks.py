@@ -161,11 +161,11 @@ def register_onboarding_callbacks(app):
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
         Input(f"{P}-sign", "n_clicks"),
-        State(f"{P}-pw", "value"),
+        State(f"{P}-pw", "value"), State(f"{P}-method", "value"), State(f"{P}-paper", "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_sign(n, password):
+    def onb_sign(n, password, method, paper):
         s = _session()
         if not n or not s:
             return no_update, no_update, no_update
@@ -174,11 +174,53 @@ def register_onboarding_callbacks(app):
         if not ag:
             return no_update, _alert("There is no Agreement to sign yet.", False), no_update
         try:
-            st = ds.sign("agreement", ag["id"], uid, password or "")
+            from app.services import esign_adapter as es
+            if es.is_required(sid):
+                st = ds.sign("agreement", ag["id"], uid, password or "", method=method or "aadhaar_eSign", evidence_ref=(paper or None))
+            else:
+                st = ds.sign("agreement", ag["id"], uid, password or "")
         except ds.SigningRefused as exc:
             return no_update, _alert(str(exc), False), no_update
         body, mk = _body(sid, uid, role)
         return body, _alert("Signed." + (" The Agreement is sealed." if st.get("sealed") else "")), mk
+
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input(f"{P}-esign-start", "n_clicks"), Input(f"{P}-esign-demo", "n_clicks"),
+        State(f"{P}-method", "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_esign_start(n_start, n_demo, method):
+        s = _session()
+        if not s or not (n_start or n_demo):
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        from app.services import esign_adapter as es
+        ag = ob.db._execute("SELECT id FROM society_agreements WHERE society_id=%s", (sid,), fetch_one=True) if sid else None
+        if not ag or not es.is_required(sid):
+            return no_update, no_update, no_update
+        try:
+            _s_id, text = ds.item_text("agreement", ag["id"])
+            u = ob.db._execute("SELECT name, email FROM users WHERE id=%s", (uid,), fetch_one=True) or {}
+            if ctx.triggered_id == f"{P}-esign-demo":
+                req = es.latest_for(sid, "agreement", ag["id"], uid)
+                if not req:
+                    return no_update, _alert("Start an eSign request first.", False), no_update
+                es.simulate_completion(req["id"])
+                msg = "The demo vendor completed your eSign."
+            else:
+                if method == "paper":
+                    return no_update, _alert("A paper counterpart needs no request: paste the scan's SHA-256 and confirm with your password.", False), no_update
+                es.create_request(sid, "agreement", ag["id"], u.get("name") or "Signer", u.get("email"), None,
+                                  method or "aadhaar_eSign", ds.sha256(text), uid, signer_user_id=uid)
+                msg = "eSign request started. Finish it with the vendor."
+        except (es.EsignError, ds.SigningRefused) as exc:
+            return no_update, _alert(str(exc), False), no_update
+        body, mk = _body(sid, uid, role)
+        return body, _alert(msg), mk
 
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
@@ -252,6 +294,39 @@ def register_onboarding_callbacks(app):
 
     @app.callback(
         Output({"type": f"{P}-mmsg", "sid": MATCH}, "children", allow_duplicate=True),
+        Input({"type": f"{P}-mstart", "sid": MATCH}, "n_clicks"), Input({"type": f"{P}-mdemo", "sid": MATCH}, "n_clicks"),
+        State({"type": f"{P}-mmethod", "sid": MATCH}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_master_esign(n_start, n_demo, method):
+        s = _master_ok()
+        if not s or not ctx.triggered_id or not (n_start or n_demo):
+            return no_update
+        sid = int(ctx.triggered_id["sid"])
+        from app.services import esign_adapter as es
+        ag = ob.db._execute("SELECT id FROM society_agreements WHERE society_id=%s", (sid,), fetch_one=True)
+        if not ag or not es.is_required(sid):
+            return no_update
+        try:
+            if ctx.triggered_id["type"] == f"{P}-mdemo":
+                req = es.latest_for(sid, "agreement", ag["id"], s[1])
+                if not req:
+                    return _alert("Start an eSign request first.", False)
+                es.simulate_completion(req["id"])
+                return _alert("The demo vendor completed the platform's eSign. Now confirm with your password.")
+            if method == "paper":
+                return _alert("A paper counterpart needs no request: paste the scan's SHA-256 and sign.", False)
+            _x, text = ds.item_text("agreement", ag["id"])
+            u = ob.db._execute("SELECT name, email FROM users WHERE id=%s", (s[1],), fetch_one=True) or {}
+            es.create_request(sid, "agreement", ag["id"], u.get("name") or "Platform signatory", u.get("email"), None,
+                              method or "dsc", ds.sha256(text), s[1], signer_user_id=s[1])
+        except (es.EsignError, ds.SigningRefused) as exc:
+            return _alert(str(exc), False)
+        return _alert("eSign request started. Finish it with the vendor, then confirm with your password.")
+
+    @app.callback(
+        Output({"type": f"{P}-mmsg", "sid": MATCH}, "children", allow_duplicate=True),
         Input({"type": f"{P}-adv-sign", "id": MATCH}, "n_clicks"),
         State({"type": f"{P}-adv-pw", "id": MATCH}, "value"),
         prevent_initial_call=True,
@@ -270,7 +345,7 @@ def register_onboarding_callbacks(app):
         return _alert("Adviser appointment signed." + (" Sealed." if st.get("sealed") else ""))
 
     # ── stage: legacy resolution import (V5.8) ──────────────────────────────
-    LEG_FIELDS = ("meeting", "dtype", "mfile", "mhash", "body")
+    LEG_FIELDS = ("held", "mtype", "dtype", "outcome", "mfile", "mhash", "body")
 
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
@@ -281,14 +356,14 @@ def register_onboarding_callbacks(app):
         prevent_initial_call=True,
     )
     @require_session
-    def onb_legacy_import(n, meeting, dtype, mfile, mhash, body):
+    def onb_legacy_import(n, held, mtype, dtype, outcome, mfile, mhash, body):
         s = _session()
         if not n or not s or s[2] != "admin" or not s[0]:
             return no_update, no_update, no_update
         sid, uid, role = s
         try:
-            msg = ob.import_legacy_resolution(sid, uid, int(meeting) if meeting not in (None, "") else None,
-                                              int(dtype) if dtype not in (None, "") else None, body, mfile, mhash)
+            msg = ob.import_legacy_resolution(sid, uid, held, mtype or "GBM", int(dtype) if dtype not in (None, "") else None,
+                                              body, mfile, mhash, outcome or "unknown")
         except (ob.OnboardingError, ValueError, TypeError) as exc:
             return no_update, _alert(str(exc), False), no_update
         body_html, mk = _body(sid, uid, role)
@@ -298,10 +373,11 @@ def register_onboarding_callbacks(app):
         Output({"type": f"{P}-mmsg", "sid": MATCH}, "children"),
         Input({"type": f"{P}-msign", "sid": MATCH}, "n_clicks"),
         State({"type": f"{P}-mpw", "sid": MATCH}, "value"),
+        State({"type": f"{P}-mmethod", "sid": MATCH}, "value"), State({"type": f"{P}-mpaper", "sid": MATCH}, "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_master_sign(n, password):
+    def onb_master_sign(n, password, method, paper):
         s = _master_ok()
         if not n or not s or not ctx.triggered_id:
             return no_update
@@ -310,7 +386,11 @@ def register_onboarding_callbacks(app):
         if not ag:
             return _alert("That society has no Agreement.", False)
         try:
-            st = ds.sign("agreement", ag["id"], s[1], password or "")
+            from app.services import esign_adapter as es
+            if es.is_required(sid):
+                st = ds.sign("agreement", ag["id"], s[1], password or "", method=method or "dsc", evidence_ref=(paper or None))
+            else:
+                st = ds.sign("agreement", ag["id"], s[1], password or "")
         except ds.SigningRefused as exc:
             return _alert(str(exc), False)
         act = st.get("activation") or {}

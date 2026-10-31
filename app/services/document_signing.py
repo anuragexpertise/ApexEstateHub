@@ -270,6 +270,13 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
         raise SigningRefused("You do not hold an office that may sign this record.")
     _confirm_password(user_id, password)                                   # wrong password never signs
     h = sha256(text)
+    if action != "decline" and kind in ("agreement", "adviser_appointment"):
+        from app.services import esign_adapter as es                       # V5.6b: the society may require eSign / DSC / paper
+        if es.is_required(society_id):
+            try:
+                method, evidence_ref = es.evidence_for_signature(society_id, kind, subject_id, user_id, method, evidence_ref, h)
+            except es.EsignError as exc:
+                raise SigningRefused(str(exc)) from exc
     # Prefer a REQUIRED capacity not yet covered, else the first eligible one.
     have = {x["office_code"] for x in d._execute("SELECT office_code FROM document_signatures WHERE subject_kind=%s AND subject_id=%s AND item_hash=%s AND action IN ('sign','approve')",
                                                    (kind, subject_id, h), fetch_all=True) or []}

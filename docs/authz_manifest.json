@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "unclassified_baseline": 150,
+  "unclassified_baseline": 132,
   "endpoints": {
     "callback:account_callbacks.py::handle_change_password": {
       "classification": "unclassified"
@@ -20,6 +20,9 @@
       "classification": "legacy-gated"
     },
     "callback:adviser_callbacks.py::adv_sign": {
+      "classification": "legacy-gated"
+    },
+    "callback:adviser_portal_callbacks.py::adviser_export": {
       "classification": "legacy-gated"
     },
     "callback:agreement_callbacks.py::_stamp_agreement_emailed": {
@@ -579,7 +582,25 @@
     "callback:noc_callbacks.py::_stamp_noc_printed": {
       "classification": "unclassified"
     },
+    "callback:onboarding_callbacks.py::onb_adviser_appoint": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_adviser_sign": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_esign_start": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_esign_toggle": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_callbacks.py::onb_grievance": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_legacy_import": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_master_esign": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_master_retry": {
@@ -976,6 +997,10 @@
     },
     "route:auth.py::unsubscribe_push": {
       "classification": "unclassified"
+    },
+    "route:esign_routes.py::esign_callback": {
+      "classification": "exempt",
+      "reason": "Vendor webhook: no session by design. Authenticated by HMAC-SHA256 of the raw body (ESIGN_CALLBACK_SECRET; refused when unset); idempotent; refuses a wrong document hash or signer; returns status only."
     },
     "route:presumed_visitor.py::create_presumed_visitor": {
       "classification": "unclassified"

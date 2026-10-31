@@ -123,6 +123,10 @@ def require_session(f):
     def wrapped(*args, **kwargs):
         if get_current_user_id() is None:
             raise PreventUpdate
+        if get_current_user_role() == "adviser":                  # V5.9: the login ends with the appointment, mid-session too
+            from app.security import adviser_access
+            if not adviser_access.in_force(get_current_user_id()):
+                raise PreventUpdate
         if not _setup_exempt(f, wrapped) and _setup_blocks_callback():
             raise PreventUpdate
         return f(*args, **kwargs)

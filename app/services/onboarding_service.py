@@ -395,30 +395,32 @@ def seal_annexes(society_id: int, actor_id: int) -> dict:
 
 
 def _operator() -> tuple[str, str]:
-    return (os.getenv("OPERATOR_LEGAL_NAME") or OPERATOR_LEGAL_NAME_DEFAULT,
-            os.getenv("OPERATOR_ADDRESS") or OPERATOR_ADDRESS_DEFAULT)
+    return OPERATOR_LEGAL_NAME_DEFAULT, OPERATOR_ADDRESS_DEFAULT       # fixed in code: the Agreement always names this entity
 
 
 def set_esign_required(society_id: int, actor_id: int, required: bool) -> None:
-    """V5.6b: per-society eSign toggle.
+    """V5.6b: per-society eSign toggle (default No).
 
-    Flips the Agreement signer policy between a password confirmation and the
-    eSign adapter method (aadhaar_eSign / dsc / paper). The adapter itself
-    (app/services/esign_adapter.py) is vendor-neutral: its HTTP client is
-    injected at signing time, so no vendor account is required to operate it.
-    When eSign is required, a password confirmation on the Agreement is refused
-    until the adapter reports a completed signature.
+    No: the office-bearers confirm with their own password, as before. Yes: the Agreement and adviser appointments are
+    signed by Aadhaar eSign, DSC or signed paper; document_signing.sign() refuses a password confirmation and accepts the
+    signature only when a completed esign request (or a paper scan hash) for that person and that exact text exists.
+    The toggle cannot change once anyone has signed, because that would change the rules mid-signature.
     """
-    from app.services import document_signing as ds
-    method = "aadhaar_eSign" if required else "password"
+    if _row("""SELECT 1 AS x FROM document_signatures ds JOIN society_agreements sa
+                 ON ds.subject_kind='agreement' AND ds.subject_id=sa.id
+                WHERE sa.society_id=%s AND ds.action IN ('sign','approve')""", (society_id,)):
+        raise OnboardingError("Signing has started; the signing method can no longer be changed.")
+    if state_of(society_id) == "active":
+        raise OnboardingError("The society is already active.")
     db._execute("UPDATE societies SET esign_required=%s WHERE id=%s", (bool(required), society_id))
-    ds.set_policy(society_id, "agreement",
-                  eligible=["president", "secretary", "treasurer", "platform"],
-                  required=["president", "secretary", "treasurer", "platform"],
-                  min_signers=4, actor_id=actor_id, signature_method=method)
+    _audit_adviser(society_id, actor_id, "ESIGN_REQUIRED_SET", 0, {"required": bool(required)})
 
 
-# ── stage 7: adviser appointment (V5.9) ─────────────────────────────────────
+def esign_required(society_id: int) -> bool:
+    r = _row("SELECT esign_required FROM societies WHERE id=%s", (society_id,))
+    return bool(r and r["esign_required"])
+
+
 def list_advisers(society_id: int) -> list[dict]:
     return _rows("""SELECT id, kind, name, firm, membership_number, scope, term_start, term_end,
                            resolution_id, independence_declared, active, revoked_at, revoked_reason, login_user_id
@@ -512,7 +514,7 @@ def _audit_adviser(society_id: int, actor_id: int, action: str, adviser_id: int,
 
 # ── stage: legacy resolution import (V5.8) ──────────────────────────────────
 def list_legacy_resolutions(society_id: int) -> list[dict]:
-    return _rows("""SELECT r.id, r.body, r.text, r.resolution_type, r.status, r.passed_on,
+    return _rows("""SELECT r.id, r.body, r.text, r.resolution_type, r.status, r.passed_on, r.legacy_outcome,
                            r.minutes_file, r.minutes_hash, r.created_at,
                            m.held_on, m.type AS meeting_type
                       FROM resolutions r
@@ -521,36 +523,54 @@ def list_legacy_resolutions(society_id: int) -> list[dict]:
                      ORDER BY r.created_at DESC""", (society_id,)) or []
 
 
-def import_legacy_resolution(society_id: int, actor_id: int, meeting_id: int,
-                             decision_type_id: int, body: str, minutes_file: str | None,
-                             minutes_hash: str | None) -> str:
-    """Record a resolution imported from before the platform (V5.8).
+def decision_type_options() -> list[dict]:
+    return _rows("SELECT id, label FROM decision_types ORDER BY label") or []
 
-    Marked legacy=TRUE so it is visible as evidence but never satisfies the
-    engine's majority checks. Requires an existing meeting and decision type in
-    this society.
+
+def import_legacy_resolution(society_id: int, actor_id: int, held_on, meeting_type: str,
+                             decision_type_id: int, body: str, minutes_file: str | None,
+                             minutes_hash: str | None, outcome: str = "unknown") -> str:
+    """Record a resolution from before the platform (V5.8) as EVIDENCE.
+
+    It is stored as a draft with legacy=TRUE, never as passed, and carries the SHA-256 of the signed minutes. What the old
+    minutes said happened goes in legacy_outcome. Because it is not passed it can never satisfy a majority check or
+    authorise a document; the society must pass a fresh resolution for that.
     """
     body = (body or "").strip()
     if not body:
-        raise OnboardingError("The resolution body is required.")
-    m = _row("SELECT id FROM meetings WHERE id=%s AND society_id=%s", (meeting_id, society_id))
-    if not m:
-        raise OnboardingError("That meeting does not belong to this society.")
-    dt = _row("SELECT id FROM decision_types WHERE id=%s", (decision_type_id,))
-    if not dt:
-        raise OnboardingError("That decision type does not exist.")
+        raise OnboardingError("The resolution text is required.")
+    mh = (minutes_hash or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", mh):
+        raise OnboardingError("Attach the signed minutes: their SHA-256 (64 hexadecimal characters) is required.")
+    if outcome not in ("passed", "rejected", "unknown"):
+        raise OnboardingError("Say whether the old minutes record it as passed, rejected or unknown.")
+    try:
+        held = held_on if isinstance(held_on, date) else date.fromisoformat(str(held_on)[:10])
+    except ValueError:
+        raise OnboardingError("Give the date of the old meeting as YYYY-MM-DD.")
+    if held > date.today():
+        raise OnboardingError("A legacy meeting must be in the past.")
+    if meeting_type not in ("GBM", "EGM", "MC"):
+        raise OnboardingError("Choose General Body, Extraordinary or Managing Committee meeting.")
+    if not _row("SELECT id FROM decision_types WHERE id=%s", (decision_type_id,)):
+        raise OnboardingError("Choose what kind of decision it was.")
+    # The old meeting is recorded as held but with quorum NOT met: the platform has no attendance register for it, so it
+    # can never stand as proof of quorum either.
+    mt = _row("SELECT id FROM meetings WHERE society_id=%s AND type=%s AND held_on=%s AND agenda='Legacy import' LIMIT 1",
+              (society_id, meeting_type, held))
+    meeting_id = mt["id"] if mt else _row(
+        "INSERT INTO meetings (society_id, type, held_on, quorum_met, agenda, created_by) VALUES (%s,%s,%s,FALSE,'Legacy import',%s) RETURNING id",
+        (society_id, meeting_type, held, actor_id))["id"]
     row = _row("""INSERT INTO resolutions
-                   (society_id, meeting_id, decision_type_id, body, majority_required,
-                    votes_for_pct, owners_present_pct, passed, passed_on, status, legacy,
+                   (meeting_id, decision_type_id, body, majority_required, passed, status, legacy, legacy_outcome,
                     minutes_file, minutes_hash, created_by)
-                 VALUES (%s,%s,%s,%s,100.00,NULL,NULL,TRUE,CURRENT_DATE,'passed',TRUE,%s,%s,%s)
-                 RETURNING id""",
-                (society_id, meeting_id, decision_type_id, body, minutes_file, minutes_hash, actor_id))
+                 VALUES (%s,%s,%s,100.00,FALSE,'draft',TRUE,%s,%s,%s,%s) RETURNING id""",
+               (meeting_id, decision_type_id, body, outcome, minutes_file, mh, actor_id))
     db._execute("INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source) "
                 "VALUES (%s,%s,%s,'resolution',%s,%s::jsonb,'app')",
                 (society_id, actor_id, "LEGACY_RESOLUTION_IMPORTED", str(row["id"]),
-                 json.dumps({"meeting_id": meeting_id, "legacy": True})))
-    return f"Legacy resolution imported (marked legacy; evidence only, not a majority check)."
+                 json.dumps({"meeting_id": meeting_id, "legacy": True, "minutes_hash": mh, "outcome": outcome})))
+    return "Imported as evidence (legacy). It does not count as a passed resolution."
 
 
 def agreement_text(society_id: int, agreement_no: str, annex_hashes: dict, annexes: dict) -> str:
@@ -632,12 +652,8 @@ def assert_ready_to_sign(society_id: int) -> None:
         raise OnboardingError("Annexes A, B and C must be sealed before the Agreement is signed.")
     if any(h not in (ag["body_text"] or "") for h in sealed.values()):
         raise OnboardingError("The Agreement text no longer matches the sealed annexes; reissue it from the annexes.")
-    if any(h not in (ag["body_text"] or "") for h in sealed.values()):
-        raise OnboardingError("The Agreement text no longer matches the sealed annexes; reissue it from the annexes.")
-    missing = [v for v in ("OPERATOR_LEGAL_NAME", "OPERATOR_ADDRESS") if not os.getenv(v)]
-    if missing:
-        raise OnboardingError("Signing is blocked until these are set in the environment: " + ", ".join(missing) +
-                              ". Settle them with the advocate before anyone signs.")
+    if OPERATOR_LEGAL_NAME_DEFAULT not in (ag["body_text"] or ""):
+        raise OnboardingError("The Agreement does not name the operator; reissue it from the annexes.")
 
 
 # ── activation ────────────────────────────────────────────────────────────────────────────────────────────────────

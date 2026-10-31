@@ -114,18 +114,23 @@ def dpdp_pending_legal_review(society_id: int) -> bool:
         return True
 
 
-def mark_dpdp_reviewed(society_id: int, item_key: str, actor_id: int,
+def review_items(society_id: int) -> list[dict]:
+    """The [Verify] items for this society and whether the advocate has signed each off."""
+    return _rows("SELECT item_key, detail, reviewed, reviewed_at FROM dpdp_legal_review WHERE society_id=%s ORDER BY id", (society_id,))
+
+
+def mark_dpdp_reviewed(society_id: int, item_key: str, actor_id: int, role: str | None = "admin",
                        reviewed: bool = True) -> bool:
     """Mark a DPDP [Verify] item reviewed (or unreviewed). Only a manager may do it."""
     if item_key not in REVIEW_ITEMS:
         raise DpdpError("Unknown review item.")
-    _require_manager(society_id, actor_id, None)
+    _require_manager(society_id, actor_id, role)
     try:
         row = _row("""UPDATE dpdp_legal_review
                       SET reviewed=%s, reviewed_at=CASE WHEN %s THEN NOW() ELSE reviewed_at END,
                           reviewed_by=CASE WHEN %s THEN %s ELSE reviewed_by END
                       WHERE society_id=%s AND item_key=%s RETURNING id""",
-                   (reviewed, reviewed, reviewed, actor_id, society_id, item_key), fetch_one=True)
+                   (reviewed, reviewed, reviewed, actor_id, society_id, item_key))
         return bool(row)
     except Exception:                                                   # table may not exist
         log.exception("mark_dpdp_reviewed failed")

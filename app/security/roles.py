@@ -23,7 +23,7 @@ society-scoped authorization lives in app/security/policy.py (RBAC tables).
 from __future__ import annotations
 
 # users.role CHECK constraint (database/estatehub.sql)
-PERSISTED_ROLES: tuple[str, ...] = ("admin", "apartment", "vendor", "security", "accountant", "supervisor", "staff", "auditor")
+PERSISTED_ROLES: tuple[str, ...] = ("admin", "apartment", "vendor", "security", "accountant", "supervisor", "staff", "auditor", "adviser")
 
 # Virtual platform role, derived — never persisted.
 MASTER_ROLE = "master"
@@ -50,6 +50,7 @@ PORTAL_HOME: dict[str, str] = {
     "supervisor": "/dashboard/supervisor-portal",
     "staff": "/dashboard/staff-portal",
     "auditor": "/dashboard/auditor-portal",
+    "adviser": "/dashboard/adviser-portal",
 }
 DEFAULT_PORTAL = "/dashboard/"
 

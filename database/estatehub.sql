@@ -20705,6 +20705,7 @@ $$;
 CREATE OR REPLACE FUNCTION trg_resolutions_decision_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE v_society INT; v_code TEXT; v_on DATE; v_need NUMERIC;
 BEGIN
+    IF NEW.legacy THEN RETURN NEW; END IF;      -- V5.8: imported evidence, never passed, so no majority applies (ck_resolution_legacy_inert)
     SELECT m.society_id INTO v_society FROM meetings m WHERE m.id = NEW.meeting_id;
     SELECT code INTO v_code FROM decision_types WHERE id = NEW.decision_type_id;
     v_on := COALESCE(NEW.passed_on, CURRENT_DATE);
@@ -22139,4 +22140,31 @@ LANGUAGE sql STABLE AS $$
       FROM (VALUES ('it_act_2025_transition'), ('ifms_july_2026_amendment')) AS i (item)
       LEFT JOIN LATERAL (SELECT * FROM release_verifications v WHERE v.release_tag = p_tag AND v.item = i.item
                           ORDER BY v.checked_on DESC, v.id DESC LIMIT 1) r ON TRUE;
+$$;
+
+-- ════════════════════════════════════════════════════════════════════════════════
+-- V5 follow-up: eSign signer link, inert legacy resolutions, adviser scope.
+-- ════════════════════════════════════════════════════════════════════════════════
+-- V5.6b: which login the eSign request is for, so a completed request can only back that person's own signature.
+ALTER TABLE esign_requests ADD COLUMN IF NOT EXISTS signer_user_id INT REFERENCES users (id);
+CREATE INDEX IF NOT EXISTS idx_esign_requests_signer ON esign_requests (signer_user_id, subject_kind, subject_id);
+
+-- V5.8: a legacy resolution is EVIDENCE. It records what the old minutes said (legacy_outcome) but is never 'passed', so
+-- no majority check, document link or decision engine that tests resolutions.passed / status = 'passed' can ever use it.
+ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS legacy_outcome VARCHAR(10)
+    CHECK (legacy_outcome IS NULL OR legacy_outcome IN ('passed', 'rejected', 'unknown'));
+ALTER TABLE resolutions DROP CONSTRAINT IF EXISTS ck_resolution_legacy_inert;
+ALTER TABLE resolutions ADD CONSTRAINT ck_resolution_legacy_inert
+    CHECK (NOT legacy OR (NOT passed AND status = 'draft' AND minutes_hash IS NOT NULL));
+
+-- V5.9: is this login an adviser whose appointment is in force today? (the login itself is checked on every request)
+CREATE OR REPLACE FUNCTION fn_adviser_in_force(p_user_id INT, p_on DATE DEFAULT CURRENT_DATE)
+RETURNS TABLE (appointment_id INT, society_id INT, kind VARCHAR, term_end DATE)
+LANGUAGE sql STABLE AS $$
+    SELECT a.id, a.society_id, a.kind, a.term_end
+      FROM adviser_appointments a
+     WHERE a.login_user_id = p_user_id AND a.active AND a.revoked_at IS NULL
+       AND p_on BETWEEN a.term_start AND a.term_end
+       AND EXISTS (SELECT 1 FROM signed_records s WHERE s.subject_kind = 'adviser_appointment' AND s.subject_id = a.id AND s.status = 'valid')
+     LIMIT 1
 $$;

@@ -128,6 +128,12 @@ ROLE_CONFIG = {
             {"label": "Events",    "href": "/dashboard/staff-events",   "icon": "fa-calendar-alt"},
         ],
     },
+    "adviser": {
+        "color": "#7c3aed",
+        "label": "Adviser Portal",
+        "icon": "fa-user-tie",
+        "tabs": [{"label": "My access", "href": "/dashboard/adviser-portal", "icon": "fa-user-tie"}],
+    },
     "auditor": {
         "color": "#dc2626",
         "label": "Auditor Portal",

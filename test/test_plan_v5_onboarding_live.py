@@ -182,7 +182,7 @@ def test_10_seal_annexes_puts_their_hashes_in_the_agreement(world):
     assert {k: v["status"] for k, v in st.items()} == {"A": "sealed", "B": "sealed", "C": "sealed"}
     text = db._execute("SELECT body_text FROM society_agreements WHERE society_id=%s", (sid,), fetch_one=True)["body_text"]
     assert all(v["content_hash"] in text for v in st.values())
-    assert "Test Operator Pvt Ltd" in text and "Treasurer" in text and "DATA PROTECTION" in text
+    assert "EstateHub LLP" in text and "Treasurer" in text and "DATA PROTECTION" in text
     ob.assert_ready_to_sign(sid)
 
 

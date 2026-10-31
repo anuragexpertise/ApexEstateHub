@@ -10,6 +10,7 @@ application login (database/app_role.py), not the owner.
     anchors      daily   anchor every society's ledger chain and verify every anchor signature
     patrol       hourly  mark missed patrols and assign new ones
     ratification daily   expire overdue ratifications (fn_expire_overdue_ratifications)
+    expiry       daily   end adviser appointments past their term; expire stale eSign requests
     watchdog     hourly  alert the masters when any of the above has not run lately (a scheduler that never fires
                          leaves no failed row, so only a check on the log can notice it)
 
@@ -59,9 +60,18 @@ def job_ratification(db=None) -> dict:
     return {"expired": int(row["n"])}
 
 
+def job_expiry(db=None) -> dict:
+    """Daily: end adviser appointments past their term and expire stale eSign requests."""
+    from app.security import adviser_access
+    from app.services import esign_adapter
+    out = adviser_access.expire_due()
+    out["esign_expired"] = esign_adapter.expire_stale_requests()
+    return out
+
+
 # How long each job may go without a finished, successful run before the watchdog complains. Daily jobs get a little over a
 # day (a late scheduler start is not an outage); hourly jobs get a little over two hours.
-MAX_AGE_HOURS = {"anchors": 26, "patrol": 2.5, "ratification": 26}
+MAX_AGE_HOURS = {"anchors": 26, "patrol": 2.5, "ratification": 26, "expiry": 26}
 
 
 def job_watchdog(db=None) -> dict:
@@ -98,7 +108,7 @@ def check_restricted_login(db=None) -> str | None:
     return None
 
 
-JOBS = {"anchors": job_anchors, "patrol": job_patrol, "ratification": job_ratification, "watchdog": job_watchdog}
+JOBS = {"anchors": job_anchors, "patrol": job_patrol, "ratification": job_ratification, "expiry": job_expiry, "watchdog": job_watchdog}
 
 
 class JobFailed(RuntimeError):
