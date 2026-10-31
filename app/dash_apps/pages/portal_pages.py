@@ -461,6 +461,10 @@ def master_portal_page(active_tab="dashboard", sid=None) -> html.Div:
         {"label": "Vendor",    "value": "vendor"},
         {"label": "Security",  "value": "security"},
     ]
+    if active_tab == "onboarding":
+        from app.dash_apps.pages.onboarding_page import master_queue
+        return master_queue()
+
     if active_tab == "rwa-compliance-up":
         return _rwa_compliance_up_page(c)
 

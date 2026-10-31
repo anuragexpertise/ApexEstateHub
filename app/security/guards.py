@@ -73,6 +73,8 @@ _SETUP_EXEMPT_MODULES = frozenset({
     "login_callbacks",
     "account_callbacks",
     "agreement_callbacks",
+    "onboarding_callbacks",     # the Onboarding Hub is what a not-yet-active society uses; it authorises each action itself
+    "privacy_callbacks",
 })
 _SETUP_EXEMPT_FUNCTIONS = frozenset({
     ("drilldown_callbacks", "handle_image_upload"),

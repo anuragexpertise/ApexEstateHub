@@ -40,6 +40,8 @@ def register_callbacks(app):
         "debug_callbacks",            # 10. Debug
         "noc_callbacks",              # 10. NOC card buttons
         "agreement_callbacks",        # 10b. Agreement card buttons
+        "onboarding_callbacks",       # 10b2. Onboarding Hub (plan v5): seat committee, annexes, sign
+        "privacy_callbacks",          # 10b3. DPDP privacy notice gate + rights register
         "ratification_callbacks",     # 10d. To-ratify register + rule-application register
         "dispute_callbacks",          # 10e. Disputed / under-protest bills (task 1.5)
         "itc_callbacks",              # 10f. ITC reversal register (task 1.7)

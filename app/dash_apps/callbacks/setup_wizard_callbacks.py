@@ -153,6 +153,11 @@ def register_setup_wizard_callbacks(app):
         # its own copy of the stepup_password_hash query.
         from app.security.setup_guard import society_setup_incomplete
         if society_setup_incomplete(society_id):
+            from app.services import onboarding_service as _ob
+            if _ob.state_of(society_id) == "registered":
+                return html.Div()        # stage 2 first: the Onboarding Hub seats the committee, then opens the wizard
+            if _ob.state_of(society_id) == "setup draft":
+                return html.Div()        # the draft is saved; the hub now handles the annexes and signatures
             # Trigger Wizard
             return get_setup_wizard_layout(society_id)
 
@@ -680,6 +685,11 @@ def register_setup_wizard_callbacks(app):
             if get_current_user_role() != "admin":
                 return True, no_update, no_update, no_update, no_update, "Only the society admin can complete setup.", _hidden_spinner, no_update, no_update
 
+            # Plan v5 stage 2 comes first: the three office-bearers sign the Agreement, so they must be seated before a draft is saved.
+            from app.services import onboarding_service as _ob
+            if _ob.state_of(society_id) not in ("committee seated", "setup draft"):
+                return True, no_update, no_update, no_update, no_update, "Seat the President, Secretary and Treasurer first (Society onboarding page).", _hidden_spinner, no_update, no_update
+
             # A11: the 5-second throttle used to be an in-memory dict, so with 2
             # gunicorn workers it was per-worker and reset on restart. One atomic
             # UPDATE on the database makes it shared: only the request that moves
@@ -937,32 +947,14 @@ def register_setup_wizard_callbacks(app):
             # statement, same transaction), so a failure here can no longer be
             # swallowed and leave the society without a legal regime (A10).
 
-            # Auto-show the society's Agreement right after onboarding
-            # completes, and persist it (society_agreements) so it can be
-            # reprinted/audited later. A failure here must never block the
-            # setup itself from completing — the wizard has already
-            # succeeded at this point.
+            # Plan v5: the wizard only SAVED A DRAFT. The binding Agreement is issued after the annexes are sealed, so no
+            # Agreement preview opens here (the old preview showed text that was not what gets signed).
             agreement_body = no_update
             agreement_open = no_update
-            try:
-                from app.dash_apps.callbacks.drilldown_callbacks import _get_or_create_agreement
-                from app.dash_apps.drilldown import renderers
-                agreement_record = _get_or_create_agreement(db, society_id)
-                society = db._execute("SELECT * FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True) or {}
-                agreement_body = renderers.render_agreement_card(society=dict(society), agreement_record=agreement_record)
-                admin_note = html.Div([
-                    html.I(className="fas fa-info-circle me-2"),
-                    html.B("Note for Admin: "),
-                    "You can now Bulk Enroll Apartments, Users, Vendors, Security, and Assets."
-                ], className="alert alert-info mt-3")
-                agreement_body = html.Div([agreement_body, admin_note])
-                agreement_open = True
-            except Exception as e:
-                print(f"⚠️  Agreement generation failed after setup: {e}")
 
             return (
                 False, no_update, "/dashboard/admin-portal",
-                {"type": "success", "message": "Setup completed successfully!"},
+                {"type": "success", "message": "Setup draft saved. Next: check and seal the annexes, then sign the Agreement."},
                 no_update, "",
                 _hidden_spinner,
                 agreement_open, agreement_body,

@@ -371,6 +371,7 @@ _PATH_LABELS = {
     "vendor-portal":     "Dashboard",
     "master":            "Societies",
     "master-societies":  "Societies",
+    "master-onboarding": "Onboarding",
     "master-compliance-up": "RWA Compliance (UP)",
     "master-aoa-rules":  "AOA Rule Editor",
     "master-tests":      "Tests",
@@ -483,6 +484,13 @@ def _setup_pending_content(role):
     (apartment/vendor/security) have no wizard to complete, so this is the
     only thing they see for their society until an admin finishes setup.
     """
+    try:                                                  # plan v5: the Onboarding Hub replaces the dead end
+        from app.dash_apps.pages.onboarding_page import render_pending
+        from app.security.audit_context import get_current_society_id, get_current_user_id
+        return render_pending(role, get_current_society_id(), get_current_user_id())
+    except Exception:                                     # noqa: BLE001 - never leave the user with a blank page
+        import logging
+        logging.getLogger(__name__).exception("onboarding hub failed to render")
     if role == "admin":
         message = ("Please complete the Setup Wizard to activate your "
                     "society's dashboard.")
@@ -515,6 +523,7 @@ def _portal_content(role, society_id, pathname, auth=None):
     if is_master:
         tab = (
             "master-settings"     if "/master-settings"     in p else
+            "onboarding"          if "/master-onboarding"    in p else
             "rwa-compliance-up"   if "/master-compliance-up" in p else
             "aoa-rules"           if "/master-aoa-rules"    in p else
             "tests"               if "/master-tests"        in p else

@@ -23,7 +23,7 @@ def made():
 
 
 def _data(tag, **kw):
-    d = {"name": f"Soc {tag}", "address": "A", "pan": "ABCDE1234F", "reg_num": "R1",
+    d = {"name": f"Soc {tag}", "address": "A", "pan": "ABCDE1234F", "reg_num": "R1", "state": "Maharashtra", "reg_cert_hash": "a" * 64,
          "plan": "Free", "validity": "2027-03-31",
          "admin_email": f"adm_{tag}@example.com", "admin_password": "Passw0rd!"}
     d.update(kw)

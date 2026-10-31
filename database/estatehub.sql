@@ -14762,138 +14762,136 @@ $$;
 CREATE OR REPLACE FUNCTION fn_activate_society(p_society_id INT, p_actor_id INT)
 RETURNS TEXT LANGUAGE plpgsql AS $$
 DECLARE
-    v_state VARCHAR(20);
+    v_state        VARCHAR(20);
     v_agreement_id INT;
-    v_required TEXT[] := ARRAY['president','secretary','treasurer','platform'];
-    v_signed TEXT[];
-    v_in_arrears BOOLEAN := FALSE;
-    v_arrear_msg TEXT;
-    v_journal_id INT;
-    v_seq BIGINT;
-    v_head_hash TEXT;
-    v_row_count BIGINT := 0;
-    r RECORD;
-    b RECORD;
-    ob RECORD;
-    v_annex_c JSONB;
+    v_required     TEXT[] := ARRAY['president','secretary','treasurer','platform'];
+    v_signed       TEXT[];
+    v_annex        RECORD;
+    v_annex_c      JSONB;
+    v_fy           INT;
+    v_as_at        DATE;
+    v_dr           NUMERIC := 0;
+    v_cr           NUMERIC := 0;
+    v_rows         INT := 0;
+    v_arrears_days INT;
+    v_msg          TEXT := '';
+    r              RECORD;
+    b              RECORD;
+    ob             RECORD;
 BEGIN
-    -- 1) Society must exist and be in 'setup draft'.
-    SELECT onboarding_state INTO v_state FROM societies WHERE id = p_society_id;
+    -- 1) The society must exist and be in 'setup draft' (the wizard draft is saved, nothing is posted yet).
+    SELECT onboarding_state INTO v_state FROM societies WHERE id = p_society_id FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Society % not found', p_society_id;
+    END IF;
+    IF v_state = 'active' THEN
+        RETURN 'ALREADY_ACTIVE';
     END IF;
     IF v_state <> 'setup draft' THEN
         RAISE EXCEPTION 'Society % is not in setup draft state (current: %). Activation requires a submitted Setup Wizard draft.', p_society_id, v_state
             USING ERRCODE = 'check_violation';
     END IF;
 
-    -- 2) Agreement must be sealed with all four required signers.
+    -- 2) The Agreement must be sealed with all four signatures: President, Secretary, Treasurer and the platform.
     SELECT sr.subject_id INTO v_agreement_id
-    FROM signed_records sr
-    WHERE sr.society_id = p_society_id AND sr.subject_kind = 'agreement' AND sr.status = 'valid'
-    LIMIT 1;
+      FROM signed_records sr
+     WHERE sr.society_id = p_society_id AND sr.subject_kind = 'agreement' AND sr.status = 'valid'
+     LIMIT 1;
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'The Agreement is not sealed. All four signatures (President, Secretary, Treasurer, platform) are required before activation.' USING ERRCODE = 'check_violation';
+        RAISE EXCEPTION 'The Agreement is not sealed. All four signatures (President, Secretary, Treasurer, platform) are required before activation.'
+            USING ERRCODE = 'check_violation';
     END IF;
-
-    -- Gather which required offices have signed the current agreement text.
-    SELECT array_agg(DISTINCT ds.office_code) INTO v_signed
-    FROM document_signatures ds
-    WHERE ds.society_id = p_society_id AND ds.subject_kind = 'agreement'
-      AND ds.subject_id = v_agreement_id AND ds.action IN ('sign','approve');
+    SELECT COALESCE(array_agg(DISTINCT ds.office_code), ARRAY[]::TEXT[]) INTO v_signed
+      FROM document_signatures ds
+     WHERE ds.society_id = p_society_id AND ds.subject_kind = 'agreement'
+       AND ds.subject_id = v_agreement_id AND ds.action IN ('sign', 'approve');
     IF NOT (v_required <@ v_signed) THEN
-        RAISE EXCEPTION 'The Agreement is missing required signatures. Missing: %', array_to_string(array(SELECT x FROM unnest(v_required) x WHERE x <> ALL(v_signed)), ', ')
+        RAISE EXCEPTION 'The Agreement is missing required signatures. Missing: %',
+            array_to_string(ARRAY(SELECT x FROM unnest(v_required) x WHERE x <> ALL (v_signed)), ', ')
             USING ERRCODE = 'check_violation';
     END IF;
 
-    -- 3) Sealed Annex C must exist.
+    -- 3) Annexes A, B and C must be sealed, and none may still be blocked by a failing control.
+    FOR v_annex IN SELECT c AS code FROM unnest(ARRAY['A','B','C']) c LOOP
+        IF NOT EXISTS (SELECT 1 FROM onboarding_annexes
+                        WHERE society_id = p_society_id AND annex_code = v_annex.code
+                          AND status = 'sealed' AND NOT blocking) THEN
+            RAISE EXCEPTION 'Annex % is not sealed. Annexes A, B and C must be sealed before activation.', v_annex.code
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END LOOP;
     SELECT content INTO v_annex_c
-    FROM onboarding_annexes
-    WHERE society_id = p_society_id AND annex_code = 'C' AND status = 'sealed'
-    LIMIT 1;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Sealed Annex C (opening financial position) not found. Annexes A, B and C must be sealed before activation.' USING ERRCODE = 'check_violation';
-    END IF;
+      FROM onboarding_annexes
+     WHERE society_id = p_society_id AND annex_code = 'C' AND status = 'sealed';
+    v_fy    := COALESCE((v_annex_c->>'financial_year')::INT, EXTRACT(YEAR FROM CURRENT_DATE)::INT);
+    v_as_at := COALESCE(NULLIF(v_annex_c->>'as_at_date', '')::DATE, CURRENT_DATE);
 
-    -- 4) Bye-law 7 re-check: none of the three office-bearers may be in arrears
-    --    against the opening balances (Annex C as-at date).
+    -- 4) Bye-law 7 re-check: none of the three office-bearers may be in arrears, whether on receivables already on the
+    --    books or on the arrears declared in Annex C (receivables do not exist yet at this point).
+    v_arrears_days := COALESCE(fn_regime_param_num(p_society_id, 'arrears_disqualify_days', v_as_at)::INT, 60);
     FOR b IN
         SELECT co.office_code, co.apartment_id
-        FROM committee_offices co
-        WHERE co.society_id = p_society_id AND co.status = 'active'
-          AND co.office_code IN ('president','secretary','treasurer')
-          AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE)
+          FROM committee_offices co
+         WHERE co.society_id = p_society_id AND co.status = 'active'
+           AND co.office_code IN ('president', 'secretary', 'treasurer')
+           AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE)
     LOOP
-        SELECT * INTO ob FROM fn_get_standing(p_society_id, b.apartment_id, CURRENT_DATE) LIMIT 1;
-        IF FOUND AND ob.arrears_bye_law7 > 0 THEN
-            v_in_arrears := TRUE;
-            v_arrear_msg := v_arrear_msg || b.office_code || ' (flat ' || b.apartment_id || ') has opening arrears of Rs ' || ob.arrears_bye_law7 || '; ';
+        SELECT * INTO ob FROM fn_get_standing(p_society_id, b.apartment_id, v_as_at) LIMIT 1;
+        IF FOUND AND COALESCE(ob.arrears_bye_law7, 0) > 0 THEN
+            v_msg := v_msg || b.office_code || ' (flat id ' || b.apartment_id || ') has arrears of Rs ' || ob.arrears_bye_law7 || '; ';
         END IF;
+        FOR r IN
+            SELECT (j->>'amount')::NUMERIC AS amount, NULLIF(j->>'overdue_days', '')::INT AS overdue_days
+              FROM jsonb_array_elements(COALESCE(v_annex_c->'arrears_by_flat', '[]'::jsonb)) j
+              JOIN apartments ap ON ap.id = b.apartment_id AND ap.society_id = p_society_id
+             WHERE j->>'flat_number' = ap.flat_number
+        LOOP
+            IF r.amount > 0 AND (r.overdue_days IS NULL OR r.overdue_days > v_arrears_days) THEN
+                v_msg := v_msg || b.office_code || ' (flat id ' || b.apartment_id || ') declares opening arrears of Rs ' || r.amount || '; ';
+            END IF;
+        END LOOP;
     END LOOP;
-    IF v_in_arrears THEN
-        RAISE EXCEPTION 'Bye-law 7 re-check failed: %Activation blocked until the office-bearers' opening arrears are cleared.', v_arrear_msg USING ERRCODE = 'check_violation';
+    IF v_msg <> '' THEN
+        RAISE EXCEPTION 'Bye-law 7 re-check failed: % Activation is blocked until the office-bearers'' arrears are cleared.', v_msg
+            USING ERRCODE = 'check_violation';
     END IF;
 
-    -- 5) Post the opening journal from sealed Annex C.
-    v_journal_id := NEXTVAL('seq_transaction_number');
+    -- 5) The opening position goes in through brought_forward, which is what every statement reads as the opening
+    --    balance (a journal posted as ordinary movement would be missed by Cash-in-Hand and counted twice by the rest).
+    --    Debits must equal credits, by the account's own side, exactly as in the Setup Wizard.
     FOR r IN
-        SELECT (j->>'acc_id')::INT AS acc_id,
-               j->>'drcr' AS drcr,
-               (j->>'amount')::NUMERIC AS amount,
-               j->>'particulars' AS particulars,
-               j->>'as_at_date' AS as_at_date
-        FROM jsonb_array_elements(
-            COALESCE(v_annex_c->'opening_balances', '[]'::jsonb)
-        ) j
-        WHERE (j->>'amount')::NUMERIC > 0
+        SELECT (j->>'acc_id')::INT AS acc_id, (j->>'amount')::NUMERIC AS amount, j->>'remarks' AS remarks,
+               a.drcr_account AS drcr
+          FROM jsonb_array_elements(COALESCE(v_annex_c->'opening_balances', '[]'::jsonb)) j
+          LEFT JOIN accounts a ON a.id = (j->>'acc_id')::INT AND a.society_id = p_society_id
+         WHERE (j->>'amount')::NUMERIC > 0
     LOOP
-        -- Validate the account belongs to this society.
-        IF NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = r.acc_id AND a.society_id = p_society_id) THEN
-            RAISE EXCEPTION 'Annex C references account % which is not in this society', r.acc_id;
+        IF r.drcr IS NULL THEN
+            RAISE EXCEPTION 'Annex C names account % which is not in this society', r.acc_id USING ERRCODE = 'check_violation';
         END IF;
-
-        INSERT INTO transactions (
-            society_id, entry_side, trx_date, acc_id, entity_id, role, acc_particulars,
-            amount, mode, status, created_by, created_at, source_table, source_id, journal_id
-        ) VALUES (
-            p_society_id, r.drcr, COALESCE(NULLIF(r.as_at_date,'')::DATE, CURRENT_DATE),
-            r.acc_id, NULL, 'society', r.particulars,
-            r.amount, 'journal', 'paid', p_actor_id, NOW(),
-            'onboarding', v_journal_id, v_journal_id
-        );
-        v_row_count := v_row_count + 1;
+        IF r.drcr = 'Dr' THEN v_dr := v_dr + r.amount; ELSE v_cr := v_cr + r.amount; END IF;
+        INSERT INTO brought_forward (society_id, financial_year, acc_id, drcr_bf, bf_amount, remarks, is_auto_calculated)
+        VALUES (p_society_id, v_fy, r.acc_id, r.drcr, r.amount, r.remarks, FALSE)
+        ON CONFLICT (society_id, financial_year, acc_id)
+        DO UPDATE SET drcr_bf = EXCLUDED.drcr_bf, bf_amount = EXCLUDED.bf_amount, remarks = EXCLUDED.remarks,
+                      updated_at = NOW(), is_auto_calculated = FALSE;
+        v_rows := v_rows + 1;
     END LOOP;
-
-    IF v_row_count = 0 THEN
-        RAISE EXCEPTION 'Annex C contains no opening balances to post' USING ERRCODE = 'check_violation';
+    IF v_dr <> v_cr THEN
+        RAISE EXCEPTION 'Annex C does not balance: debits Rs % and credits Rs %. Activation rolled back.', v_dr, v_cr
+            USING ERRCODE = 'check_violation';
     END IF;
 
-    -- Verify Dr = Cr for the opening journal.
-    -- Actual balance control is enforced at Annex C sealing (V5.5);
-    -- here we only confirm rows were posted.
-
-    -- 6) First ledger anchor over the opening journal.
-    SELECT MAX(ledger_seq), MAX(head_hash), COUNT(*)
-    INTO v_seq, v_head_hash, v_row_count
-    FROM transactions
-    WHERE society_id = p_society_id;
-    IF v_seq IS NULL THEN
-        v_seq := 0; v_head_hash := ''; v_row_count := 0;
-    END IF;
-
-    INSERT INTO ledger_chain_anchors (
-        society_id, ledger_seq, head_hash, row_count, anchored_by,
-        method, sig_purpose, sig_key_version, sig_algorithm
-    ) VALUES (
-        p_society_id, GREATEST(COALESCE(v_seq, 0), 1),
-        COALESCE(v_head_hash, encode(sha256(''), 'hex')),
-        COALESCE(v_row_count, 0), p_actor_id,
-        'manual', 'SIGNING_LEDGER', NULL, 'HMAC-SHA256'
-    );
-
-    -- 7) Activate the society.
+    -- 6) Activate. One transaction: any failure above leaves the society exactly as it was.
     UPDATE societies SET onboarding_state = 'active' WHERE id = p_society_id;
+    UPDATE onboarding_declarations SET status = 'posted' WHERE society_id = p_society_id;
+    INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source)
+    VALUES (p_society_id, p_actor_id, 'SOCIETY_ACTIVATED', 'society', p_society_id::TEXT,
+            jsonb_build_object('agreement_id', v_agreement_id, 'opening_rows', v_rows,
+                               'opening_total', v_dr, 'as_at', v_as_at, 'financial_year', v_fy), 'app');
 
+    -- 7) First ledger anchor, only when the ledger already has lines. An anchor needs at least one row, so a society
+    --    that opens with no postings is anchored by the scheduled job after its first entry.
     RETURN 'OK';
 END;
 $$;
@@ -21196,15 +21194,17 @@ CREATE TABLE consent_records (
     id                BIGSERIAL PRIMARY KEY,
     society_id        INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     person_key        VARCHAR(100) NOT NULL,        -- flat owner / tenant / vendor / guard identifier
-    person_role       VARCHAR(20) NOT NULL CHECK (person_role IN ('owner','family','tenant','vendor','security','staff','adviser')),
+    person_role       VARCHAR(20) NOT NULL CHECK (person_role IN ('owner','family','tenant','visitor','vendor','security','staff','admin','adviser')),
     purpose           VARCHAR(60) NOT NULL,         -- e.g. dues, gate_pass, visitor_log, billing, marketing
     notice_version    INT NOT NULL,
     consented_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     withdrawn_at      TIMESTAMP,
     lawful_basis      VARCHAR(30) NOT NULL DEFAULT 'consent' CHECK (lawful_basis IN ('consent','legitimate_use','vital_interest','legal_obligation')),
-    created_by        INT REFERENCES users (id)
+    created_by        INT REFERENCES users (id),
+    user_id           INT REFERENCES users (id) ON DELETE SET NULL    -- the login that gave it, when there is one
 );
 CREATE INDEX idx_consent_records_person ON consent_records (society_id, person_key, purpose);
+CREATE INDEX idx_consent_records_user ON consent_records (society_id, user_id, purpose) WHERE user_id IS NOT NULL;
 CREATE INDEX idx_consent_records_withdrawn ON consent_records (withdrawn_at) WHERE withdrawn_at IS NOT NULL;
 
 -- Rights register: access, correction, erasure, grievance, nominee requests.
@@ -21215,11 +21215,16 @@ CREATE TABLE rights_requests (
     request_type    VARCHAR(20) NOT NULL CHECK (request_type IN ('access','correction','erasure','grievance','nominee')),
     subject         TEXT NOT NULL,
     due_date        DATE NOT NULL,                    -- DPDP timeline for response
-    outcome         VARCHAR(30),                      -- granted | partial | rejected | pending
+    outcome         VARCHAR(30) CHECK (outcome IS NULL OR outcome IN ('granted','partial','rejected','pending')),
     outcome_note    TEXT,
     responded_at    TIMESTAMP,
     responded_by    INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    requester_user_id INT REFERENCES users (id) ON DELETE SET NULL,   -- the login that raised it
+    apartment_id    INT REFERENCES apartments (id) ON DELETE SET NULL, -- the flat whose profile an erasure would blank
+    erasure_notice_at TIMESTAMP,                      -- when the member was told, before anything is deleted
+    erased_at       TIMESTAMP,
+    CONSTRAINT ck_rights_outcome_has_response CHECK (outcome IS NULL OR outcome = 'pending' OR responded_at IS NOT NULL)
 );
 CREATE INDEX idx_rights_requests_society ON rights_requests (society_id, created_at DESC);
 CREATE INDEX idx_rights_requests_due ON rights_requests (due_date) WHERE outcome IS NULL;
@@ -21252,6 +21257,100 @@ CREATE TABLE retention_rules (
 );
 
 -- ════════════════════════════════════════════════════════════════════════════════
+
+-- ── V5.11 DPDP functions ─────────────────────────────────────────────────────────────────────────────────────────
+-- Why an erasure may NOT go ahead yet. One row per reason; no rows means the profile can be blanked. A serving
+-- office-bearer, a flat that is still an enrolled member, money still owed either way, and a bill under dispute are
+-- all reasons the society must keep the record (hold for disputes and audits).
+CREATE OR REPLACE FUNCTION fn_erasure_blockers(p_society_id INT, p_apartment_id INT)
+RETURNS TABLE (reason TEXT) LANGUAGE plpgsql STABLE AS $$
+DECLARE s RECORD;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM apartments WHERE id = p_apartment_id AND society_id = p_society_id) THEN
+        reason := 'Flat not found in this society.'; RETURN NEXT; RETURN;
+    END IF;
+    IF EXISTS (SELECT 1 FROM apartments WHERE id = p_apartment_id AND society_id = p_society_id AND active) THEN
+        reason := 'The flat is still an enrolled member. Erase only after the member has left and the flat is deactivated.'; RETURN NEXT;
+    END IF;
+    IF EXISTS (SELECT 1 FROM committee_offices WHERE society_id = p_society_id AND apartment_id = p_apartment_id AND status = 'active') THEN
+        reason := 'The flat holds a serving office; the seat must end first.'; RETURN NEXT;
+    END IF;
+    SELECT * INTO s FROM fn_get_standing(p_society_id, p_apartment_id, CURRENT_DATE) LIMIT 1;
+    IF FOUND AND COALESCE(s.dues_outstanding, 0) > 0 THEN
+        reason := 'Dues of Rs ' || s.dues_outstanding || ' are still outstanding (hold for recovery).'; RETURN NEXT;
+    END IF;
+    IF FOUND AND COALESCE(s.loan_outstanding, 0) > 0 THEN
+        reason := 'An owner loan of Rs ' || s.loan_outstanding || ' is still outstanding.'; RETURN NEXT;
+    END IF;
+    RETURN;
+END $$;
+
+-- Blank a person's PROFILE once the purpose has ended. Ledger lines, receipts and vouchers are never touched (they carry
+-- the flat, not the person), so fn_verify_ledger_chain stays valid. Refused while any blocker stands, and until the
+-- 48-hour notice has run. Returns a short outcome text.
+CREATE OR REPLACE FUNCTION fn_erase_person_profile(p_society_id INT, p_apartment_id INT, p_request_id BIGINT, p_actor_id INT)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE
+    v_req rights_requests%ROWTYPE;
+    v_blockers TEXT;
+    v_uids INT[];
+BEGIN
+    SELECT * INTO v_req FROM rights_requests
+     WHERE id = p_request_id AND society_id = p_society_id AND request_type = 'erasure' FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Erasure request not found' USING ERRCODE = 'check_violation'; END IF;
+    IF v_req.erased_at IS NOT NULL THEN RETURN 'ALREADY_ERASED'; END IF;
+    IF v_req.erasure_notice_at IS NULL OR v_req.erasure_notice_at > NOW() - INTERVAL '48 hours' THEN
+        RAISE EXCEPTION 'The member must be given notice at least 48 hours before anything is erased.' USING ERRCODE = 'check_violation';
+    END IF;
+    SELECT string_agg(reason, ' ') INTO v_blockers FROM fn_erasure_blockers(p_society_id, p_apartment_id);
+    IF v_blockers IS NOT NULL THEN
+        RAISE EXCEPTION 'Erasure is held: %', v_blockers USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT COALESCE(array_agg(id), ARRAY[]::INT[]) INTO v_uids
+      FROM users WHERE society_id = p_society_id AND role = 'apartment' AND linked_id = p_apartment_id;
+
+    UPDATE apartments
+       SET owner_name = 'Former member', owner_photo = NULL, id_proof = NULL, mobile = NULL, alt_mobile = NULL,
+           alt_address = NULL, updated_at = NOW()
+     WHERE id = p_apartment_id AND society_id = p_society_id;
+    DELETE FROM push_subscriptions WHERE user_id = ANY (v_uids);
+    UPDATE users
+       SET email = 'erased-' || id || '@erased.invalid', name = NULL, pin_hash = NULL, pattern_hash = NULL,
+           password_hash = 'erased', reset_token = NULL, reset_token_expires = NULL, push_token = NULL,
+           push_enabled = FALSE, active = FALSE
+     WHERE id = ANY (v_uids);
+    UPDATE consent_records SET withdrawn_at = COALESCE(withdrawn_at, NOW())
+     WHERE society_id = p_society_id AND user_id = ANY (v_uids);
+    UPDATE rights_requests
+       SET erased_at = NOW(), outcome = 'granted', responded_at = NOW(), responded_by = p_actor_id,
+           outcome_note = COALESCE(outcome_note, '') || ' Profile blanked; ledger lines untouched.'
+     WHERE id = p_request_id;
+    INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source)
+    VALUES (p_society_id, p_actor_id, 'DPDP_ERASURE', 'apartment', p_apartment_id::TEXT,
+            jsonb_build_object('request_id', p_request_id, 'logins_closed', COALESCE(array_length(v_uids, 1), 0)), 'app');
+    RETURN 'OK';
+END $$;
+
+-- The society moves from 'registered' to 'committee seated' once the President, Secretary and Treasurer are each seated
+-- with a login, an evidence file and its hash (V5.3). Idempotent; never moves a society backwards.
+CREATE OR REPLACE FUNCTION fn_mark_committee_seated(p_society_id INT)
+RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+DECLARE v_ok BOOLEAN;
+BEGIN
+    SELECT COUNT(DISTINCT co.office_code) = 3 INTO v_ok
+      FROM committee_offices co
+     WHERE co.society_id = p_society_id AND co.status = 'active'
+       AND co.office_code IN ('president', 'secretary', 'treasurer')
+       AND co.user_id IS NOT NULL AND co.evidence_hash IS NOT NULL
+       AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE);
+    IF v_ok THEN
+        UPDATE societies SET onboarding_state = 'committee seated'
+         WHERE id = p_society_id AND onboarding_state = 'registered';
+    END IF;
+    RETURN COALESCE(v_ok, FALSE);
+END $$;
+
 
 -- The resolution that still blocks this document: NULL when it names none, or when that resolution is sealed.
 CREATE OR REPLACE FUNCTION fn_document_resolution_block(p_society_id INT, p_kind TEXT, p_subject_id INT) RETURNS INT
