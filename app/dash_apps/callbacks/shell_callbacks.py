@@ -124,6 +124,7 @@ _SEARCH_TAB_ROUTES = {
         "dashboard": "/dashboard/staff-portal", "concerns": "/dashboard/staff-concerns",
         "events": "/dashboard/staff-events",
     },
+    "adviser": {"dashboard": "/dashboard/adviser-portal"},
     "auditor": {
         "dashboard": "/dashboard/auditor-portal", "books": "/dashboard/auditor-books",
         "receipts": "/dashboard/auditor-receipts", "expenses": "/dashboard/auditor-expenses",
@@ -420,7 +421,7 @@ _PATH_LABELS = {
     "supervisor-portal": "Dashboard", "supervisor-gate": "Gate & Security", "supervisor-users": "Users",
     "supervisor-concerns": "Concerns", "supervisor-events": "Events", "supervisor-channels": "Channels",
     "staff-portal": "Dashboard", "staff-concerns": "Concerns", "staff-events": "Events",
-    "auditor-portal": "Verify", "auditor-books": "Books", "auditor-receipts": "Receipts",
+    "adviser-portal": "Adviser", "auditor-portal": "Verify", "auditor-books": "Books", "auditor-receipts": "Receipts",
     "auditor-expenses": "Expenses", "auditor-financials": "Financials",
 }
 
@@ -631,6 +632,10 @@ def _portal_content(role, society_id, pathname, auth=None):
             "dashboard"
         )
         return auditor_portal_page(tab, sid=society_id)
+    if role == "adviser":
+        from app.dash_apps.pages.adviser_portal import adviser_portal_page
+        from app.security.audit_context import get_current_user_id
+        return adviser_portal_page(get_current_user_id(), society_id)
     return html.Div("Page not found", className="text-muted text-center p-5 mt-5")
 
 

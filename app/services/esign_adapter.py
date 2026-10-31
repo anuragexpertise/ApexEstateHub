@@ -65,6 +65,7 @@ def create_request(
     doc_hash: str,
     actor_id: int,
     http_post: Optional[Callable[[str, dict], dict]] = None,
+    signer_user_id: int | None = None,
 ) -> dict:
     """Create (or return the existing, idempotent) eSign request.
 
@@ -81,9 +82,10 @@ def create_request(
     existing = db._execute(
         """SELECT * FROM esign_requests
            WHERE society_id=%s AND subject_kind=%s AND subject_id=%s AND method=%s
+             AND signer_user_id IS NOT DISTINCT FROM %s AND callback_hash=%s
              AND status IN ('pending', 'sent', 'completed')
            ORDER BY created_at DESC LIMIT 1""",
-        (society_id, subject_kind, subject_id, method), fetch_one=True,
+        (society_id, subject_kind, subject_id, method, signer_user_id, doc_hash), fetch_one=True,
     )
     if existing:
         return _request_dict(existing)
@@ -98,7 +100,7 @@ def create_request(
         "signer_mobile": signer_mobile,
         "method": method,
         "document_hash": doc_hash,
-        "callback_url": f"/api/esign/callback/{vendor_request_id}",
+        "callback_url": f"/api/esign/callback/{vendor_request_id}",   # esign_routes.py
     }
 
     status = "pending"
@@ -117,13 +119,14 @@ def create_request(
         """INSERT INTO esign_requests
            (society_id, subject_kind, subject_id, vendor_request_id, vendor,
             signer_name, signer_email, signer_mobile, method, status,
-            callback_hash, created_at, error)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s)
+            callback_hash, created_at, error, signer_user_id)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s)
            RETURNING id""",
         (society_id, subject_kind, subject_id, vendor_request_id, VENDOR,
          signer_name, signer_email, signer_mobile, method, status,
-         doc_hash, error), fetch_one=True,
+         doc_hash, error, signer_user_id), fetch_one=True,
     )
+    row = db._execute("SELECT * FROM esign_requests WHERE id=%s", (row["id"],), fetch_one=True)
     return _request_dict(row)
 
 
@@ -202,10 +205,13 @@ def process_callback(vendor_request_id: str, callback_payload: dict,
     if verify_signature is not None and not verify_signature(callback_payload):
         raise EsignError("Callback signature verification failed.")
 
+    who = (callback_payload.get("signer_email") or "").strip().lower()
+    if who and row["signer_email"] and who != row["signer_email"].strip().lower():
+        raise EsignError("Callback signer does not match the request.")
     doc_hash = callback_payload.get("document_hash") or callback_payload.get("hash")
     status = (callback_payload.get("status") or "").lower()
-    if doc_hash and doc_hash != row["callback_hash"]:
-        raise EsignError("Callback document hash does not match the request hash.")
+    if not doc_hash or doc_hash != row["callback_hash"]:
+        raise EsignError("Callback document hash is missing or does not match the request hash.")
 
     if status in ("completed", "failed", "expired"):
         completed_at = datetime.utcnow() if status == "completed" else None
@@ -231,6 +237,70 @@ def expire_stale_requests(ttl_hours: int = 72) -> int:
     return len(result or [])
 
 
+# ── the signing gate (used by document_signing.sign) ───────────────────────
+
+SIGNABLE_KINDS = ("agreement", "adviser_appointment")
+SANDBOX = lambda: __import__("os").getenv("ESIGN_SANDBOX") == "1"   # noqa: E731  (a demo vendor that completes on request)
+
+
+def is_required(society_id: int) -> bool:
+    r = db._execute("SELECT esign_required FROM societies WHERE id=%s", (society_id,), fetch_one=True)
+    return bool(r and r["esign_required"])
+
+
+def latest_for(society_id: int, kind: str, subject_id: int, user_id: int) -> dict | None:
+    row = db._execute(
+        """SELECT * FROM esign_requests WHERE society_id=%s AND subject_kind=%s AND subject_id=%s AND signer_user_id=%s
+           ORDER BY id DESC LIMIT 1""", (society_id, kind, subject_id, user_id), fetch_one=True)
+    return _request_dict(row) if row else None
+
+
+def evidence_for_signature(society_id: int, kind: str, subject_id: int, user_id: int, method: str,
+                           evidence_ref: str | None, doc_hash: str) -> tuple[str, str]:
+    """Called by sign() when the society requires eSign. Returns (method, evidence_ref) to record, or raises.
+
+    aadhaar_eSign / dsc: a COMPLETED request for this very person and this exact text (its hash is the item hash).
+    paper: the SHA-256 of the scanned, signed counterpart.
+    A password confirmation alone is never accepted.
+    """
+    import re
+    if method == "password" or method not in ALLOWED_METHODS:
+        raise EsignError("This society requires an Aadhaar eSign, DSC or signed-paper signature; a password alone is not accepted.")
+    if method == "paper":
+        ref = (evidence_ref or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", ref):
+            raise EsignError("For a paper counterpart, give the SHA-256 (64 hexadecimal characters) of the signed scan.")
+        return "paper", ref
+    row = db._execute(
+        """SELECT * FROM esign_requests WHERE society_id=%s AND subject_kind=%s AND subject_id=%s AND signer_user_id=%s
+              AND method=%s AND status='completed' AND callback_hash=%s ORDER BY id DESC LIMIT 1""",
+        (society_id, kind, subject_id, user_id, method, doc_hash), fetch_one=True)
+    if not row:
+        raise EsignError("Your eSign for this exact text is not complete yet. Start the eSign request and finish it first.")
+    return method, row["evidence_ref"] or f"vendor:{row['vendor_request_id']}"
+
+
+def simulate_completion(request_id: int) -> dict:
+    """Demo vendor (ESIGN_SANDBOX=1 only): complete a request as the vendor's callback would."""
+    if not SANDBOX():
+        raise EsignError("The demo vendor is switched off.")
+    row = db._execute("SELECT * FROM esign_requests WHERE id=%s", (request_id,), fetch_one=True)
+    if not row:
+        raise EsignError("eSign request not found.")
+    return process_callback(row["vendor_request_id"], {"status": "completed", "document_hash": row["callback_hash"],
+                                                      "evidence_ref": f"sandbox:{row['vendor_request_id']}"})
+
+
+def verify_callback_signature(raw_body: bytes, header_value: str | None) -> bool:
+    """HMAC-SHA256 of the raw body with ESIGN_CALLBACK_SECRET. No secret configured means every callback is refused."""
+    import hmac, os
+    secret = os.getenv("ESIGN_CALLBACK_SECRET", "")
+    if not secret or not header_value:
+        return False
+    want = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(want, header_value.strip().lower().removeprefix("sha256="))
+
+
 def _request_dict(row) -> dict:
     if not row:
         return {}
@@ -243,5 +313,5 @@ def _request_dict(row) -> dict:
         "status": row["status"], "callback_hash": row["callback_hash"],
         "evidence_ref": row["evidence_ref"], "created_at": str(row["created_at"]) if row["created_at"] else None,
         "completed_at": str(row["completed_at"]) if row["completed_at"] else None,
-        "error": row["error"],
+        "error": row["error"], "signer_user_id": row.get("signer_user_id") if hasattr(row, "get") else None,
     }

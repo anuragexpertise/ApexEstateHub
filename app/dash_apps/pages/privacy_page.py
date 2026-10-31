@@ -50,6 +50,20 @@ def _mine(society_id, user_id):
                   size="sm", style={"fontSize": "12px"}) if rows else html.Div("You have not raised a request.", style=_MUTED)])
 
 
+def _review_banner(society_id):
+    """[Verify] items the advocate has not yet signed off: the society sees them until each is marked reviewed."""
+    items = [i for i in dp.review_items(society_id) if not i["reviewed"]]
+    if not items:
+        return html.Div()
+    labels = {"response_days": f"Answer rights requests within {dp.RESPONSE_DAYS} days", "lawful_basis_dues": "Dues are held as legitimate use",
+              "lawful_basis_gate_safety": "Gate and visitor records are held as legitimate use", "notice_effective_date": "Effective date of the notice"}
+    return dbc.Alert([html.Strong("Pending legal review. "), "Your advocate should confirm these before you rely on them:",
+                      html.Ul([html.Li([labels.get(i["item_key"], i["item_key"]), "  ",
+                                        dbc.Button("Advocate confirmed", id={"type": "prv-reviewed", "key": i["item_key"]}, size="sm", color="warning",
+                                                   outline=True, n_clicks=0, className="py-0")]) for i in items], className="mb-0 mt-1")],
+                     color="warning", className="py-2", style={"fontSize": "12.5px"})
+
+
 def _manager(society_id):
     reqs = dp.list_requests(society_id)
     cards = []
@@ -82,7 +96,7 @@ def _manager(society_id):
                          html.Td("sent" if b["intimation_sent"] else "not sent")]) for b in dp.list_breaches(society_id)]
     n = dp.current_notice(society_id) or {}
     return html.Div([
-        html.Hr(), html.H6("Society register"),
+        html.Hr(), _review_banner(society_id), html.H6("Society register"),
         *(cards or [html.Div("No requests have been raised.", style=_MUTED)]),
         html.H6("Breach register", className="mt-3"),
         dbc.Row([dbc.Col(dbc.Input(id="prv-b-desc", size="sm", placeholder="What happened (at least 20 characters)", maxLength=4000), md=7),

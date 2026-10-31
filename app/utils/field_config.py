@@ -122,18 +122,18 @@ FIELD_CONFIG = {
             "tooltip": "Alternate address for correspondence (optional)",
         },
         "owner_photo": {
-            "visible": ADMIN_MASTER,
+            "visible": ADMIN_ONLY,                 # V5.12: optional, and not shown to the platform operator
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {},
-            "tooltip": "Upload a passport-size photo (JPG/PNG, max 2MB)",
+            "tooltip": "Optional. Add a photo only if the society needs one (JPG/PNG, max 2MB). Shown to the administrator only.",
         },
         "id_proof": {
-            "visible": ADMIN_MASTER,
+            "visible": ADMIN_ONLY,                 # V5.12: optional, and not shown to the platform operator
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {},
-            "tooltip": "Upload ID proof document (Aadhaar, PAN, etc.)",
+            "tooltip": "Optional. Keep an ID document only where the society has a reason to; never needed to use the platform. Shown to the administrator only.",
         },
         "apartment_size": {
             "visible": ALL_ROLES,
@@ -380,7 +380,7 @@ FIELD_CONFIG = {
             "editable": ADMIN_ONLY,
             "default": "",
             "validation": {},
-            "tooltip": "Upload ID proof document",
+            "tooltip": "Optional. Keep an ID document only where the society has a reason to.",
         },
         "active": {
             "visible": ("admin", "security"),

@@ -109,12 +109,14 @@ _BULK_TEMPLATES: dict[str, dict] = {
         "label": "Apartment Users",
         "columns": [
             "flat_number", "email", "password",
-            "name", "user_type",
+            "name", "user_type", "adult_confirmed",
         ],
         "required": ["flat_number", "email", "password", "name"],
         "notes": (
             "user_type can be owner, family, tenant, or visitor. "
-            "This creates additional logins tied to an existing apartment."
+            "This creates additional logins tied to an existing apartment. "
+            "Logins are for adults only: for family, tenant or visitor write adult_confirmed = yes to confirm the person is 18 or over. "
+            "No date of birth, ID proof or photo is asked for here (DPDP: collect only what the purpose needs)."
         ),
     },
     "assets": {
@@ -586,6 +588,10 @@ def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None
         user_type = row.get("user_type", "family").strip().lower()
         if user_type not in ("owner", "family", "tenant", "visitor"):
             user_type = "family"
+        # V5.12 minimisation: the platform holds records of adults only, and asks for no age beyond this one confirmation.
+        if user_type != "owner" and str(row.get("adult_confirmed") or "").strip().lower() not in ("yes", "y", "true", "1"):
+            failed.append((i, "Logins are for adults only. Confirm the person is 18 or over with adult_confirmed = yes.", _em))
+            continue
 
         _pw_err = validate_password(password)
         if _pw_err:

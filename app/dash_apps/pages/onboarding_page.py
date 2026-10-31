@@ -13,6 +13,7 @@ Identity and society always come from the server session (callbacks re-check); n
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import dash_bootstrap_components as dbc
 from dash import dcc, html
@@ -52,7 +53,9 @@ def marker(society_id: int) -> str:
     sigs = 0
     if ag:
         sigs = (ob.db._execute("SELECT COUNT(*) AS n FROM document_signatures WHERE subject_kind='agreement' AND subject_id=%s", (ag["id"],), fetch_one=True) or {}).get("n", 0)
-    return json.dumps([st, ann, seated, sigs], sort_keys=True, default=str)
+    es = ob.db._execute("SELECT esign_required, (SELECT string_agg(id || status, ',' ORDER BY id) FROM esign_requests WHERE society_id=s.id) AS r "
+                        "FROM societies s WHERE id=%s", (society_id,), fetch_one=True) or {}
+    return json.dumps([st, ann, seated, sigs, es.get("esign_required"), es.get("r")], sort_keys=True, default=str)
 
 
 # ── stage 2 ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -156,6 +159,36 @@ def _stage_annexes(society_id: int):
     return out
 
 
+def esign_control(society_id: int, kind: str, subject_id: int, user_id: int, office: str, sign_id, pw_id):
+    """The signer's own control. eSign off: password and Sign. eSign on: choose the method, start the request, finish it with the
+    vendor (or upload the paper counterpart's hash), then confirm with the password. The method and paper fields are always in
+    the layout (hidden when eSign is off) so the callback can read them either way."""
+    from app.services import esign_adapter as es
+    on = es.is_required(society_id)
+    req = es.latest_for(society_id, kind, subject_id, user_id) if on else None
+    hide = {} if on else {"display": "none"}
+    status_line = ""
+    if on:
+        status_line = ("No eSign request yet. Pick a method and start one." if not req else
+                       f"eSign request {req['status']} ({req['method'].replace('_', ' ')}). " +
+                       ("It is complete: confirm with your password to record the signature." if req["status"] == "completed" else
+                        "Finish it with the vendor; this page updates by itself."))
+    box = [html.Div([
+        dbc.Select(id=f"{P}-method", size="sm", value=(req or {}).get("method") or "aadhaar_eSign", style={"maxWidth": "230px", "display": "inline-block", "marginRight": "8px"},
+                   options=[{"label": "Aadhaar eSign", "value": "aadhaar_eSign"}, {"label": "Digital Signature Certificate", "value": "dsc"},
+                            {"label": "Signed paper counterpart", "value": "paper"}]),
+        dbc.Input(id=f"{P}-paper", size="sm", placeholder="Paper only: SHA-256 of the signed scan", maxLength=64,
+                  style={"maxWidth": "330px", "display": "inline-block", "marginRight": "8px"}),
+        dbc.Button("Start eSign", id=f"{P}-esign-start", color="primary", outline=True, size="sm", n_clicks=0, className="me-2"),
+        dbc.Button("Complete with demo vendor", id=f"{P}-esign-demo", color="secondary", outline=True, size="sm", n_clicks=0,
+                   style={} if es.SANDBOX() else {"display": "none"}),
+        html.Div(status_line, style=_MUTED)], style={"marginBottom": "6px", **hide})]
+    return html.Div(box + [
+        dbc.Input(id=pw_id, type="password", placeholder="Your login password", autoComplete="current-password", size="sm",
+                  style={"maxWidth": "240px", "display": "inline-block", "marginRight": "8px"}),
+        dbc.Button(f"Sign as {office.replace('_', ' ').title()}", id=sign_id, color="success", size="sm", n_clicks=0)])
+
+
 def signing_panel(society_id: int, user_id: int | None, role: str | None = None):
     ag = ob.db._execute("SELECT id, body_text FROM society_agreements WHERE society_id=%s", (society_id,), fetch_one=True)
     sealed = ob.annex_status(society_id)
@@ -175,10 +208,7 @@ def signing_panel(society_id: int, user_id: int | None, role: str | None = None)
     if st["sealed"]:
         control = dbc.Alert("The Agreement is sealed.", color="success", className="py-2 mb-0")
     elif mine:
-        control = html.Div([
-            dbc.Input(id=f"{P}-pw", type="password", placeholder="Your login password", autoComplete="current-password", size="sm",
-                      style={"maxWidth": "240px", "display": "inline-block", "marginRight": "8px"}),
-            dbc.Button(f"Sign as {mine[0].title()}", id=f"{P}-sign", color="success", size="sm", n_clicks=0)])
+        control = esign_control(society_id, "agreement", ag["id"], user_id, mine[0], f"{P}-sign", f"{P}-pw")
     # V5.6b: per-society eSign toggle (admin only). When on, the Agreement must be
     # signed through the eSign adapter instead of a password confirmation.
     esign_row = html.Div()
@@ -188,7 +218,7 @@ def signing_panel(society_id: int, user_id: int | None, role: str | None = None)
         esign_row = html.Div([
             html.Strong("eSign required for signing", style={"fontSize": "12px", "color": "#556", "marginRight": "8px"}),
             dbc.Switch(id=f"{P}-esign", value=on, size="sm"),
-            html.Span("Vendor-neutral adapter; no password confirmation is accepted while this is on.",
+            html.Span("Default No. When on, a password alone is not accepted: each signer uses Aadhaar eSign, a DSC or a signed paper counterpart. Cannot be changed once signing starts.",
                       style={"fontSize": "11.5px", "color": "#667", "marginLeft": "6px"})],
             style={"marginTop": "8px", "display": "flex", "alignItems": "center", "gap": "8px"})
     return html.Div([
@@ -277,8 +307,8 @@ def legacy_resolutions_section(society_id: int, role: str | None) -> list:
     rows = ob.list_legacy_resolutions(society_id)
     cards = [html.Div([
         html.Strong(f"{r['resolution_type'] or 'Resolution'} (#{r['id']})"),
-        html.Div(f"{r['meeting_type']} on {r['held_on']:%d %b %Y}  passed {r['passed_on']:%d %b %Y}  "
-                 f"status={r['status']}", style=_MUTED),
+        html.Div([f"{r['meeting_type']} meeting on {r['held_on']:%d %b %Y}. Old minutes say: {r['legacy_outcome'] or 'unknown'}. ",
+                  dbc.Badge("evidence only", color="secondary")], style=_MUTED),
         html.Div((r['body'] or r['text'] or "")[:200] + ("…" if (r['body'] or r['text'] or "") and len(r['body'] or r['text'] or "") > 200 else ""),
                  style={"fontSize": "12px", "color": "#445", "marginTop": "4px"}),
         html.Div(f"minutes: {r['minutes_file'] or '-'}  hash: {r['minutes_hash'] or '-'}", style=_MUTED),
@@ -291,10 +321,18 @@ def legacy_resolutions_section(society_id: int, role: str | None) -> list:
         out.append(html.Div([
             html.Strong("Import a legacy resolution"),
             dbc.Row([
-                dbc.Col(_field("Meeting #", dbc.Input(id=fid("meeting"), size="sm", type="number")), md=2),
-                dbc.Col(_field("Decision type #", dbc.Input(id=fid("dtype"), size="sm", type="number")), md=2),
-                dbc.Col(_field("Minutes file ref", dbc.Input(id=fid("mfile"), size="sm", maxLength=255)), md=3),
-                dbc.Col(_field("Minutes SHA-256", dbc.Input(id=fid("mhash"), size="sm", maxLength=64)), md=3),
+                dbc.Col(_field("Date of the old meeting", dbc.Input(id=fid("held"), size="sm", type="date", max=str(date.today()))), md=3),
+                dbc.Col(_field("Meeting", dbc.Select(id=fid("mtype"), size="sm", value="GBM", options=[
+                    {"label": "General Body", "value": "GBM"}, {"label": "Extraordinary General", "value": "EGM"},
+                    {"label": "Managing Committee", "value": "MC"}])), md=3),
+                dbc.Col(_field("Kind of decision", dbc.Select(id=fid("dtype"), size="sm",
+                                                              options=[{"label": d["label"], "value": d["id"]} for d in ob.decision_type_options()])), md=3),
+                dbc.Col(_field("Old minutes say", dbc.Select(id=fid("outcome"), size="sm", value="unknown", options=[
+                    {"label": "Passed", "value": "passed"}, {"label": "Rejected", "value": "rejected"}, {"label": "Not clear", "value": "unknown"}])), md=3),
+            ], className="g-2"),
+            dbc.Row([
+                dbc.Col(_field("Signed minutes: file name", dbc.Input(id=fid("mfile"), size="sm", maxLength=255)), md=5),
+                dbc.Col(_field("Signed minutes: SHA-256 (64 characters)", dbc.Input(id=fid("mhash"), size="sm", maxLength=64)), md=7),
             ], className="g-2"),
             dbc.Row([
                 dbc.Col(_field("Resolution body", dbc.Textarea(id=fid("body"), size="sm", rows=3)), md=8),
@@ -352,7 +390,19 @@ def master_queue():
             body = html.Div([dbc.Alert("The Agreement is sealed but activation was held. Retry after the cause is fixed.", color="warning", className="py-2 mb-2"),
                              dbc.Button("Retry activation", id={"type": f"{P}-retry", "sid": r["id"]}, color="warning", size="sm", n_clicks=0)])
         elif core:
-            body = html.Div([dbc.Input(id={"type": f"{P}-mpw", "sid": r["id"]}, type="password", placeholder="Your password", size="sm",
+            from app.services import esign_adapter as es
+            esign_on = es.is_required(r["id"])
+            esign_bits = [html.Div([
+                dbc.Select(id={"type": f"{P}-mmethod", "sid": r["id"]}, size="sm", value="dsc", style={"maxWidth": "230px", "display": "inline-block", "marginRight": "8px"},
+                           options=[{"label": "Digital Signature Certificate", "value": "dsc"}, {"label": "Aadhaar eSign", "value": "aadhaar_eSign"},
+                                    {"label": "Signed paper counterpart", "value": "paper"}]),
+                dbc.Input(id={"type": f"{P}-mpaper", "sid": r["id"]}, size="sm", placeholder="Paper only: SHA-256 of the signed scan", maxLength=64,
+                          style={"maxWidth": "330px", "display": "inline-block", "marginRight": "8px"}),
+                dbc.Button("Start eSign", id={"type": f"{P}-mstart", "sid": r["id"]}, color="primary", outline=True, size="sm", n_clicks=0, className="me-2"),
+                dbc.Button("Complete with demo vendor", id={"type": f"{P}-mdemo", "sid": r["id"]}, color="secondary", outline=True, size="sm", n_clicks=0,
+                           style={} if es.SANDBOX() else {"display": "none"})],
+                style={"marginBottom": "6px", **({} if esign_on else {"display": "none"})})]
+            body = html.Div(esign_bits + [dbc.Input(id={"type": f"{P}-mpw", "sid": r["id"]}, type="password", placeholder="Your password", size="sm",
                                        autoComplete="current-password", style={"maxWidth": "230px", "display": "inline-block", "marginRight": "8px"}),
                              dbc.Button("Sign for the platform and activate", id={"type": f"{P}-msign", "sid": r["id"]}, color="success", size="sm", n_clicks=0)])
         else:

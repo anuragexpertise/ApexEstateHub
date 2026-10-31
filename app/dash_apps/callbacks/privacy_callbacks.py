@@ -183,4 +183,17 @@ def register_privacy_callbacks(app):
             return _refresh(str(exc), False)
         return _refresh(f"Notice version {v['version']} published.")
 
+    @app.callback(Output("privacy-rights-body", "children", allow_duplicate=True),
+                  Input({"type": "prv-reviewed", "key": ALL}, "n_clicks"), prevent_initial_call=True)
+    @require_session
+    def privacy_reviewed(clicks):
+        s, t = _s(), ctx.triggered_id
+        if not s or not t or not any(clicks or []):
+            return no_update
+        try:
+            dp.mark_dpdp_reviewed(s[0], t["key"], s[1], s[2], True)
+        except dp.DpdpError as exc:
+            return _refresh(str(exc), False)
+        return _refresh("Marked as confirmed by your advocate.")
+
     print("  ✓ Privacy callbacks registered")
