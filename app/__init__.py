@@ -7,6 +7,11 @@ import os
 import logging
 from pathlib import Path
 
+# ── Patch Dash 2.14.2 IndexError bug (State + ALL pattern matching) ──
+# Must be imported before dash.Dash.dispatch is used (i.e. before any
+# callback request is handled). See app/dash_patch.py for details.
+import app.dash_patch  # noqa: F401  (side effect: patches Dash.dispatch)
+
 from flask import Flask, jsonify, request
 from flask_login import LoginManager, login_required
 from flask_cors import CORS
