@@ -534,32 +534,6 @@ def _save_captured_image(decoded: bytes, entity: str, field_name: str, society_i
 
 def register_drilldown_callbacks(app):
 
-    # ── 0a. Master portal: registration certificate for a new society ─────────
-    @app.callback(
-        Output("master-society-cert-status", "children"),
-        Output({"type": "form-field-hidden", "entity": "master_society", "field": "reg_cert_file"}, "value"),
-        Output({"type": "form-field-hidden", "entity": "master_society", "field": "reg_cert_hash"}, "value"),
-        Input("master-society-cert-upload", "contents"),
-        State("master-society-cert-upload", "filename"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def handle_master_cert_upload(contents, filename):
-        if not contents:
-            raise PreventUpdate
-        if get_current_user_role() != "master":
-            return html.Span("Only the platform master can register a society.", style={"color": "#de5c52"}), "", ""
-        from app.services.society_service import SocietyCreateError, store_registration_certificate
-        try:
-            decoded = base64.b64decode(contents.split(",", 1)[1])
-            stored, digest = store_registration_certificate(filename, decoded)
-        except SocietyCreateError as e:
-            return html.Span(f"✗ {e}", style={"color": "#de5c52"}), "", ""
-        except Exception:                                               # noqa: BLE001
-            log.exception("registration certificate upload failed")
-            return html.Span("✗ Could not read that file. Please try again.", style={"color": "#de5c52"}), "", ""
-        return (html.Span(f"✓ {filename} attached (SHA-256 {digest[:12]}…)", style={"color": "#17976e"}), stored, digest)
-
     # ── 0. Image upload (drag/drop or file picker) ─────────────────────────────
     @app.callback(
         Output({"type": "image-preview", "entity": MATCH, "field": MATCH}, "children"),

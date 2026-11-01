@@ -13,7 +13,7 @@ import base64
 import time
 
 import dash_bootstrap_components as dbc
-from dash import MATCH, Input, Output, State, ctx, dcc, no_update
+from dash import ALL, MATCH, Input, Output, State, ctx, dcc, no_update
 
 from app.dash_apps.pages import onboarding_page as op
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
@@ -51,26 +51,39 @@ def _body(sid, uid, role):
 def register_onboarding_callbacks(app):
     fields = ("flat", "name", "size", "email", "phone", "password", "ref")
 
+    # Outputs are the single hub body/toast/marker, so the inputs cannot use MATCH (Dash rejects a MATCH
+    # key that the Outputs do not carry). ALL + ctx.triggered_id / ctx.states_list picks out the office clicked.
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
-        Input({"type": f"{P}-seat", "office": MATCH}, "n_clicks"),
-        [State({"type": f"{P}-f", "office": MATCH, "field": f}, "value") for f in fields],
-        State({"type": f"{P}-f", "office": MATCH, "field": "file"}, "contents"),
-        State({"type": f"{P}-f", "office": MATCH, "field": "file"}, "filename"),
+        Input({"type": f"{P}-seat", "office": ALL}, "n_clicks"),
+        [State({"type": f"{P}-f", "office": ALL, "field": f}, "value") for f in fields],
+        State({"type": f"{P}-f", "office": ALL, "field": "file"}, "contents"),
+        State({"type": f"{P}-f", "office": ALL, "field": "file"}, "filename"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_seat(n, flat, name, size, email, phone, password, ref, contents, filename):
+    def onb_seat(_clicks, *_states):
         s = _session()
-        if not n or not s or not ctx.triggered_id:
+        trig = ctx.triggered_id
+        if not s or not isinstance(trig, dict) or not (ctx.triggered and ctx.triggered[0].get("value")):
             return no_update, no_update, no_update
         sid, uid, role = s
         if role != "admin" or not sid:
             return no_update, _alert("Only the society's administrator can seat the committee.", False), no_update
+        office = trig["office"]
+
+        def _val(i):
+            for item in (ctx.states_list[i] or []):
+                if isinstance(item.get("id"), dict) and item["id"].get("office") == office:
+                    return item.get("value")
+            return None
+
+        flat, name, size, email, phone, password, ref = (_val(i) for i in range(len(fields)))
+        contents, filename = _val(len(fields)), _val(len(fields) + 1)
         try:
-            msg = ob.seat_founding_officer(uid, sid, ctx.triggered_id["office"], flat, name, email, phone, password or "", ref,
+            msg = ob.seat_founding_officer(uid, sid, office, flat, name, email, phone, password or "", ref,
                                            filename, _decode(contents), int(size) if size not in (None, "") else None)
         except ob.OnboardingError as exc:
             return no_update, _alert(str(exc), False), no_update
@@ -326,7 +339,7 @@ def register_onboarding_callbacks(app):
         return _alert("eSign request started. Finish it with the vendor, then confirm with your password.")
 
     @app.callback(
-        Output({"type": f"{P}-mmsg", "sid": MATCH}, "children", allow_duplicate=True),
+        Output({"type": f"{P}-advmsg", "id": MATCH}, "children"),
         Input({"type": f"{P}-adv-sign", "id": MATCH}, "n_clicks"),
         State({"type": f"{P}-adv-pw", "id": MATCH}, "value"),
         prevent_initial_call=True,

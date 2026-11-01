@@ -82,7 +82,8 @@ def create_society_checked(data: dict) -> int:
             f"The admin email '{admin_email}' is already registered to another user. "
             "Use a different email. No society was created.")
 
-    # V5: registration number + certificate hash are mandatory at creation.
+    # Registration number is mandatory at creation. State, constitution (regime) and the
+    # registration certificate are optional here: the society completes them in its own setup wizard.
     pan = (data.get("pan") or "").strip().upper()
     reg_num = (data.get("reg_num") or "").strip()
     reg_cert_hash = (data.get("reg_cert_hash") or "").strip()
@@ -92,11 +93,7 @@ def create_society_checked(data: dict) -> int:
 
     if not reg_num:
         raise SocietyCreateError("Registration number is required to register a society.")
-    if not state:
-        raise SocietyCreateError("State is required to assign the society's legal regime at creation.")
-    if not reg_cert_hash:
-        raise SocietyCreateError("Registration certificate (SHA-256 hash) is required to register a society.")
-    if len(reg_cert_hash) != 64 or not all(c in "0123456789abcdef" for c in reg_cert_hash):
+    if reg_cert_hash and (len(reg_cert_hash) != 64 or not all(c in "0123456789abcdef" for c in reg_cert_hash)):
         raise SocietyCreateError("Registration certificate hash must be a 64-character hex SHA-256.")
     if pan and not re.fullmatch(r"[A-Z]{5}[0-9]{4}[A-Z]", pan):
         raise SocietyCreateError("PAN must be in the form ABCDE1234F (5 letters, 4 digits, 1 letter).")
@@ -220,7 +217,7 @@ def payload_from_master_form(form: dict, created_by) -> dict:
     from app.security.password_policy import validate_password
     f = {k: (v.strip() if isinstance(v, str) else v) for k, v in (form or {}).items()}
     required = [("name", "Society name"), ("address", "Address"), ("pan", "PAN"), ("registration", "Registration number"),
-                ("state", "State"), ("constitution", "Constitution"), ("validity_date", "Validity date"),
+                ("validity_date", "Validity date"),
                 ("admin_username", "Admin email"), ("admin_password", "Admin password")]
     missing = [label for key, label in required if not f.get(key)]
     if missing:
@@ -228,11 +225,8 @@ def payload_from_master_form(form: dict, created_by) -> dict:
     pw_error = validate_password(f["admin_password"])
     if pw_error:
         raise SocietyCreateError(pw_error)
-    cert_hash = verify_registration_certificate(f.get("reg_cert_file"), f.get("reg_cert_hash"))
     return {
         "name": f["name"], "address": f["address"], "pan": f["pan"], "reg_num": f["registration"],
-        "state": f["state"], "constitution": f["constitution"],
-        "reg_cert_hash": cert_hash, "reg_cert_file": f["reg_cert_file"],
         "plan": f.get("plan") or "Free", "validity": f["validity_date"],
         "admin_email": f["admin_username"], "admin_password": f["admin_password"], "created_by": created_by,
     }

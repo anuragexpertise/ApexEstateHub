@@ -262,6 +262,7 @@ def advisers_section(society_id: int, role: str | None, user_id: int | None) -> 
             html.Div(f"scope: {a['scope'] or '-'}   resolution #{a['resolution_id']}   "
                      f"login: {'yes' if a['login_user_id'] else 'no'}", style=_MUTED),
             html.Div(ctrl, style={"marginTop": "6px"}),
+            html.Div(id={"type": f"{P}-advmsg", "id": int(a["id"])}),
         ], style=_CARD))
     out = [html.H6("Adviser appointments"), html.Div(cards or [html.Div("No advisers appointed yet.", style=_MUTED)])]
     if role == "admin":

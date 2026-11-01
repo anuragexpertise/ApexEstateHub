@@ -1,6 +1,5 @@
-"""Plan v5.2: the master portal's Create Society form must supply everything create_society_checked() now demands.
-Before this, the only UI path to a new society was refused with 'State is required' every time."""
-import base64
+"""The master portal's Create Society form sets only name, address, PAN, registration number, plan and validity.
+State, regime (constitution) and the registration certificate are completed by the society in its setup wizard."""
 import hashlib
 
 import pytest
@@ -14,16 +13,6 @@ PDF = b"%PDF-1.4\n" + b"certificate body " * 50
 def _cert_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(ss, "_cert_folder", lambda: tmp_path / "registration")
     return tmp_path
-
-
-def _form(**over):
-    stored, digest = ss.store_registration_certificate("reg.pdf", PDF)
-    f = {"name": "Sunrise Heights", "address": "Agra", "pan": "ABCDE1234F", "registration": "REG/2026/77",
-         "state": "UP", "constitution": "AOA", "validity_date": "2027-03-31", "plan": "Free",
-         "admin_username": "admin@sunrise.example", "admin_password": "Str0ngPass!",
-         "reg_cert_file": stored, "reg_cert_hash": digest}
-    f.update(over)
-    return f
 
 
 # ── certificate storage and verification ─────────────────────────────────────────────────────────────────────────
@@ -58,23 +47,31 @@ def test_a_forged_hash_or_filename_is_rejected():
 
 
 # ── form -> create_society_checked payload ───────────────────────────────────────────────────────────────────────
-def test_payload_carries_the_v5_fields():
-    f = _form()
-    p = ss.payload_from_master_form(f, created_by=9)
-    assert (p["state"], p["constitution"], p["reg_num"], p["reg_cert_hash"], p["created_by"]) == ("UP", "AOA", "REG/2026/77", f["reg_cert_hash"], 9)
-    assert p["admin_email"] == "admin@sunrise.example" and p["validity"] == "2027-03-31"
+def _form(**over):
+    """What the master's form submits: name, address, PAN, registration number, plan, validity, admin login."""
+    f = {"name": "Sunrise Heights", "address": "Agra", "pan": "ABCDE1234F", "registration": "REG/2026/77",
+         "validity_date": "2027-03-31", "plan": "Free",
+         "admin_username": "admin@sunrise.example", "admin_password": "Str0ngPass!"}
+    f.update(over)
+    return f
 
 
-@pytest.mark.parametrize("field,label", [("state", "State"), ("constitution", "Constitution"), ("registration", "Registration number"),
-                                         ("name", "Society name"), ("admin_username", "Admin email")])
+def test_payload_carries_only_what_the_master_sets():
+    p = ss.payload_from_master_form(_form(), created_by=9)
+    assert (p["name"], p["pan"], p["reg_num"], p["plan"], p["validity"], p["created_by"]) == (
+        "Sunrise Heights", "ABCDE1234F", "REG/2026/77", "Free", "2027-03-31", 9)
+    assert p["admin_email"] == "admin@sunrise.example"
+    # State, regime and certificate belong to the society's own setup wizard.
+    for k in ("state", "constitution", "reg_cert_hash", "reg_cert_file"):
+        assert k not in p
+
+
+@pytest.mark.parametrize("field,label", [("registration", "Registration number"), ("name", "Society name"),
+                                         ("address", "Address"), ("pan", "PAN"), ("validity_date", "Validity date"),
+                                         ("admin_username", "Admin email")])
 def test_missing_fields_are_named_for_the_master(field, label):
     with pytest.raises(ss.SocietyCreateError, match=label):
         ss.payload_from_master_form(_form(**{field: ""}), 1)
-
-
-def test_no_certificate_means_no_society():
-    with pytest.raises(ss.SocietyCreateError, match="Upload the registration certificate"):
-        ss.payload_from_master_form(_form(reg_cert_file="", reg_cert_hash=""), 1)
 
 
 def test_weak_password_gets_the_policy_message():
@@ -83,15 +80,19 @@ def test_weak_password_gets_the_policy_message():
 
 
 # ── the form itself ──────────────────────────────────────────────────────────────────────────────────────────────
-def test_form_offers_state_constitution_and_certificate_upload():
+def test_form_has_no_state_regime_or_certificate_fields():
     from app.dash_apps.drilldown.renderers import render_form_master_society_new
     text = str(render_form_master_society_new())
     for needle in ("'field': 'state'", "'field': 'constitution'", "master-society-cert-upload", "master-society-cert-status",
-                   "'field': 'reg_cert_file'", "'field': 'reg_cert_hash'", "Uttar Pradesh", "Co-operative Housing Society"):
+                   "'field': 'reg_cert_file'", "'field': 'reg_cert_hash'"):
+        assert needle not in text, needle
+    for needle in ("'field': 'name'", "'field': 'address'", "'field': 'pan'", "'field': 'registration'",
+                   "'field': 'plan'", "'field': 'validity_date'"):
         assert needle in text, needle
 
 
-def test_upload_callback_stores_hashes_and_reports(monkeypatch):
+def test_certificate_upload_callback_is_gone():
+    """The fixed-id certificate callback overlapped the generic MATCH image callbacks and halted Dash's callback registration."""
     import app.dash_apps.callbacks.drilldown_callbacks as dc
     from dash import Dash
     captured = {}
@@ -102,15 +103,5 @@ def test_upload_callback_stores_hashes_and_reports(monkeypatch):
                 captured[fn.__name__] = fn
                 return fn
             return deco
-    app = Rec(__name__)
-    dc.register_drilldown_callbacks(app)
-    fn = captured["handle_master_cert_upload"]
-    raw = getattr(fn, "__wrapped__", fn)
-    monkeypatch.setattr(dc, "get_current_user_role", lambda: "master")
-    status, stored, digest = raw("data:application/pdf;base64," + base64.b64encode(PDF).decode(), "reg.pdf")
-    assert digest == hashlib.sha256(PDF).hexdigest() and stored == digest + ".pdf" and "attached" in str(status)
-    status, stored, digest = raw("data:application/pdf;base64," + base64.b64encode(b"junk").decode(), "reg.pdf")
-    assert (stored, digest) == ("", "") and "real PDF" in str(status)
-    monkeypatch.setattr(dc, "get_current_user_role", lambda: "admin")
-    _s, stored, digest = raw("data:application/pdf;base64," + base64.b64encode(PDF).decode(), "reg.pdf")
-    assert (stored, digest) == ("", "")                                          # only the master may register a society
+    dc.register_drilldown_callbacks(Rec(__name__))
+    assert "handle_master_cert_upload" not in captured
