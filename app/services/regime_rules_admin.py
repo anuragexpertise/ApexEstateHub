@@ -762,8 +762,29 @@ def record_wizard_adoption(actor_id, actor_role, actor_society_id, society_id: i
     return (True, f"{clause_id} noted as provisional ({choice.replace('_', ' ')}).") if row else (False, "Nothing was saved.")
 
 
+_POLICY_CACHE: dict[int, tuple[float, dict]] = {}
+_POLICY_CACHE_TTL = 3.0          # seconds: one page render asks for every drop-down (35+ lookups); this makes it one query
+
+
+def _policy_cache_clear(society_id) -> None:
+    _POLICY_CACHE.pop(int(society_id), None)
+
+
 def list_society_policies(society_id: int) -> dict[str, dict]:
-    """policy_key -> {value, active, proposed}: value is what the engine uses now, proposed is a pending choice."""
+    """policy_key -> {value, active, proposed}: value is what the engine uses now, proposed is a pending choice.
+    Cached for a few seconds per society (cleared on every write here) so one render costs one query, not one per key."""
+    import copy
+    import time
+    sid = int(society_id)
+    hit = _POLICY_CACHE.get(sid)
+    if hit and time.monotonic() - hit[0] < _POLICY_CACHE_TTL:
+        return copy.deepcopy(hit[1])
+    out = _list_society_policies_uncached(sid)
+    _POLICY_CACHE[sid] = (time.monotonic(), out)
+    return copy.deepcopy(out)
+
+
+def _list_society_policies_uncached(society_id: int) -> dict[str, dict]:
     out = {k: {"value": policy_default(k), "active": False, "proposed": None} for k in POLICY_SPECS}
     rows = _rows("""SELECT policy_key, value_text, resolution_id FROM society_policy_settings
                      WHERE society_id = %s AND effective_from <= CURRENT_DATE
@@ -811,6 +832,7 @@ def record_wizard_policy(actor_id, actor_role, actor_society_id, society_id: int
            RETURNING id""",
         {"s": int(society_id), "k": policy_key, "v": value, "uid": actor_id, "role": actor_role,
          "why": f"Recorded in the {source}; awaiting resolution"})
+    _policy_cache_clear(society_id)
     return (True, "Noted as provisional until you record the passed resolution.") if row else (False, "Nothing was saved.")
 
 
@@ -838,6 +860,7 @@ def _activate_policy(actor_id, actor_role, society_id: int, policy_key: str, res
                   %(why)s, %(uid)s, %(role)s
              FROM upd RETURNING id""",
         {"s": int(society_id), "k": policy_key, "r": int(resolution_id), "uid": actor_id, "role": actor_role, "why": why})
+    _policy_cache_clear(society_id)
     label = POLICY_SPECS[policy_key][0]
     return ((True, f"Policy '{label}' is now active via resolution #{resolution_id}.") if row
             else (False, "No provisional choice to activate."))
