@@ -20,7 +20,7 @@ from datetime import date
 
 from app.services import signing_service
 
-KINDS = ("noc", "agreement", "resolution", "minutes", "poll", "expense", "fund_withdrawal", "adviser_appointment")
+KINDS = ("noc", "agreement", "resolution", "minutes", "poll", "expense", "fund_withdrawal", "adviser_appointment", "stepup_change")
 PURPOSE = {"noc": "SIGNING_NOC"}          # every other kind is sealed with SIGNING_AGREEMENT
 OFFICES = ("president", "vice_president", "secretary", "joint_secretary", "treasurer", "working_committee_member")
 ALL_BEARERS = list(OFFICES)
@@ -30,6 +30,7 @@ LINKABLE = ("noc", "agreement", "minutes", "expense", "fund_withdrawal")   # rec
 DEFAULT_POLICY = {
     "noc":             dict(eligible=["secretary"], required=["secretary"], min=1),
     "agreement":       dict(eligible=["president", "secretary", "treasurer", "platform"], required=["president", "secretary", "treasurer", "platform"], min=4),
+    "stepup_change":   dict(eligible=["president", "secretary", "treasurer"], required=["president", "secretary", "treasurer"], min=3),
     "resolution":      dict(eligible=["president", "vice_president", "secretary", "joint_secretary", "chair"], required=["secretary", "chair"], min=2),
     "minutes":         dict(eligible=["president", "vice_president", "secretary", "joint_secretary", "chair"], required=["secretary", "chair"], min=2),
     "poll":            dict(eligible=["secretary", "president"], required=[], min=1),
@@ -119,6 +120,13 @@ def item_text(kind: str, subject_id: int, db=None) -> tuple[int, str]:
             raise SigningRefused("Adviser appointment not found.")
         return r["society_id"], (f"adviser_appointment|{subject_id}|{r['kind']}|{r['name']}|{r['firm']}|{r['membership_number']}|"
                                  f"{r['scope']}|{r['term_start']}|{r['term_end']}|{r['resolution_id']}")
+    if kind == "stepup_change":
+        r = d._execute("SELECT s.society_id, s.name, h.new_hash FROM stepup_change_requests h JOIN societies s ON s.id = h.society_id WHERE h.id=%s",
+                       (subject_id,), fetch_one=True)
+        if not r:
+            raise SigningRefused("Step-up change request not found.")
+        fp = sha256(r["new_hash"])[:12]
+        return r["society_id"], f"Society {r['name']}: replace the step-up password (request #{subject_id}, hash fingerprint {fp})"
     raise SigningRefused(f"Unsupported record kind {kind!r}.")
 
 
@@ -285,7 +293,7 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
         waiting = [o for o in ("president", "secretary", "treasurer") if o not in have]
         if waiting:                                                        # plan v5: the platform signs last, which accepts and activates
             raise SigningRefused("The platform signs last. Still to sign: " + ", ".join(w.title() for w in waiting) + ".")
-    if _self_dealing(d, kind, subject_id, user_id, society_id):
+    if kind != "stepup_change" and _self_dealing(d, kind, subject_id, user_id, society_id):
         raise SigningRefused("You cannot sign an item concerning your own flat.")
     # One person counts once. Checked before inserting (rather than by catching the unique violation) so a refusal never
     # leaves a failed statement behind. A withdrawal whose earlier approval was recorded but not counted (for example the
@@ -316,6 +324,12 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
         if kind == "agreement":                                            # the sealed Agreement IS the activation event (plan v5)
             from app.services import onboarding_service as ob
             st["activation"] = ob.try_activate(society_id, user_id)
+        if kind == "stepup_change":                                        # the sealed step-up change installs the new hash
+            from app.services import signing_service as ss
+            if action == "decline":
+                d._execute("UPDATE stepup_change_requests SET status='declined', decided_at=NOW() WHERE id=%s", (subject_id,))
+            elif st.get("sealed"):
+                ss.apply_stepup_change(subject_id, user_id, d)
         if kind == "resolution":                                           # documents that were only waiting for this seal
             st["documents_sealed"] = _seal_linked(d, subject_id)
     return st

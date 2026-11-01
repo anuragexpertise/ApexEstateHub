@@ -267,17 +267,14 @@ REVIEW_STEP_NAME = "Review"
 WIZARD_GROUPS = {
     "Organization Details": ["Instructions", "Society Details", "Administrator"],
     "Legal Regime & Funds": ["Legal Regime Selection", "Funds"],
-    "Statutory Compliance": ["TAN & TDS Rates", "GSTIN & GST Rate", "State Act & Rules"],
-    "By-Laws & Governance": ["Model Bye-Laws Adoption"],
+    "Statutory Compliance": ["TAN & TDS Rates", "GSTIN & GST Rate"],
     "Society Policy & Operations": ["Apartment Charges", "Vendor Charges", "Accounts Heads", "Brought Forward"],
-    "Finalization": ["Review", "Agreement"],
+    "Finalization": ["Review"],
 }
 # CATEGORIES holds INTERNAL step keys. statutory_rules.py (STEP_ROWS, STEP_LINK_CATEGORIES), the render branches in
 # render_category_content() and the callbacks all key on them. STEP_LABELS is display wording only.
 STEP_LABELS = {
     "GSTIN & GST Rate": "GSTIN & GST Rates",
-    "State Act & Rules": "Compliance",
-    "Model Bye-Laws Adoption": "By-Laws Adoption",
     "Accounts Heads": "Accounts",
 }
 
@@ -294,14 +291,11 @@ CATEGORIES = [
     'Funds',
     'TAN & TDS Rates',
     'GSTIN & GST Rate',
-    'State Act & Rules',
-    'Model Bye-Laws Adoption',
     'Apartment Charges',
     'Vendor Charges',
     'Accounts Heads',
     'Brought Forward',
     'Review',
-    'Agreement',
 ]
 
 CATEGORY_ICONS = {
@@ -312,14 +306,11 @@ CATEGORY_ICONS = {
     "Funds": "fas fa-piggy-bank",
     "TAN & TDS Rates": "fas fa-percent",
     "GSTIN & GST Rate": "fas fa-file-invoice-dollar",
-    "State Act & Rules": "fas fa-gavel",
-    "Model Bye-Laws Adoption": "fas fa-scale-balanced",
     "Apartment Charges": "fas fa-home",
     "Vendor Charges": "fas fa-truck",
     "Accounts Heads": "fas fa-book",
     "Brought Forward": "fas fa-arrow-right",
     "Review": "fas fa-clipboard-check",
-    "Agreement": "fas fa-handshake",
 }
 
 def _render_image_capture_control(entity, field, existing=None, society_id=None):
@@ -873,7 +864,7 @@ def _instrument_link(title, url, year=None):
 
 
 def _office_bearer_status(society_id):
-    """Plan v3 2.10: every serving post needs flat, name, email, phone and a signature image, or shows as incomplete."""
+    """Read-only status of the three serving office-bearers on the Administrator step. Incomplete ones link back to Stage 2."""
     if not society_id:
         return html.Div()
     try:
@@ -884,22 +875,37 @@ def _office_bearer_status(society_id):
     except Exception:
         return html.Div()
     seated = {r["office_code"] for r in rows}
-    items = [html.Li([f"{r['office_code'].replace('_', ' ').title()}: {r['holder_name']} (flat {r['flat_number'] or '?'}) - ",
-                      html.Span("complete", style={"color": "#17976e"}) if r["complete"]
-                      else html.Span("incomplete, missing " + ", ".join(r["missing"] or []), style={"color": "#b02a37"})]) for r in rows]
+    items = []
+    for r in rows:
+        if r["complete"]:
+            items.append(html.Li([f"{r['office_code'].replace('_', ' ').title()}: {r['holder_name']} (flat {r['flat_number'] or '?'}) - ",
+                                  html.Span("complete", style={"color": "#17976e"})]))
+        else:
+            items.append(html.Li([f"{r['office_code'].replace('_', ' ').title()}: {r['holder_name']} (flat {r['flat_number'] or '?'}) - ",
+                                  html.Span("incomplete, missing " + ", ".join(r["missing"] or []), style={"color": "#b02a37"})]))
     items += [html.Li([f"{o.replace('_', ' ').title()}: ", html.Span("not yet appointed", style={"color": "#b26a00"})])
               for o in ("president", "secretary", "treasurer") if o not in seated]
+    complete = all((r.get("complete") for r in rows)) and len(seated) == 3
     return html.Div([html.Div("Serving office-bearers", style={"fontWeight": "600", "fontSize": "13px"}),
                      html.Ul(items, style={"fontSize": "12px"}) if items else html.Div("None appointed yet.", style={"fontSize": "12px"}),
-                     html.Div("Contact details and the signature image are kept under Settings, Society governance, Managing Committee.",
-                              style={"fontSize": "11px", "color": "#888"})], className="mb-3")
+                     html.Div([
+                         dbc.Button("Complete missing details", id="onb-back-to-committee", color="secondary", size="sm", outline=True,
+                                    disabled=complete, style={"fontSize": "12px", "marginTop": "6px"}),
+                         html.Span("  Opens Stage 2 to finish mobile, signature image and election minutes for each officer.",
+                                   style={"fontSize": "11px", "color": "#888", "marginLeft": "8px"})],
+                        style={"marginTop": "6px"})], className="mb-3")
 
 
-def legal_hierarchy_rows(society_id=None, state=None):
-    """Body rows of the Legal Hierarchy table, driven by the society's regime (no hard-coded state)."""
-    from app.services.statutory_rules import instruments_for_society, grouped_instruments, normalize_state
+def legal_hierarchy_rows(society_id=None, state=None, answers=None):
+    """Body rows of the Legal Hierarchy table, driven by the society's regime (no hard-coded state).
+
+    Bold rule (§4.7.5): an instrument row is bold when applies_when=='always' or the matching
+    Yes/No answer is True; otherwise normal weight with a muted reason. Returns (rows, applicable_keys).
+    """
+    from app.services.statutory_rules import instruments_for_society, grouped_instruments, normalize_state, instrument_applies
     st = normalize_state(state or _society_state(society_id))
     regime, instruments = instruments_for_society(society_id, st)
+    answers = answers or {}
     groups = grouped_instruments(instruments)
     try:
         from app.services.kpi_rule_links_service import get_links_for_categories
@@ -907,23 +913,44 @@ def legal_hierarchy_rows(society_id=None, state=None):
     except Exception:
         central_links = []
 
-    def items(types):
+    def items(types, applicable_keys):
         out = []
         for t in types:
             for r in groups.get(t, []):
+                applies, reason = instrument_applies(r, answers)
+                key = f"instr_{r.get('title','')}"
+                applicable_keys[key] = applies
                 link = _instrument_link(r["title"], r.get("source_url") if r.get("verification") == "verified" else None, r.get("enactment_year"))
                 if r.get("verification") != "verified":          # unverified rows are labelled and carry no link
                     link = html.Span([link, html.Span(" (unverified)", style={"color": "#b26a00", "fontSize": "11px"})])
-                out.append(html.Div(link, className="mb-1"))
+                weight = html.Strong(link) if applies else link
+                reason_txt = None if applies or reason is None else html.Span(f" — {reason}", style={"color": "#8a8f98", "fontSize": "11px"})
+                out.append(html.Div([weight, reason_txt] if reason_txt else [weight], className="mb-1",
+                                    style={"fontWeight": "700" if applies else "400",
+                                           "color": "#223" if applies else "#8a8f98"}))
         return out
 
-    central = items(("Central Act", "Central Rules"))
+    applicable_keys = {}
+    central = items(("Central Act", "Central Rules"), applicable_keys)
     if not central:   # catalog has no Central Act rows: use the official-portal links
         central = [html.Div(_instrument_link(l.label.split(" — ")[0], l.url), className="mb-1") for l in central_links]
     pending = html.Small("link pending verification", className="text-muted")
-    state_act = items(("Act",)) or [html.Span(f"No {regime} Act in the catalog yet.", className="text-muted")]
-    rules = items(("Rules", "Notification")) or [html.Span(f"No {regime} Rules in the catalog yet.", className="text-muted")]
-    model_bl = items(("Bye-laws",)) or [html.Span(f"No {regime} Model Bye-laws in the catalog yet.", className="text-muted")]
+    state_act = items(("Act",), applicable_keys) or [html.Span(f"No {regime} Act in the catalog yet.", className="text-muted")]
+    rules = items(("Rules", "Notification"), applicable_keys) or [html.Span(f"No {regime} Rules in the catalog yet.", className="text-muted")]
+    model_bl = items(("Bye-laws",), applicable_keys) or [html.Span(f"No {regime} Model Bye-laws in the catalog yet.", className="text-muted")]
+
+    # Operational laws group: has_employees / has_security_agency (new Yes/No radios, default No).
+    op_laws = []
+    for trig, label in (("has_employees", "Employees / labour laws"), ("has_security_agency", "Security agency / PSARA")):
+        applies = answers.get(trig) is True
+        op_laws.append(html.Div([
+            html.Strong(label) if applies else html.Span(label, style={"color": "#8a8f98"}),
+            html.Span(f" — {'applies' if applies else 'not triggered: you answered “No”'}",
+                      style={"fontSize": "11px", "color": "#8a8f98", "marginLeft": "6px"})
+        ], className="mb-1", style={"fontWeight": "700" if applies else "400",
+                                    "color": "#223" if applies else "#8a8f98"}))
+        applicable_keys[f"instr_op_{trig}"] = applies
+
     try:
         from app.services import regime_rules_admin as _rra
         _dts = {d["code"]: d for d in _rra.list_decision_types()}
@@ -944,21 +971,18 @@ def legal_hierarchy_rows(society_id=None, state=None):
         return html.Div(html.Small(text, className="text-muted"))
 
     rows = [
-        ("L0 - Central Acts", central + [_note("Income-tax, GST, RERA. Apply to every society; not a choice.")], "locked"),
-        ("L0 - State Act", state_act, "locked"),
-        ("L0 - Rules", rules, "locked"),
-        ("L0 - Model Bye-laws (notified)", model_bl + [_note("Made by the Governor under the Act; a society makes its bye-laws in accordance with them.")], "locked"),
-        ("L1 - Society Bye-laws", [html.Span("The Model Bye-laws as adopted or varied by the General Body on the "),
-                                  html.Strong("Model Bye-Laws Adoption"), html.Span(" step. Adopting or varying: "),
-                                  html.Span(_maj("ADOPT_BYE_LAW")), html.Span(". A clause may be recorded as not adopted only on "
-                                  "a written advocate's opinion, and never if the Act or Rules back it.")], "provisional"),
-        ("L2 - Society Policy / GBM Resolutions", [html.Span("Policy: "), html.Span(_maj("SET_SOCIETY_POLICY")),
-                                                  html.Span(". Ordinary General Body resolution: "), html.Span(_maj("GENERAL_RESOLUTION")),
-                                                  html.Span(", with quorum. Recorded under "), html.Strong("Settings > Society governance > Meetings & Resolutions"),
-                                                  html.Span(". A policy may tighten, never loosen, the layer above it.")], "provisional"),
-        ("L3 - Board / Working Committee", [html.Span("Operational limits decided by the committee: "), html.Span(_maj("SET_BOARD_PARAM")),
-                                           html.Span(", then placed before the General Body for ratification. Recorded under "),
-                                           html.Strong("Settings > Society governance"), html.Span(".")], "provisional"),
+        ("L0 Central Acts", central + [_note("Income-tax, GST, RERA. Apply to every society; not a choice.")], "locked"),
+        ("L0 Central Rules & Notifications", [_note("Central rules and notifications under the central Acts.")], "locked"),
+        ("L0 State Acts", state_act, "locked"),
+        ("L0 State Rules", rules, "locked"),
+        ("L0 Model Bye-laws (notified)", model_bl + [_note("Made by the Governor under the Act; a society makes its bye-laws in accordance with them.")], "locked"),
+        ("L0 Operational laws", op_laws, "locked"),
+        ("L1 Society-adopted Bye-laws", [html.Span("Before Stage 6: "), html.Strong("Model Bye-Laws apply as notified; "),
+                                      html.Span("the society may adopt or vary them in Stage 6 (Adoption)."), _note(
+                                          "After Stage 6: clause list with adopted clauses bold.")], "provisional"),
+        ("L2 General Body Resolutions", [html.Span("Majority rules from "), html.Strong("decision_types"),
+                                      html.Span(" (existing _maj()).")], "normal"),
+        ("L3 Board / Managing Committee", [html.Span("Existing text — meetings and decisions.")], "normal"),
     ]
     out = []
     for label, body, badge_type in rows:
@@ -967,7 +991,7 @@ def legal_hierarchy_rows(society_id=None, state=None):
             html.Td(body, style={"fontSize": "12px"}),
             html.Td(dbc.Badge(badge_type.capitalize(), color="secondary" if badge_type == "locked" else "info", pill=True, style={"fontSize": "9px"})),
         ]))
-    return out
+    return out, applicable_keys
 
 
 def _yn(v):
@@ -1170,7 +1194,7 @@ def legal_regime_live(society_id=None, state=None, constitution=None):
     regime = regime_for_society(society_id, picked_state)
     name, status = regime_profile(regime)
     own = state_has_own_regime(picked_state)
-    hierarchy_rows = legal_hierarchy_rows(society_id, picked_state)
+    hierarchy_rows, _applicable_keys = legal_hierarchy_rows(society_id, picked_state)
     _sel = regime_selection(picked_state, picked_constitution or "AOA")
     _opt_rows = [html.Tr([
         html.Td(html.B(o["label"]) if o["constitution"] == (picked_constitution or "AOA").upper() else o["label"]),
@@ -1373,124 +1397,39 @@ def render_category_content(category, society_id=None, state=None, constitution=
                     dbc.RadioItems(id="sw-central-rera", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3"),
                 ], width=6),
             ]),
+            html.H6("Operational laws (Yes / No)", className="text-primary mt-4 mb-2"),
+            html.P("These decide whether employment or security-agency instruments appear in bold on this page "
+                   "and in Annex A. Default No.", className="text-muted small mb-2"),
+            dbc.Row([
+                dbc.Col([
+                    _label("Does the society have employees?"),
+                    dbc.RadioItems(id="sw-central-employees", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=False, inline=True, className="mb-3"),
+                ], width=6),
+                dbc.Col([
+                    _label("Does the society engage a security agency?"),
+                    dbc.RadioItems(id="sw-central-security-agency", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=False, inline=True, className="mb-3"),
+                ], width=6),
+            ]),
+            html.H6("Legal Hierarchy (Precedence Order)", className="text-primary mt-4 mb-2"),
+            html.P("This page is part of the Agreement. It is sealed as Annex A and signed by the office-bearers. "
+                   "Bold = applicable to this society; normal weight = not triggered (reason shown).", className="text-muted small mb-2"),
+            dbc.Table([
+                html.Thead(html.Tr([
+                    html.Th("Layer", style={"fontSize": "11px", "width": "160px"}),
+                    html.Th("Instrument", style={"fontSize": "11px"}),
+                    html.Th("Status", style={"fontSize": "11px", "width": "120px"}),
+                ])),
+                html.Tbody(id="sw-legal-hierarchy-body"),
+            ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
+            dbc.Alert([
+                html.Strong("Non-applicable rows: ", className="me-2"),
+                "non-bold, grey, with the reason why they do not apply. Applicable rows are bold. "
+                "Annex A seals this hierarchy and its SHA-256 digest when the Agreement is sealed.",
+            ], color="info", className="py-2 mt-3", style={"fontSize": "12.5px"}),
         ]
     elif category == "State Act & Rules":
-        from app.services.statutory_rules import instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR
-        regime, instruments = instruments_for_society(society_id, state)
-        
-        # Show the State Act instruments
-        instrument_rows = []
-        for itype, items in grouped_instruments(instruments).items():
-            instrument_rows.append(html.Tr([
-                html.Td(dbc.Badge(itype, color=INSTRUMENT_BADGE_COLOR.get(itype, "light"), pill=True, style={"fontSize": "10px"})),
-                html.Td(items[0]["title"] + (f" ({items[0]['enactment_year']})" if items[0].get("enactment_year") else ""), style={"fontSize": "11px", "fontWeight": "600"}),
-            ]))
-            for r in items[1:]:
-                instrument_rows.append(html.Tr([
-                    html.Td(""),
-                    html.Td(html.Small("· " + r["title"] + (f" ({r['enactment_year']})" if r.get("enactment_year") else ""), className="text-muted", style={"fontSize": "10px"})),
-                ]))
-        
-        return elements + [
-            _render_banner("State Act & Rules", f"Review the State Act and Rules governing this society ({regime}). These are read-only — maintained by Master. Fund rates and opt-ins are set later, on the Funds step."),
-            html.H6("State Instruments", className="text-primary mt-3 mb-2"),
-            dbc.Table([
-                html.Thead(html.Tr([html.Th("Type", style={"fontSize": "11px"}), html.Th("Instrument", style={"fontSize": "11px"})])),
-                html.Tbody(instrument_rows),
-            ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
-        ]
-    elif category == "Model Bye-Laws Adoption":
-        from app.services import regime_rules_admin as rra
-        from app.services.statutory_rules import regime_for_society
-        from app.dash_apps.pages.setup_wizard import fund_flags
-        existing = {}
-        try:
-            for r in rra.list_society_bye_laws(society_id) if society_id else []:
-                if r["layer"] == 1:
-                    existing[r["clause_id"]] = r
-        except Exception:
-            existing = {}
-        labels = {"adopted_as_is": "Adopt as-is", "adopted_with_variation": "Adopt with variation", "not_adopted": "Not adopted"}
-        rows = []
-        for clause_id, title in rra.MODEL_BYE_LAW_CLAUSES:
-            locked = rra.clause_is_locked(society_id, clause_id) if society_id else clause_id in rra.STATUTE_BACKED_CLAUSES
-            cur = existing.get(clause_id) or {}
-            current = cur.get("proposed_status") if cur.get("status") == "provisional" else cur.get("status")
-            opts = [{"label": labels[c], "value": c} for c in rra.ADOPTION_CHOICES
-                    if not (locked and c == "not_adopted")]
-            active = bool(cur.get("resolution_id")) and cur.get("status") != "provisional"
-            rows.append(html.Tr([
-                html.Td([html.Strong(clause_id, style={"fontSize": "11px"}), html.Br(),
-                         html.Small(title + (" · enforced by the engine" if locked else ""), className="text-muted")],
-                        style={"maxWidth": "260px"}),
-                html.Td(dbc.RadioItems(id={"type": "sw-bl-choice", "clause": clause_id}, options=opts, value=current,
-                                       inline=True, className="small", inputClassName="me-1", labelClassName="me-3",
-                                       persistence=False)
-                        if not active else dbc.Badge("Active (resolution on file)", color="success")),
-                html.Td(dbc.Input(id={"type": "sw-bl-var", "clause": clause_id}, type="text", debounce=True, size="sm",
-                                  value=cur.get("variation_text") or "", placeholder="Variation text",
-                                  disabled=active, style={"fontSize": "11px"})),
-                html.Td(html.Small(id={"type": "sw-bl-msg", "clause": clause_id}, className="text-muted")),
-            ]))
-        try:
-            pol = rra.list_society_policies(society_id) if society_id else {}
-        except Exception:
-            pol = {}
-        pol_rows, fund_pol_rows = [], []
-        _ff = fund_flags(society_id, state)
-        for key, (label, clause, choices) in rra.POLICY_SPECS.items():
-            if key in rra.FUND_STEP_POLICY_KEYS:
-                continue                      # asked on the Funds step
-            st = pol.get(key) or {"value": choices[0][0], "active": False, "proposed": None}
-            shown = st["proposed"] or st["value"]
-            (fund_pol_rows if key in rra.FUND_POLICY_KEYS else pol_rows).append(html.Tr([
-                html.Td([html.Strong(label, style={"fontSize": "12px"}), html.Br(),
-                         html.Small(f"Resolution on {clause}", className="text-muted")], style={"maxWidth": "260px"}),
-                html.Td(dbc.Select(id={"type": "sw-pol-choice", "key": key}, size="sm",
-                                   options=[{"label": lbl, "value": v} for v, lbl in choices], value=shown)),
-                html.Td([dbc.Badge("Active (resolution on file)", color="success") if st["active"] and not st["proposed"]
-                         else dbc.Badge("Provisional", color="warning", text_color="dark"),
-                         html.Small(id={"type": "sw-pol-msg", "key": key}, className="text-muted ms-2")]),
-            ]))
-        policy_panel = html.Div([
-            html.H6("Society resolution settings", className="mt-3 mb-1"),
-            html.Small("Choices the engine used to hard-code. Provisional until you record the passed resolution "
-                       "(Settings → Society governance → Meetings & Resolutions). "
-                       "Clauses 7, 39, 49 and 55 are 'enforced by the engine' unless you allow them to be dropped; "
-                       "which clauses are truly non-droppable is a legal call - confirm with an advocate.", className="text-muted d-block mb-2"),
-            dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in ("Setting", "Choice", "Status")])),
-                       html.Tbody(pol_rows)], bordered=True, size="sm"),
-            html.H6("Funds & assessments", className="mt-3 mb-1"),
-            html.Small("Whether and how a Sinking or Repair fund is collected is asked on the Funds step.",
-                       className="text-muted d-block mb-2"),
-            dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in ("Setting", "Choice", "Status")])),
-                       html.Tbody(fund_pol_rows)], bordered=True, size="sm") if fund_pol_rows else html.Div(),
-        ]) if society_id else html.Div()
-        return elements + [
-            dbc.Alert([html.I(className="fas fa-scale-balanced me-2"),
-                       "Record which Model Bye-Laws 2011 clauses your Association is adopting. These are ",
-                       html.Strong("provisional"), " — nothing changes in how EstateHub treats dues, voting, NOC or filings "
-                       "until you record the General Body meeting and its passed resolution. Clauses you leave alone follow the "
-                       "Model Bye-Laws and the Act as written."], color="info", className="mb-3", style={"fontSize": "13px"}),
-            html.Div([
-                html.Div([html.Strong("Who can change what"), html.Br(),
-                          html.Small("Act & Rules (locked) → Model Bye-Laws (this step; GBM resolution, 2/3) → Society Policy "
-                                     "(GBM; may only tighten a clause) → Board Decision (MC; operational limits). "
-                                     "A lower layer can never loosen a higher one.", className="text-muted")],
-                         className="mb-2")]),
-            html.Div(dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in
-                                ("Clause", "Intended outcome", "Variation (if any)", "")])),
-                                html.Tbody(rows)], bordered=True, size="sm", hover=True),
-                     style={"maxHeight": "420px", "overflowY": "auto"}),
-            policy_panel,
-            dbc.Alert([html.I(className="fas fa-arrow-right me-2"), html.Strong("Next: "),
-                       "after the General Body meets, record the meeting and then the passed resolution under ",
-                       html.Strong("Settings → Society governance → Meetings & Resolutions"),
-                       ". That activates the choices above automatically. ",
-                       html.Strong("Order matters: save the choice first, then record the resolution. "
-                                   "An older resolution can't activate a newer choice.")],
-                      color="warning", className="mt-3", style={"fontSize": "13px"}),
-        ]
+        # Retained as dead code: removed from CATEGORIES in PR-1 (item 8). The page lives in pages/adoption_panel.py.
+        return []
     elif category == "TAN & TDS Rates":
         from database.seed import tds_wizard_rows
         s_tan = ""
@@ -1886,6 +1825,37 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 _side("Assets", "Dr", [1000]),
                 _side("Liabilities & Equity", "Cr", [2000, 3000]),
             ], className="sw-bf-grid"),
+
+            # ── item 10: pending receivables by apartment ─────────────────────────
+            html.Hr(),
+            html.H6("Pending receivables by apartment", className="mt-4 mb-2 text-primary"),
+            html.P("Enter each flat's opening dues (arrears carried from Annex C). The total must tie to the Sundry Debtors "
+                   "accounts entered above (SDr / SDrCash / SDrDig).", className="text-muted small mb-2"),
+            dbc.Input(id="onb-receivables-json", type="hidden", value="[]"),
+            html.Div(id="onb-receivables-table", className="sw-hscroll", style={"marginBottom": "8px"}),
+            dbc.Row([
+                dbc.Col(dbc.Button("+ Add row", id="onb-bf-add-rec", color="secondary", size="sm", outline=True, n_clicks=0), md=3),
+                dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Download template (xlsx)"],
+                                   id="onb-bf-recv-template", color="secondary", size="sm", outline=True, n_clicks=0), md=3),
+                dbc.Col(dcc.Upload(id="onb-bf-recv-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload xlsx"],
+                                               color="secondary", size="sm", outline=True, n_clicks=0),
+                                   multiple=False, accept=".xlsx"), md=3),
+                dbc.Col(dcc.Download(id="onb-bf-recv-download"), md=3),
+            ], className="g-2"),
+            html.Div(id="onb-bf-recv-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
+            html.Div(id="onb-bf-tieout", className="mb-3", style={"fontSize": "12px", "fontWeight": "700"}),
+
+            # ── item 11: reconciliation & evidence ────────────────────────────────
+            html.Hr(),
+            html.H6("Reconciliation & evidence", className="mt-4 mb-2 text-primary"),
+            html.P("Reconcile every bank/cash account that carries a brought-forward balance, and attach the supporting scans "
+                   "(the server computes each file's SHA-256; nobody types a hash).", className="text-muted small mb-2"),
+            dbc.Input(id="onb-reconciliation-json", type="hidden", value="{}"),
+            html.Div(id="onb-bf-reconciliation-cards", className="mb-3"),
+            dcc.Upload(id="onb-bf-evidence-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Attach scan"],
+                                               color="secondary", size="sm", outline=True, n_clicks=0),
+                       multiple=False, accept=".pdf,.png,.jpg,.jpeg"),
+            html.Div(id="onb-bf-evidence-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
         ]
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Administrator":
@@ -1894,15 +1864,27 @@ def render_category_content(category, society_id=None, state=None, constitution=
             _office_bearer_status(society_id),
             html.Hr(),
             html.P("Create this society's step-up password.", className="text-danger fw-bold mb-1"),
-            html.P(
-                "This is the real key used to sign every QR gate-pass code "
-                "(apartments, vendors, security, admin) issued for THIS "
-                "society — it is specific to this society and is never "
-                "shared with any other society on the platform. Store it "
-                "safely: changing it later invalidates every previously "
-                "printed QR code for this society, requiring a full reissue.",
-                className="text-muted small mb-3",
-            ),
+            dbc.Alert([
+                html.Strong("What is the step-up password?", style={"fontSize": "13px"}),
+                html.Div("It is a second password that confirms sensitive society actions: re-issuing or revoking QR gate passes and, "
+                         "when enabled, rotating or revoking the society's signing keys. It does not sign anything and it is not a "
+                         "login password. The society's signing keys are created and protected by the server; nobody, including the "
+                         "platform, can read them through this screen.", style={"fontSize": "12px", "marginTop": "4px"}),
+                html.Strong("Who is responsible?", style={"fontSize": "13px", "marginTop": "8px"}),
+                html.Div("The society — jointly the President, Secretary and Treasurer. The administrator sets the first one so setup "
+                         "can finish; within 30 days of going live it must be replaced with a password chosen under the three "
+                         "office-bearers' signatures.", style={"fontSize": "12px", "marginTop": "4px"}),
+                html.Strong("How is it changed?", style={"fontSize": "13px", "marginTop": "8px"}),
+                html.Div("Settings → Society governance → Step-up password → Request change. The new password takes effect only after "
+                         "the serving President, Secretary and Treasurer each approve with their own login password.",
+                         style={"fontSize": "12px", "marginTop": "4px"}),
+                html.Strong("When new office-bearers are elected:", style={"fontSize": "13px", "marginTop": "8px"}),
+                html.Div("the password is not changed automatically, but the society is flagged “step-up password review required” and "
+                         "the new office-bearers are asked to replace it within 7 days, because a former office-bearer may still know it. "
+                         "Former office-bearers cannot approve anything.", style={"fontSize": "12px", "marginTop": "4px"}),
+                html.Strong("If you forget it:", style={"fontSize": "13px", "marginTop": "8px"}),
+                html.Div("it cannot be recovered. Request a change (three approvals).", style={"fontSize": "12px", "marginTop": "4px"}),
+            ], color="info", className="mb-3"),
             _label("SIGNING_SECRET (Strong Password)"),
             dbc.Input(id="sw-qr-secret", type="password", required=True, className="mb-3"),
             _field_feedback("sw-qr-secret-feedback"),
@@ -1961,24 +1943,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                        "After you submit, the binding Agreement is issued with three annexes (legal regime, this review, and the opening "
                        "position). The President, Secretary and Treasurer sign it with their own passwords, then the platform signs and "
                        "your society goes live. Until then nothing is posted to the ledger."], color="info", className="py-2 mb-3",
-                      style={"fontSize": "12.5px"}),
-            _label("Type 'I AGREE' below to proceed"),
-            dbc.Input(id="sw-i-agree", type="text", placeholder="I AGREE", className="mb-4"),
-            _field_feedback("sw-i-agree-feedback"),
-            html.Hr(),
-            html.P("Authorization required to submit setup.", className="fw-bold"),
-            dbc.Row([
-                dbc.Col([
-                    _label("Admin Password"),
-                    dbc.Input(id="sw-admin-password", type="password", placeholder="Your login password...", className="mb-3"),
-                    _field_feedback("sw-admin-password-feedback")
-                ], width=6),
-                dbc.Col([
-                    _label("SIGNING_SECRET"),
-                    dbc.Input(id="sw-qr-confirm-final", type="password", placeholder="Enter the SIGNING_SECRET created in the Administrator tab...", className="mb-3"),
-                    _field_feedback("sw-qr-confirm-final-feedback")
-                ], width=6)
-            ])
+                       style={"fontSize": "12.5px"}),
         ]
     return []
 

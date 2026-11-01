@@ -29,6 +29,7 @@ def register_callbacks(app):
         "drilldown_callbacks",        # 3. Drilldown
         "patrol_map_callbacks",       
         "card_catalogue_callbacks",   # 4. Card catalogue
+        "onboarding_wizard_callbacks",# 4b. Setup Wizard callbacks (onboarding review): nav, step save, review
         "customize_callbacks",        # 5. Customize
         "qr_callbacks",               # 6. QR gate pass
         "security_callbacks",         # 6b. Security gate-alert

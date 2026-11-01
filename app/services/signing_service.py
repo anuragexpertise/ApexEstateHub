@@ -211,3 +211,25 @@ def verify_stepup_password(society_id: int, typed: str, db=None) -> bool:
     row = _db(db)._execute("SELECT stepup_password_hash FROM societies WHERE id = %s", (society_id,), fetch_one=True)
     h = (row or {}).get("stepup_password_hash")
     return bool(h) and check_password_hash(h, typed)
+
+
+def apply_stepup_change(request_id: int, actor_id: int, db=None) -> dict:
+    """Seal an approved step-up change request: install the new hash, clear the review flag, audit it."""
+    d = _db(db)
+    req = d._execute("SELECT id, society_id, new_hash, status FROM stepup_change_requests WHERE id = %s", (request_id,), fetch_one=True)
+    if not req:
+        raise SigningError("No such step-up change request.")
+    if req["status"] != "open":
+        raise SigningError("That step-up change request has already been decided.")
+    new_hash = req["new_hash"]
+    society_id = req["society_id"]
+    d._execute("""UPDATE societies
+                   SET stepup_password_hash = %s, stepup_changed_at = NOW(), stepup_review_required = FALSE, stepup_initial = FALSE
+                 WHERE id = %s""", (new_hash, society_id))
+    d._execute("UPDATE stepup_change_requests SET status = 'applied', decided_at = NOW() WHERE id = %s", (request_id,))
+    d._execute(
+        "INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source) "
+        "VALUES (%s,%s,'STEPUP_PASSWORD_CHANGED','stepup_change_request',%s,%s::jsonb,'app')",
+        (society_id, actor_id, request_id,
+         json.dumps({"request_id": request_id, "hash_fingerprint": hashlib.sha256(new_hash.encode()).hexdigest()[:12]})))
+    return {"request_id": request_id, "society_id": society_id, "applied": True}

@@ -44,6 +44,8 @@ import io
 import pandas as pd
 from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 
+from app.services import onboarding_service as ob
+
 from dash import Input, Output, State, ALL, ctx, no_update, html, dcc
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
@@ -394,6 +396,11 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
 
         success += 1
         slots_left -= 1
+        # Item 10: link any pending opening receivable for this flat (idempotent).
+        try:
+            ob.link_opening_receivable(sid, apt_id, flat)
+        except Exception:                                          # noqa: BLE001 - enrolment stands even if linking fails
+            print(f"could not link opening receivable for flat {flat} in society {sid}")
 
     if success:
         try:   # Plan v3 2.8: keep flats' undivided-interest shares summing to 100% (unless typed from the Declaration)

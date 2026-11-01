@@ -81,6 +81,24 @@ def _invalidate_permission_cache() -> None:
         pass
 
 
+def _flag_stepup_review(sid: int, actor_id: int) -> None:
+    """A core office changed: the step-up password needs review within 7 days. Notify the serving office-bearers and the admin."""
+    try:
+        db._execute("UPDATE societies SET stepup_review_required = TRUE WHERE id = %s", (sid,))
+        holders = [r["user_id"] for r in _rows("""SELECT co.user_id FROM committee_offices co
+                                                   WHERE co.society_id=%s AND co.office_code = ANY(%s) AND co.status='active'
+                                                     AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE)""",
+                                               (sid, list(CORE_OFFICES)))]
+        holders = [h for h in holders if h]
+        for uid in set(holders + [actor_id]):
+            db._execute("INSERT INTO notifications (user_id, society_id, title, body, notification_type) "
+                        "VALUES (%s,%s,%s,%s,'push')",
+                        (uid, sid, "Step-up password review required",
+                         "A core office-bearer (President / Secretary / Treasurer) changed. Replace the step-up password within 7 days."))
+    except Exception:                                    # noqa: BLE001 - the seat change stands even if the alert can't be written
+        pass
+
+
 def _audit(cur, action: str, office_id, after: dict) -> None:
     """Append the audit row INSIDE the caller's transaction, so the change and its record commit or roll back together
     (a failure here rolls the appointment back too: no un-audited change of who holds office). Skipped only when there
@@ -251,6 +269,8 @@ def appoint(actor_id, actor_role, society_id, apartment_id, office_code, holder_
     except Exception as exc:
         return False, _db_message(exc)
     _invalidate_permission_cache()
+    if office_code in CORE_OFFICES:
+        _flag_stepup_review(sid, actor_id)
     try:                                       # plan v5 stage 2: all three core offices seated with evidence -> 'committee seated'
         db._execute("SELECT fn_mark_committee_seated(%s) AS ok", (sid,), fetch_one=True)
     except Exception:                          # noqa: BLE001 - the seat is recorded; the state move can be retried
@@ -298,6 +318,8 @@ def end_office(actor_id, actor_role, society_id, office_id, reason, actor_societ
     except Exception as exc:
         return False, _db_message(exc)
     _invalidate_permission_cache()
+    if office["office_code"] in CORE_OFFICES:
+        _flag_stepup_review(sid, actor_id)
     return True, f"{office['holder_name']} is no longer {OFFICE_LABEL[office['office_code']]}."
 
 
