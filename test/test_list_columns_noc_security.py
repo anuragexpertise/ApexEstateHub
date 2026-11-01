@@ -5,6 +5,10 @@ import os
 import pytest
 
 from app.dash_apps.drilldown import schema_introspect as si
+from test.live_db_gate import LIVE_DB_REASON, live_db_enabled
+
+# The entity metadata is built by introspecting the live schema, so none of this can run without a real Postgres.
+pytestmark = [pytest.mark.skipif(not live_db_enabled(), reason=LIVE_DB_REASON), pytest.mark.postgres_integration]
 
 
 @pytest.fixture(scope="module")

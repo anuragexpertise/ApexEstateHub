@@ -162,6 +162,82 @@ def create_society_checked(data: dict) -> int:
     return sid
 
 
+CONSTITUTION_LABELS = {
+    "AOA": "Apartment Owners' Association (AOA)",
+    "REG_SOCIETY": "Registered Society",
+    "COOP": "Co-operative Housing Society",
+    "GENERIC": "Other / not sure (no state rules loaded)",
+}
+
+_CERT_TYPES = {".pdf": b"%PDF-", ".png": b"\x89PNG", ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff"}
+_CERT_MAX_BYTES = 5 * 1024 * 1024
+
+
+def _cert_folder():
+    from app.dash_apps.callbacks.drilldown_callbacks import ASSETS_ROOT
+    return ASSETS_ROOT / "registration"
+
+
+def store_registration_certificate(filename: str, data: bytes) -> tuple[str, str]:
+    """Validate the registration certificate and keep it under its own SHA-256. Returns (stored name, sha256).
+    The stored name is '<sha256><ext>', so the file itself proves the hash that is saved on the society."""
+    import hashlib
+    import os
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in _CERT_TYPES:
+        raise SocietyCreateError("Attach the registration certificate as a PDF, PNG or JPG file.")
+    if not data or len(data) > _CERT_MAX_BYTES:
+        raise SocietyCreateError("The certificate file must be between 1 byte and 5 MB.")
+    if not data.startswith(_CERT_TYPES[ext]):
+        raise SocietyCreateError("The file does not look like a real %s." % ext.lstrip(".").upper())
+    digest = hashlib.sha256(data).hexdigest()
+    folder = _cert_folder()
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{digest}{ext}").write_bytes(data)
+    return f"{digest}{ext}", digest
+
+
+def verify_registration_certificate(stored_name: str, claimed_hash: str) -> str:
+    """The browser only hands back a file name and a hash; trust neither. Re-read the stored file and re-hash it.
+    Returns the verified hash, or raises SocietyCreateError."""
+    import hashlib
+    import os
+    name = os.path.basename((stored_name or "").strip())
+    claimed = (claimed_hash or "").strip().lower()
+    if not name or not claimed:
+        raise SocietyCreateError("Upload the registration certificate before creating the society.")
+    path = _cert_folder() / name
+    if not path.is_file() or not name.lower().startswith(claimed):
+        raise SocietyCreateError("The uploaded certificate could not be found. Please upload it again.")
+    if hashlib.sha256(path.read_bytes()).hexdigest() != claimed:
+        raise SocietyCreateError("The uploaded certificate does not match its recorded hash. Please upload it again.")
+    return claimed
+
+
+def payload_from_master_form(form: dict, created_by) -> dict:
+    """Turn the master portal's Create Society form into create_society_checked() input, with the plan's V5.2 fields.
+    Raises SocietyCreateError with a message the master can act on."""
+    from app.security.password_policy import validate_password
+    f = {k: (v.strip() if isinstance(v, str) else v) for k, v in (form or {}).items()}
+    required = [("name", "Society name"), ("address", "Address"), ("pan", "PAN"), ("registration", "Registration number"),
+                ("state", "State"), ("constitution", "Constitution"), ("validity_date", "Validity date"),
+                ("admin_username", "Admin email"), ("admin_password", "Admin password")]
+    missing = [label for key, label in required if not f.get(key)]
+    if missing:
+        raise SocietyCreateError("Please fill in: " + ", ".join(missing) + ".")
+    pw_error = validate_password(f["admin_password"])
+    if pw_error:
+        raise SocietyCreateError(pw_error)
+    cert_hash = verify_registration_certificate(f.get("reg_cert_file"), f.get("reg_cert_hash"))
+    return {
+        "name": f["name"], "address": f["address"], "pan": f["pan"], "reg_num": f["registration"],
+        "state": f["state"], "constitution": f["constitution"],
+        "reg_cert_hash": cert_hash, "reg_cert_file": f["reg_cert_file"],
+        "plan": f.get("plan") or "Free", "validity": f["validity_date"],
+        "admin_email": f["admin_username"], "admin_password": f["admin_password"], "created_by": created_by,
+    }
+
+
 def create_society(data: dict) -> int | None:
     """Create society + admin user. Returns new society id or None."""
     try:

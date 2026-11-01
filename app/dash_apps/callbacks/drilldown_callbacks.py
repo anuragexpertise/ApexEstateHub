@@ -534,6 +534,32 @@ def _save_captured_image(decoded: bytes, entity: str, field_name: str, society_i
 
 def register_drilldown_callbacks(app):
 
+    # ── 0a. Master portal: registration certificate for a new society ─────────
+    @app.callback(
+        Output("master-society-cert-status", "children"),
+        Output({"type": "form-field-hidden", "entity": "master_society", "field": "reg_cert_file"}, "value"),
+        Output({"type": "form-field-hidden", "entity": "master_society", "field": "reg_cert_hash"}, "value"),
+        Input("master-society-cert-upload", "contents"),
+        State("master-society-cert-upload", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def handle_master_cert_upload(contents, filename):
+        if not contents:
+            raise PreventUpdate
+        if get_current_user_role() != "master":
+            return html.Span("Only the platform master can register a society.", style={"color": "#de5c52"}), "", ""
+        from app.services.society_service import SocietyCreateError, store_registration_certificate
+        try:
+            decoded = base64.b64decode(contents.split(",", 1)[1])
+            stored, digest = store_registration_certificate(filename, decoded)
+        except SocietyCreateError as e:
+            return html.Span(f"✗ {e}", style={"color": "#de5c52"}), "", ""
+        except Exception:                                               # noqa: BLE001
+            log.exception("registration certificate upload failed")
+            return html.Span("✗ Could not read that file. Please try again.", style={"color": "#de5c52"}), "", ""
+        return (html.Span(f"✓ {filename} attached (SHA-256 {digest[:12]}…)", style={"color": "#17976e"}), stored, digest)
+
     # ── 0. Image upload (drag/drop or file picker) ─────────────────────────────
     @app.callback(
         Output({"type": "image-preview", "entity": MATCH, "field": MATCH}, "children"),
@@ -2216,41 +2242,14 @@ def register_drilldown_callbacks(app):
             merged["apartment_id"] = get_current_linked_id()
         # ── 6. Master Society Creation Intercept ─────────────────────────────
         if entity_singular == "master_society" and card_id == "form_master_society_new":
-            name = merged.get("name", "").strip()
-            address = merged.get("address", "").strip()
-            pan = merged.get("pan", "").strip()
-            reg_num = merged.get("registration", "").strip()
-            plan = merged.get("plan", "Free")
-            validity_date = merged.get("validity_date")
-            admin_email = merged.get("admin_username", "").strip()
-            admin_password = merged.get("admin_password", "")
-            
-            if not all([name, address, pan, reg_num, validity_date, admin_email, admin_password]):
-                return (store, no_update, no_update, 
-                        {"type": "error", "message": "All essential fields (Name, Address, PAN, Registration, Validity Date, Admin Email, Password) are required."}, 
-                        no_update)
-            
-            if validate_password(admin_password):
-                return (store, no_update, no_update, 
-                        {"type": "error", "message": "Password must be at least 8 characters."}, 
-                        no_update)
-            
+            name = (merged.get("name") or "").strip()
             from app.services.society_service import (
                 SocietyCreateError,
                 create_society_checked,
+                payload_from_master_form,
             )
             try:
-                nsid = create_society_checked({
-                    "name": name,
-                    "address": address,
-                    "pan": pan,
-                    "reg_num": reg_num,
-                    "plan": plan,
-                    "validity": validity_date if validity_date else None,
-                    "admin_email": admin_email,
-                    "admin_password": admin_password,
-                    "created_by": get_current_user_id(),
-                })
+                nsid = create_society_checked(payload_from_master_form(merged, get_current_user_id()))
                 if not nsid:
                     return (store, no_update, no_update, 
                             {"type": "error", "message": "Failed to create society."}, 

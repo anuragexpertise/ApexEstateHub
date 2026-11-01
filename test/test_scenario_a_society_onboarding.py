@@ -29,6 +29,10 @@ class TestScenarioA_SocietyOnboarding:
             "plan": "Free",
             "validity": "2027-12-31",
             "Calc": "2026-04-01",
+            # V5.1: registration number, state and certificate hash are mandatory at creation.
+            "reg_num": "REG/2026/001",
+            "state": "UP",
+            "reg_cert_hash": "a" * 64,
             "admin_email": "admin@test.com",
             "admin_password": "AdminPass123",
         })
@@ -46,6 +50,10 @@ class TestScenarioA_SocietyOnboarding:
             "plan": "Free",
             "validity": "2027-12-31",
             "Calc": "2026-04-01",
+            # V5.1: registration number, state and certificate hash are mandatory at creation.
+            "reg_num": "REG/2026/001",
+            "state": "UP",
+            "reg_cert_hash": "a" * 64,
             "admin_email": "admin@test.com",
             "admin_password": "AdminPass123",
         })
@@ -68,6 +76,10 @@ class TestScenarioA_SocietyOnboarding:
             "plan": "Free",
             "validity": "2027-12-31",
             "Calc": "2026-04-01",
+            # V5.1: registration number, state and certificate hash are mandatory at creation.
+            "reg_num": "REG/2026/001",
+            "state": "UP",
+            "reg_cert_hash": "a" * 64,
             "admin_email": "admin@test.com",
             "admin_password": "AdminPass123",
         })
@@ -90,6 +102,10 @@ class TestScenarioA_SocietyOnboarding:
             "plan": "Free",
             "validity": "2027-12-31",
             "Calc": "2026-04-01",
+            # V5.1: registration number, state and certificate hash are mandatory at creation.
+            "reg_num": "REG/2026/001",
+            "state": "UP",
+            "reg_cert_hash": "a" * 64,
             "admin_email": "admin@test.com",
             "admin_password": "AdminPass123",
         })
@@ -109,6 +125,10 @@ class TestScenarioA_SocietyOnboarding:
             "plan": "Free",
             "validity": "2027-12-31",
             "Calc": "2026-04-01",
+            # V5.1: registration number, state and certificate hash are mandatory at creation.
+            "reg_num": "REG/2026/001",
+            "state": "UP",
+            "reg_cert_hash": "a" * 64,
             "admin_email": "admin@test.com",
             "admin_password": "AdminPass123",
         })
@@ -131,6 +151,10 @@ class TestScenarioA_SocietyOnboarding:
             "plan": "Free",
             "validity": "2027-12-31",
             "Calc": "2026-04-01",
+            # V5.1: registration number, state and certificate hash are mandatory at creation.
+            "reg_num": "REG/2026/001",
+            "state": "UP",
+            "reg_cert_hash": "a" * 64,
             "admin_email": "admin@test.com",
             "admin_password": "AdminPass123",
         })
@@ -150,6 +174,10 @@ class TestScenarioA_SocietyOnboarding:
             "plan": "Free",
             "validity": "2027-12-31",
             "Calc": "2026-04-01",
+            # V5.1: registration number, state and certificate hash are mandatory at creation.
+            "reg_num": "REG/2026/001",
+            "state": "UP",
+            "reg_cert_hash": "a" * 64,
             "admin_email": "admin@free.com",
             "admin_password": "AdminPass123",
         })
@@ -189,6 +217,10 @@ class TestScenarioA_SocietyOnboarding:
             "plan": "Free",
             "validity": "2027-12-31",
             "Calc": "2026-04-01",
+            # V5.1: registration number, state and certificate hash are mandatory at creation.
+            "reg_num": "REG/2026/001",
+            "state": "UP",
+            "reg_cert_hash": "a" * 64,
             "admin_email": "admin@vis.com",
             "admin_password": "AdminPass123",
         })

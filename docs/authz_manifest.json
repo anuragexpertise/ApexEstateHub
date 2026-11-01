@@ -284,6 +284,9 @@
     "callback:drilldown_callbacks.py::handle_image_upload": {
       "classification": "unclassified"
     },
+    "callback:drilldown_callbacks.py::handle_master_cert_upload": {
+      "classification": "legacy-gated"
+    },
     "callback:drilldown_callbacks.py::handle_poll_vote": {
       "classification": "action",
       "actions": [
@@ -665,6 +668,9 @@
       "reason": "Session-guarded (@require_session). Reads and writes only the signed-in user's own rows (identity from the server session, never the browser); no other person's data is reachable. Raises the caller's own rights request."
     },
     "callback:privacy_callbacks.py::privacy_respond": {
+      "classification": "legacy-gated"
+    },
+    "callback:privacy_callbacks.py::privacy_reviewed": {
       "classification": "legacy-gated"
     },
     "callback:privacy_callbacks.py::privacy_toggle": {

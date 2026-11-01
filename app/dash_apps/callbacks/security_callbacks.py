@@ -2,6 +2,7 @@ from dash import Input, Output, State, no_update, html, ctx, ALL
 import dash_bootstrap_components as dbc
 from datetime import datetime
 from app.services.qr_service import validate_qr_code
+from app.services.dpdp_service import GATE_NOTICE_LINE
 from app.services.alert_service import (
     trigger_channel_alert,
     trigger_visitor_alert,
@@ -238,6 +239,7 @@ def render_gate_alerts_section(society_id=None):
                     dbc.Input(id="walk-in-visitor-vehicle", type="text", placeholder="e.g. MH-02-1234", style={"fontSize": "13px"}),
                 ], width=12),
             ], className="mb-3"),
+            html.Div(GATE_NOTICE_LINE, id="walk-in-visitor-notice", className="text-muted mb-2", style={"fontSize": "11px"}),
             dbc.Button(
                 [html.I(className="fas fa-paper-plane me-1"), "Create Visitor & Notify Owner"],
                 id="walk-in-visitor-submit-btn",
@@ -354,6 +356,7 @@ def render_walk_in_visitor_form():
                     dbc.Input(id="walk-in-visitor-vehicle", type="text", placeholder="e.g. MH-02-1234", style={"fontSize": "13px"}),
                 ], width=12),
             ], className="mb-3"),
+            html.Div(GATE_NOTICE_LINE, id="walk-in-visitor-notice", className="text-muted mb-2", style={"fontSize": "11px"}),
             dbc.Button(
                 [html.I(className="fas fa-paper-plane me-1"), "Create Visitor & Notify Owner"],
                 id="walk-in-visitor-submit-btn",
