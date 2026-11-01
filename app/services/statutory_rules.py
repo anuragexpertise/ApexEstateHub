@@ -139,7 +139,7 @@ STATUTORY_ROWS = {
         "The full tabulated list of Acts, Rules, Bye-laws and Notifications "
         "governing this AOA, with applicability, key provisions and sources.",
         True,
-        "Full table on the Setup Wizard's 'State Act & Rules' step; Master "
+        "Full table on the Setup Wizard's 'Legal Regime & Compliance' step; Master "
         "maintains it on Master Portal → RWA Compliance (UP).",
     ),
 }
@@ -151,10 +151,7 @@ STEP_ROWS = {
     # Central Acts are a banner on this step (not a step of their own), so their rows are listed here.
     "Legal Regime Selection":   ["up_aoa_act", "up_aoa_rules", "legal_instruments",
                                  "it_mutuality", "it_return", "gst", "tds"],
-    "State Act & Rules":        ["up_aoa_act", "up_aoa_rules", "legal_instruments",
-                                 "reserve", "corpus", "sinking", "repair"],
     "Funds":                    ["sinking", "repair", "reserve", "corpus"],
-    "Model Bye-Laws Adoption":  ["sinking", "repair", "reserve", "corpus"],
     "TAN & TDS Rates":          ["tds"],
     "GSTIN & GST Rate":         ["gst"],
     "Apartment Charges":        ["sinking", "repair", "gst"],
@@ -170,10 +167,7 @@ STEP_LINK_CATEGORIES = {
     "Administrator":            ["apartment_act"],
     "Legal Regime Selection":   ["apartment_act", "cooperative_act", "rera",
                                  "fund_gst", "gst_registered", "tds_no_pan", "income_tax_mutuality"],
-    "State Act & Rules":        ["apartment_act", "cooperative_act", "rera",
-                                 "sinking_fund", "income_tax_mutuality"],
     "Funds":                    ["sinking_fund", "apartment_act"],
-    "Model Bye-Laws Adoption":  ["apartment_act", "sinking_fund"],
     "TAN & TDS Rates":          ["tds_no_pan", "income_tax_mutuality"],
     "GSTIN & GST Rate":         ["gst_registered", "fund_gst"],
     "Apartment Charges":        ["sinking_fund", "apartment_act", "cooperative_act"],
@@ -186,12 +180,11 @@ STEP_LINK_CATEGORIES = {
 # Steps whose "Acts & Rules" column also lists the tabulated Act / Rules /
 # Bye-laws for the society's regime (legal_instrument_catalog). Steps without
 # an entry render the framework rows and official links only.
-STEP_INSTRUMENTS = {"Society Details", "Legal Regime Selection", "State Act & Rules",
-                    "Model Bye-Laws Adoption", "Apartment Charges", "Accounts Heads", "Agreement"}
+STEP_INSTRUMENTS = {"Society Details", "Legal Regime Selection", "Apartment Charges", "Accounts Heads"}
 
 
 # ── Act / Rules / Bye-laws catalog (legal_instrument_catalog) ───────────────
-# The wizard's "State Act & Rules" step shows the same tabulated Acts, Rules,
+# The wizard's "Legal Regime & Compliance" step shows the same tabulated Acts, Rules,
 # Bye-laws and Notifications that the Master Portal's "RWA Compliance (UP)" tab
 # renders (app/dash_apps/pages/portal_pages.py::_rwa_compliance_up_page), from
 # the same table — so an admin reads the governing provisions while setting

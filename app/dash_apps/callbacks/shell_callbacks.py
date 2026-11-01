@@ -472,6 +472,16 @@ def _plan_expired_content(role):
     )
 
 
+def _enrollment_lock_content():
+    """Residents, vendors and guards see this between activation and the admin completing Enrollment (item 15)."""
+    return html.Div(
+        [html.I(className="fas fa-hourglass-half", style={"fontSize": "40px", "color": "#8895a5"}),
+         html.H4("Your society is finishing enrollment", style={"marginTop": "14px"}),
+         html.Div("Your portal opens when the administrator completes it.", style={"color": "#667"})],
+        className="text-center", style={"paddingTop": "120px"},
+    )
+
+
 def _setup_pending_content(role):
     """
     Rendered by route_page in place of the real dashboard whenever the
@@ -1020,6 +1030,25 @@ def register_shell_callbacks(app):
         if role != "master" and society_setup_incomplete(society_id):
             return (
                 _setup_pending_content(role),
+                {"rendered": True, "ts": time.time()},
+                [],
+                _breadcrumb(pathname),
+                "", {},
+                email.split("@")[0].title() if email else "User",
+                role_label, "?",
+                "EstateHub", "?",
+                "EstateHub", "/static/assets/EH_logo.png",
+                {},
+            )
+
+        # Item 15: portal lock by onboarding phase. Residents' portals open when the admin completes Enrollment; the
+        # admin's home shows the Hub (Stages 5-7) until onboarding is complete; every other admin tab stays usable.
+        from app.security.setup_guard import society_portal_state, admin_in_onboarding
+        _pstate = society_portal_state(society_id, role) if role != "master" else "open"
+        _hub_home = admin_in_onboarding(society_id, role) and (pathname or "/") in ("/", "/dashboard", "/dashboard/", "/admin", "/admin/", "/setup-wizard")
+        if _pstate == "enrollment_lock" or _hub_home:
+            return (
+                (_enrollment_lock_content() if _pstate == "enrollment_lock" else _setup_pending_content(role)),
                 {"rendered": True, "ts": time.time()},
                 [],
                 _breadcrumb(pathname),

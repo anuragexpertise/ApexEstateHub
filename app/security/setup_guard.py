@@ -40,3 +40,36 @@ def society_setup_incomplete(society_id) -> bool:
         fetch_one=True,
     )
     return bool(row) and row.get("onboarding_state") != "active"
+
+
+# Item 15: after activation the apartment, vendor and security portals stay closed until the admin completes Enrollment.
+ENROLLMENT_LOCKED_ROLES = ("apartment", "vendor", "security")
+
+
+def society_portal_state(society_id, role) -> str:
+    """'setup' (society not active: show the Hub) | 'enrollment_lock' (active, phase 'enrollment', resident-type role) | 'open'.
+
+    Admin, master and advisers are never locked. Societies that were already active when the phase column was added
+    were backfilled to 'complete' by migration 002, so nobody is locked out retroactively."""
+    if not society_id or role == "master":
+        return "open"
+    from database.db_manager import db
+    row = db._execute("SELECT onboarding_state, onboarding_phase FROM societies WHERE id = :sid",
+                      {"sid": society_id}, fetch_one=True)
+    if not row:
+        return "open"
+    if row.get("onboarding_state") != "active":
+        return "setup"
+    if row.get("onboarding_phase") == "enrollment" and role in ENROLLMENT_LOCKED_ROLES:
+        return "enrollment_lock"
+    return "open"
+
+
+def admin_in_onboarding(society_id, role) -> bool:
+    """True while the admin's home route should show the Hub (Stages 5-7 not yet finished)."""
+    if role != "admin" or not society_id:
+        return False
+    from database.db_manager import db
+    row = db._execute("SELECT onboarding_state, onboarding_phase FROM societies WHERE id = :sid",
+                      {"sid": society_id}, fetch_one=True)
+    return bool(row) and row.get("onboarding_state") == "active" and row.get("onboarding_phase") in ("enrollment", "adoption", "advisers")

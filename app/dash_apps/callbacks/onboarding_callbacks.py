@@ -16,7 +16,7 @@ import time
 
 import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import ALL, MATCH, Input, Output, State, ctx, dcc, no_update
+from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 
 from app.dash_apps.pages import onboarding_page as op
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
@@ -45,6 +45,17 @@ def _decode(contents):
         return base64.b64decode(contents.split(",", 1)[1])
     except Exception:                                                      # noqa: BLE001
         return None
+
+
+def _paper_evidence(sid, uid, contents, filename):
+    """Paper counterpart: the user uploads the scan, the SERVER computes the SHA-256 (nobody types a hash)."""
+    raw = _decode(contents)
+    if not raw:
+        raise ds.SigningRefused("Upload the signed scan (PDF, PNG or JPG).")
+    try:
+        return ob.store_evidence_file(sid, "paper_signature", None, filename or "", raw, uid, {"kind": "agreement"})["sha256"]
+    except ob.OnboardingError as exc:
+        raise ds.SigningRefused(str(exc)) from exc
 
 
 def _body(sid, uid, role):
@@ -271,11 +282,12 @@ def register_onboarding_callbacks(app):
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
         Input(f"{P}-sign", "n_clicks"),
-        State(f"{P}-pw", "value"), State(f"{P}-method", "value"), State(f"{P}-paper", "value"),
+        State(f"{P}-pw", "value"), State(f"{P}-method", "value"),
+        State(f"{P}-paper", "contents"), State(f"{P}-paper", "filename"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_sign(n, password, method, paper):
+    def onb_sign(n, password, method, paper, paper_name):
         s = _session()
         if not n or not s:
             return no_update, no_update, no_update
@@ -285,8 +297,12 @@ def register_onboarding_callbacks(app):
             return no_update, _alert("There is no Agreement to sign yet.", False), no_update
         try:
             from app.services import esign_adapter as es
-            if es.is_required(sid):
-                st = ds.sign("agreement", ag["id"], uid, password or "", method=method or "aadhaar_eSign", evidence_ref=(paper or None))
+            mode = ob.signing_mode(sid)
+            if mode == "paper":
+                st = ds.sign("agreement", ag["id"], uid, password or "", method="paper",
+                             evidence_ref=_paper_evidence(sid, uid, paper, paper_name))
+            elif es.is_required(sid):
+                st = ds.sign("agreement", ag["id"], uid, password or "", method=method or "aadhaar_eSign")
             else:
                 st = ds.sign("agreement", ag["id"], uid, password or "")
         except ds.SigningRefused as exc:
@@ -371,21 +387,24 @@ def register_onboarding_callbacks(app):
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
-        Input(f"{P}-esign", "value"),
+        Input(f"{P}-signmode", "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_esign_toggle(required):
+    def onb_signmode(mode):
         s = _session()
         if not s or s[2] != "admin" or not s[0]:
             return no_update, no_update, no_update
         sid, uid, role = s
+        if mode == ob.signing_mode(sid):
+            return no_update, no_update, no_update
         try:
-            ob.set_esign_required(sid, uid, bool(required))
+            ob.set_signing_mode(sid, uid, mode)
         except Exception as exc:                                       # noqa: BLE001
-            return no_update, _alert(f"eSign toggle could not be saved: {exc}", False), no_update
+            body, mk = _body(sid, uid, role)
+            return body, _alert(f"The signing method could not be changed: {exc}", False), mk
         body, mk = _body(sid, uid, role)
-        return body, _alert("eSign required is now " + ("ON" if required else "OFF") + "."), mk
+        return body, _alert(f"Signing method is now {mode}."), mk
 
     # ── stage 7: adviser appointment / signing ──────────────────────────────
     ADV_FIELDS = ("kind", "name", "firm", "mno", "scope", "ts", "te", "res", "email", "pw")
@@ -436,7 +455,7 @@ def register_onboarding_callbacks(app):
                 es.simulate_completion(req["id"])
                 return _alert("The demo vendor completed the platform's eSign. Now confirm with your password.")
             if method == "paper":
-                return _alert("A paper counterpart needs no request: paste the scan's SHA-256 and sign.", False)
+                return _alert("A paper counterpart needs no request: upload the signed scan and sign.", False)
             _x, text = ds.item_text("agreement", ag["id"])
             u = ob.db._execute("SELECT name, email FROM users WHERE id=%s", (s[1],), fetch_one=True) or {}
             es.create_request(sid, "agreement", ag["id"], u.get("name") or "Platform signatory", u.get("email"), None,
@@ -489,15 +508,24 @@ def register_onboarding_callbacks(app):
         body_html, mk = _body(sid, uid, role)
         return body_html, _alert(msg), mk
 
+    def _platform_sign_job(sid, uid, ag_id, password, method, evidence, progress=None):
+        """Runs in a worker thread (a new DB connection per call). ds.sign reports steps 1-3 and activation 4-7."""
+        st = ds.sign("agreement", ag_id, uid, password or "", method=method, evidence_ref=evidence, progress=progress)
+        act = st.get("activation") or {}
+        if st.get("sealed") and not act.get("ok"):
+            raise RuntimeError("Signed and sealed, but activation is held: " + str(act.get("error")))
+        return {"sealed": bool(st.get("sealed"))}
+
     @app.callback(
         Output({"type": f"{P}-mmsg", "sid": MATCH}, "children"),
         Input({"type": f"{P}-msign", "sid": MATCH}, "n_clicks"),
         State({"type": f"{P}-mpw", "sid": MATCH}, "value"),
-        State({"type": f"{P}-mmethod", "sid": MATCH}, "value"), State({"type": f"{P}-mpaper", "sid": MATCH}, "value"),
+        State({"type": f"{P}-mmethod", "sid": MATCH}, "value"),
+        State({"type": f"{P}-mpaper", "sid": MATCH}, "contents"), State({"type": f"{P}-mpaper", "sid": MATCH}, "filename"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_master_sign(n, password, method, paper):
+    def onb_master_sign(n, password, method, paper, paper_name):
         s = _master_ok()
         if not n or not s or not ctx.triggered_id:
             return no_update
@@ -505,18 +533,116 @@ def register_onboarding_callbacks(app):
         ag = ob.db._execute("SELECT id FROM society_agreements WHERE society_id=%s", (sid,), fetch_one=True)
         if not ag:
             return _alert("That society has no Agreement.", False)
+        from app.services import esign_adapter as es
+        from app.services import onboarding_jobs as jobs
         try:
-            from app.services import esign_adapter as es
-            if es.is_required(sid):
-                st = ds.sign("agreement", ag["id"], s[1], password or "", method=method or "dsc", evidence_ref=(paper or None))
+            mode = ob.signing_mode(sid)
+            if mode == "paper":
+                use_method, evidence = "paper", _paper_evidence(sid, s[1], paper, paper_name)
+            elif es.is_required(sid):
+                use_method, evidence = method or "dsc", None
             else:
-                st = ds.sign("agreement", ag["id"], s[1], password or "")
+                use_method, evidence = "password", None
         except ds.SigningRefused as exc:
             return _alert(str(exc), False)
-        act = st.get("activation") or {}
-        if act.get("ok"):
-            return _alert("Signed. The Agreement is sealed and the society is active.")
-        return _alert("Signed and sealed, but activation is held: " + str(act.get("error")), False)
+        if jobs.latest_running(sid):
+            return _alert("The platform signature is already being processed.", False)
+        job_id = jobs.start("platform_sign", sid, s[1], _platform_sign_job, sid=sid, uid=s[1], ag_id=ag["id"],
+                            password=password, method=use_method, evidence=evidence)
+        return op.job_view(sid, job_id)
+
+    @app.callback(
+        Output({"type": f"{P}-jobbar", "sid": MATCH}, "children"),
+        Output({"type": f"{P}-jobpoll", "sid": MATCH}, "disabled"),
+        Input({"type": f"{P}-jobpoll", "sid": MATCH}, "n_intervals"),
+        State({"type": f"{P}-jobid", "sid": MATCH}, "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_job_poll(_n, job_id):
+        """Authorised on every poll: a master may watch any society's job; anyone else only their own society's."""
+        s = _session()
+        if not s or not job_id or not ctx.triggered_id:
+            return no_update, no_update
+        sid = int(ctx.triggered_id["sid"])
+        if s[2] != "master" and s[0] != sid:
+            return no_update, True
+        from app.services import onboarding_jobs as jobs
+        job = jobs.get(job_id, society_id=sid)
+        if not job:
+            return _alert("That job was not found.", False), True
+        if job["status"] == "done":
+            ev = ob.db._execute("SELECT id FROM onboarding_events WHERE society_id=%s AND event='agreement_signed' ORDER BY id DESC LIMIT 1",
+                                (sid,), fetch_one=True)
+            name = (ob.db._execute("SELECT name FROM societies WHERE id=%s", (sid,), fetch_one=True) or {}).get("name") or "The society"
+            kids = [dbc.Progress(value=100, label="100%", color="success", style={"height": "20px"}),
+                    html.Div("Society is live", style={"fontWeight": "700", "marginTop": "4px"})]
+            if ev:
+                kids.append(dcc.Store(id={"type": "onb-celebrate", "sid": sid}, data={"key": f"onb-celebrated-{sid}-{ev['id']}", "name": name}))
+            return kids, True
+        if job["status"] == "failed":
+            return [dbc.Alert(str(job.get("error") or "The activation failed."), color="danger", className="py-2"),
+                    dbc.Button("Retry activation", id={"type": f"{P}-retry", "sid": sid}, color="warning", size="sm", n_clicks=0)], True
+        pct = op.JOB_PERCENT.get(int(job.get("step") or 0), 5)
+        return dbc.Progress(value=pct, striped=True, animated=True, label=f"{pct}%", style={"height": "20px"}), False
+
+    app.clientside_callback(
+        """function(data){
+            if (!data || !data.length || !window.dash_clientside || !window.dash_clientside.onboarding) {
+                return window.dash_clientside.no_update;
+            }
+            window.dash_clientside.onboarding.celebrate(data[0]);
+            return window.dash_clientside.no_update;
+        }""",
+        Output("onb-celebrate-sink", "children"),
+        Input({"type": "onb-celebrate", "sid": ALL}, "data"),
+        prevent_initial_call=False,
+    )
+
+    # ── items 14/15: Stage 5-7 buttons ───────────────────────────────────────
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input(f"{P}-enrol-done", "n_clicks"),
+        State(f"{P}-enrol-later", "value"), State(f"{P}-enrol-later-reason", "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_enrol_done(n, later, reason):
+        s = _session()
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        try:
+            msg = ob.mark_enrollment_complete(sid, uid, reason if later else None)
+        except ob.OnboardingError as exc:
+            return no_update, _alert(str(exc), False), no_update
+        body, mk = _body(sid, uid, role)
+        return body, _alert(msg), mk
+
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input(f"{P}-phase-next", "n_clicks"), Input(f"{P}-phase-later", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_phase_next(n_next, n_later):
+        s = _session()
+        if not (n_next or n_later) or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        nxt = {"adoption": "advisers", "advisers": "complete"}.get(ob.society_phase(sid))
+        if not nxt:
+            return no_update, no_update, no_update
+        try:
+            msg = ob.advance_phase(sid, uid, nxt)
+        except ob.OnboardingError as exc:
+            return no_update, _alert(str(exc), False), no_update
+        body, mk = _body(sid, uid, role)
+        return body, _alert(msg), mk
 
     @app.callback(
         Output({"type": f"{P}-retry", "sid": MATCH}, "children", allow_duplicate=True),

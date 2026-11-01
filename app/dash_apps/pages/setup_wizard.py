@@ -186,7 +186,7 @@ def build_rules_panel(step, society_id=None, state=None):
         ))
         instruments_html.append(html.Small(
             f"{regime} · {len(instruments)} instrument{'s' if len(instruments) != 1 else ''} — full table on the "
-            "'State Act & Rules' step.",
+            "'Legal Regime & Compliance' step.",
             className="text-muted", style={"display": "block", "marginBottom": "6px"},
         ))
         for itype, items in grouped_instruments(instruments).items():
@@ -765,14 +765,14 @@ def fund_note(flags, regime):
     if mode == "fy_close":
         return (f"{regime}: no fixed Sinking / Repair fund rate was found, so by default nothing is added to the monthly bill. "
                 "Reserves are built from the year's surplus at financial-year close. To levy a fund on every bill instead, opt in on the "
-                "Model Bye-Laws Adoption step (Funds & assessments); a rate entered here is billed only once that General Body resolution is recorded.")
+                "Funds step (or Stage 6, Adoption, after activation); a rate entered here is billed only once that General Body resolution is recorded.")
     if mode == "none":
         return f"{regime} collects no Sinking or Repair fund. None is being levied."
     if flags["sinking"] or flags["repair"]:
         return (f"{regime} sets no statutory rate; these funds are added to each monthly bill at the rate you enter, "
-                f"shared by default {basis.replace('_', ' ')}. Choose the basis on the Model Bye-Laws Adoption step.")
+                f"shared by default {basis.replace('_', ' ')}. Choose the basis on the Funds step.")
     return (f"{regime} does not prescribe a Sinking or Repair fund. None is being levied. To levy one, opt in on the "
-            "Model Bye-Laws Adoption step (Funds & assessments).")
+            "Funds step (or Stage 6, Adoption, after activation).")
 
 
 def regime_badge(state_code, constitution=None):
@@ -1519,9 +1519,6 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 "Annex A seals this hierarchy and its SHA-256 digest when the Agreement is sealed.",
             ], color="info", className="py-2 mt-3", style={"fontSize": "12.5px"}),
         ]
-    elif category == "State Act & Rules":
-        # Retained as dead code: removed from CATEGORIES in PR-1 (item 8). The page lives in pages/adoption_panel.py.
-        return []
     elif category == "TAN & TDS Rates":
         from database.seed import tds_wizard_rows
         s_tan = ""
@@ -1541,7 +1538,20 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 display_format="YYYY-MM-DD"
             ), className="mb-4"),
             html.Hr(),
-            html.H6("TDS Rates", className="text-primary mb-3")
+            html.H6("TDS Rates", className="text-primary mb-3"),
+            dbc.Alert("Tax Year 2026-27 onward: file under the Income-tax Act, 2025 section numbers. "
+                      "The 1961 Act numbers still apply to income up to 31 Mar 2026.", color="info",
+                      className="py-2", style={"fontSize": "12.5px"}),
+            dbc.Row([
+                dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Download template (xlsx)"],
+                                   id="onb-tds-template", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(dcc.Upload(id="onb-tds-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload filled xlsx"],
+                                   color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".xlsx"), md="auto"),
+                dbc.Col(dcc.Download(id="onb-tds-download"), md="auto"),
+            ], className="g-2 mb-2"),
+            dcc.Store(id="onb-tds-pending", data=None),
+            html.Div(id="onb-tds-preview", className="mb-2"),
+            dbc.Button("Apply to form", id="onb-tds-apply", color="primary", size="sm", disabled=True, n_clicks=0, className="mb-3"),
         ]
         
         header = html.Div([
@@ -1913,6 +1923,16 @@ def render_category_content(category, society_id=None, state=None, constitution=
             html.Small("Only funds this society holds are listed: the prescribed funds, plus any optional fund it opted into on the Funds step. "
                        "To carry an opening balance for Sinking or Repair & Maintenance, opt in first.", className="text-muted d-block mb-2"),
             html.H6("Brought Forward Accounts", className="mt-4 mb-2 text-primary"),
+            dbc.Row([
+                dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Download template (xlsx)"],
+                                   id="onb-bf-template", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(dcc.Upload(id="onb-bf-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload filled xlsx"],
+                                   color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".xlsx"), md="auto"),
+                dbc.Col(dcc.Download(id="onb-bf-download"), md="auto"),
+            ], className="g-2 mb-2"),
+            dcc.Store(id="onb-bf-pending", data=None),
+            html.Div(id="onb-bf-preview", className="mb-2"),
+            dbc.Button("Apply to form", id="onb-bf-apply", color="primary", size="sm", disabled=True, n_clicks=0, className="mb-3"),
             html.Div([
                 _side("Assets", "Dr", [1000]),
                 _side("Liabilities & Equity", "Cr", [2000, 3000]),
@@ -1923,7 +1943,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
             html.H6("Pending receivables by apartment", className="mt-4 mb-2 text-primary"),
             html.P("Enter each flat's opening dues (arrears carried from Annex C). The total must tie to the Sundry Debtors "
                    "accounts entered above (SDr / SDrCash / SDrDig).", className="text-muted small mb-2"),
-            dbc.Input(id="onb-receivables-json", type="hidden", value="[]"),
+            dcc.Store(id="onb-receivables-json", data=[]),
             html.Div(id="onb-receivables-table", className="sw-hscroll", style={"marginBottom": "8px"}),
             dbc.Row([
                 dbc.Col(dbc.Button("+ Add row", id="onb-bf-add-rec", color="secondary", size="sm", outline=True, n_clicks=0), md=3),
@@ -1942,7 +1962,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
             html.H6("Reconciliation & evidence", className="mt-4 mb-2 text-primary"),
             html.P("Reconcile every bank/cash account that carries a brought-forward balance, and attach the supporting scans "
                    "(the server computes each file's SHA-256; nobody types a hash).", className="text-muted small mb-2"),
-            dbc.Input(id="onb-reconciliation-json", type="hidden", value="{}"),
+            dcc.Store(id="onb-reconciliation-json", data={}),
             html.Div(id="onb-bf-reconciliation-cards", className="mb-3"),
             dcc.Upload(id="onb-bf-evidence-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Attach scan"],
                                                color="secondary", size="sm", outline=True, n_clicks=0),

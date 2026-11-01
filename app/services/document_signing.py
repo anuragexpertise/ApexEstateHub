@@ -246,7 +246,8 @@ def _complete(st: dict) -> bool:
 
 
 def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, action: str = "sign",
-         reason: str | None = None, method: str = "password", evidence_ref: str | None = None) -> dict:
+         reason: str | None = None, method: str = "password", evidence_ref: str | None = None,
+         progress=None) -> dict:
     """Record this user's confirmation ('sign'/'approve') or refusal ('decline', needs a written reason).
     Returns the new status; the record is sealed when the last required signature arrives."""
     if kind not in KINDS:
@@ -254,6 +255,8 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
     if action not in ("sign", "approve", "decline"):
         raise SigningRefused("Unknown action.")
     d = _db(db)
+    _prog = progress or (lambda step, message: None)
+    _prog(1, "Checking your password and signing authority")
     society_id, text = item_text(kind, subject_id, d)
     if d._execute("SELECT 1 FROM signed_records WHERE subject_kind=%s AND subject_id=%s AND status='valid'", (kind, subject_id), fetch_one=True):
         raise SigningRefused("This record is already sealed.")
@@ -315,15 +318,17 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
                 raise SigningRefused("You have already signed this item; one person counts once.") from exc
             raise
         _audit(d, society_id, user_id, f"DOCUMENT_{action.upper()}", kind, subject_id, {"office": office, "item_hash": h, "method": method})
+    _prog(2, "Recording the platform signature")
     if kind == "fund_withdrawal":
         _withdrawal_effect(d, society_id, subject_id, user_id, action)
     st = status(kind, subject_id, d)
     if action != "decline" and _complete(st) and not st["awaiting_resolution"]:
+        _prog(3, "Sealing the Agreement")
         st["seal"] = _seal(d, society_id, kind, subject_id, h, st)
         st["sealed"] = True
         if kind == "agreement":                                            # the sealed Agreement IS the activation event (plan v5)
             from app.services import onboarding_service as ob
-            st["activation"] = ob.try_activate(society_id, user_id)
+            st["activation"] = ob.try_activate(society_id, user_id, progress=progress)
         if kind == "stepup_change":                                        # the sealed step-up change installs the new hash
             from app.services import signing_service as ss
             if action == "decline":
