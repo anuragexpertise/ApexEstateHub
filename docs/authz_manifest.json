@@ -284,9 +284,6 @@
     "callback:drilldown_callbacks.py::handle_image_upload": {
       "classification": "unclassified"
     },
-    "callback:drilldown_callbacks.py::handle_master_cert_upload": {
-      "classification": "legacy-gated"
-    },
     "callback:drilldown_callbacks.py::handle_poll_vote": {
       "classification": "action",
       "actions": [

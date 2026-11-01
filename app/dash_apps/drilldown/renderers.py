@@ -8686,32 +8686,8 @@ def render_form_master_society_new() -> "html.Div":
                     dbc.Label("Registration Number", html_for="new-society-reg-num", style={"fontSize":"11px", "fontWeight":"700"}),
                     dbc.Input(id={"type": "form-field", "entity": "master_society", "field": "registration"}, type="text", placeholder="Enter registration number", style={"fontSize":"12px"}),
                 ], width=12, className="mb-3"),
-                dbc.Col([
-                    dbc.Label("State", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dbc.Select(id={"type": "form-field", "entity": "master_society", "field": "state"},
-                               options=[{"label": n, "value": c} for c, n in _master_form_states()],
-                               value="UP", style={"fontSize":"12px"}),
-                    html.Small("Decides which state's statutory rules apply to this society.", className="text-muted"),
-                ], width=12, md=6, className="mb-3"),
-                dbc.Col([
-                    dbc.Label("Constitution", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dbc.Select(id={"type": "form-field", "entity": "master_society", "field": "constitution"},
-                               options=[{"label": n, "value": c} for c, n in _master_form_constitutions()],
-                               value="AOA", style={"fontSize":"12px"}),
-                    html.Small("As stated on the registration certificate.", className="text-muted"),
-                ], width=12, md=6, className="mb-3"),
-                dbc.Col([
-                    dbc.Label("Registration Certificate (PDF, PNG or JPG, up to 5 MB)", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dcc.Upload(
-                        id="master-society-cert-upload",
-                        children=html.Div([html.I(className="fas fa-file-upload me-2"), "Drop the certificate here or click to choose"]),
-                        style={"borderWidth": "2px", "borderStyle": "dashed", "borderRadius": "10px", "textAlign": "center",
-                               "padding": "14px", "cursor": "pointer", "fontSize": "12px", "borderColor": "#667eea"},
-                        multiple=False, accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"),
-                    html.Div(id="master-society-cert-status", className="mt-1", style={"fontSize": "12px"}),
-                    dcc.Input(id={"type": "form-field-hidden", "entity": "master_society", "field": "reg_cert_file"}, type="text", style={"display": "none"}),
-                    dcc.Input(id={"type": "form-field-hidden", "entity": "master_society", "field": "reg_cert_hash"}, type="text", style={"display": "none"}),
-                ], width=12, className="mb-3"),
+                # State, Constitution (regime) and the registration certificate are the
+                # society's own onboarding/setup-wizard steps, not the master's.
                 dbc.Col([
                     dbc.Label("Plan", html_for="new-society-plan", style={"fontSize":"11px", "fontWeight":"700"}),
                     dbc.Select(id={"type": "form-field", "entity": "master_society", "field": "plan"},
