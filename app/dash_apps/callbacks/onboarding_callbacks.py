@@ -466,7 +466,7 @@ def register_onboarding_callbacks(app):
         prevent_initial_call=True,
     )
     @require_session
-    def onb_setup_nav(*_clicks, step):
+    def onb_setup_nav(*_clicks):
         s = _session()
         if not ctx.triggered_id:
             return no_update, no_update, no_update, no_update, no_update, no_update
@@ -474,7 +474,9 @@ def register_onboarding_callbacks(app):
         if not s or role != "admin" or not sid:
             return no_update, no_update, no_update, no_update, no_update, _alert("Only the administrator can navigate setup.", False)
         trig = ctx.triggered_id
-        n = int(step or 0)
+        # Dash invokes every dependency positionally: [nav clicks..., prev, next], then the
+        # State "onb-setup-step" arrives as the last positional value.
+        n = int(_clicks[-1] or 0) if _clicks else 0
         if trig == "onb-btn-prev":
             n = max(0, n - 1)
         elif trig == "onb-btn-next":
