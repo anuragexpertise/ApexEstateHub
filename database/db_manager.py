@@ -146,8 +146,8 @@ class DatabaseManager:
             dsn = self._dsn()
             # psycopg2 CLOSES every returned connection once `minconn` idle ones are already held, and getconn() holds
             # a lock while it opens a new TLS connection. With minconn=1 any concurrent Dash callbacks therefore
-            # reconnect on nearly every query, one at a time (the "getconn() took 0.8s, 1.6s, 2.4s" log pattern on
-            # Neon). Default to 4 idle connections; lower DB_POOL_MIN only if the database's connection limit
+            # reconnect on nearly every query, one at a time (the "getconn() took 0.8s, 1.6s, 2.4s" log pattern).
+            # Default to 4 idle connections; lower DB_POOL_MIN only if the Aiven plan's connection limit
             # demands it. maxconn must stay >= minconn.
             _min = max(1, int(os.getenv("DB_POOL_MIN", "4")))
             _max = max(_min, int(os.getenv("DB_POOL_MAX", "10")))

@@ -12,7 +12,7 @@ A failure alerts every platform master by push and the process exits 1, so the h
 
 ## Which host
 
-The repository's older notes say Render with Aiven; the owner runs **ApexWeave with NeonDB** (Plan v4, Decision 1). The jobs are host-neutral:
+Production runs on **Render with an Aiven PostgreSQL database** (Plan v4, Decision 1). The jobs are host-neutral:
 create one scheduled task per row above on the host, with the command `python scripts/run_job.py <job>` and the **same environment as the web
 service**, except the database login (next section). If the host cannot run scheduled tasks, any machine that can reach the database can run
 them from cron; keep that machine off the database host, as the signing key must not sit beside the data.
@@ -22,8 +22,8 @@ them from cron; keep that machine off the database host, as the signing key must
 The jobs must run as the restricted login, not the owner. Create it once (`python database/app_role.py --apply` as the owner, then
 `CREATE USER estatehub_login PASSWORD '...' IN ROLE estatehub_app;`) and give the scheduler its `DATABASE_URL` (or `PG*`). `run_job.py`
 **refuses to run** as a superuser or a login outside `estatehub_app`, alerts the masters and exits 1. `JOB_ALLOW_OWNER_LOGIN=1` lifts
-the check for a development machine only. NeonDB's pooled endpoint may reject the `options` startup parameter: set
-`PG_SKIP_STARTUP_OPTIONS=1` for it (the session timezone is then the database's).
+the check for a development machine only. Aiven's PgBouncer connection pool rejects the `options` startup parameter: set
+`PG_SKIP_STARTUP_OPTIONS=1` when connecting through it (the session timezone is then the database's).
 
 Environment the scheduler needs: the database login, `SECRET_VAULT_KEY` (signing the anchors), and the push keys used for the alert.
 

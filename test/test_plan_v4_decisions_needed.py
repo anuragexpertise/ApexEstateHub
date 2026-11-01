@@ -9,11 +9,11 @@ import pytest
 
 class TestV4DecisionsNeeded:
     def test_decision1_host_choice(self):
-        """Decision 1: Host - Render/Aiven vs ApexWeave/NeonDB"""
+        """Decision 1: Host - Render with Aiven"""
         # Check Procfile and README
         assert os.path.exists("Procfile")
         readme = open("README.md").read()
-        assert "Render" in readme or "ApexWeave" in readme or "Aiven" in readme or "Neon" in readme
+        assert "Render" in readme or "Aiven" in readme
 
     def test_decision2_committee_quorum(self):
         """Decision 2: Committee quorum more than half"""

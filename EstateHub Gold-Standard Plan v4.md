@@ -26,7 +26,7 @@ v4 keeps v3's phase numbers and task ids so every commit and test still maps to 
 1. **Status is explicit.** Every task now says built, partly built or open, checked against the code, not against the README.
 2. **Phase 3 is split in two.** What can be built without the CA (3.1, 3.2, 3.4, 3.8, all done) is separated from what waits on a CA layout or formula (3.3, 3.5, 3.6, 3.7, 3.9). Waiting work gets a written question for the CA instead of a guess.
 3. **Gaps found while building become tasks.** The fund-withdrawal Approve and Decline screen, the hard link from a document to its resolution (2.12), a screen to classify GST accounts, the adviser-decisions screen (0.2), and a fix for the seeded demo data that makes the tie-out and compliance certificate fail.
-4. **Hosting is now a decision, not an assumption.** The repo and the Phase 0 tracker say Render and Aiven; you work on ApexWeave and NeonDB. The scheduler, backup and restore tasks cannot be finished until that is settled.
+4. **Hosting is now a decision, not an assumption.** Production runs on Render with an Aiven PostgreSQL database, as the repo and the Phase 0 tracker say. The scheduler, backup and restore tasks follow that host.
 5. **Phase 5 implemented.** Tasks 5.1–5.4 are built in code (assurance tables/guards/views/functions in `database/estatehub.sql`, service in `app/services/assurance.py`, release gate in `scripts/release_check.py`, docs in `docs/PHASE5_ASSURANCE.md`, tests). Assurance activities still require external reviewers; the system enforces gates and labels remain provisional until evidence is recorded. Current suite shows 1103 passing, 2 failing (environment-related), 586 skipped.
 
 ## Open work carried forward
@@ -119,7 +119,7 @@ Seven decisions hold up work. The first blocks two tasks outright.
 
 | # | Decision | Why it matters | Blocks | Who |
 | --- | --- | --- | --- | --- |
-| 1 | Which host runs production: Render with Aiven (what `README.md`, `Procfile` and the Phase 0 tracker say) or ApexWeave with NeonDB (what you use) | Scheduler, backup and restore steps differ by host; the repo's docs may describe the wrong one | C.8, 4.4 | You |
+| 1 | Which host runs production: Render with Aiven (what `README.md`, `Procfile` and the Phase 0 tracker say). Settled | Scheduler, backup and restore steps follow Render cron jobs and Aiven | C.8, 4.4 | You |
 | 2 | Committee quorum: is more than half correct | Provisional in code; wrong figure would refuse or pass real meetings | C.4, 5.2 | Advocate |
 | 3 | Does a login-password confirmation satisfy the bye-laws and the IT Act for resolutions and approvals | It records who confirmed, not a legal e-signature; paper minutes stay meanwhile | 5.2 | Advocate |
 | 4 | Retention beyond 5 years for any record class | Sets the purge rule and the hold | 4.4 | CA |
