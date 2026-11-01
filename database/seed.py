@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # database/seed.py
 """
-ApexEstateHub — comprehensive demo/seed data.
+EstateHub — comprehensive demo/seed data.
 
   This seed is written for the block chart-of-accounts scheme
   (1000=Assets, 2000=Liabilities, 3000=Equity, 4000=Income, 5000=Expenses).
@@ -3181,7 +3181,7 @@ def _run_seed_unguarded(conn):
     cur = conn.cursor()
     print()
     print("  ┌─────────────────────────────────────────────────────────┐")
-    print("  │        Seeding ApexEstateHub demo data (seed.py)         │")
+    print("  │        Seeding EstateHub demo data (seed.py)         │")
     print("  │        ⚠  BLOCK-COA — requires migration 001 + 002       │")
     print("  └─────────────────────────────────────────────────────────┘")
 
@@ -3372,7 +3372,7 @@ def run_seed(conn):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ApexEstateHub demo data seed")
+    parser = argparse.ArgumentParser(description="EstateHub demo data seed")
     parser.parse_args()
     conn = get_conn()
     print("  ✓ Connected to Aiven PostgreSQL")

@@ -20,6 +20,7 @@ from dash import dcc, html
 
 from app.services import document_signing as ds
 from app.services import onboarding_service as ob
+from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label, render_category_content
 
 P = "onb"
 _MUTED = {"fontSize": "12px", "color": "#667"}
@@ -109,8 +110,8 @@ def _stage_committee(society_id: int):
                  dbc.Col(_field("Mobile", dbc.Input(id=f"{P}-g-phone", size="sm", value=s.get("grievance_officer_phone") or "")), md=3)], className="g-2"),
         dbc.Button("Save grievance officer", id=f"{P}-g-save", color="secondary", size="sm", outline=True, n_clicks=0)], style=_CARD))
     if s.get("onboarding_state") == "committee seated":
-        out.append(dbc.Button([html.I(className="fas fa-arrow-right me-2"), "Continue to the Setup Wizard"], id=f"{P}-open-wizard",
-                              color="success", n_clicks=0, className="mt-2"))
+        out.append(html.Div("All three office-bearers are seated. Complete society setup below; nothing posts until the Agreement is signed and the society is activated.",
+                            style=_MUTED))
     return out
 
 
@@ -145,17 +146,67 @@ def _stage_annexes(society_id: int):
                _field("Arrears by flat (one per line: flat, amount, days overdue)", dbc.Textarea(id=f"{P}-in-arrears", value=arrears, rows=3, style={"fontSize": "12px"})),
                dbc.Checkbox(id=f"{P}-in-bank", label="Bank and cash balances agree to the bank statement and cash count on the as-at date", value=bool(inp.get("bank_agrees")), className="mb-2"),
                dbc.Row([dbc.Col(_field("SHA-256 of last audited statements (optional)", dbc.Input(id=f"{P}-in-audit", size="sm", value=inp.get("audited_hash") or "")), md=6),
-                        dbc.Col(_field("CA review reference, or leave blank for 'none obtained'", dbc.Input(id=f"{P}-in-ca", size="sm", value=inp.get("ca_review_ref") or "")), md=6)], className="g-2"),
-               dbc.Button("Save and check the annexes", id=f"{P}-prepare", color="primary", size="sm", n_clicks=0)], style=_CARD)]
+                         dbc.Col(_field("CA review reference, or leave blank for 'none obtained'", dbc.Input(id=f"{P}-in-ca", size="sm", value=inp.get("ca_review_ref") or "")), md=6)], className="g-2"),
+                dbc.Row([dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Download opening-position template (xlsx)"],
+                                            id=f"{P}-c-template", color="secondary", size="sm", outline=True, n_clicks=0), md=6),
+                         dbc.Col(dcc.Upload(id=f"{P}-c-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload opening-position xlsx"],
+                                            color="secondary", size="sm", outline=True, n_clicks=0),
+                                            multiple=False, accept=".xlsx,.xls"), md=6)], className="g-2"),
+                dcc.Download(id=f"{P}-c-download"),
+                html.Div(id=f"{P}-c-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
+                dbc.Button("Save and check the annexes", id=f"{P}-prepare", color="primary", size="sm", n_clicks=0)], style=_CARD)]
     for code in ("A", "B", "C"):
         if code in drafts:
             out.append(_controls(code, drafts[code]))
+    any_blocked = any(drafts.get(c, {}).get("blocking") for c in ("A", "B", "C"))
+    if any_blocked:
+        out.append(dbc.Button([html.I(className="fas fa-arrow-left me-2"), "Back to society setup to fix the blocker"],
+                              id=f"{P}-back-to-setup", color="secondary", size="sm", outline=True, n_clicks=0))
     ready = len(drafts) == 3 and all(v["status"] != "sealed" and not v["blocking"] for v in drafts.values())
     all_sealed = len(drafts) == 3 and all(v["status"] == "sealed" for v in drafts.values())
     if ready:
         out.append(dbc.Button([html.I(className="fas fa-stamp me-2"), "Seal the annexes and issue the Agreement"], id=f"{P}-seal", color="success", n_clicks=0))
     elif all_sealed:
         out.append(html.Div("Annexes sealed. Re-saving the details above would change them and void any signature already given.", style=_MUTED))
+    return out
+
+
+# ── stage 3: society setup, rendered inline inside the Hub (non-modal) ────────────────────────────
+def setup_stage(society_id: int, current_step: int = 0) -> list:
+    """Render the Setup Wizard categories as inline navigable stages inside the Onboarding Hub.
+    Nothing is posted until the Agreement is signed and the society is activated."""
+    heading = "Stage 3: society setup"
+    out = [html.H6(heading),
+           html.Div("Declare the legal regime, rates, charges, accounts and opening balances. The wizard draft is editable until signing "
+                    "starts; the Annexes stage below re-checks every control before anything is sealed.", style=_MUTED)]
+    nav_items = []
+    for i, cat in enumerate(CATEGORIES):
+        icon, color = _ICON["current"] if i == current_step else (_ICON["done"] if i < current_step else _ICON["todo"])
+        nav_items.append(html.Div([
+            html.I(className=f"fas {icon}", style={"color": color, "fontSize": "16px"}),
+            html.Span(step_label(cat), style={"fontSize": "12px", "fontWeight": "700" if i == current_step else "500",
+                                              "color": "#223" if i <= current_step else "#8895a5"})],
+            id={"type": "onb-nav", "index": i}, n_clicks=0,
+            className="onb-nav-item" + (" active" if i == current_step else ""),
+            style={"textAlign": "center", "flex": "1", "padding": "4px 2px", "cursor": "pointer",
+                   "borderBottom": "2px solid " + (color if i == current_step else "#e1e7ef"),
+                   "opacity": 1.0 if i <= current_step else 0.5}))
+    out.append(html.Div(nav_items, id="onb-setup-nav", style={"display": "flex", "gap": "2px", "borderBottom": "1px solid #c9d2dc",
+                                                             "marginBottom": "10px", "paddingBottom": "6px"}))
+    containers = []
+    for i, cat in enumerate(CATEGORIES):
+        containers.append(html.Div(render_category_content(cat, society_id), id={"type": "onb-step", "index": i},
+                                   style={"display": "block" if i == current_step else "none", "paddingTop": "6px"}))
+    out.append(html.Div(containers, id="onb-step-containers"))
+    out.append(html.Div([
+        html.Div(id="onb-setup-error", style={"color": "#c0392b", "marginBottom": "8px", "fontSize": "13px"}),
+        dbc.Button("Previous", id="onb-btn-prev", color="secondary", size="sm", n_clicks=0,
+                   disabled=(current_step == 0), style={"fontSize": "12px"}),
+        dbc.Button("Next", id="onb-btn-next", color="primary", size="sm", n_clicks=0, style={"fontSize": "12px"}),
+        dbc.Button("Submit setup draft", id="onb-btn-submit", color="success", size="sm", n_clicks=0, style={"fontSize": "12px"}),
+        html.Span(dbc.Spinner(type="border", size="sm", color="success"), id="onb-submit-spinner",
+                  style={"display": "none", "marginLeft": "8px"}),
+    ], style={"marginTop": "10px", "display": "flex", "gap": "6px", "flexWrap": "wrap", "alignItems": "center"}))
     return out
 
 
@@ -344,16 +395,25 @@ def legacy_resolutions_section(society_id: int, role: str | None) -> list:
     return out
 
 
-def hub_body(role: str, society_id: int, user_id: int | None) -> list:
+def hub_body(role: str, society_id: int, user_id: int | None, view: str | None = None) -> list:
     st = ob.state_of(society_id) or "registered"
     out = [tracker(society_id)]
     is_admin = role == "admin"
-    if st in ("registered", "committee seated"):
+    if st == "registered":
         out += _stage_committee(society_id) if is_admin else [html.Div("The administrator is seating the founding committee.", style=_MUTED)]
-    elif st == "setup draft":
+    elif st == "committee seated":
         if is_admin:
-            out += _stage_annexes(society_id)
-        out.append(signing_panel(society_id, user_id, role))
+            out += setup_stage(society_id)
+        else:
+            out.append(html.Div("The founding committee is seated; the administrator is completing society setup.", style=_MUTED))
+    elif st == "setup draft":
+        if view == "setup" and is_admin:
+            out.append(html.Div("Back to society setup to fix the blocked control.", style=_MUTED))
+            out += setup_stage(society_id)
+        else:
+            if is_admin:
+                out += _stage_annexes(society_id)
+            out.append(signing_panel(society_id, user_id, role))
         if not is_admin:
             out.append(html.Div("You sign here once the annexes are sealed. Until the Agreement is sealed the society cannot bill, receive or post.", style=_MUTED))
     elif st == "active":
@@ -372,6 +432,8 @@ def render_pending(role: str, society_id: int | None, user_id: int | None):
         html.Div(id=f"{P}-toast"),
         dcc.Interval(id=f"{P}-poll", interval=6000, n_intervals=0),
         dcc.Store(id=f"{P}-marker", data=marker(society_id)),
+        dcc.Store(id="onb-setup-step", data=0),
+        dcc.Store(id="onb-view", data="current"),
         html.Div(hub_body(role, society_id, user_id), id=f"{P}-body"),
     ], style={"maxWidth": "880px", "margin": "0 auto", "padding": "16px"})
 

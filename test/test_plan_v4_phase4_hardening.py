@@ -1,5 +1,5 @@
 """
-Tests mapping to: ApexEstateHub Gold-Standard Plan v4 - Phase 4: platform hardening
+Tests mapping to: EstateHub Gold-Standard Plan v4 - Phase 4: platform hardening
 """
 import os
 

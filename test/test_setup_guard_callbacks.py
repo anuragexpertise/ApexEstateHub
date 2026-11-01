@@ -40,7 +40,7 @@ def test_ordinary_callback_runs_once_setup_is_complete(session):
     assert _make("app.dash_apps.callbacks.expense_callbacks")() == "ran"
 
 
-@pytest.mark.parametrize("module", ["setup_wizard_callbacks", "shell_callbacks", "login_callbacks",
+@pytest.mark.parametrize("module", ["shell_callbacks", "login_callbacks",
                                     "account_callbacks", "agreement_callbacks"])
 def test_wizard_and_shell_modules_stay_usable(session, module):
     assert _make(f"app.dash_apps.callbacks.{module}")() == "ran"
@@ -73,7 +73,7 @@ def test_master_is_never_blocked(session):
 def test_no_session_still_prevents_update(session, monkeypatch):
     monkeypatch.setattr(guards, "get_current_user_id", lambda: None)
     with pytest.raises(PreventUpdate):
-        _make("app.dash_apps.callbacks.setup_wizard_callbacks")()
+        _make("app.dash_apps.callbacks.shell_callbacks")()
 
 
 def test_completed_society_is_cached(session):

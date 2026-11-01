@@ -1,4 +1,4 @@
-# ApexEstateHub Gold-Standard Plan v4
+# EstateHub Gold-Standard Plan v4
 
 Oct 28, 2026 · @Anurag Gupta
 

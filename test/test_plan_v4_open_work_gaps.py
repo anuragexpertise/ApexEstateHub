@@ -1,5 +1,5 @@
 """
-Tests mapping to: ApexEstateHub Gold-Standard Plan v4 - "Open work carried forward"
+Tests mapping to: EstateHub Gold-Standard Plan v4 - "Open work carried forward"
 """
 import os
 

@@ -1889,29 +1889,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
         ]
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Administrator":
-        s_name, s_phone, s_email = "", "", ""
-        if society_id:
-            row = db._execute("SELECT secretary_name, secretary_phone, secretary_email FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
-            if row:
-                s_name, s_phone, s_email = row.get("secretary_name", "") or "", row.get("secretary_phone", "") or "", row.get("secretary_email", "") or ""
         return elements + [
-            _render_banner("Administrator Details", "Configure Secretary details, digital signature, and your step-up password. The password confirms sensitive actions (QR re-issue, key rotation); the server creates and guards the society's signing keys. Who signs what: expenses, NOCs, agreements and minutes are signed by the office-bearers named in the README table \"Who signs what\" (status marks show what is built today); a password confirmation records who confirmed but is not a legal e-signature."),
-            html.H6("Secretary Details", className="text-primary mb-3"),
-            _label("Secretary Name"),
-            dbc.Input(id="sw-sec-name", type="text", value=s_name, className="mb-3"),
-            _label("Secretary Phone"),
-            dbc.Input(id="sw-sec-phone", type="tel", value=s_phone, className="mb-3"),
-            _label("Secretary Email"),
-            dbc.Input(id="sw-sec-email", type="email", value=s_email, className="mb-3"),
-            _label("Secretary Signature Image"),
-            _render_image_capture_control("society", "sec_sign", _imgs.get("sec_sign"), society_id),
-            dbc.Alert([
-                html.Strong("Managing Committee: "),
-                "the President, Treasurer, Secretary and Working Committee are not entered here. An office belongs to a "
-                "flat, and bye-law 7 checks that flat's dues, so they are appointed once your flats and owner logins "
-                "exist: Settings → Society governance → Managing Committee. The details above are the Secretary's "
-                "letterhead details only.",
-            ], color="info", className="mb-3", style={"fontSize": "12.5px"}),
+            _render_banner("Administrator & step-up password", "Create this society's step-up password (SIGNING_SECRET). It confirms sensitive actions (QR re-issue, key rotation); the server creates and guards the society's signing keys. The Secretary is seated in the founding-committee stage and signs the Agreement there — no separate Secretary capture is needed here."),
             _office_bearer_status(society_id),
             html.Hr(),
             html.P("Create this society's step-up password.", className="text-danger fw-bold mb-1"),

@@ -144,9 +144,32 @@ def _store_evidence(society_id: int, filename: str, data: bytes) -> tuple[str, s
     return f"{digest}{ext}", digest
 
 
+def _store_signature(society_id: int, filename: str, data: bytes) -> str:
+    """Validate and store a signature PNG; returns the stored relative path."""
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext != ".png":
+        raise OnboardingError("Signature must be a PNG image.")
+    if not data or len(data) > EVIDENCE_MAX_BYTES:
+        raise OnboardingError("The signature image must be between 1 byte and 5 MB.")
+    if not data.startswith(b"\x89PNG"):
+        raise OnboardingError("The signature file does not look like a real PNG.")
+    digest = _sha(data)
+    try:
+        from app.dash_apps.callbacks.drilldown_callbacks import ASSETS_ROOT
+        folder = ASSETS_ROOT / str(society_id) / "signatures"
+        folder.mkdir(parents=True, exist_ok=True)
+        stored = f"{digest}.png"
+        (folder / stored).write_bytes(data)
+    except Exception:
+        log.exception("could not keep the signature file for society %s", society_id)
+        stored = f"{digest}.png"
+    return stored
+
+
 def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat_number: str, name: str, email: str,
                           phone: str | None, password: str, resolution_ref: str, evidence_name: str | None,
-                          evidence_bytes: bytes | None, apartment_size: int | None = None) -> str:
+                          evidence_bytes: bytes | None, signature_name: str | None = None,
+                          signature_bytes: bytes | None = None, apartment_size: int | None = None) -> str:
     """Enrol the flat and login for one of the three office-bearers and seat them. Returns a message; raises OnboardingError."""
     from app.security.password_policy import validate_password
     from app.services import committee_service as cs
@@ -170,6 +193,10 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
     if not evidence_bytes:
         raise OnboardingError("Attach the signed minutes of the election (PDF, PNG or JPG).")
     stored, digest = _store_evidence(society_id, evidence_name or "", evidence_bytes)
+
+    sig_stored = None
+    if signature_bytes:
+        sig_stored = _store_signature(society_id, signature_name or "", signature_bytes)
 
     apt = _row("SELECT id FROM apartments WHERE society_id=%s AND flat_number=%s", (society_id, flat))
     login = None
@@ -197,7 +224,8 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
             created_user = True
         ok, msg = cs.appoint(actor_id, "admin", society_id, apt["id"], office_code, name, user_id=login["id"],
                              term_start=date.today(), resolution_ref=ref, actor_society_id=society_id,
-                             email=email_c, phone=phone_c, evidence_file=stored, evidence_hash=digest)
+                             email=email_c, phone=phone_c, signature_image=sig_stored,
+                             evidence_file=stored, evidence_hash=digest)
         if not ok:
             raise OnboardingError(msg)
     except Exception:
@@ -208,6 +236,9 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
         raise
     seated = _row("SELECT fn_mark_committee_seated(%s) AS ok", (society_id,))
     extra = " All three office-bearers are seated; the Setup Wizard is next." if (seated or {}).get("ok") else ""
+    # Sync the society letterhead Secretary signature from the seated Secretary's signature image.
+    if office_code == "secretary" and sig_stored:
+        db._execute("UPDATE societies SET secretary_sign=%s WHERE id=%s", (sig_stored, society_id))
     return f"{name} is now {OFFICE_LABEL[office_code]} (evidence {digest[:12]}...)." + extra
 
 
@@ -259,6 +290,287 @@ def save_annex_inputs(society_id: int, arrears_text: str, bank_agrees: bool, aud
     d["annex_c_inputs"] = inputs
     db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s", (json.dumps(d), society_id))
     return inputs
+
+
+# ── stage 3: setup draft submit (merged from setup_wizard.submit_setup_wizard) ──────────────────────────
+def submit_setup_draft(society_id: int, actor_id: int, data: dict) -> str:
+    """Save the two-phase Setup Wizard draft: posts nothing to the ledger, stores onboarding_declarations,
+    creates the society's signing keys + step-up password, and calls fn_complete_society_setup within one
+    transaction with seed_accounts (A14 atomicity). Returns a success message; raises OnboardingError."""
+    import json as _json
+
+    from database.seed import seed_accounts as _seed_accounts, tds_wizard_rows as _tds_wizard_rows, it2025_twin as _it2025_twin
+    from database.db_manager import _to_pyformat
+    from database.money import money as _money_val
+    from app.services import regime_rules_admin as _rra
+    from app.services.up_aoa_actions import fill_after_enrolment as _fill_after_enrolment
+    from app.security.password_policy import validate_signing_secret as _validate_signing_secret
+    from app.services.signing_service import ensure_society_keys as _ensure_society_keys, set_stepup_password_hash as _set_stepup_password_hash
+    from app.services.auth_service import verify_password_with_lockout as _verify_password_with_lockout
+    from app.dash_apps.callbacks.drilldown_callbacks import _move_temp_images as _move_temp_images
+    from app.utils.fiscal import fy_start_date as _fy_start_date
+
+    def _num_or_none(lst, i):
+        v = lst[i] if i < len(lst) else None
+        return None if v in (None, "") else float(v)
+
+    def _req(label, value, kind="text"):
+        value = str(value or "").strip()
+        if not value:
+            raise OnboardingError(f"{label} is required.")
+        if kind == "email" and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
+            raise OnboardingError(f"Enter a valid {label.lower()} address.")
+        if kind == "phone" and not re.fullmatch(r"[0-9+()\-\s]{7,20}", value):
+            raise OnboardingError(f"Enter a valid {label.lower()} number.")
+        if kind == "secret":
+            err = _validate_signing_secret(value)
+            if err:
+                raise OnboardingError(err)
+        return value
+
+    # ---- validation ----
+    address = _req("Address", data.get("address"), "text")
+    s_email = _req("Email", data.get("s_email"), "email")
+    phone = _req("Phone number", data.get("phone"), "phone")
+
+    i_agree = data.get("i_agree")
+    if str(i_agree or "").strip() != "I AGREE":
+        raise OnboardingError("You must type 'I AGREE' to proceed.")
+
+    admin_pass = data.get("admin_password") or ""
+    if not admin_pass:
+        raise OnboardingError("Admin Password is required.")
+
+    qr_secret = data.get("secret") or ""
+    if not qr_secret:
+        raise OnboardingError("SIGNING_SECRET is required.")
+    qr_confirm = data.get("secret_confirm") or qr_secret
+    qr_confirm_final = data.get("secret_confirm_final") or qr_secret
+    if qr_secret != qr_confirm or qr_secret != qr_confirm_final:
+        raise OnboardingError("SIGNING_SECRETs do not match.")
+
+    apt_billing_basis = data.get("apt_billing_basis") or "undivided_interest"
+    apt_amt = data.get("apt_amt")
+    apt_rate = data.get("apt_rate")
+    apt_budget = data.get("apt_budget")
+    apt_sinking = data.get("apt_sinking")
+    apt_repair = data.get("apt_repair")
+    apt_cost = data.get("apt_cost")
+    s_state = (data.get("s_state") or "").strip()[:50] or None
+    s_constitution = (data.get("s_constitution") or "AOA").strip()[:20] or "AOA"
+
+    # fund flags (live, not saved)
+    _flags = _fund_flags_fn(society_id, s_state, constitution=s_constitution)
+    apt_sinking = (apt_sinking or 0) if _flags["sinking"] else 0
+    apt_repair = (apt_repair or 0) if _flags["repair"] else 0
+
+    # reuse wizard validation helpers
+    from app.dash_apps.pages.setup_wizard import apt_charges_error as _apt_charges_error, funds_error as _funds_error, fund_plan as _fund_plan
+    _apt_err = (_apt_charges_error(apt_billing_basis, apt_budget, apt_rate, apt_amt)
+                or _funds_error(_fund_plan(society_id, s_state, constitution=s_constitution)["plan"], apt_sinking, apt_repair, apt_cost))
+    if _apt_err:
+        raise OnboardingError(_apt_err)
+
+    # throttle (5s, shared via DB)
+    _slot = db._execute(
+        "UPDATE users SET setup_submit_at = NOW() "
+        "WHERE id = :uid AND (setup_submit_at IS NULL "
+        "OR setup_submit_at < NOW() - INTERVAL '5 seconds') RETURNING id",
+        {"uid": actor_id}, fetch_one=True,
+    )
+    if not _slot:
+        raise OnboardingError("Please wait before submitting again.")
+
+    # state gate
+    if state_of(society_id) not in ("committee seated", "setup draft"):
+        raise OnboardingError("Seat the President, Secretary and Treasurer first (Society onboarding page).")
+
+    # password verify (feeds shared lockout)
+    _pw_ok, _pw_msg = _verify_password_with_lockout(actor_id, admin_pass)
+    if not _pw_ok:
+        raise OnboardingError(_pw_msg)
+
+    # signing keys + step-up password
+    try:
+        _ensure_society_keys(society_id, actor_id)
+        secret_enc = _set_stepup_password_hash(qr_secret)
+    except Exception as e:
+        raise OnboardingError(f"Unable to create the society's signing keys: {e}")
+
+    try:
+        _fill_after_enrolment(society_id)
+    except Exception:
+        pass  # undivided-interest fill is best-effort
+
+    # build tds pairs
+    tds_raw = data.get("tds") or []
+    tds_natures = data.get("tds_natures") or []
+    tds_pairs = []
+    for idx, item in enumerate(_tds_wizard_rows()):
+        rate = _num_or_none(tds_raw, idx)
+        if rate is None:
+            continue
+        pair = {
+            "section": item[0],
+            "discriminator": item[1],
+            "nature_of_income": tds_natures[idx] if idx < len(tds_natures) else None,
+            "rate": rate,
+            "rate_no_pan": _num_or_none(data.get("tds_rates_no_pan") or [], idx),
+            "single_bill_threshold": _num_or_none(data.get("tds_single_bills") or [], idx),
+            "annual_aggregate_threshold": _num_or_none(data.get("tds_agg_bills") or [], idx),
+        }
+        twin = _it2025_twin(item[0], item[1])
+        if twin is not None:
+            pair["it2025"] = twin
+        tds_pairs.append(pair)
+
+    # build bf json
+    bf_ids = data.get("bf_ids") or []
+    bf_amts = data.get("bf_amts") or []
+    bf_remarks = data.get("bf_remarks") or []
+    bf_json = []
+    for idx, acc_dict in enumerate(bf_ids):
+        amt = bf_amts[idx] if idx < len(bf_amts) else None
+        if amt is not None and _money_val(amt) > 0:
+            bf_json.append({
+                "acc_id": acc_dict["acc_id"],
+                "bf_amount": str(_money_val(amt)),
+                "remarks": bf_remarks[idx] if idx < len(bf_remarks) else "",
+            })
+
+    # image paths already moved by caller; collect form_data
+    form_data = {}
+    for key, dst in (("logo", "logo"), ("bg", "bg"), ("pay_qr", "pay_qr"), ("sec_sign", "sec_sign")):
+        if data.get(key):
+            form_data[dst] = data[key]
+    if form_data:
+        _move_temp_images("society", society_id, society_id, form_data)
+
+    # sanitise strings
+    tan = str(data.get("tan") or "")[:10] or None
+    gstin = str(data.get("gstin") or "")[:15] or None
+    _reg_row = db._execute("SELECT registration_number FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True) or {}
+    reg_num = _reg_row.get("registration_number")
+    phone = str(phone)[:20] if phone else None
+    sec_phone = str(data.get("sec_phone") or "")[:20] or None
+    sec_name = str(data.get("sec_name") or "")[:100] or None
+    sec_email = str(data.get("sec_email") or "")[:100] or None
+    # Fall back to the seated Secretary (captured in the founding-committee stage) so the
+    # Administrator step no longer duplicates Secretary capture (T3).
+    if not sec_name:
+        _seated = seated_officers(society_id)
+        _sec = _seated.get("secretary") or {}
+        if _sec:
+            sec_name = sec_name or (_sec.get("holder_name") or "")
+            sec_phone = sec_phone or (_sec.get("phone") or "")
+            sec_email = sec_email or (_sec.get("email") or "")
+
+    # fund settings
+    c_sink = _flags["plan"]["sinking"]["basis"] if _flags["plan"]["sinking"]["mode"] == "on_bill" else "per_sq_ft"
+    c_repair = _flags["plan"]["repair"]["basis"] if _flags["plan"]["repair"]["mode"] == "on_bill" else "per_sq_ft"
+    c_charges_int = _rra.policy_intent(society_id, "fund_arrears_interest") == "yes"
+
+    c_gst_exempt = bool(data.get("c_gst_exempt"))
+    c_gst_cad = data.get("c_gst_cad") or "monthly"
+    c_tds_act = data.get("c_tds_act") or "warn"
+    c_exp_fmt = data.get("c_exp_fmt") or "structured"
+    c_gst_reg = bool(data.get("c_gst_reg"))
+
+    _setup_sql = """SELECT fn_complete_society_setup(
+                    :sid, :secret_enc, :logo, :addr, :phone, :bg, :tan, :gstin, :pay_qr, :calc_start, :sec_name, :sec_phone, :sec_email, :sec_sign,
+                    CAST(:tds_json AS jsonb), :cgst, :sgst,
+                    :apt_amt, :apt_rate, :apt_billing_basis, :apt_due, :apt_sink, :apt_repair,
+                    :ven_1, :ven_7, :ven_30,
+                    :bf_fy, CAST(:bf_json AS jsonb), :created_by,
+                    :s_email, :reg_num, :apt_interest,
+                    :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt, :gate_logic, :duty_hrs, :tds_effective_date, :s_state, :s_constitution,
+                    :apt_cost, :apt_budget, :draft
+                ) AS result"""
+    _setup_params = {
+        "sid": society_id,
+        "secret_enc": secret_enc,
+        "logo": data.get("logo"),
+        "addr": address,
+        "phone": phone,
+        "bg": data.get("bg"),
+        "tan": tan,
+        "gstin": gstin,
+        "pay_qr": data.get("pay_qr"),
+        "calc_start": data.get("calc_start") or str(_fy_start_date()),
+        "sec_name": sec_name,
+        "gate_logic": data.get("gate_logic"),
+        "duty_hrs": data.get("duty_hrs"),
+        "sec_phone": sec_phone,
+        "sec_email": sec_email,
+        "sec_sign": data.get("sec_sign"),
+        "tds_json": _json.dumps(tds_pairs),
+        "cgst": None if data.get("cgst") in (None, "") else float(data.get("cgst")),
+        "sgst": None if data.get("sgst") in (None, "") else float(data.get("sgst")),
+        "apt_amt": apt_amt, "apt_rate": apt_rate, "apt_billing_basis": apt_billing_basis, "apt_due": data.get("apt_due_day"),
+        "apt_sink": apt_sinking, "apt_repair": apt_repair,
+        "ven_1": data.get("ven_1"), "ven_7": data.get("ven_7"), "ven_30": data.get("ven_30"),
+        "bf_fy": data.get("bf_fy"), "bf_json": _json.dumps(bf_json),
+        "created_by": actor_id,
+        "s_email": s_email,
+        "reg_num": reg_num,
+        "apt_interest": max(float(data.get("apt_interest") or 0), 0.0),
+        "apt_cost": apt_cost, "apt_budget": apt_budget,
+        "c_sink": c_sink,
+        "c_repair": c_repair,
+        "c_gst_exempt": c_gst_exempt,
+        "c_charges_int": c_charges_int,
+        "c_gst_cad": c_gst_cad,
+        "c_gst_reg": c_gst_reg,
+        "c_tds_act": c_tds_act,
+        "c_exp_fmt": c_exp_fmt,
+        "tds_effective_date": data.get("tds_effective_date") or str(_fy_start_date()),
+        "s_state": s_state,
+        "s_constitution": s_constitution,
+        "draft": True,
+    }
+    _sql, _prm = _to_pyformat(_setup_sql, _setup_params)
+    try:
+        with db._conn() as conn:
+            cur = conn.cursor()
+            _seed_accounts(cur, conn, society_id, commit=False)
+            _declaration = {
+                "tds": tds_pairs,
+                "cgst": data.get("cgst"), "sgst": data.get("sgst"),
+                "apt": {"amt": apt_amt, "rate": apt_rate, "billing_basis": apt_billing_basis,
+                        "due_day": data.get("apt_due_day"), "sinking": apt_sinking, "repair": apt_repair,
+                        "interest": data.get("apt_interest"), "cost": apt_cost, "budget": apt_budget},
+                "ven": {"1day": data.get("ven_1"), "7day": data.get("ven_7"), "1mth": data.get("ven_30")},
+                "bf": {"fy": data.get("bf_fy"), "rows": bf_json},
+                "compliance": {"gst_exempt": c_gst_exempt, "charges_int": c_charges_int,
+                               "cadence": c_gst_cad, "registered": c_gst_reg,
+                               "tds_no_pan": c_tds_act, "export_fmt": c_exp_fmt},
+                "society": {"state": s_state, "constitution": s_constitution,
+                            "email": s_email, "reg_num": reg_num},
+            }
+            cur.execute(
+                """INSERT INTO onboarding_declarations (society_id, declaration_json, status, created_by, submitted_at)
+                   VALUES (%s, %s::jsonb, 'submitted', %s, NOW())
+                   ON CONFLICT (society_id) DO UPDATE SET
+                       declaration_json = EXCLUDED.declaration_json,
+                       status = 'submitted', updated_at = NOW(), submitted_at = NOW()""",
+                (society_id, _json.dumps(_declaration), actor_id))
+            cur.execute(_sql, _prm)
+            _row = cur.fetchone()
+            result = dict(_row) if _row else None
+            _res = (result or {}).get("result") or ""
+            if _res != "OK":
+                raise OnboardingError(_res or "Setup could not be saved — please try again.")
+    except OnboardingError:
+        raise
+    except Exception as e:
+        raise OnboardingError(f"Unable to save the society setup: {e}")
+
+    return "Setup draft saved. Next: check and seal the annexes, then sign the Agreement."
+
+
+def _fund_flags_fn(society_id, state, constitution=None):
+    from app.dash_apps.pages.setup_wizard import fund_flags as _ff
+    return _ff(society_id, state, constitution=constitution)
 
 
 def _ctl(passed: bool, reason: str, blocking: bool = True) -> dict:

@@ -1,4 +1,4 @@
-# ApexEstateHub — Statutory & Financial Accuracy Review
+# EstateHub — Statutory & Financial Accuracy Review
 
 **Repository:** github.com/anuragexpertise/ApexEstateHub, HEAD `6dabca9` · **Review date:** 16 Oct 2026 · **Default regime:** UP Apartment Owners' Association (UP Apartment Act 2010, Rules 2011, Model Bye-Laws 2011)
 

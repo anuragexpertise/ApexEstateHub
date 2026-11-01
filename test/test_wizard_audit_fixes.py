@@ -162,8 +162,8 @@ def test_layout_builds_and_every_callback_registers():
     _hidden_spinner before it was defined."""
     dash = pytest.importorskip("dash")
     dbc = pytest.importorskip("dash_bootstrap_components")
-    from app.dash_apps.callbacks.setup_wizard_callbacks import register_setup_wizard_callbacks
+    from app.dash_apps.callbacks.onboarding_callbacks import register_onboarding_callbacks
     app = dash.Dash(__name__, suppress_callback_exceptions=True, external_stylesheets=[dbc.themes.BOOTSTRAP])
     app.layout = w.get_setup_wizard_layout(None)
-    register_setup_wizard_callbacks(app)
+    register_onboarding_callbacks(app)
     assert len(app.callback_map) >= 12

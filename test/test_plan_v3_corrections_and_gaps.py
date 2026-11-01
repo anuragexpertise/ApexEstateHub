@@ -1,5 +1,5 @@
 """
-Tests mapping to: ApexEstateHub Gold-Standard Plan v3 - Corrections and gaps
+Tests mapping to: EstateHub Gold-Standard Plan v3 - Corrections and gaps
 """
 import os
 

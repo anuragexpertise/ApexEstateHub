@@ -277,7 +277,7 @@ def test_autofill_account_lookup_is_tenant_scoped():
 
 
 def test_setup_and_notification_callbacks_do_not_read_client_identity():
-    setup = (CALLBACKS / "setup_wizard_callbacks.py").read_text()
+    setup = (CALLBACKS / "onboarding_callbacks.py").read_text()
     assert not re.search(r'auth\.get\(\s*["\'](?:user_id|society_id|role)["\']', setup)
     shell = (CALLBACKS / "shell_callbacks.py").read_text()
     notif = shell[shell.index("def _load_notifications("):shell.index("# ── 11. DRILL-BACK")]
