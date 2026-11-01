@@ -19,7 +19,6 @@ import pandas as pd
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, no_update
 
 from app.dash_apps.pages import onboarding_page as op
-from app.dash_apps.pages.setup_wizard import CATEGORIES
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
 from app.security.guards import require_session
 from app.services import document_signing as ds
@@ -65,6 +64,8 @@ def register_onboarding_callbacks(app):
         [State({"type": f"{P}-f", "office": ALL, "field": f}, "value") for f in fields],
         State({"type": f"{P}-f", "office": ALL, "field": "file"}, "contents"),
         State({"type": f"{P}-f", "office": ALL, "field": "file"}, "filename"),
+        State({"type": f"{P}-f", "office": ALL, "field": "sig"}, "contents"),
+        State({"type": f"{P}-f", "office": ALL, "field": "sig"}, "filename"),
         prevent_initial_call=True,
     )
     @require_session
@@ -86,14 +87,105 @@ def register_onboarding_callbacks(app):
 
         flat, name, size, email, phone, password, ref = (_val(i) for i in range(len(fields)))
         contents, filename = _val(len(fields)), _val(len(fields) + 1)
+        sig_contents, sig_filename = _val(len(fields) + 2), _val(len(fields) + 3)
         try:
             msg = ob.seat_founding_officer(uid, sid, office, flat, name, email, phone, password or "", ref,
                                            filename, _decode(contents),
+                                           signature_name=sig_filename,
+                                           signature_bytes=_decode(sig_contents),
                                            apartment_size=int(size) if size not in (None, "") else None)
         except ob.OnboardingError as exc:
             return no_update, _alert(str(exc), False), no_update
         body, mk = _body(sid, uid, role)
         return body, _alert(msg), mk
+
+    # ── signature thumbnail preview while choosing a signature image ──────────
+    @app.callback(
+        Output({"type": f"{P}-f", "office": ALL, "field": "sig-preview"}, "children", allow_duplicate=True),
+        Input({"type": f"{P}-f", "office": ALL, "field": "sig"}, "contents"),
+        State({"type": f"{P}-f", "office": ALL, "field": "sig"}, "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_sig_preview(contents_list, filename_list):
+        trig = ctx.triggered_id
+        if not trig or not isinstance(trig, dict):
+            return no_update
+        office = trig["office"]
+        for item in (ctx.states_list[0] or []):
+            iid = item.get("id")
+            if isinstance(iid, dict) and iid.get("office") == office and iid.get("field") == "sig":
+                contents = item.get("value")
+                fname = ""
+                for it2 in (ctx.states_list[1] or []):
+                    i2 = it2.get("id")
+                    if isinstance(i2, dict) and i2.get("office") == office and i2.get("field") == "sig":
+                        fname = it2.get("value") or ""
+                        break
+                if contents:
+                    return html.Div([
+                        html.Img(src=contents, style={"maxWidth": "140px", "maxHeight": "70px",
+                                                      "border": "1px solid #c9d2dc", "borderRadius": "4px"}),
+                        html.Div(fname, style={"fontSize": "11px", "color": "#667", "marginTop": "2px"})])
+                return html.Div("Signature image selected.", style={"fontSize": "11.5px", "color": "#17976e"})
+        return no_update
+
+    # ── seated officer Edit details: mobile and/or signature replace ──────────
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input({"type": f"{P}-f", "office": ALL, "field": "save"}, "n_clicks"),
+        State({"type": f"{P}-f", "office": ALL, "field": "phone"}, "value"),
+        State({"type": f"{P}-f", "office": ALL, "field": "sig"}, "contents"),
+        State({"type": f"{P}-f", "office": ALL, "field": "sig"}, "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_officer_update(_clicks, phones, sig_contents_list, sig_filename_list):
+        trig = ctx.triggered_id
+        if not trig or not isinstance(trig, dict):
+            return no_update, no_update, no_update
+        s = _session()
+        if not s or s[2] != "admin" or not s[0]:
+            return no_update, _alert("Only the society's administrator can edit an officer.", False), no_update
+        sid, uid, role = s
+        office = trig["office"]
+        phone = None
+        for item in (ctx.states_list[0] or []):
+            iid = item.get("id")
+            if isinstance(iid, dict) and iid.get("office") == office and iid.get("field") == "phone":
+                phone = item.get("value")
+                break
+        sig_contents = sig_filename = None
+        for idx, item in enumerate((ctx.states_list[1] or [])):
+            iid = item.get("id")
+            if isinstance(iid, dict) and iid.get("office") == office and iid.get("field") == "sig":
+                sig_contents = item.get("value")
+                sig_filename = (sig_filename_list or [None])[idx] if sig_filename_list else None
+                break
+        try:
+            msg = ob.update_seated_officer(uid, sid, office, phone=phone,
+                                           signature_name=sig_filename,
+                                           signature_bytes=_decode(sig_contents))
+        except ob.OnboardingError as exc:
+            return no_update, _alert(str(exc), False), no_update
+        body, mk = _body(sid, uid, role)
+        return body, _alert(msg), mk
+
+    # ── Administrator step: jump back to Stage 2 to finish an officer ─────────
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Input("onb-back-to-committee", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_back_to_committee(n):
+        s = _session()
+        if not n or not s:
+            return no_update
+        sid, uid, role = s
+        return op.hub_body(role, sid, uid)
 
     @app.callback(
         Output(f"{P}-toast", "children", allow_duplicate=True),
@@ -241,6 +333,7 @@ def register_onboarding_callbacks(app):
         return body, _alert(msg), mk
 
     @app.callback(
+        Output("onb-tracker", "children"),
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
         Input(f"{P}-poll", "n_intervals"),
@@ -252,14 +345,22 @@ def register_onboarding_callbacks(app):
     def onb_poll(_n, last, view):
         s = _session()
         if not s or not s[0]:
-            return no_update, no_update
+            return no_update, no_update, no_update
         sid, uid, role = s
         mk = op.marker(sid)
         if mk == last:
-            return no_update, no_update
-        if ob.state_of(sid) == "active":                      # activated while the page was open: show the dashboard
-            return op.hub_body(role, sid, uid), mk
-        return op.hub_body(role, sid, uid, view=view or "current"), mk
+            return no_update, no_update, no_update
+        st = ob.state_of(sid)
+        # §2.3 poll safety: while the setup stage is mounted (view == "setup", or the
+        # society is committee-seated / in a setup draft) the poll must not replace
+        # onb-body — that wipes unsaved inputs and jumps the DOM (F3). Only refresh the
+        # tracker; re-render the body only on real state transitions.
+        setup_mounted = (view == "setup") or st in ("committee seated", "setup draft")
+        if st == "active":
+            return op.tracker(sid), op.hub_body(role, sid, uid), mk
+        if setup_mounted:
+            return op.tracker(sid), no_update, mk
+        return op.tracker(sid), op.hub_body(role, sid, uid, view=view or "current"), mk
 
     # ── Master queue ────────────────────────────────────────────────────────────────────────────────────────
     def _master_ok():
@@ -430,141 +531,7 @@ def register_onboarding_callbacks(app):
         res = ob.try_activate(int(ctx.triggered_id["sid"]), s[1])
         return _alert("The society is active." if res["ok"] else "Still held: " + res["error"], res["ok"])
 
-    # ── stage 3: society setup — inline navigation + submit ───────────────────────────────────────────
-    def _step_styles(n):
-        return [{"display": "block" if i == n else "none"} for i in range(len(CATEGORIES))]
 
-    def _nav_classes(n):
-        return ["onb-nav-item" + (" active" if i == n else "") for i in range(len(CATEGORIES))]
-
-    def _nav_styles(n):
-        return [{"textAlign": "center", "flex": "1", "padding": "4px 2px", "cursor": "pointer",
-                 "borderBottom": "2px solid " + (_ICON_COLOR(i, n) if i == n else "#e1e7ef"),
-                 "opacity": 1.0 if i <= n else 0.5} for i in range(len(CATEGORIES))]
-
-    def _ICON_COLOR(i, n):
-        return "#1d74d8" if i == n else ("#2e9e5b" if i < n else "#b8c2cf")
-
-    def _nav_outputs(n):
-        return (n, _step_styles(n), _nav_classes(n), _nav_styles(n), (n == 0), "")
-
-    # single callback driving setup navigation: every input is scalar (15 fixed nav buttons + prev/next),
-    # so there is exactly one Dash grouping and no ALL-input/scalar-state mismatch.
-    _nav_inputs = [Input({"type": "onb-nav", "index": i}, "n_clicks") for i in range(len(CATEGORIES))]
-
-    @app.callback(
-        Output("onb-setup-step", "data", allow_duplicate=True),
-        Output({"type": "onb-step", "index": ALL}, "style", allow_duplicate=True),
-        Output({"type": "onb-nav", "index": ALL}, "className", allow_duplicate=True),
-        Output({"type": "onb-nav", "index": ALL}, "style", allow_duplicate=True),
-        Output("onb-btn-prev", "disabled", allow_duplicate=True),
-        Output("onb-setup-error", "children", allow_duplicate=True),
-        *_nav_inputs,
-        Input("onb-btn-prev", "n_clicks"),
-        Input("onb-btn-next", "n_clicks"),
-        State("onb-setup-step", "data"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def onb_setup_nav(*_clicks):
-        s = _session()
-        if not ctx.triggered_id:
-            return no_update, no_update, no_update, no_update, no_update, no_update
-        sid, _uid, role = s
-        if not s or role != "admin" or not sid:
-            return no_update, no_update, no_update, no_update, no_update, _alert("Only the administrator can navigate setup.", False)
-        trig = ctx.triggered_id
-        # Dash invokes every dependency positionally: [nav clicks..., prev, next], then the
-        # State "onb-setup-step" arrives as the last positional value.
-        n = int(_clicks[-1] or 0) if _clicks else 0
-        if trig == "onb-btn-prev":
-            n = max(0, n - 1)
-        elif trig == "onb-btn-next":
-            n = min(len(CATEGORIES) - 1, n + 1)
-        elif isinstance(trig, dict) and trig.get("type") == f"{P}-nav":
-            n = int(trig.get("index", n))
-        return _nav_outputs(n)
-
-    @app.callback(
-        Output(f"{P}-toast", "children", allow_duplicate=True),
-        Output(f"{P}-body", "children", allow_duplicate=True),
-        Output(f"{P}-marker", "data", allow_duplicate=True),
-        Input("onb-btn-submit", "n_clicks"),
-        State("sw-society-address", "value"), State("sw-society-email", "value"), State("sw-society-phone", "value"),
-        State("sw-society-state", "value"), State("sw-society-constitution", "value"),
-        State("sw-society-tan", "value"), State("sw-society-gstin", "value"),
-        State("sw-calc-start-date", "value"),
-        State("sw-qr-secret", "value"), State("sw-qr-secret-confirm", "value"), State("sw-qr-confirm-final", "value"),
-        State("sw-admin-password", "value"), State("sw-i-agree", "value"),
-        State("sw-gate-logic", "value"), State("sw-duty-hrs", "value"),
-        State("sw-cgst", "value"), State("sw-sgst", "value"),
-        State("sw-tds-effective-date", "value"),
-        State({"type": "tds-rate", "index": ALL}, "value"),
-        State({"type": "tds-nature", "index": ALL}, "value"),
-        State({"type": "tds-rate-no-pan", "index": ALL}, "value"),
-        State({"type": "tds-single-bill", "index": ALL}, "value"),
-        State({"type": "tds-agg-bill", "index": ALL}, "value"),
-        State("sw-apt-cost", "value"), State("sw-apt-budget", "value"), State("sw-apt-rate", "value"),
-        State("sw-apt-amt", "value"), State("sw-apt-billing-basis", "value"), State("sw-apt-due", "value"),
-        State("sw-apt-interest", "value"),
-        State("sw-apt-sinking", "value"), State("sw-apt-repair", "value"),
-        State("sw-ven-1day", "value"), State("sw-ven-7day", "value"), State("sw-ven-1mth", "value"),
-        State("sw-bf-fy", "value"),
-        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
-        State({"type": "sw-bf-remarks", "acc_id": ALL}, "value"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def onb_setup_submit(n_clicks, addr, email, phone, state, constitution, tan, gstin, calc_start,
-                         secret, secret_confirm, secret_confirm_final, admin_pw, i_agree,
-                         gate_logic, duty_hrs, cgst, sgst, tds_eff_date,
-                         tds_rate, tds_nature, tds_no_pan, tds_single, tds_agg,
-                         apt_cost, apt_budget, apt_rate, apt_amt, apt_basis, apt_due, apt_interest,
-                         apt_sink, apt_repair, ven_1, ven_7, ven_30, bf_fy, bf_amt, bf_remarks):
-        s = _session()
-        if not n_clicks or not s or s[2] != "admin" or not s[0]:
-            return no_update, no_update, no_update
-        sid, uid, role = s
-        tds = []
-        names = _tds_wizard_names()
-        for idx, name in enumerate(names):
-            rate = tds_rate[idx] if idx < len(tds_rate) else None
-            if rate in (None, ""):
-                continue
-            tds.append({"section": name[0], "discriminator": name[1], "nature_of_income": (tds_nature[idx] if idx < len(tds_nature) else None),
-                        "rate": rate,
-                        "rate_no_pan": (tds_no_pan[idx] if idx < len(tds_no_pan) else None),
-                        "single_bill_threshold": (tds_single[idx] if idx < len(tds_single) else None),
-                        "annual_aggregate_threshold": (tds_agg[idx] if idx < len(tds_agg) else None)})
-        bf = []
-        for idx, acc in enumerate(_bf_accs(sid)):
-            amt = bf_amt[idx] if idx < len(bf_amt) else None
-            if amt is None or amt == "":
-                continue
-            try:
-                amt_f = float(amt)
-            except (TypeError, ValueError):
-                continue
-            if amt_f <= 0:
-                continue
-            bf.append({"acc_id": acc["acc_id"], "bf_amount": str(amt_f), "remarks": (bf_remarks[idx] if idx < len(bf_remarks) else "")})
-        data = {"address": addr, "s_email": email, "phone": phone, "s_state": state, "s_constitution": constitution,
-                "tan": tan, "gstin": gstin, "calc_start": calc_start,
-                "secret": secret, "secret_confirm": secret_confirm, "secret_confirm_final": secret_confirm_final,
-                "admin_password": admin_pw, "i_agree": i_agree,
-                "gate_logic": gate_logic, "duty_hrs": duty_hrs,
-                "tds": tds, "cgst": cgst, "sgst": sgst, "tds_effective_date": tds_eff_date,
-                "apt_cost": apt_cost, "apt_budget": apt_budget, "apt_rate": apt_rate, "apt_amt": apt_amt,
-                "apt_billing_basis": apt_basis, "apt_due_day": apt_due, "apt_interest": apt_interest,
-                "apt_sinking": apt_sink, "apt_repair": apt_repair,
-                "ven_1": ven_1, "ven_7": ven_7, "ven_30": ven_30,
-                "bf_fy": bf_fy, "bf_json": bf}
-        try:
-            msg = ob.submit_setup_draft(sid, uid, data)
-        except ob.OnboardingError as exc:
-            return _alert(str(exc), False), no_update, no_update
-        body, mk = _body(sid, uid, role)
-        return _alert(msg), body, mk
 
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),

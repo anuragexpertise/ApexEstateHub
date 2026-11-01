@@ -143,7 +143,7 @@ CREATE TRIGGER trg_onboarding_declarations_updated_at
 CREATE TABLE onboarding_annexes (
     id              SERIAL PRIMARY KEY,
     society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    annex_code      VARCHAR(1) NOT NULL CHECK (annex_code IN ('A', 'B', 'C')),
+    annex_code      VARCHAR(1) NOT NULL CHECK (annex_code IN ('A', 'B', 'C', 'D')),
     content         JSONB NOT NULL DEFAULT '{}'::jsonb,   -- frozen annex content
     content_hash    VARCHAR(64) NOT NULL,                 -- SHA-256 of the canonical annex text
     status          VARCHAR(20) NOT NULL DEFAULT 'draft'  -- draft | submitted | sealed | superseded
@@ -14766,7 +14766,7 @@ $$;
 -- ════════════════════════════════════════════════════════════════════════════════
 CREATE OR REPLACE FUNCTION fn_activate_society(p_society_id INT, p_actor_id INT)
 RETURNS TEXT LANGUAGE plpgsql AS $$
-DECLARE
+    DECLARE
     v_state        VARCHAR(20);
     v_agreement_id INT;
     v_required     TEXT[] := ARRAY['president','secretary','treasurer','platform'];
@@ -14781,6 +14781,7 @@ DECLARE
     v_arrears_days INT;
     v_msg          TEXT := '';
     v_rec_acc      INT;
+    v_apt_id       INT;
     r              RECORD;
     b              RECORD;
     ob             RECORD;
@@ -14888,15 +14889,30 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    -- 5.5) Turn Annex C arrears into opening dues receivables, one per flat
-    -- (role='apartment', entity_id = the flat). These are the opening dues the
-    -- society carries forward; billing and interest pick them up once active.
+    -- 5.5) Turn Annex C arrears into opening_receivables_pending, one per flat.
+    -- If the flat already exists as an apartment, create the receivable now and mark linked;
+    -- otherwise leave pending_link so Stage 5 enrolment can link it later (fixes F6).
     FOR r IN
-        SELECT ap.id AS apartment_id, (j->>'amount')::NUMERIC AS amount
+        SELECT (j->>'flat_number')::TEXT AS flat_number,
+               (j->>'amount')::NUMERIC AS amount,
+               COALESCE(NULLIF(j->>'overdue_days', '')::INT, 0) AS overdue_days,
+               j->>'remarks' AS remarks
           FROM jsonb_array_elements(COALESCE(v_annex_c->'arrears_by_flat', '[]'::jsonb)) j
-          JOIN apartments ap ON ap.flat_number = j->>'flat_number' AND ap.society_id = p_society_id
-     LOOP
-        IF r.amount > 0 THEN
+         WHERE (j->>'amount')::NUMERIC > 0
+    LOOP
+        -- Upsert the pending row (idempotent).
+        INSERT INTO opening_receivables_pending (society_id, flat_number, amount, overdue_days, remarks, status)
+        VALUES (p_society_id, r.flat_number, r.amount, r.overdue_days, r.remarks, 'pending_link')
+        ON CONFLICT (society_id, flat_number) DO UPDATE
+          SET amount = EXCLUDED.amount, overdue_days = EXCLUDED.overdue_days,
+              remarks = EXCLUDED.remarks, status = 'pending_link',
+              apartment_id = NULL, receivable_id = NULL, linked_at = NULL;
+        -- If the flat is already enrolled, create the receivable and mark linked.
+        SELECT ap.id INTO v_apt_id
+          FROM apartments ap
+         WHERE ap.society_id = p_society_id AND ap.flat_number = r.flat_number
+          LIMIT 1;
+        IF v_apt_id IS NOT NULL THEN
             SELECT id INTO v_rec_acc
               FROM accounts
              WHERE society_id = p_society_id AND tab_name = 'SDr'
@@ -14908,8 +14924,12 @@ BEGIN
             INSERT INTO receivables (society_id, entity_id, role, acc_id, description, period_month,
                                      base_amount, interest_amount, interest_months_applied, amount,
                                      paid_amount, paid_principal, due_date, status)
-            VALUES (p_society_id, r.apartment_id, 'apartment', v_rec_acc,
-                    'Opening dues - Annex C arrears', v_as_at, r.amount, 0, 0, r.amount, 0, 0, v_as_at, 'pending');
+            VALUES (p_society_id, v_apt_id, 'apartment', v_rec_acc,
+                    'Opening dues - Annex C arrears', v_as_at, r.amount, 0, 0, r.amount, 0, 0, v_as_at, 'pending')
+            RETURNING id INTO v_rec_acc;
+            UPDATE opening_receivables_pending
+               SET status = 'linked', apartment_id = v_apt_id, receivable_id = v_rec_acc, linked_at = NOW()
+             WHERE society_id = p_society_id AND flat_number = r.flat_number;
         END IF;
     END LOOP;
 
@@ -22162,6 +22182,81 @@ LANGUAGE sql STABLE AS $$
       FROM adviser_appointments a
      WHERE a.login_user_id = p_user_id AND a.active AND a.revoked_at IS NULL
        AND p_on BETWEEN a.term_start AND a.term_end
-       AND EXISTS (SELECT 1 FROM signed_records s WHERE s.subject_kind = 'adviser_appointment' AND s.subject_id = a.id AND s.status = 'valid')
+        AND EXISTS (SELECT 1 FROM signed_records s WHERE s.subject_kind = 'adviser_appointment' AND s.subject_id = a.id AND s.status = 'valid')
      LIMIT 1
 $$;
+
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Migration 002: onboarding review (Society Onboarding 15 items) — idempotent DDL
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+
+-- societies: phase, signing mode, step-up custody flags
+ALTER TABLE societies ADD COLUMN IF NOT EXISTS onboarding_phase TEXT
+  CHECK (onboarding_phase IN ('enrollment','adoption','advisers','complete'));
+UPDATE societies SET onboarding_phase = 'complete' WHERE onboarding_state = 'active' AND onboarding_phase IS NULL;
+ALTER TABLE societies ADD COLUMN IF NOT EXISTS signing_mode TEXT NOT NULL DEFAULT 'password'
+  CHECK (signing_mode IN ('password','esign','paper'));
+UPDATE societies SET signing_mode = 'esign' WHERE esign_required IS TRUE;
+ALTER TABLE societies ADD COLUMN IF NOT EXISTS stepup_review_required BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE societies ADD COLUMN IF NOT EXISTS stepup_initial BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE societies ADD COLUMN IF NOT EXISTS stepup_changed_at TIMESTAMPTZ;
+
+-- step-up password change (3 signatures: President, Secretary, Treasurer)
+CREATE TABLE IF NOT EXISTS stepup_change_requests (
+  id SERIAL PRIMARY KEY,
+  society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+  requested_by INT NOT NULL REFERENCES users(id),
+  new_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','applied','declined','cancelled')),
+  master_assist_ref TEXT, master_assist_sha256 TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), decided_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_stepup_open ON stepup_change_requests(society_id) WHERE status = 'open';
+
+-- evidence (bank statement, cash count, audited report, review letter, paper signature)
+CREATE TABLE IF NOT EXISTS onboarding_evidence (
+  id SERIAL PRIMARY KEY,
+  society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+  purpose TEXT NOT NULL CHECK (purpose IN ('bank_statement','cash_count','audited_report','review_letter','paper_signature')),
+  acc_id INT, filename TEXT NOT NULL, stored_name TEXT NOT NULL,
+  sha256 CHAR(64) NOT NULL, size_bytes INT NOT NULL, meta JSONB NOT NULL DEFAULT '{}',
+  uploaded_by INT REFERENCES users(id), uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_onb_evidence_soc ON onboarding_evidence(society_id, purpose);
+
+-- opening receivables by flat (pending_link until the flat is enrolled)
+CREATE TABLE IF NOT EXISTS opening_receivables_pending (
+  id SERIAL PRIMARY KEY,
+  society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+  flat_number TEXT NOT NULL, amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  overdue_days INT, remarks TEXT,
+  status TEXT NOT NULL DEFAULT 'pending_link' CHECK (status IN ('pending_link','linked','void_requested')),
+  apartment_id INT, receivable_id INT, void_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), linked_at TIMESTAMPTZ,
+  UNIQUE (society_id, flat_number)
+);
+
+-- onboarding jobs (DB-backed signing/activation job with progress)
+CREATE TABLE IF NOT EXISTS onboarding_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','done','failed')),
+  step INT NOT NULL DEFAULT 0, steps_total INT NOT NULL DEFAULT 7, message TEXT, error TEXT, result JSONB,
+  created_by INT REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ
+);
+
+-- onboarding events (agreement_signed etc.)
+CREATE TABLE IF NOT EXISTS onboarding_events (
+  id SERIAL PRIMARY KEY, society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+  event TEXT NOT NULL, payload JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- law catalog: applies_when + topic columns
+ALTER TABLE legal_instrument_catalog ADD COLUMN IF NOT EXISTS applies_when TEXT NOT NULL DEFAULT 'always'
+  CHECK (applies_when IN ('always','central_it_tan','central_tds','central_gst','central_rera','has_employees','has_security_agency','info'));
+ALTER TABLE legal_instrument_catalog ADD COLUMN IF NOT EXISTS topic VARCHAR(40);
+
+-- pseudo-regime CENTRAL (central laws applying to every society)
+INSERT INTO legal_regime_profiles (code, state_code, constitution, name, primary_law, effective_from)
+  VALUES ('CENTRAL','IN','GENERIC','Central laws applying to every society','Various Central Acts', DATE '1860-01-01')
+  ON CONFLICT (code) DO NOTHING;

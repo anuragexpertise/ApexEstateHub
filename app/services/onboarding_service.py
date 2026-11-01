@@ -23,9 +23,11 @@ import logging
 import os
 import re
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from database.db_manager import db
+
+from app.dash_apps.pages.wizard_registry import DEPENDS, SKIPPED_WHEN
 
 log = logging.getLogger(__name__)
 
@@ -145,24 +147,32 @@ def _store_evidence(society_id: int, filename: str, data: bytes) -> tuple[str, s
 
 
 def _store_signature(society_id: int, filename: str, data: bytes) -> str:
-    """Validate and store a signature PNG; returns the stored relative path."""
+    """Validate and store a signature image (PNG, JPG, JPEG or WEBP); magic-byte check each, then
+    convert to WebP < 50 KB via image_utils.compress_to_webp. Returns the stored relative path."""
+    from app.dash_apps.drilldown.image_utils import compress_to_webp as _c2w
     ext = os.path.splitext(filename or "")[1].lower()
-    if ext != ".png":
-        raise OnboardingError("Signature must be a PNG image.")
-    if not data or len(data) > EVIDENCE_MAX_BYTES:
-        raise OnboardingError("The signature image must be between 1 byte and 5 MB.")
-    if not data.startswith(b"\x89PNG"):
-        raise OnboardingError("The signature file does not look like a real PNG.")
-    digest = _sha(data)
+    if ext not in (".png", ".jpg", ".jpeg", ".webp"):
+        raise OnboardingError("Signature must be a PNG, JPG or WEBP image.")
+    if not data or len(data) > 1024 * 1024:
+        raise OnboardingError("The signature image must be between 1 byte and 1 MB.")
+    magic = data[:12]
+    ok_magic = (magic.startswith(b"\x89PNG") or magic[:4] == b"\xff\xd8\xff" or
+                magic[:4] == b"RIFF" and magic[8:12] == b"WEBP")
+    if not ok_magic:
+        raise OnboardingError("The signature file does not look like a real image.")
+    webp = _c2w(data)
+    if webp is None:
+        raise OnboardingError("The signature image could not be compressed below 50 KB.")
+    digest = _sha(webp)
     try:
         from app.dash_apps.callbacks.drilldown_callbacks import ASSETS_ROOT
         folder = ASSETS_ROOT / str(society_id) / "signatures"
         folder.mkdir(parents=True, exist_ok=True)
-        stored = f"{digest}.png"
-        (folder / stored).write_bytes(data)
-    except Exception:
+        stored = f"{digest}.webp"
+        (folder / stored).write_bytes(webp)
+    except Exception:                                               # noqa: BLE001
         log.exception("could not keep the signature file for society %s", society_id)
-        stored = f"{digest}.png"
+        stored = f"{digest}.webp"
     return stored
 
 
@@ -205,9 +215,9 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
         raise OnboardingError("Attach the signed minutes of the election (PDF, PNG or JPG).")
     stored, digest = _store_evidence(society_id, evidence_name or "", evidence_bytes)
 
-    sig_stored = None
-    if signature_bytes:
-        sig_stored = _store_signature(society_id, signature_name or "", signature_bytes)
+    if not signature_bytes:
+        raise OnboardingError("Attach the signature image.")
+    sig_stored = _store_signature(society_id, signature_name or "", signature_bytes)
 
     apt = _row("SELECT id FROM apartments WHERE society_id=%s AND flat_number=%s", (society_id, flat))
     login = None
@@ -239,6 +249,11 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
                              evidence_file=stored, evidence_hash=digest)
         if not ok:
             raise OnboardingError(msg)
+        # Item 10: link any pending opening receivable for this flat (idempotent).
+        try:
+            link_opening_receivable(society_id, apt["id"], flat)
+        except Exception:                                          # noqa: BLE001 - the seat stands even if linking fails
+            log.exception("could not link opening receivable for flat %s in society %s", flat, society_id)
     except Exception:
         if created_user:
             db._execute("DELETE FROM users WHERE id=%s", (login["id"],))
@@ -251,6 +266,51 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
     if office_code == "secretary" and sig_stored:
         db._execute("UPDATE societies SET secretary_sign=%s WHERE id=%s", (sig_stored, society_id))
     return f"{name} is now {OFFICE_LABEL[office_code]} (evidence {digest[:12]}...)." + extra
+
+
+def update_seated_officer(actor_id: int, society_id: int, office_code: str, phone: str | None = None,
+                          signature_name: str | None = None, signature_bytes: bytes | None = None) -> str:
+    """Update a seated officer's mobile and/or signature image. Allowed while the society is not past setup
+    (registered / committee seated / setup draft) and no Agreement signature exists yet. Audit: FOUNDING_OFFICER_UPDATED."""
+    from app.services import committee_service as cs
+    if office_code not in CORE_OFFICES:
+        raise OnboardingError("Only the President, Secretary and Treasurer may be updated here.")
+    st = state_of(society_id)
+    if st not in ("registered", "committee seated", "setup draft"):
+        raise OnboardingError("Office-bearer details can only be changed before signing starts.")
+    ag = _row("SELECT id FROM society_agreements WHERE society_id=%s ORDER BY id DESC LIMIT 1", (society_id,))
+    if ag:
+        n = (db._execute("SELECT COUNT(*) AS n FROM document_signatures WHERE subject_kind='agreement' AND subject_id=%s",
+                         (ag["id"],), fetch_one=True) or {}).get("n", 0)
+        if n:
+            raise OnboardingError("The Agreement is already being signed; office-bearer details are locked.")
+    row = _row("""SELECT co.id, co.apartment_id FROM committee_offices co
+                   WHERE co.society_id=%s AND co.office_code=%s AND co.status='active'
+                     AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE)""",
+               (society_id, office_code))
+    if not row:
+        raise OnboardingError(f"{OFFICE_LABEL[office_code]} is not currently seated.")
+    updates = []
+    params = []
+    if phone is not None:
+        p = cs.clean_phone(phone)
+        if p is False:
+            raise OnboardingError("Enter a valid phone number.")
+        updates.append("phone=%s"); params.append(p)
+    sig_stored = None
+    if signature_bytes:
+        sig_stored = _store_signature(society_id, signature_name or "", signature_bytes)
+        updates.append("signature_image=%s"); params.append(sig_stored)
+    if not updates:
+        return f"{OFFICE_LABEL[office_code]}: nothing changed."
+    params += [society_id, office_code]
+    db._execute(f"UPDATE committee_offices SET {', '.join(updates)} WHERE society_id=%s AND office_code=%s AND status='active'", tuple(params))
+    # Sync the society letterhead Secretary signature.
+    if office_code == "secretary" and sig_stored:
+        db._execute("UPDATE societies SET secretary_sign=%s WHERE id=%s", (sig_stored, society_id))
+    _audit(society_id, actor_id, "FOUNDING_OFFICER_UPDATED", "committee_office", int(row["id"]),
+           {"office": office_code, "phone": bool(phone), "signature": bool(sig_stored)})
+    return f"{OFFICE_LABEL[office_code]} details updated."
 
 
 def set_grievance_officer(society_id: int, name: str, email: str, phone: str | None) -> None:
@@ -271,6 +331,412 @@ def declaration(society_id: int) -> dict | None:
         return None
     d = r["declaration_json"]
     return d if isinstance(d, dict) else json.loads(d or "{}")
+
+
+# ── §2.1 draft model: single source of truth for the wizard ───────────────────────
+def load_draft(society_id: int) -> dict:
+    """Return the saved draft dict (the "draft" key of declaration_json), {} if none."""
+    d = declaration(society_id) or {}
+    return d.get("draft") or {}
+
+
+def _save_declaration(society_id: int, d: dict, actor_id: int) -> None:
+    db._execute("""INSERT INTO onboarding_declarations (society_id, declaration_json, status, created_by, submitted_at)
+                   VALUES (%s, %s::jsonb, 'submitted', %s, NOW())
+                   ON CONFLICT (society_id) DO UPDATE SET
+                       declaration_json = EXCLUDED.declaration_json,
+                       status = 'submitted', updated_at = NOW(), submitted_at = NOW()""",
+                (society_id, json.dumps(d, default=str), actor_id))
+
+
+from app.dash_apps.pages.wizard_registry import DEPENDS, SKIPPED_WHEN
+
+
+def save_step(society_id: int, actor_id: int, step_key: str, values: dict) -> dict:
+    """Validate only `step_key`, merge its values into draft[step_key], persist.
+
+    Returns {"ok": bool, "errors": [str], "status": "done"|"todo"|"error"}.
+    Never touches the ledger. Values that are None are ignored so a not-rendered
+    step can never wipe the draft. When saved values change, dependents (§2.2)
+    are marked needs_review; TDS/GST flip to skipped when their central flag is
+    off.
+    """
+    d = declaration(society_id) or {}
+    draft = d.setdefault("draft", {})
+    steps = d.setdefault("steps", {})
+    errors = validate_step(step_key, draft, society_id)
+    changed = False
+    step_values = dict(draft.get(step_key) or {})
+    for k, v in (values or {}).items():
+        if v is not None and step_values.get(k) != v:
+            step_values[k] = v
+            changed = True
+    draft[step_key] = step_values
+
+    status = "done" if not errors else "todo"
+    steps[step_key] = {"status": status, "saved_at": date.today().isoformat(),
+                       "needs_review": False}
+
+    if changed:
+        for dep in DEPENDS.get(step_key, []):
+            ds = steps.get(dep) or {}
+            if ds.get("status") in ("done", "todo"):
+                ds["needs_review"] = True
+                steps[dep] = ds
+
+    # Skipping: TDS/GST flip to skipped when their central flag is off.
+    if step_key == "legal_regime":
+        central = step_values
+        for dep_key, flag in SKIPPED_WHEN.items():
+            if central.get(flag) is False:
+                steps[dep_key] = {"status": "skipped", "saved_at": None, "needs_review": False}
+            elif central.get(flag) is True:
+                cur = steps.get(dep_key) or {}
+                if cur.get("status") == "skipped":
+                    cur["status"] = "todo"
+                    cur["needs_review"] = True
+                    steps[dep_key] = cur
+
+    _save_declaration(society_id, d, actor_id)
+    return {"ok": not errors, "errors": errors, "status": steps[step_key]["status"]}
+
+
+def validate_step(step_key: str, draft: dict, society_id: int) -> list[str]:
+    """Pure validator for one step; no DB writes beyond read-only lookups."""
+    draft = draft or {}
+    step = draft.get(step_key) or {}
+    errors: list[str] = []
+
+    def req(label, value):
+        if value is None or str(value).strip() == "":
+            errors.append(f"{label} is required.")
+
+    if step_key == "society_details":
+        req("Address", step.get("address"))
+        email = str(step.get("email") or "").strip()
+        if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            errors.append("Enter a valid email address.")
+        phone = str(step.get("phone") or "").strip()
+        if phone and not re.fullmatch(r"[0-9+()\-\s]{7,20}", phone):
+            errors.append("Enter a valid phone number.")
+        if not step.get("state"):
+            errors.append("State is required.")
+        if not step.get("constitution"):
+            errors.append("Constitution is required.")
+
+    elif step_key == "administrator":
+        secret = step.get("stepup_hash")
+        if not secret:
+            errors.append("Step-up password is required.")
+        from app.security.password_policy import validate_signing_secret as _vss
+        if secret and _vss(str(secret)):
+            errors.append(_vss(str(secret)))
+        if not _committee_complete(society_id):
+            errors.append("All three office-bearers (President, Secretary, Treasurer) must be seated with a signature image and mobile.")
+
+    elif step_key == "legal_regime":
+        from app.services.statutory_rules import regime_for_society as _rfs
+        try:
+            _rfs(society_id, step.get("state") or None)
+        except Exception as exc:
+            errors.append(f"Legal regime could not be resolved: {exc}")
+
+    elif step_key == "funds":
+        for fund, rate in (("sinking", step.get("apt_sinking")), ("repair", step.get("apt_repair"))):
+            if rate not in (None, ""):
+                try:
+                    r = float(rate)
+                    if r < 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    errors.append(f"{fund.title()} fund rate must be a number >= 0.")
+
+    elif step_key == "tds":
+        if not step.get("central_tds", True):
+            return errors
+        if not str(step.get("tan") or "").strip():
+            errors.append("TAN is required when TDS applies.")
+        import re as _re
+        tan = str(step.get("tan") or "").strip()
+        if tan and not _re.fullmatch(r"[A-Z]{4}[0-9]{5}[A-Z]", tan):
+            errors.append("TAN must match ABCD12345E.")
+        for row in (step.get("rows") or []):
+            for fld in ("rate", "rate_no_pan"):
+                v = row.get(fld)
+                if v not in (None, ""):
+                    try:
+                        d = Decimal(str(v))
+                        if not (0 <= d <= 100):
+                            raise ValueError
+                    except (InvalidOperation, ValueError):
+                        errors.append(f"TDS row {row.get('section')}: {fld} must be 0-100.")
+
+    elif step_key == "gst":
+        if not step.get("central_gst", True):
+            return errors
+        gstin = str(step.get("gstin") or "").strip()
+        if gstin and len(gstin) != 15:
+            errors.append("GSTIN must be 15 characters.")
+        for fld in ("cgst", "sgst"):
+            v = step.get(fld)
+            if v not in (None, ""):
+                try:
+                    d = Decimal(str(v))
+                    if d < 0:
+                        raise ValueError
+                except (InvalidOperation, ValueError):
+                    errors.append(f"{fld.upper()} must be a number >= 0.")
+
+    elif step_key == "vendor":
+        for fld in ("vendor_1day", "vendor_7day", "vendor_1mth"):
+            v = step.get(fld)
+            if v not in (None, ""):
+                try:
+                    d = Decimal(str(v))
+                    if d < 0:
+                        raise ValueError
+                except (InvalidOperation, ValueError):
+                    errors.append(f"{fld} must be a number >= 0.")
+
+    elif step_key == "accounts":
+        if not step.get("calc_start"):
+            errors.append("Accounting/calculation start date is required.")
+
+    elif step_key == "brought_forward":
+        if not step.get("fy"):
+            errors.append("Financial year is required.")
+        rows = step.get("rows") or []
+        dr = sum((money(r.get("bf_amount")) for r in rows if r.get("side") == "Dr"), Decimal(0))
+        cr = sum((money(r.get("bf_amount")) for r in rows if r.get("side") == "Cr"), Decimal(0))
+        if rows and dr != cr:
+            errors.append(f"Brought Forward does not balance: Dr {dr} vs Cr {cr}.")
+        # Receivables tie-out: sum of receivables vs Sundry Debtors accounts entered above.
+        recs = step.get("receivables") or []
+        rec_total = sum((money(r.get("amount")) for r in recs if r.get("amount") not in (None, "")), Decimal(0))
+        sdr_total = Decimal(0)
+        for r in rows:
+            if r.get("side") == "Dr" and r.get("tab") in ("SDr", "SDrCash", "SDrDig"):
+                sdr_total += money(r.get("bf_amount"))
+        if recs and rec_total != sdr_total:
+            errors.append(f"Pending receivables (₹{rec_total}) do not tie to Sundry Debtors accounts (₹{sdr_total}).")
+
+    return errors
+
+
+def validate_all(draft: dict, society_id: int) -> dict[str, list[str]]:
+    """Every step's errors; empty lists mean the step is valid."""
+    return {k: validate_step(k, draft, society_id) for k in STEP_REGISTRY_KEYS}
+
+
+def step_statuses(society_id: int) -> dict[str, dict]:
+    """What the left rail renders: {step_key: {status, saved_at, needs_review}}."""
+    d = declaration(society_id) or {}
+    steps = d.get("steps") or {}
+    out = {}
+    for key in STEP_REGISTRY_KEYS:
+        s = dict(steps.get(key) or {"status": "todo", "saved_at": None})
+        s.setdefault("status", "todo")
+        out[key] = s
+    return out
+
+
+def finalize_draft(society_id: int, actor_id: int, admin_password: str) -> str:
+    """validate_all must be empty; write societies via fn_complete_society_setup(draft=True);
+    state -> 'setup draft'. Keeps the 5 s throttle, lockout check and key seeding in one
+    transaction (A14 atomicity)."""
+    from app.security.auth_service import verify_password_with_lockout as _verify
+    d = declaration(society_id)
+    if d is None:
+        raise OnboardingError("Submit the Setup Wizard first; its draft is what the annexes are built from.")
+    draft = d.get("draft") or {}
+    bad = validate_all(draft, society_id)
+    if any(v for v in bad.values()):
+        flat = [e for k, v in bad.items() for e in v]
+        raise OnboardingError("Fix the step errors first: " + "; ".join(flat[:5]))
+    _pw_ok, _pw_msg = _verify(actor_id, admin_password or "")
+    if not _pw_ok:
+        raise OnboardingError(_pw_msg or "Admin password is wrong.")
+    if state_of(society_id) not in ("committee seated", "setup draft"):
+        raise OnboardingError("Seat the President, Secretary and Treasurer first.")
+    # Reuse the existing atomic submit path, reading values from the draft.
+    _submit_from_draft(society_id, actor_id, draft)
+    return "Setup draft saved. Next: check and seal the annexes, then sign the Agreement."
+
+
+def _committee_complete(society_id: int) -> bool:
+    officers = seated_officers(society_id)
+    return all(bool(officers.get(o)) and officers[o].get("complete") for o in CORE_OFFICES)
+
+
+def _audit(society_id: int, actor_id: int, action: str, resource_type: str, resource_id: int | None,
+           extra: dict) -> None:
+    import json as _json
+    db._execute("INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source) "
+                "VALUES (%s,%s,%s,%s,%s,%s::jsonb,'app')",
+                (society_id, actor_id, action, resource_type, str(resource_id or 0), _json.dumps(extra or {})))
+
+
+# Public alias used by the UI and validators (§4.4.6).
+committee_complete = _committee_complete
+
+
+STEP_REGISTRY_KEYS = [
+    "society_details", "administrator", "legal_regime", "funds", "tds", "gst",
+    "apartment", "vendor", "accounts", "brought_forward", "review",
+]
+
+
+def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
+    """Build the fn_complete_society_setup call from the draft (fixes F2: TDS as rows,
+    BF as bf_json, images/compliance flags all present)."""
+    import json as _json
+    from database.db_manager import _to_pyformat
+    from app.services import regime_rules_admin as _rra
+    from app.services.auth_service import verify_password_with_lockout  # noqa: F401  (throttle+lockout shared)
+    from app.dash_apps.pages.setup_wizard import (_fund_flags_fn, _fund_plan_fn, apt_charges_error as _apt_charges_error,
+                                                  funds_error as _funds_error, fund_plan as _fund_plan)
+    from database.seed import tds_wizard_rows as _tds_wizard_rows, it2025_twin as _it2025_twin
+    from app.utils.fiscal import fy_start_date as _fy_start_date
+    from app.services.signing_service import ensure_society_keys as _ensure_society_keys, set_stepup_password_hash as _set_stepup_password_hash
+    from app.dash_apps.callbacks.drilldown_callbacks import _move_temp_images as _move_temp_images
+
+    def _num_or_none(v):
+        return None if v in (None, "") else float(v)
+
+    soc = _row("SELECT state, constitution FROM societies WHERE id=%s", (society_id,)) or {}
+    s_state = soc.get("state") or "UP"
+    s_constitution = soc.get("constitution") or "AOA"
+
+    sd = draft.get("society_details") or {}
+    admin = draft.get("administrator") or {}
+    regime = draft.get("legal_regime") or {}
+    funds = draft.get("funds") or {}
+    tds = draft.get("tds") or {}
+    gst = draft.get("gst") or {}
+    apt = draft.get("apartment") or {}
+    vend = draft.get("vendor") or {}
+    accts = draft.get("accounts") or {}
+    bf = draft.get("brought_forward") or {}
+    images = draft.get("images") or {}
+
+    _flags = _fund_flags_fn(society_id, s_state, constitution=s_constitution)
+    apt_sinking = (funds.get("apt_sinking") or 0) if _flags["sinking"] else 0
+    apt_repair = (funds.get("apt_repair") or 0) if _flags["repair"] else 0
+
+    _apt_err = (_apt_charges_error(funds.get("apt_billing_basis"), funds.get("apt_budget"),
+                                   funds.get("apt_rate"), funds.get("apt_amt"))
+                or _funds_error(_fund_plan(society_id, s_state, constitution=s_constitution)["plan"],
+                                apt_sinking, apt_repair, funds.get("apt_cost")))
+    if _apt_err:
+        raise OnboardingError(_apt_err)
+
+    # throttle (5 s, shared via DB)
+    _slot = db._execute(
+        "UPDATE users SET setup_submit_at = NOW() "
+        "WHERE id = :uid AND (setup_submit_at IS NULL OR setup_submit_at < NOW() - INTERVAL '5 seconds') RETURNING id",
+        {"uid": actor_id}, fetch_one=True,
+    )
+    if not _slot:
+        raise OnboardingError("Please wait before submitting again.")
+
+    _ensure_society_keys(society_id, actor_id)
+    secret_enc = _set_stepup_password_hash(admin.get("stepup_hash") or "")
+
+    try:
+        from app.services.up_aoa_actions import fill_after_enrolment as _fill_after_enrolment
+        _fill_after_enrolment(society_id)
+    except Exception:
+        pass
+
+    tds_rows = []
+    for item in _tds_wizard_rows():
+        row = next((r for r in (tds.get("rows") or []) if r.get("section") == item[0] and r.get("discriminator") == item[1]), {})
+        twin = _it2025_twin(item[0], item[1])
+        pair = {
+            "section": item[0], "discriminator": item[1],
+            "nature_of_income": row.get("nature_of_income"),
+            "rate": _num_or_none(row.get("rate")),
+            "rate_no_pan": _num_or_none(row.get("rate_no_pan")),
+            "single_bill_threshold": _num_or_none(row.get("single_bill_threshold")),
+            "annual_aggregate_threshold": _num_or_none(row.get("annual_aggregate_threshold")),
+        }
+        if twin is not None:
+            pair["it2025"] = twin
+        tds_rows.append(pair)
+
+    bf_json = []
+    for r in (bf.get("rows") or []):
+        amt = money(r.get("bf_amount"))
+        if amt > 0:
+            bf_json.append({"acc_id": int(r.get("acc_id")), "bf_amount": str(amt),
+                            "remarks": r.get("remarks") or ""})
+
+    form_data = {}
+    for key, field in (("logo", images.get("logo")), ("bg", images.get("bg")),
+                       ("pay_qr", accts.get("pay_qr")), ("sec_sign", images.get("sec_sign"))):
+        if field:
+            form_data[key] = field
+    if form_data:
+        _move_temp_images("society", society_id, society_id, form_data)
+
+    c_gst_exempt = bool(draft.get("compliance", {}).get("gst_exempt")) if draft.get("compliance") else False
+    c_gst_cad = (draft.get("compliance") or {}).get("cadence") or "monthly"
+    c_tds_act = (draft.get("compliance") or {}).get("tds_no_pan") or "warn"
+    c_gst_reg = bool((draft.get("compliance") or {}).get("registered"))
+    c_charges_int = _rra.policy_intent(society_id, "fund_arrears_interest") == "yes"
+    c_sink = _flags["plan"]["sinking"]["basis"] if _flags["plan"]["sinking"]["mode"] == "on_bill" else "per_sq_ft"
+    c_repair = _flags["plan"]["repair"]["basis"] if _flags["plan"]["repair"]["mode"] == "on_bill" else "per_sq_ft"
+
+    tan = str(tds.get("tan") or "")[:10] or None
+    gstin = str(gst.get("gstin") or "")[:15] or None
+    reg_row = _row("SELECT registration_number FROM societies WHERE id = :id", {"id": society_id}) or {}
+    reg_num = reg_row.get("registration_number")
+
+    _setup_sql = """SELECT fn_complete_society_setup(
+                    :sid, :secret_enc, :logo, :addr, :phone, :bg, :tan, :gstin, :pay_qr, :calc_start,
+                    :sec_name, :sec_phone, :sec_email, :sec_sign,
+                    CAST(:tds_json AS jsonb), :cgst, :sgst,
+                    :apt_amt, :apt_rate, :apt_billing_basis, :apt_due, :apt_sink, :apt_repair,
+                    :ven_1, :ven_7, :ven_30,
+                    :bf_fy, CAST(:bf_json AS jsonb), :created_by,
+                    :s_email, :reg_num, :apt_interest,
+                    :c_sink, :c_repair, :c_gst_exempt, :c_charges_int, :c_gst_cad, :c_gst_reg, :c_tds_act, :c_exp_fmt, :gate_logic, :duty_hrs, :tds_effective_date, :s_state, :s_constitution,
+                    :apt_cost, :apt_budget, :draft
+                ) AS result"""
+    _setup_params = {
+        "sid": society_id, "secret_enc": secret_enc,
+        "logo": images.get("logo"), "addr": sd.get("address"), "phone": sd.get("phone"),
+        "bg": images.get("bg"), "tan": tan, "gstin": gstin, "pay_qr": accts.get("pay_qr"),
+        "calc_start": accts.get("calc_start") or str(_fy_start_date()),
+        "sec_name": "", "gate_logic": sd.get("gate_logic"), "duty_hrs": sd.get("duty_hrs"),
+        "sec_phone": "", "sec_email": "", "sec_sign": images.get("sec_sign"),
+        "tds_json": _json.dumps(tds_rows),
+        "cgst": _num_or_none(gst.get("cgst")), "sgst": _num_or_none(gst.get("sgst")),
+        "apt_amt": funds.get("apt_amt"), "apt_rate": funds.get("apt_rate"),
+        "apt_billing_basis": funds.get("apt_billing_basis"), "apt_due": funds.get("apt_due_day"),
+        "apt_sink": apt_sinking, "apt_repair": apt_repair,
+        "ven_1": vend.get("vendor_1day"), "ven_7": vend.get("vendor_7day"), "ven_30": vend.get("vendor_1mth"),
+        "bf_fy": bf.get("fy"), "bf_json": _json.dumps(bf_json), "created_by": actor_id,
+        "s_email": sd.get("email"), "reg_num": reg_num,
+        "apt_interest": max(float(funds.get("apt_interest") or 0), 0.0),
+        "apt_cost": funds.get("apt_cost"), "apt_budget": funds.get("apt_budget"),
+        "c_sink": c_sink, "c_repair": c_repair, "c_gst_exempt": c_gst_exempt,
+        "c_charges_int": c_charges_int, "c_gst_cad": c_gst_cad, "c_gst_reg": c_gst_reg,
+        "c_tds_act": c_tds_act, "c_exp_fmt": "structured",
+        "tds_effective_date": tds.get("effective_date") or str(_fy_start_date()),
+        "s_state": s_state, "s_constitution": s_constitution, "draft": True,
+    }
+    _sql, _prm = _to_pyformat(_setup_sql, _setup_params)
+    with db._conn() as conn:
+        cur = conn.cursor()
+        from database.seed import seed_accounts as _seed_accounts
+        _seed_accounts(cur, conn, society_id, commit=False)
+        cur.execute(_sql, _prm)
+        _row = cur.fetchone()
+        result = dict(_row) if _row else None
+        _res = (result or {}).get("result") or ""
+        if _res != "OK":
+            raise OnboardingError(_res or "Setup could not be saved — please try again.")
 
 
 def save_annex_inputs(society_id: int, arrears_text: str, bank_agrees: bool, audited_hash: str | None, ca_review_ref: str | None) -> dict:
@@ -301,6 +767,183 @@ def save_annex_inputs(society_id: int, arrears_text: str, bank_agrees: bool, aud
     d["annex_c_inputs"] = inputs
     db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s", (json.dumps(d), society_id))
     return inputs
+
+
+# ── item 10: pending receivables by flat ─────────────────────────────────────────
+def get_receivables(society_id: int) -> list[dict]:
+    """Read receivables from the draft (brought_forward.receivables), [] if none."""
+    d = declaration(society_id) or {}
+    bf = (d.get("draft") or {}).get("brought_forward") or {}
+    return bf.get("receivables") or []
+
+
+def save_receivables(society_id: int, actor_id: int, rows: list[dict]) -> dict:
+    """Validate and save receivables rows into draft.brought_forward.receivables."""
+    d = declaration(society_id) or {}
+    draft = d.setdefault("draft", {})
+    bf = draft.setdefault("brought_forward", {})
+    errors: list[str] = []
+    seen: set[str] = set()
+    clean: list[dict] = []
+    total = Decimal(0)
+    for idx, r in enumerate(rows or [], start=1):
+        flat = (r.get("flat_number") or "").strip()
+        if not flat:
+            errors.append(f"Row {idx}: flat number is required.")
+            continue
+        if flat in seen:
+            errors.append(f"Row {idx}: duplicate flat number {flat}.")
+            continue
+        seen.add(flat)
+        try:
+            amt = money(r.get("amount"))
+            if amt <= 0:
+                raise ValueError
+        except (ValueError, ArithmeticError):
+            errors.append(f"Row {idx}: amount must be a number > 0.")
+            continue
+        days = r.get("overdue_days")
+        if days in (None, ""):
+            days = None
+        else:
+            try:
+                days = int(days)
+                if days < 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                errors.append(f"Row {idx}: days overdue must be an integer >= 0.")
+                continue
+        clean.append({"flat_number": flat, "amount": str(amt), "overdue_days": days,
+                      "remarks": (r.get("remarks") or "")[:200]})
+        total += amt
+    bf["receivables"] = clean
+    steps = d.setdefault("steps", {})
+    steps["brought_forward"] = {"status": "done" if not errors else "todo",
+                                "saved_at": date.today().isoformat()}
+    db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s",
+                (json.dumps(d), society_id))
+    return {"ok": not errors, "errors": errors, "total": str(total)}
+
+
+def link_opening_receivable(society_id: int, apartment_id: int, flat_number: str) -> str | None:
+    """When a flat is enrolled, create its receivable row from opening_receivables_pending
+    (idempotent) and mark it linked. Returns the receivable id or None if no pending row."""
+    pending = _row("""SELECT id, amount, overdue_days, remarks FROM opening_receivables_pending
+                       WHERE society_id=%s AND flat_number=%s AND status='pending_link'""",
+                   (society_id, flat_number), fetch_one=True)
+    if not pending:
+        return None
+    from database.seed import seed_receivable as _seed_receivable
+    try:
+        with db._conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""SELECT id FROM receivables WHERE society_id=%s AND flat_number=%s""",
+                        (society_id, flat_number))
+            if cur.fetchone():
+                rec_id = None
+            else:
+                cur.execute("""INSERT INTO receivables (society_id, apartment_id, flat_number, amount, overdue_days,
+                                                           particulars, status, created_at)
+                                VALUES (%s,%s,%s,%s,%s,'Opening dues - Annex C arrears','open',NOW())
+                                RETURNING id""",
+                            (society_id, apartment_id, flat_number, pending["amount"],
+                             pending["overdue_days"]))
+                rec_id = (cur.fetchone() or {}).get("id")
+            cur.execute("""UPDATE opening_receivables_pending SET status='linked', apartment_id=%s,
+                              receivable_id=%s, linked_at=NOW() WHERE id=%s""",
+                        (apartment_id, rec_id, pending["id"]))
+            conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return rec_id
+
+
+def get_pending_receivables(society_id: int) -> list[dict]:
+    """Receivables still awaiting enrolment (pending_link), for Stage 5."""
+    return _rows("""SELECT id, flat_number, amount, overdue_days, remarks, status, apartment_id
+                     FROM opening_receivables_pending
+                    WHERE society_id=%s AND status IN ('pending_link','void_requested')
+                    ORDER BY flat_number""", (society_id,)) or []
+
+
+def void_pending_receivable(society_id: int, actor_id: int, flat_number: str, reason: str) -> None:
+    """Mark a pending receivable as void (flat does not exist). Requires a reason >= 10 chars."""
+    if not reason or len(reason.strip()) < 10:
+        raise OnboardingError("Give a reason (at least 10 characters) for voiding this flat.")
+    _row("""UPDATE opening_receivables_pending SET status='void_requested', void_reason=%s
+             WHERE society_id=%s AND flat_number=%s AND status='pending_link'""",
+         (reason.strip(), society_id, flat_number))
+    _audit(society_id, actor_id, "OPENING_RECEIVABLE_VOIDED", "opening_receivables_pending", None,
+           {"flat_number": flat_number, "reason": reason})
+
+
+# ── item 11: bank / cash reconciliation & evidence ───────────────────────────────
+def get_bank_reconciliation(society_id: int) -> dict:
+    """Read reconciliation & evidence from draft.brought_forward.reconciliation."""
+    d = declaration(society_id) or {}
+    bf = (d.get("draft") or {}).get("brought_forward") or {}
+    return bf.get("reconciliation") or {}
+
+
+def save_bank_reconciliation(society_id: int, actor_id: int, values: dict) -> dict:
+    """Save reconciliation & evidence into draft.brought_forward.reconciliation."""
+    d = declaration(society_id) or {}
+    draft = d.setdefault("draft", {})
+    bf = draft.setdefault("brought_forward", {})
+    rec = bf.setdefault("reconciliation", {})
+    rec.update(values)
+    bf["reconciliation"] = rec
+    steps = d.setdefault("steps", {})
+    steps["brought_forward"] = {"status": "done", "saved_at": date.today().isoformat()}
+    db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s",
+                (json.dumps(d), society_id))
+    return {"ok": True}
+
+
+def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filename: str,
+                        data: bytes, uploaded_by: int, meta: dict) -> dict:
+    """Store an evidence file via _store_evidence extended with purpose; returns db row."""
+    import os as _os
+    ext = _os.path.splitext(filename or "")[1].lower()
+    if ext not in EVIDENCE_TYPES:
+        raise OnboardingError("Attach the file as a PDF, PNG or JPG (max 5 MB).")
+    if not data or len(data) > EVIDENCE_MAX_BYTES:
+        raise OnboardingError("The file must be between 1 byte and 5 MB.")
+    if not data.startswith(EVIDENCE_TYPES[ext]):
+        raise OnboardingError("The file does not look like a real %s." % ext.lstrip(".").upper())
+    digest = _sha(data)
+    try:
+        from app.dash_apps.callbacks.drilldown_callbacks import ASSETS_ROOT
+        folder = ASSETS_ROOT / str(society_id) / "evidence"
+        folder.mkdir(parents=True, exist_ok=True)
+        stored = f"{digest}{ext}"
+        (folder / stored).write_bytes(data)
+    except Exception:
+        log.exception("could not keep evidence file for society %s", society_id)
+        stored = f"{digest}{ext}"
+    row = _row("""INSERT INTO onboarding_evidence (society_id, purpose, acc_id, filename, stored_name,
+                    sha256, size_bytes, meta, uploaded_by)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s) RETURNING id""",
+               (society_id, purpose, acc_id, filename, stored, digest, len(data),
+                json.dumps(meta or {}), uploaded_by), fetch_one=True)
+    return {"id": row["id"], "sha256": digest, "stored_name": stored, "filename": filename}
+
+
+def get_evidence(society_id: int, purpose: str, acc_id: int | None = None) -> list[dict]:
+    """Read evidence rows for a purpose (and optional account)."""
+    if acc_id is not None:
+        return _rows("""SELECT id, purpose, acc_id, filename, stored_name, sha256, size_bytes, meta,
+                               uploaded_by, uploaded_at
+                          FROM onboarding_evidence
+                         WHERE society_id=%s AND purpose=%s AND acc_id=%s
+                         ORDER BY uploaded_at DESC""",
+                     (society_id, purpose, acc_id)) or []
+    return _rows("""SELECT id, purpose, acc_id, filename, stored_name, sha256, size_bytes, meta,
+                          uploaded_by, uploaded_at
+                     FROM onboarding_evidence
+                    WHERE society_id=%s AND purpose=%s
+                    ORDER BY uploaded_at DESC""", (society_id, purpose)) or []
 
 
 # ── stage 3: setup draft submit (merged from setup_wizard.submit_setup_wizard) ──────────────────────────
@@ -413,22 +1056,40 @@ def submit_setup_draft(society_id: int, actor_id: int, data: dict) -> str:
     except Exception:
         pass  # undivided-interest fill is best-effort
 
-    # build tds pairs
+    # build tds pairs — accept `tds` either as a list of dicts keyed by
+    # (section, discriminator) (the wizard upload/nav path, fixes F2) or, for
+    # backward compat, as a positional list of rates.
     tds_raw = data.get("tds") or []
+    tds_by_key = {}
+    if tds_raw and isinstance(tds_raw[0], dict):
+        for row in tds_raw:
+            if row.get("section") and row.get("discriminator") is not None:
+                tds_by_key[(row["section"], row["discriminator"])] = row
     tds_natures = data.get("tds_natures") or []
     tds_pairs = []
     for idx, item in enumerate(_tds_wizard_rows()):
-        rate = _num_or_none(tds_raw, idx)
+        key = (item[0], item[1])
+        row = tds_by_key.get(key, {})
+        rate = row.get("rate")
+        if rate in (None, ""):
+            rate = _num_or_none(tds_raw, idx) if not tds_by_key else None
         if rate is None:
             continue
         pair = {
-            "section": item[0],
-            "discriminator": item[1],
-            "nature_of_income": tds_natures[idx] if idx < len(tds_natures) else None,
+            "section": item[0], "discriminator": item[1],
+            "nature_of_income": row.get("nature_of_income")
+            if row.get("nature_of_income") is not None
+            else (tds_natures[idx] if idx < len(tds_natures) else None),
             "rate": rate,
-            "rate_no_pan": _num_or_none(data.get("tds_rates_no_pan") or [], idx),
-            "single_bill_threshold": _num_or_none(data.get("tds_single_bills") or [], idx),
-            "annual_aggregate_threshold": _num_or_none(data.get("tds_agg_bills") or [], idx),
+            "rate_no_pan": row.get("rate_no_pan")
+            if row.get("rate_no_pan") is not None
+            else _num_or_none(data.get("tds_rates_no_pan") or [], idx),
+            "single_bill_threshold": row.get("single_bill_threshold")
+            if row.get("single_bill_threshold") is not None
+            else _num_or_none(data.get("tds_single_bills") or [], idx),
+            "annual_aggregate_threshold": row.get("annual_aggregate_threshold")
+            if row.get("annual_aggregate_threshold") is not None
+            else _num_or_none(data.get("tds_agg_bills") or [], idx),
         }
         twin = _it2025_twin(item[0], item[1])
         if twin is not None:
@@ -589,19 +1250,41 @@ def _ctl(passed: bool, reason: str, blocking: bool = True) -> dict:
 
 
 def _annex_a(society_id: int, soc: dict) -> tuple[dict, dict]:
-    regime = _row("SELECT regime_code, effective_from, source_reference FROM society_legal_regime WHERE society_id=%s "
-                  "AND effective_from <= CURRENT_DATE AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)", (society_id,))
-    clauses = _rows("SELECT clause_id, layer, status, proposed_status, variation_text, resolution_id FROM society_bye_laws "
-                    "WHERE society_id=%s ORDER BY clause_id", (society_id,))
-    provisional = [c for c in clauses if c.get("proposed_status") or not c.get("resolution_id")]
-    content = {"state": soc.get("state"), "constitution": soc.get("constitution"),
-               "regime_code": (regime or {}).get("regime_code"), "regime_effective_from": str((regime or {}).get("effective_from") or ""),
-               "bye_laws": [{"clause": c["clause_id"], "layer": c["layer"], "status": c["status"],
-                             "variation": c.get("variation_text"), "provisional": c in provisional} for c in clauses],
-               "note": "Every clause marked provisional becomes active only when a passed General Body resolution is recorded."}
-    controls = {"regime_assigned": _ctl(bool(regime), "A legal regime is assigned." if regime else
+    """Annex A: legal regime and hierarchy snapshot, sealed as part of the Agreement."""
+    from app.services.statutory_rules import instruments_for_regime, instrument_applies
+    regime_row = _row("SELECT regime_code FROM society_legal_regime WHERE society_id=%s "
+                      "AND effective_from <= CURRENT_DATE AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)", (society_id,))
+    regime_code = (regime_row or {}).get("regime_code")
+    # Read the six Yes/No answers from the draft.
+    decl = declaration(society_id) or {}
+    draft = decl.get("draft") or {}
+    regime = draft.get("legal_regime") or {}
+    answers = {"central_it_tan": bool(regime.get("central_it_tan")),
+               "central_tds": bool(regime.get("central_tds")),
+               "central_gst": bool(regime.get("central_gst")),
+               "central_rera": bool(regime.get("central_rera")),
+               "has_employees": bool(regime.get("has_employees")),
+               "has_security_agency": bool(regime.get("has_security_agency"))}
+    instruments = instruments_for_regime(regime_code or "UP_AOA_2010")
+    hierarchy = []
+    for r in instruments:
+        applies, reason = instrument_applies(r, answers)
+        hierarchy.append({"layer": r.get("instrument_type") or "", "title": r.get("title") or "",
+                          "year": r.get("enactment_year"), "type": r.get("instrument_type") or "",
+                          "applicable": applies, "verification": r.get("verification") or "unverified",
+                          "source_url": r.get("source_url")})
+    digest_input = json.dumps(hierarchy, sort_keys=True, separators=(",", ":"), default=str)
+    catalog_digest = _sha(digest_input)
+    unverified = [h for h in hierarchy if h["verification"] != "verified"]
+    content = {"regime_code": regime_code or "", "answers": answers,
+               "hierarchy": hierarchy, "catalog_digest": catalog_digest,
+               "generated_at": date.today().isoformat(),
+               "note": "The Model Bye-Laws apply as notified. Adoption or variation by the General Body is recorded after activation "
+                       "in Stage 6 (Adoption) and is between the Society and its members; the Operator is not a party to it."}
+    controls = {"regime_assigned": _ctl(bool(regime_code), "A legal regime is assigned." if regime_code else
                                         "No legal regime is assigned. Choose the State and constitution (UP AOA gets UP_AOA_2010)."),
-                "provisional_listed": _ctl(True, f"{len(provisional)} of {len(clauses)} clause(s) are provisional and are listed above.", False)}
+                "unverified_instruments": _ctl(False, f"{len(unverified)} instrument(s) are unverified; the advocate should confirm before sealing.",
+                                               len(unverified) == 0)}
     return content, controls
 
 

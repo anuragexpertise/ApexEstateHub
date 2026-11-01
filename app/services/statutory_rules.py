@@ -397,27 +397,47 @@ def instruments_for_regime(regime_code=DEFAULT_REGIME):
     """
     Act / Rules / Bye-laws rows for one regime, from legal_instrument_catalog.
 
+    Includes CENTRAL (pseudo-regime) rows that apply to every society, then the
+    regime's own rows. De-duplicates by title: the regime row wins over CENTRAL.
+
     Falls back to the seed list in database/seed.py when the table is missing
     on this database (the same "not integrated yet" situation the Master tab
     renders setup instructions for) so the wizard step never comes up blank.
     """
     try:
         from database.db_manager import db
+        central = db._execute(
+            """SELECT instrument_type, title, enactment_year, issuing_authority,
+                      applicability, key_provisions, source_reference, source_url,
+                      display_order, status, last_verified_on, verification,
+                      notification_no, applies_when, topic
+               FROM legal_instrument_catalog
+               WHERE regime_code='CENTRAL'
+               ORDER BY display_order""",
+            fetch_all=True,
+        ) or []
         rows = db._execute(
             """SELECT instrument_type, title, enactment_year, issuing_authority,
                       applicability, key_provisions, source_reference, source_url,
-                      display_order, status, last_verified_on, verification, notification_no
+                      display_order, status, last_verified_on, verification,
+                      notification_no, applies_when, topic
                FROM legal_instrument_catalog
                WHERE regime_code=%s
                ORDER BY display_order""",
             (regime_code,), fetch_all=True,
         ) or []
     except Exception:
+        central = []
         rows = []
-    if not rows:
+    if not central and not rows:
+        central = _seed_fallback_instruments("CENTRAL")
         rows = _seed_fallback_instruments(regime_code)
     _skip = EXCLUDED_INSTRUMENTS.get(regime_code, set())
     rows = [r for r in rows if r.get("title") not in _skip]
+    seen = {r.get("title") for r in rows}
+    for c in central:
+        if c.get("title") not in seen:
+            rows.append(c)
     return sorted(
         rows,
         key=lambda r: (
@@ -426,6 +446,24 @@ def instruments_for_regime(regime_code=DEFAULT_REGIME):
             r.get("display_order") or 0,
         ),
     )
+
+
+def instrument_applies(instrument: dict, answers: dict) -> tuple[bool, str | None]:
+    """
+    Whether a catalog instrument applies to this society, given its Yes/No answers.
+
+    Returns (applies: bool, reason: str | None). reason is set when applies is False,
+    e.g. "not triggered: you answered No" or None when always/informational.
+    """
+    trigger = instrument.get("applies_when") or "always"
+    if trigger == "always":
+        return True, None
+    if trigger == "info":
+        return False, None  # informational: shown, never bold
+    answer_key = trigger
+    if answers.get(answer_key) is True:
+        return True, None
+    return False, f"not triggered: you answered “No” to {trigger.replace('_', ' ')}"
 
 
 def instruments_for_society(society_id=None, state_code=None):

@@ -63,9 +63,27 @@ def marker(society_id: int) -> str:
 def _office_card(office: str, seated: dict | None):
     label = ob.OFFICE_LABEL[office]
     if seated:
+        sig = seated.get("signature_image")
+        sig_img = html.Div()
+        if sig:
+            sig_img = html.Img(src=f"/assets/{sig}", style={"maxWidth": "120px", "maxHeight": "60px", "marginTop": "6px",
+                                                           "border": "1px solid #c9d2dc", "borderRadius": "4px"})
+        def fid(f):
+            return {"type": f"{P}-f", "office": office, "field": f}
         return html.Div([html.I(className="fas fa-user-check me-2", style={"color": "#2e9e5b"}),
                          html.Strong(f"{label}: {seated['holder_name']}"), html.Span(f"  flat {seated['flat_number']}", style=_MUTED),
-                         html.Div(f"Elected under {seated['resolution_ref']}; minutes SHA-256 {str(seated['evidence_hash'])[:16]}...", style=_MUTED)],
+                         html.Div(f"Elected under {seated['resolution_ref']}; minutes SHA-256 {str(seated['evidence_hash'])[:16]}...", style=_MUTED),
+                         html.Div([html.Strong("Signature: ", style={"fontSize": "11.5px", "color": "#556"}), sig_img], style={"marginTop": "6px"}),
+                         html.Details([html.Summary("Edit details", style={"fontSize": "12px", "cursor": "pointer", "marginTop": "8px"}),
+                                       dbc.Row([
+                                           dbc.Col(_field("Mobile", dbc.Input(id=fid("phone"), size="sm", value=seated.get("phone") or "", maxLength=20)), md=4),
+                                           dbc.Col(_field("Signature image", dcc.Upload(
+                                               id=fid("sig"), accept=".png,.jpg,.jpeg,.webp", multiple=False,
+                                               children=html.Span("Replace signature", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"}),
+                                               style={"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px"})), md=4),
+                                           dbc.Col(dbc.Button("Save", id=fid("save"), color="primary", size="sm", n_clicks=0, style={"fontSize": "12px"}), md=2),
+                                           dbc.Col(html.Div(id=fid("msg"), style={"fontSize": "12px"}), md=2),
+                                       ], className="g-2")], style={"marginTop": "8px"})],
                         style=_CARD)
 
     def fid(f):
@@ -79,7 +97,7 @@ def _office_card(office: str, seated: dict | None):
         ], className="g-2 mt-1"),
         dbc.Row([
             dbc.Col(_field("Email (their login)", dbc.Input(id=fid("email"), size="sm", type="email", maxLength=100)), md=5),
-            dbc.Col(_field("Mobile", dbc.Input(id=fid("phone"), size="sm", maxLength=20)), md=3),
+            dbc.Col(_field("Mobile *", dbc.Input(id=fid("phone"), size="sm", maxLength=20)), md=3),
             dbc.Col(_field("Temporary password", dbc.Input(id=fid("password"), size="sm", type="password", autoComplete="new-password")), md=4),
         ], className="g-2"),
         dbc.Row([
@@ -89,8 +107,16 @@ def _office_card(office: str, seated: dict | None):
                 children=html.Span("Choose the minutes file", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"}),
                 style={"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px"})), md=6),
         ], className="g-2"),
+        dbc.Row([
+            dbc.Col(_field("Signature image * (PNG, JPG or WEBP, up to 1 MB)", dcc.Upload(
+                id=fid("sig"), accept=".png,.jpg,.jpeg,.webp", multiple=False,
+                children=html.Span("Choose the signature image", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"}),
+                style={"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px"})), md=6),
+            dbc.Col(html.Div(id=fid("sig-preview"), style={"fontSize": "11.5px", "color": "#667", "marginTop": "6px"}), md=6),
+        ], className="g-2"),
         html.Div([dbc.Button(f"Seat {label}", id={"type": f"{P}-seat", "office": office}, color="primary", size="sm", n_clicks=0),
-                  html.Span("  Their flat and login are created now; they must change the password at first sign-in.", style=_MUTED)]),
+                  html.Span("  Their flat and login are created now; they must change the password at first sign-in.", style=_MUTED),
+                  html.Span("  Mobile and signature image are both required.", style=_MUTED)]),
     ], style=_CARD)
 
 
@@ -174,39 +200,83 @@ def _stage_annexes(society_id: int):
 # ── stage 3: society setup, rendered inline inside the Hub (non-modal) ────────────────────────────
 def setup_stage(society_id: int, current_step: int = 0) -> list:
     """Render the Setup Wizard categories as inline navigable stages inside the Onboarding Hub.
+
+    Layout: left step-rail inside the page, main content area to the right (item 1).
+    Step statuses come from the server draft (step_statuses), not browser state (item 2).
     Nothing is posted until the Agreement is signed and the society is activated."""
+    from app.services import onboarding_service as ob
+    statuses = ob.step_statuses(society_id) or {}
     heading = "Stage 3: society setup"
     out = [html.H6(heading),
-           html.Div("Declare the legal regime, rates, charges, accounts and opening balances. The wizard draft is editable until signing "
-                    "starts; the Annexes stage below re-checks every control before anything is sealed.", style=_MUTED)]
-    nav_items = []
+           html.Div("Declare the legal regime, rates, charges, accounts and opening balances. The wizard draft is saved as you move "
+                    "between steps; nothing is posted until the Agreement is signed and the society is activated.", style=_MUTED)]
+
+    # ── left rail (item 2) ──────────────────────────────────────────────────────
+    rail_items = []
+    last = len(CATEGORIES) - 1
     for i, cat in enumerate(CATEGORIES):
-        icon, color = _ICON["current"] if i == current_step else (_ICON["done"] if i < current_step else _ICON["todo"])
-        nav_items.append(html.Div([
-            html.I(className=f"fas {icon}", style={"color": color, "fontSize": "16px"}),
-            html.Span(step_label(cat), style={"fontSize": "12px", "fontWeight": "700" if i == current_step else "500",
-                                              "color": "#223" if i <= current_step else "#8895a5"})],
-            id={"type": "onb-nav", "index": i}, n_clicks=0,
-            className="onb-nav-item" + (" active" if i == current_step else ""),
-            style={"textAlign": "center", "flex": "1", "padding": "4px 2px", "cursor": "pointer",
-                   "borderBottom": "2px solid " + (color if i == current_step else "#e1e7ef"),
-                   "opacity": 1.0 if i <= current_step else 0.5}))
-    out.append(html.Div(nav_items, id="onb-setup-nav", style={"display": "flex", "gap": "2px", "borderBottom": "1px solid #c9d2dc",
-                                                             "marginBottom": "10px", "paddingBottom": "6px"}))
+        st = statuses.get(cat, {}).get("status", "todo")
+        is_skipped = st == "skipped"
+        base = {"type": "onb-rail", "key": cat}
+        classes = ["onb-rail-item", st]
+        if i == current_step:
+            classes.append("current")
+        if is_skipped:
+            classes.append("skipped")
+        dot = {"todo": "○", "current": "●", "done": "✔", "error": "✖", "needs_review": "◐", "skipped": "—"}.get(st, "○")
+        dot_color = {"todo": "#b8c2cf", "current": "#1d74d8", "done": "#17976e", "error": "#c0392b",
+                     "needs_review": "#e59620", "skipped": "#9aa3ad"}.get(st, "#b8c2cf")
+        rail_items.append(html.Div([
+            html.Span(dot, className="onb-rail-dot", style={"color": dot_color}),
+            html.Span(step_label(cat), className="onb-rail-label", title=cat),
+        ], id=base, n_clicks=0, className=" ".join(classes),
+           style={"display": "flex", "alignItems": "center", "gap": "8px", "padding": "8px 10px",
+                  "borderRadius": "8px", "border": "1px solid transparent", "fontSize": "12px",
+                  "cursor": "default" if is_skipped else "pointer"}))
+    rail = html.Div([
+        html.Div("Setup steps", className="onb-rail-head", style={"fontWeight": "700", "fontSize": "13px", "color": "#223"}),
+        html.Div(rail_items, className="onb-rail-body", style={"display": "flex", "flexDirection": "column", "gap": "4px", "padding": "6px 0"}),
+        html.Div("Green = done · blue = current · amber = needs review · struck = skipped",
+                 className="onb-rail-foot"),
+    ], className="onb-rail")
+
+    # ── main content ────────────────────────────────────────────────────────────
     containers = []
     for i, cat in enumerate(CATEGORIES):
-        containers.append(html.Div(render_category_content(cat, society_id), id={"type": "onb-step", "index": i},
+        containers.append(html.Div(render_category_content(cat, society_id), id={"type": "onb-step", "key": cat},
                                    style={"display": "block" if i == current_step else "none", "paddingTop": "6px"}))
-    out.append(html.Div(containers, id="onb-step-containers"))
-    out.append(html.Div([
-        html.Div(id="onb-setup-error", style={"color": "#c0392b", "marginBottom": "8px", "fontSize": "13px"}),
-        dbc.Button("Previous", id="onb-btn-prev", color="secondary", size="sm", n_clicks=0,
-                   disabled=(current_step == 0), style={"fontSize": "12px"}),
-        dbc.Button("Next", id="onb-btn-next", color="primary", size="sm", n_clicks=0, style={"fontSize": "12px"}),
-        dbc.Button("Submit setup draft", id="onb-btn-submit", color="success", size="sm", n_clicks=0, style={"fontSize": "12px"}),
-        html.Span(dbc.Spinner(type="border", size="sm", color="success"), id="onb-submit-spinner",
-                  style={"display": "none", "marginLeft": "8px"}),
-    ], style={"marginTop": "10px", "display": "flex", "gap": "6px", "flexWrap": "wrap", "alignItems": "center"}))
+    main = html.Div([
+        html.Div(containers, id="onb-step-containers"),
+        html.Div([
+            html.Div(id="onb-setup-error", className="onb-error"),
+            dbc.Button("Previous", id="onb-btn-prev", color="secondary", size="sm", n_clicks=0,
+                       disabled=(current_step == 0), style={"fontSize": "12px"}),
+            dbc.Button("Next", id="onb-btn-next", color="primary", size="sm", n_clicks=0,
+                       disabled=(current_step == last), style={"fontSize": "12px"}),
+            dbc.Button("Save & continue to Agreement", id="onb-btn-finalize", color="success", size="sm", n_clicks=0,
+                       style={"fontSize": "12px", "display": "none" if current_step != last else "inline-block"}),
+        ], style={"marginTop": "10px", "display": "flex", "gap": "6px", "flexWrap": "wrap", "alignItems": "center"}),
+    ], className="onb-main")
+
+    setup = html.Div([rail, main], className="onb-setup")
+
+    # ── confirm modal (item 3): only the admin's login password ─────────────────
+    modal = dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle("Confirm it is you")),
+        dbc.ModalBody([
+            html.P("Enter your login password to save the draft and move to the Agreement stage.", className="small text-muted mb-3"),
+            dbc.Input(id="onb-finalize-password", type="password", placeholder="Your login password",
+                      autoComplete="current-password", className="mb-3"),
+            html.Div(id="onb-finalize-error", style={"color": "#c0392b", "fontSize": "12px", "marginBottom": "8px"}),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("Cancel", id="onb-finalize-cancel", color="secondary", size="sm", n_clicks=0),
+            dbc.Button("Save & continue", id="onb-finalize-confirm", color="success", size="sm", n_clicks=0),
+        ]),
+    ], id="onb-finalize-modal", is_open=False, centered=True, backdrop="static")
+
+    out.append(setup)
+    out.append(modal)
     return out
 
 
@@ -397,7 +467,7 @@ def legacy_resolutions_section(society_id: int, role: str | None) -> list:
 
 def hub_body(role: str, society_id: int, user_id: int | None, view: str | None = None) -> list:
     st = ob.state_of(society_id) or "registered"
-    out = [tracker(society_id)]
+    out = [html.Div(id="onb-tracker", children=tracker(society_id))]
     is_admin = role == "admin"
     if st == "registered":
         out += _stage_committee(society_id) if is_admin else [html.Div("The administrator is seating the founding committee.", style=_MUTED)]
@@ -433,9 +503,10 @@ def render_pending(role: str, society_id: int | None, user_id: int | None):
         dcc.Interval(id=f"{P}-poll", interval=6000, n_intervals=0),
         dcc.Store(id=f"{P}-marker", data=marker(society_id)),
         dcc.Store(id="onb-setup-step", data=0),
+        dcc.Store(id="onb-wizard-step", storage_type="session", data=0),
         dcc.Store(id="onb-view", data="current"),
         html.Div(hub_body(role, society_id, user_id), id=f"{P}-body"),
-    ], style={"maxWidth": "880px", "margin": "0 auto", "padding": "16px"})
+    ], className="portal-page onb-root")
 
 
 # ── Master queue ──────────────────────────────────────────────────────────────────────────────────────────────────

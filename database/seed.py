@@ -1288,42 +1288,41 @@ LEGAL_INSTRUMENTS_UP_AOA = [
      "annexures, the public-notice/objection window (15-30 days, at the Registrar's discretion), and annual "
      "return/renewal filing.",
      "UP Society Registration Rules, 1976", 50, "active"),
-    ("UP_AOA_2010", "Central Act",
+]
+
+
+LEGAL_INSTRUMENTS_CENTRAL = [
+    # (regime_code, instrument_type, title, enactment_year, issuing_authority,
+    #  applicability, key_provisions, source_reference, display_order, status, applies_when)
+    ("CENTRAL", "Central Act",
      "Real Estate (Regulation and Development) Act, 2016 (RERA)",
      2016, "Government of India",
-     "Promoters and Associations of Allottees for any RERA-registered project in UP (enforced by UP-RERA)",
+     "Promoters and Associations of Allottees for any RERA-registered project (enforced by state RERA authorities)",
      "Sec 11(4)(e): promoter must enable formation of the Association within 3 months of a majority of "
      "allottees booking units. Sec 11(4)(a)/(g): promoter remains responsible for obligations and outgoings "
-     "(taxes, water/electricity, maintenance) until conveyance/handover. Sec 17: promoter must hand over "
-     "common-area documents/plans within 30 days of the Completion Certificate, and physical possession of "
-     "common areas within 30 days of the Occupancy Certificate where no local law governs it (in UP, the "
-     "2010 Apartment Act is that local law).",
-     "RERA Act, 2016 (Central Act 16 of 2016), as applied via UP-RERA (up-rera.in)", 70, "active"),
-    ("UP_AOA_2010", "Rules",
-     "Uttar Pradesh Real Estate (Regulation and Development) Rules, 2016",
-     2016, "Government of Uttar Pradesh",
-     "RERA-registered projects and their Associations of Allottees in UP",
-     "State rules operationalising RERA in UP (registration procedure, UP-RERA authority structure, "
-     "grievance/adjudication process) — the state-level counterpart that interacts with the 2010 Apartment "
-     "Act on association formation and common-area handover timelines.",
-     "Notified under RERA Act 2016 Sec 84; UP-RERA (up-rera.in)", 80, "active"),
-    ("UP_AOA_2010", "Central Act",
-     "Central Goods and Services Tax Act, 2017 — principle of mutuality for RWAs",
+     "(taxes, water/electricity, maintenance) until conveyance/handover.",
+     "RERA Act, 2016 (Central Act 16 of 2016)", 70, "active", "central_rera"),
+    ("CENTRAL", "Central Act",
+     "Central Goods and Services Tax Act, 2017",
      2017, "Government of India",
-     "RWAs/AOAs collecting maintenance from members; exemption threshold applies per member",
+     "Societies/AOAs collecting maintenance from members; exemption threshold applies per member",
      "Notification No. 12/2017-CT (Rate) exempts RWA maintenance contributions up to ₹7,500 per month per "
-     "member from GST (contributions above that are taxable in full, not just the excess); registration "
-     "required once aggregate turnover crosses the GST threshold. Already implemented in this codebase's "
-     "gst_rates table and GST RCM subsystem.",
-     "CGST Act 2017; Notification No. 12/2017-Central Tax (Rate)", 90, "active"),
-    ("UP_AOA_2010", "Central Act",
-     "Income-tax Act, 1961 — principle of mutuality for RWAs",
+     "member from GST; registration required once aggregate turnover crosses the GST threshold.",
+     "CGST Act 2017; Notification No. 12/2017-Central Tax (Rate)", 90, "active", "central_gst"),
+    ("CENTRAL", "Central Act",
+     "Income-tax Act, 1961",
      1961, "Government of India",
-     "RWAs/AOAs assessing surplus from member contributions",
-     "Under the doctrine of mutuality, a surplus arising purely from members' own contributions (with no "
-     "profit motive or dealing with non-members) is not taxable income — the basis for this codebase's "
-     "fn_income_tax_summary_fy mutuality report; income from non-members (e.g. bank interest) remains taxable.",
-     "Income-tax Act, 1961 (mutuality is a judicially-developed doctrine, not a single section)", 100, "active"),
+     "RWAs/AOAs assessing surplus from member contributions; applies to tax years up to 2025-26",
+     "Superseded by the Income-tax Act, 2025 from 1 Apr 2026. Still applies to income earned up to 31 Mar 2026 "
+     "and to pending proceedings under the doctrine of mutuality.",
+     "Income-tax Act, 1961 (repealed w.e.f. 1 Apr 2026)", 100, "superseded", "central_it_tan"),
+    ("CENTRAL", "Central Act",
+     "Income-tax Act, 2025",
+     2025, "Government of India",
+     "RWAs/AOAs assessing income from tax year 2026-27 onward",
+     "Replaces the Income-tax Act, 1961 from 1 Apr 2026. TDS sections are renumbered (Ss. 392-397). Both "
+     "1961 and 2025 section numbers are shown during the transition.",
+     "Income-tax Act, 2025 (as assented)", 105, "active", "central_it_tan"),
 ]
 
 
@@ -1386,31 +1385,31 @@ def seed_statutory_head_catalog(cur, conn):
 
 def seed_legal_instrument_catalog(cur, conn):
     """
-    Populate legal_instrument_catalog from LEGAL_INSTRUMENTS_UP_AOA — the
-    tabulated Acts/Rules/Bye-laws/Notifications gathered by web research for
-    the UP_AOA_2010 regime, rendered on the Master Portal's "RWA Compliance
-    (UP)" tab. Idempotent on (regime_code, title, enactment_year), matching
-    the uq_legal_instrument constraint.
+    Populate legal_instrument_catalog from LEGAL_INSTRUMENTS_UP_AOA and
+    LEGAL_INSTRUMENTS_CENTRAL — tabulated Acts/Rules/Bye-laws/Notifications.
+    Idempotent on (regime_code, title, enactment_year), matching the
+    uq_legal_instrument constraint.
     """
+    all_rows = LEGAL_INSTRUMENTS_UP_AOA + LEGAL_INSTRUMENTS_CENTRAL
     inserted = 0
-    for (regime_code, instrument_type, title, enactment_year, issuing_authority,
-         applicability, key_provisions, source_reference, display_order, status) in LEGAL_INSTRUMENTS_UP_AOA:
-        row = _one(
-            cur,
-            "SELECT 1 FROM legal_instrument_catalog WHERE regime_code=%s AND title=%s "
-            "AND enactment_year IS NOT DISTINCT FROM %s",
-            (regime_code, title, enactment_year),
-        )
-        if row:
+    for row in all_rows:
+        regime_code, instrument_type, title, enactment_year, issuing_authority, \
+            applicability, key_provisions, source_reference, display_order, status = row[:10]
+        applies_when = row[10] if len(row) > 10 else "always"
+        r = _one(cur,
+            "SELECT 1 FROM legal_instrument_catalog WHERE regime_code=%s AND title=%s AND enactment_year=%s",
+            (regime_code, title, enactment_year))
+        if r:
             continue
         cur.execute(
             """INSERT INTO legal_instrument_catalog
                (regime_code, instrument_type, title, enactment_year, issuing_authority,
                 applicability, key_provisions, source_reference, display_order, status,
-                last_verified_on)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, CURRENT_DATE)""",
+                applies_when, last_verified_on)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, CURRENT_DATE)""",
             (regime_code, instrument_type, title, enactment_year, issuing_authority,
-             applicability, key_provisions, source_reference, display_order, status),
+             applicability, key_provisions, source_reference, display_order, status,
+             applies_when),
         )
         conn.commit()
         inserted += 1
