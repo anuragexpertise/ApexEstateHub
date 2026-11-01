@@ -1,5 +1,5 @@
 """
-Tests mapping to: ApexEstateHub Gold-Standard Plan v4 - "Where the repo stands"
+Tests mapping to: EstateHub Gold-Standard Plan v4 - "Where the repo stands"
 """
 import os
 import re

@@ -1,5 +1,5 @@
 """
-Tests mapping to: ApexEstateHub Gold-Standard Plan v4 - Decisions needed
+Tests mapping to: EstateHub Gold-Standard Plan v4 - Decisions needed
 7 decisions
 """
 import os

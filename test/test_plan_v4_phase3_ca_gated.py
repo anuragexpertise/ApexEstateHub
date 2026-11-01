@@ -1,5 +1,5 @@
 """
-Tests mapping to: ApexEstateHub Gold-Standard Plan v4 - Phase 3: CA-gated statements and returns
+Tests mapping to: EstateHub Gold-Standard Plan v4 - Phase 3: CA-gated statements and returns
 """
 import os
 

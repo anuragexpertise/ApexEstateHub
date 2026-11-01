@@ -1,4 +1,4 @@
-# ApexEstateHub: Gold-Standard Plan (v2, no code)
+# EstateHub: Gold-Standard Plan (v2, no code)
 
 Repo state read: `master` at `2ba9d56` ("enrolled profiles"), 23 Oct 2026. Default regime: UP Apartment Owners' Association (Act 2010, Rules 2011, Model Bye-Laws 2011). FY 2026-27, Income-tax Act 2025 in force.
 

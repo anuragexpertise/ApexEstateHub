@@ -14,10 +14,10 @@ def test_instructions_is_first_wizard_category():
 
 
 def test_wizard_trigger_waits_for_password_change():
-    src = _src("app/dash_apps/callbacks/setup_wizard_callbacks.py")
-    body = src[src.index("def trigger_setup_wizard("):][:1800]
-    assert 'Input("pwd-gate-store", "data")' in src
-    assert body.index("must_change_password") < body.index("society_setup_incomplete")
+    src = _src("app/dash_apps/callbacks/account_callbacks.py")
+    body = src[src.index("def prompt_first_login_password_change("):]
+    assert "pwd-gate-store" in body
+    assert 'id="pwd-gate-store"' in _src("app/dash_apps/app_shell.py")
 
 
 def test_first_login_password_prompt_is_not_dismissible():

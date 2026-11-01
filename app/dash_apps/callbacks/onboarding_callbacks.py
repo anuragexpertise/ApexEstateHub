@@ -10,12 +10,16 @@ yet active. Because of that every callback decides for itself, from the SERVER s
   * the platform signature, and retrying a held activation: the master login only.
 """
 import base64
+import io
+import json
 import time
 
 import dash_bootstrap_components as dbc
+import pandas as pd
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, no_update
 
 from app.dash_apps.pages import onboarding_page as op
+from app.dash_apps.pages.setup_wizard import CATEGORIES
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
 from app.security.guards import require_session
 from app.services import document_signing as ds
@@ -240,10 +244,11 @@ def register_onboarding_callbacks(app):
         Output(f"{P}-marker", "data", allow_duplicate=True),
         Input(f"{P}-poll", "n_intervals"),
         State(f"{P}-marker", "data"),
+        State("onb-view", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_poll(_n, last):
+    def onb_poll(_n, last, view):
         s = _session()
         if not s or not s[0]:
             return no_update, no_update
@@ -253,7 +258,7 @@ def register_onboarding_callbacks(app):
             return no_update, no_update
         if ob.state_of(sid) == "active":                      # activated while the page was open: show the dashboard
             return op.hub_body(role, sid, uid), mk
-        return op.hub_body(role, sid, uid), mk
+        return op.hub_body(role, sid, uid, view=view or "current"), mk
 
     # ── Master queue ────────────────────────────────────────────────────────────────────────────────────────
     def _master_ok():
@@ -412,7 +417,7 @@ def register_onboarding_callbacks(app):
         return _alert("Signed and sealed, but activation is held: " + str(act.get("error")), False)
 
     @app.callback(
-        Output({"type": f"{P}-mmsg", "sid": MATCH}, "children", allow_duplicate=True),
+        Output({"type": f"{P}-retry", "sid": MATCH}, "children", allow_duplicate=True),
         Input({"type": f"{P}-retry", "sid": MATCH}, "n_clicks"),
         prevent_initial_call=True,
     )
@@ -423,5 +428,226 @@ def register_onboarding_callbacks(app):
             return no_update
         res = ob.try_activate(int(ctx.triggered_id["sid"]), s[1])
         return _alert("The society is active." if res["ok"] else "Still held: " + res["error"], res["ok"])
+
+    # ── stage 3: society setup — inline navigation + submit ───────────────────────────────────────────
+    def _step_styles(n):
+        return [{"display": "block" if i == n else "none"} for i in range(len(CATEGORIES))]
+
+    def _nav_classes(n):
+        return ["onb-nav-item" + (" active" if i == n else "") for i in range(len(CATEGORIES))]
+
+    def _nav_styles(n):
+        return [{"textAlign": "center", "flex": "1", "padding": "4px 2px", "cursor": "pointer",
+                 "borderBottom": "2px solid " + (_ICON_COLOR(i, n) if i == n else "#e1e7ef"),
+                 "opacity": 1.0 if i <= n else 0.5} for i in range(len(CATEGORIES))]
+
+    def _ICON_COLOR(i, n):
+        return "#1d74d8" if i == n else ("#2e9e5b" if i < n else "#b8c2cf")
+
+    @app.callback(
+        Output("onb-setup-step", "data"),
+        Output({"type": "onb-step", "index": ALL}, "style"),
+        Output({"type": "onb-nav", "index": ALL}, "className"),
+        Output({"type": "onb-nav", "index": ALL}, "style"),
+        Output("onb-btn-prev", "disabled"),
+        Output("onb-setup-error", "children"),
+        Input("onb-btn-prev", "n_clicks"),
+        Input("onb-btn-next", "n_clicks"),
+        Input({"type": "onb-nav", "index": ALL}, "n_clicks"),
+        State("onb-setup-step", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_setup_nav(n_prev, n_next, nav_clicks, step):
+        s = _session()
+        if not s or not ctx.triggered_id:
+            return no_update, no_update, no_update, no_update, no_update, no_update
+        sid, _uid, role = s
+        if role != "admin" or not sid:
+            return no_update, no_update, no_update, no_update, no_update, _alert("Only the administrator can navigate setup.", False)
+        n = int(step or 0)
+        trig = ctx.triggered_id
+        if trig == "onb-btn-prev":
+            n = max(0, n - 1)
+        elif trig == "onb-btn-next":
+            n = min(len(CATEGORIES) - 1, n + 1)
+        elif isinstance(trig, dict) and trig.get("type") == f"{P}-nav":
+            n = int(trig.get("index", n))
+        return n, _step_styles(n), _nav_classes(n), _nav_styles(n), (n == 0), ""
+
+    @app.callback(
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input("onb-btn-submit", "n_clicks"),
+        State("sw-society-address", "value"), State("sw-society-email", "value"), State("sw-society-phone", "value"),
+        State("sw-society-state", "value"), State("sw-society-constitution", "value"),
+        State("sw-society-tan", "value"), State("sw-society-gstin", "value"),
+        State("sw-calc-start-date", "value"),
+        State("sw-qr-secret", "value"), State("sw-qr-secret-confirm", "value"), State("sw-qr-confirm-final", "value"),
+        State("sw-admin-password", "value"), State("sw-i-agree", "value"),
+        State("sw-gate-logic", "value"), State("sw-duty-hrs", "value"),
+        State("sw-cgst", "value"), State("sw-sgst", "value"),
+        State("sw-tds-effective-date", "value"),
+        State({"type": "tds-rate", "index": ALL}, "value"),
+        State({"type": "tds-nature", "index": ALL}, "value"),
+        State({"type": "tds-rate-no-pan", "index": ALL}, "value"),
+        State({"type": "tds-single-bill", "index": ALL}, "value"),
+        State({"type": "tds-agg-bill", "index": ALL}, "value"),
+        State("sw-apt-cost", "value"), State("sw-apt-budget", "value"), State("sw-apt-rate", "value"),
+        State("sw-apt-amt", "value"), State("sw-apt-billing-basis", "value"), State("sw-apt-due", "value"),
+        State("sw-apt-interest", "value"),
+        State("sw-apt-sinking", "value"), State("sw-apt-repair", "value"),
+        State("sw-ven-1day", "value"), State("sw-ven-7day", "value"), State("sw-ven-1mth", "value"),
+        State("sw-bf-fy", "value"),
+        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
+        State({"type": "sw-bf-remarks", "acc_id": ALL}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_setup_submit(n_clicks, addr, email, phone, state, constitution, tan, gstin, calc_start,
+                         secret, secret_confirm, secret_confirm_final, admin_pw, i_agree,
+                         gate_logic, duty_hrs, cgst, sgst, tds_eff_date,
+                         tds_rate, tds_nature, tds_no_pan, tds_single, tds_agg,
+                         apt_cost, apt_budget, apt_rate, apt_amt, apt_basis, apt_due, apt_interest,
+                         apt_sink, apt_repair, ven_1, ven_7, ven_30, bf_fy, bf_amt, bf_remarks):
+        s = _session()
+        if not n_clicks or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        tds = []
+        names = _tds_wizard_names()
+        for idx, name in enumerate(names):
+            rate = tds_rate[idx] if idx < len(tds_rate) else None
+            if rate in (None, ""):
+                continue
+            tds.append({"section": name[0], "discriminator": name[1], "nature_of_income": (tds_nature[idx] if idx < len(tds_nature) else None),
+                        "rate": rate,
+                        "rate_no_pan": (tds_no_pan[idx] if idx < len(tds_no_pan) else None),
+                        "single_bill_threshold": (tds_single[idx] if idx < len(tds_single) else None),
+                        "annual_aggregate_threshold": (tds_agg[idx] if idx < len(tds_agg) else None)})
+        bf = []
+        for idx, acc in enumerate(_bf_accs(sid)):
+            amt = bf_amt[idx] if idx < len(bf_amt) else None
+            if amt is None or amt == "":
+                continue
+            try:
+                amt_f = float(amt)
+            except (TypeError, ValueError):
+                continue
+            if amt_f <= 0:
+                continue
+            bf.append({"acc_id": acc["acc_id"], "bf_amount": str(amt_f), "remarks": (bf_remarks[idx] if idx < len(bf_remarks) else "")})
+        data = {"address": addr, "s_email": email, "phone": phone, "s_state": state, "s_constitution": constitution,
+                "tan": tan, "gstin": gstin, "calc_start": calc_start,
+                "secret": secret, "secret_confirm": secret_confirm, "secret_confirm_final": secret_confirm_final,
+                "admin_password": admin_pw, "i_agree": i_agree,
+                "gate_logic": gate_logic, "duty_hrs": duty_hrs,
+                "tds": tds, "cgst": cgst, "sgst": sgst, "tds_effective_date": tds_eff_date,
+                "apt_cost": apt_cost, "apt_budget": apt_budget, "apt_rate": apt_rate, "apt_amt": apt_amt,
+                "apt_billing_basis": apt_basis, "apt_due_day": apt_due, "apt_interest": apt_interest,
+                "apt_sinking": apt_sink, "apt_repair": apt_repair,
+                "ven_1": ven_1, "ven_7": ven_7, "ven_30": ven_30,
+                "bf_fy": bf_fy, "bf_json": bf}
+        try:
+            msg = ob.submit_setup_draft(sid, uid, data)
+        except ob.OnboardingError as exc:
+            return _alert(str(exc), False), no_update, no_update
+        body, mk = _body(sid, uid, role)
+        return _alert(msg), body, mk
+
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output("onb-view", "data", allow_duplicate=True),
+        Input(f"{P}-back-to-setup", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_back_to_setup(n):
+        s = _session()
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update
+        sid, uid, role = s
+        return op.hub_body(role, sid, uid, view="setup"), "setup"
+
+    @app.callback(
+        Output(f"{P}-c-download", "data"),
+        Input(f"{P}-c-template", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_c_download(n):
+        if not n:
+            return no_update
+        s = _session()
+        if not s or s[2] != "admin" or not s[0]:
+            return no_update
+        cols = ["account_code", "account_name", "opening_debit", "opening_credit",
+                "flat_number", "arrears_amount", "overdue_days"]
+        df = pd.DataFrame(columns=cols)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False)
+        return dcc.send_bytes(output.getvalue(), filename="opening_position_template.xlsx")
+
+    @app.callback(
+        Output(f"{P}-c-feedback", "children"),
+        Input(f"{P}-c-upload", "contents"),
+        State(f"{P}-c-upload", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_c_upload(contents, filename):
+        s = _session()
+        if not contents or not s or s[2] != "admin" or not s[0]:
+            return no_update
+        sid, _uid, _role = s
+        if not str(filename or "").lower().endswith((".xlsx", ".xls")):
+            return _alert("Choose an Excel .xlsx or .xls file.", False)
+        try:
+            raw = base64.b64decode(contents.split(",", 1)[1])
+            df = pd.read_excel(io.BytesIO(raw))
+        except Exception as exc:  # noqa: BLE001
+            return _alert(f"Could not read the file: {exc}", False)
+        required = {"account_code", "account_name", "opening_debit", "opening_credit"}
+        missing = required - set(df.columns)
+        if missing:
+            return _alert(f"Template missing columns: {', '.join(sorted(missing))}", False)
+        dr = float(pd.to_numeric(df.get("opening_debit", pd.Series([0])), errors="coerce").fillna(0).sum() or 0)
+        cr = float(pd.to_numeric(df.get("opening_credit", pd.Series([0])), errors="coerce").fillna(0).sum() or 0)
+        if abs(dr - cr) > 0.005:
+            return _alert(f"Opening position must balance: total debit {dr:.2f} != total credit {cr:.2f}.", False)
+        accts = {str(r["id"]) for r in ob.db._execute("SELECT id FROM accounts WHERE society_id=%s", (sid,), fetch_all=True) or []}
+        bad = [str(v) for v in df["account_code"].dropna().astype(str) if str(v) not in accts]
+        if bad:
+            return _alert(f"Unknown account codes: {', '.join(bad[:5])}", False)
+        arrears = []
+        for _, row in df.iterrows():
+            flat = str(row.get("flat_number") or "").strip()
+            amt = row.get("arrears_amount")
+            if flat and amt not in (None, ""):
+                try:
+                    arrears.append({"flat_number": flat, "amount": str(float(amt)),
+                                    "overdue_days": int(row.get("overdue_days") or 0)})
+                except (TypeError, ValueError):
+                    pass
+        d = ob.declaration(sid) or {}
+        d["annex_c_inputs"] = {
+            "arrears_by_flat": arrears,
+            "bank_agrees": False,
+            "audited_hash": None,
+            "ca_review_ref": None,
+            "opening_position": df.to_dict("records"),
+        }
+        ob.db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s",
+                       (json.dumps(d), sid))
+        return _alert(f"Opening position loaded: {len(df)} rows; debits {dr:.2f} = credits {cr:.2f}.")
+
+    def _tds_wizard_names():
+        from database.seed import tds_wizard_rows as _rows
+        return [(r[0], r[1]) for r in _rows()]
+
+    def _bf_accs(sid):
+        return ob.db._execute("SELECT id AS acc_id FROM accounts WHERE society_id=%s AND has_bf=TRUE ORDER BY id", (sid,), fetch_all=True) or []
 
     print("  ✓ Onboarding callbacks registered")

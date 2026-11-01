@@ -65,7 +65,7 @@ df = pd.DataFrame(rows, columns=[
 # Drop the helper column for the actual statement file
 statement_df = df[["txn_date", "description", "debit", "credit", "reference_no", "balance"]]
 
-output_path = "/home/at/Documents/ApexEstateHub/SBI Bank Transactions.xlsx"
+output_path = "/home/at/Documents/EstateHub/SBI Bank Transactions.xlsx"
 with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
     statement_df.to_excel(writer, index=False, sheet_name="SBI Statement")
 

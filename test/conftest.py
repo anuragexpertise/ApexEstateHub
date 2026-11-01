@@ -1,6 +1,6 @@
 # test/conftest.py
 """
-Shared pytest fixtures for ApexEstateHub scenario tests.
+Shared pytest fixtures for EstateHub scenario tests.
 """
 
 import sys

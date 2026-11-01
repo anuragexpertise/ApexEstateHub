@@ -1,5 +1,5 @@
 """
-Live tests mapping to: ApexEstateHub Gold-Standard Plan v5 - Society Onboarding.
+Live tests mapping to: EstateHub Gold-Standard Plan v5 - Society Onboarding.
 
 Each test maps to a V5.n task's "Done when" criterion. These are structural
 checks against the schema and code that prove the plan's lines are wired up;
@@ -96,7 +96,7 @@ class TestV5Onboarding:
 
     def test_v5_4_wizard_posts_nothing(self):
         """Wizard submit calls fn_complete_society_setup with p_draft=TRUE."""
-        path = "app/dash_apps/callbacks/setup_wizard_callbacks.py"
+        path = "app/services/onboarding_service.py"
         assert os.path.isfile(path)
         content = open(path).read()
         assert '"draft": True' in content or "'draft': True" in content

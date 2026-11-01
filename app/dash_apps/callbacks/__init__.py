@@ -36,7 +36,7 @@ def register_callbacks(app):
         "customize_kpi_callbacks",    # 8. KPI Inspector
         "list_inspector_callbacks",   # 8b. List Inspector
         "form_inspector_callbacks",   
-        "setup_wizard_callbacks",     # 9. Setup Wizard
+        # "setup_wizard_callbacks",     # 9. Setup Wizard — merged into Onboarding Hub (onboarding_service.submit_setup_draft / onboarding_callbacks)
         "debug_callbacks",            # 10. Debug
         "noc_callbacks",              # 10. NOC card buttons
         "agreement_callbacks",        # 10b. Agreement card buttons

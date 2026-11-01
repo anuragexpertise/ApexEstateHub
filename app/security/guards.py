@@ -68,7 +68,6 @@ from app.security.setup_guard import society_setup_incomplete
 #   * single functions, listed by name below (the wizard's logo/photo upload);
 #   * anything marked with @allow_during_setup (either side of @require_session).
 _SETUP_EXEMPT_MODULES = frozenset({
-    "setup_wizard_callbacks",
     "shell_callbacks",
     "login_callbacks",
     "account_callbacks",

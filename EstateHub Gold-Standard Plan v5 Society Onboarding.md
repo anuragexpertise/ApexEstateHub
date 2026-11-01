@@ -1,4 +1,4 @@
-# ApexEstateHub Gold-Standard Plan v5: Society Onboarding
+# EstateHub Gold-Standard Plan v5: Society Onboarding
 
 Oct 30, 2026 · @Anurag Gupta
 
@@ -232,7 +232,7 @@ Ten decisions hold up work. Decisions 1 to 4 block the Agreement text itself.
 
 | # | Decision | Why it matters | Blocks | Who |
 | --- | --- | --- | --- | --- |
-| 1 | The operator's exact legal entity, place of registration, address and authorised signatory. The code says "EstateHub, LLC"; the product is called ApexEstateHub | The Agreement's first line; an LLC is not an Indian entity form | V5.6 | You |
+| 1 | The operator's exact legal entity, place of registration, address and authorised signatory. The code says "EstateHub, LLC"; the product is called EstateHub | The Agreement's first line; an LLC is not an Indian entity form | V5.6 | You |
 | 2 | May a Managing Committee resolution authorise the contract, or must the General Body | A contract signed on a defective authority can be disowned later | V5.6 | Advocate |
 | 3 | Is Aadhaar eSign by the three office-bearers (through Leegality or a similar vendor), plus a DSC for the operator's signatory, enough for the Agreement, or must signed paper counterparts or stamping be added | The code records who confirmed by password; that is not a legal e-signature | V5.6b | Advocate |
 | 4 | Stamp duty on the licence in UP | An unstamped agreement may be inadmissible in evidence | V5.6 | Advocate |

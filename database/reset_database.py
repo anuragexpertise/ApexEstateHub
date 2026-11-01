@@ -1,5 +1,5 @@
 """
-ApexEstateHub Database Reset Utility
+EstateHub Database Reset Utility
 ====================================
 
 WARNING:
@@ -314,7 +314,7 @@ def main():
         sys.exit(1)
 
     print("\n" + "=" * 70)
-    print("ApexEstateHub Database Reset")
+    print("EstateHub Database Reset")
     print("=" * 70)
 
     print(f"Host     : {DB_HOST}:{DB_PORT}")

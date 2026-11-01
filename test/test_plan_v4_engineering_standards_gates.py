@@ -1,5 +1,5 @@
 """
-Tests mapping to: ApexEstateHub Gold-Standard Plan v4 - Engineering standards and gates
+Tests mapping to: EstateHub Gold-Standard Plan v4 - Engineering standards and gates
 """
 import os
 import subprocess
