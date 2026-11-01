@@ -88,7 +88,8 @@ def register_onboarding_callbacks(app):
         contents, filename = _val(len(fields)), _val(len(fields) + 1)
         try:
             msg = ob.seat_founding_officer(uid, sid, office, flat, name, email, phone, password or "", ref,
-                                           filename, _decode(contents), int(size) if size not in (None, "") else None)
+                                           filename, _decode(contents),
+                                           apartment_size=int(size) if size not in (None, "") else None)
         except ob.OnboardingError as exc:
             return no_update, _alert(str(exc), False), no_update
         body, mk = _body(sid, uid, role)

@@ -187,6 +187,17 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
         raise OnboardingError("Enter a valid email address.")
     if phone_c is False:
         raise OnboardingError("Enter a valid phone number.")
+    # One person, one office: the Agreement needs the President, Secretary and Treasurer to be three different people
+    # (one person signs once), so a flat or login already seated in another core office is refused here, not at signing.
+    clash = _row("""SELECT co.office_code FROM committee_offices co
+                     WHERE co.society_id=%s AND co.status='active' AND co.office_code = ANY(%s) AND co.office_code <> %s
+                       AND (co.apartment_id IN (SELECT id FROM apartments WHERE society_id=%s AND flat_number=%s)
+                            OR co.user_id IN (SELECT id FROM users WHERE society_id=%s AND lower(email)=%s))
+                     LIMIT 1""",
+                 (society_id, list(CORE_OFFICES), office_code, society_id, flat, society_id, email_c))
+    if clash:
+        raise OnboardingError("That flat or email already holds the %s seat. The President, Secretary and Treasurer must be "
+                              "three different people, each from a different flat." % OFFICE_LABEL.get(clash["office_code"], clash["office_code"]))
     ref = (resolution_ref or "").strip()
     if len(ref) < 3:
         raise OnboardingError("Give the resolution reference under which this person was elected.")
