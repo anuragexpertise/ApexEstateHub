@@ -444,36 +444,43 @@ def register_onboarding_callbacks(app):
     def _ICON_COLOR(i, n):
         return "#1d74d8" if i == n else ("#2e9e5b" if i < n else "#b8c2cf")
 
+    def _nav_outputs(n):
+        return (n, _step_styles(n), _nav_classes(n), _nav_styles(n), (n == 0), "")
+
+    # single callback driving setup navigation: every input is scalar (15 fixed nav buttons + prev/next),
+    # so there is exactly one Dash grouping and no ALL-input/scalar-state mismatch.
+    _nav_inputs = [Input({"type": "onb-nav", "index": i}, "n_clicks") for i in range(len(CATEGORIES))]
+
     @app.callback(
-        Output("onb-setup-step", "data"),
-        Output({"type": "onb-step", "index": ALL}, "style"),
-        Output({"type": "onb-nav", "index": ALL}, "className"),
-        Output({"type": "onb-nav", "index": ALL}, "style"),
-        Output("onb-btn-prev", "disabled"),
-        Output("onb-setup-error", "children"),
+        Output("onb-setup-step", "data", allow_duplicate=True),
+        Output({"type": "onb-step", "index": ALL}, "style", allow_duplicate=True),
+        Output({"type": "onb-nav", "index": ALL}, "className", allow_duplicate=True),
+        Output({"type": "onb-nav", "index": ALL}, "style", allow_duplicate=True),
+        Output("onb-btn-prev", "disabled", allow_duplicate=True),
+        Output("onb-setup-error", "children", allow_duplicate=True),
+        *_nav_inputs,
         Input("onb-btn-prev", "n_clicks"),
         Input("onb-btn-next", "n_clicks"),
-        Input({"type": "onb-nav", "index": ALL}, "n_clicks"),
         State("onb-setup-step", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_setup_nav(n_prev, n_next, nav_clicks, step):
+    def onb_setup_nav(*_clicks, step):
         s = _session()
-        if not s or not ctx.triggered_id:
+        if not ctx.triggered_id:
             return no_update, no_update, no_update, no_update, no_update, no_update
         sid, _uid, role = s
-        if role != "admin" or not sid:
+        if not s or role != "admin" or not sid:
             return no_update, no_update, no_update, no_update, no_update, _alert("Only the administrator can navigate setup.", False)
-        n = int(step or 0)
         trig = ctx.triggered_id
+        n = int(step or 0)
         if trig == "onb-btn-prev":
             n = max(0, n - 1)
         elif trig == "onb-btn-next":
             n = min(len(CATEGORIES) - 1, n + 1)
         elif isinstance(trig, dict) and trig.get("type") == f"{P}-nav":
             n = int(trig.get("index", n))
-        return n, _step_styles(n), _nav_classes(n), _nav_styles(n), (n == 0), ""
+        return _nav_outputs(n)
 
     @app.callback(
         Output(f"{P}-toast", "children", allow_duplicate=True),
