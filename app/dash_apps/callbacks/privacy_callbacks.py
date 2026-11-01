@@ -191,9 +191,11 @@ def register_privacy_callbacks(app):
         if not s or not t or not any(clicks or []):
             return no_update
         try:
-            dp.mark_dpdp_reviewed(s[0], t["key"], s[1], s[2], True)
+            done = dp.mark_dpdp_reviewed(s[0], t["key"], s[1], s[2], True)
         except dp.DpdpError as exc:
             return _refresh(str(exc), False)
+        if not done:
+            return _refresh("Could not record the confirmation. Nothing was changed; please try again or contact support.", False)
         return _refresh("Marked as confirmed by your advocate.")
 
     print("  ✓ Privacy callbacks registered")

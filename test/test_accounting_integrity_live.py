@@ -81,7 +81,8 @@ def _cols(cur, table, drop):
 def clone_society_books(cur, src=SOC):
     """Copy a society's chart, opening balances and transactions into a NEW
     society so both tenants use identical account ids."""
-    cur.execute("INSERT INTO societies (name) VALUES ('Isolation Clone') RETURNING id")
+    # V5: the posting guard refuses a society that is not active; the clone only exists to copy books into.
+    cur.execute("INSERT INTO societies (name, onboarding_state) VALUES ('Isolation Clone', 'active') RETURNING id")
     new = cur.fetchone()[0]
     c = _cols(cur, "accounts", {"society_id"})
     cur.execute(f"INSERT INTO accounts (society_id, {', '.join(c)}) "

@@ -1,6 +1,5 @@
 # app/services/alert_service.py
 
-from datetime import datetime, timedelta
 import logging
 from database.db_manager import db
 from app.services.push_service import send_push_notification
@@ -293,10 +292,9 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id
 
             event_row = db._execute("""
                 INSERT INTO alert_events (society_id, channel_id, state, triggered_by, triggered_at, expires_at)
-                VALUES (%s, %s, 'resolved', %s, NOW(), %s)
+                VALUES (%s, %s, 'resolved', %s, NOW(), NOW() + INTERVAL '30 minutes')
                 RETURNING id
-            """, (society_id, channel_id, triggered_by_user_id,
-                  datetime.now() + timedelta(minutes=30)), fetch_one=True)
+            """, (society_id, channel_id, triggered_by_user_id), fetch_one=True)
 
             _publish_alert_event(society_id, None, "channel_alert", {
                 "action": "resolved",
@@ -323,12 +321,13 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id
             if not ok:
                 logger.warning(f"Channel push failed for user {channel['owner_user_id']}: {msg}")
 
-        expires_at = datetime.now() + timedelta(minutes=30)
+        # Expiry is computed by the database, on the same clock the `expires_at > NOW()` checks use. The Python clock can
+        # sit in another timezone than the session, which made a fresh alert look hours old on arrival.
         event_row = db._execute("""
             INSERT INTO alert_events (society_id, channel_id, state, triggered_by, triggered_at, expires_at)
-            VALUES (%s, %s, 'pending', %s, NOW(), %s)
+            VALUES (%s, %s, 'pending', %s, NOW(), NOW() + INTERVAL '30 minutes')
             RETURNING id
-        """, (society_id, channel_id, triggered_by_user_id, expires_at), fetch_one=True)
+        """, (society_id, channel_id, triggered_by_user_id), fetch_one=True)
 
         _publish_alert_event(society_id, channel.get("owner_user_id"), "channel_alert", {
             "action": "pending",
@@ -403,11 +402,25 @@ def respond_to_alert(alert_event_id: int, owner_user_id: int, action: str):
         if record and record.get("owner_user_id") != owner_user_id:
             return False, "Only the apartment owner can respond to this alert"
 
-        db._execute("""
+        # An answer is final, and an alert that has run out of time can no longer let anyone in. The UPDATE itself
+        # carries both conditions so two quick taps cannot both win; the audit row records who moved it and from what.
+        won = db._execute("""
             UPDATE alert_events
                SET state = %s
              WHERE id = %s
-        """, (new_state, alert_event_id))
+               AND state IN ('idle', 'pending', 'arrived', 'calling')
+               AND (expires_at IS NULL OR expires_at > NOW())
+            RETURNING id
+        """, (new_state, alert_event_id), fetch_one=True)
+        if not won:
+            now_state = event.get("state")
+            if now_state in ("resolved", "denied", "expired"):
+                return False, f"This alert was already answered ({now_state.upper()}) and cannot be changed."
+            return False, "This alert has expired. Ask the gate to raise it again."
+        db._execute("""
+            INSERT INTO channel_event_transitions (event_id, society_id, from_state, to_state, actor_id, permission_used, comment)
+            VALUES (%s, %s, %s, %s, %s, 'channel.respond', %s)
+        """, (alert_event_id, event["society_id"], event.get("state"), new_state, owner_user_id, f"owner chose to {action}"))
 
         _publish_alert_event(event["society_id"], owner_user_id, "alert_response", {
             "action": action,
@@ -456,6 +469,11 @@ def create_walk_in_visitor(society_id: int, name: str, mobile: str, purpose: str
            fetch_one=True)
 
         visitor_id = row["id"]
+        try:                                                    # DPDP: log that the gate notice applied to this visit
+            from app.services import dpdp_service
+            dpdp_service.record_visitor_notice(society_id, visitor_id, security_user_id)
+        except Exception:                                       # noqa: BLE001  (never block the gate)
+            logger.exception("visitor notice logging failed")
         return visitor_id, "Walk-in visitor created"
     except Exception as e:
         logger.error(f"Error creating walk-in visitor: {e}")
@@ -546,12 +564,11 @@ def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id
             }
 
         # First press: pending
-        expires_at = datetime.now() + timedelta(minutes=30)
         event_row = db._execute("""
             INSERT INTO alert_events (society_id, channel_id, visitor_id, state, triggered_by, triggered_at, expires_at)
-            VALUES (%s, %s, %s, 'pending', %s, NOW(), %s)
+            VALUES (%s, %s, %s, 'pending', %s, NOW(), NOW() + INTERVAL '30 minutes')
             RETURNING id
-        """, (society_id, channel_id, visitor_id, triggered_by_user_id, expires_at), fetch_one=True)
+        """, (society_id, channel_id, visitor_id, triggered_by_user_id), fetch_one=True)
 
         if visitor.get("owner_user_id"):
             title = f"👤 Visitor Arrived: {name}"
@@ -626,11 +643,11 @@ def respond_to_visitor_alert(visitor_id: int, owner_user_id: int, action: str):
             fetch_one=True,
         )
 
-        if not won and action == "approve":
-            # Another owner / the gate already moved the visitor on.
+        if not won:
+            # Another owner / the gate already moved the visitor on. A deny after the visitor is in must not claim success.
             cur = db._execute("SELECT status FROM visitors WHERE id = %s",
                               (visitor_id,), fetch_one=True)
-            if cur and cur["status"] == "entered":
+            if action == "approve" and cur and cur["status"] == "entered":
                 return True, "Visitor already admitted by another owner"
             return False, "Visitor no longer pending confirmation"
 

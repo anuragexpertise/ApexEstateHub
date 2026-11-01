@@ -867,7 +867,13 @@ def register_shell_callbacks(app):
             print(f"⚠️  stage-2 branding lookup failed: {e}")
 
         from app.dash_apps.pages.login_system import login_layout
-        return login_layout(society_name), logo_src, body_style
+        try:
+            from app.services import dpdp_service
+            grievance = dpdp_service.grievance_contact(sid)
+        except Exception as e:                                              # noqa: BLE001  (a missing contact must never block login)
+            print(f"⚠️  grievance contact lookup failed: {e}")
+            grievance = None
+        return login_layout(society_name, grievance), logo_src, body_style
 
     # ── 6. MASTER LOGIN TOGGLE ────────────────────────────────────────────────
     @app.callback(

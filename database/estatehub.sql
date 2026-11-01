@@ -15637,6 +15637,9 @@ CREATE TABLE resolutions (
     legacy              BOOLEAN NOT NULL DEFAULT FALSE,
     minutes_file        VARCHAR(255),
     minutes_hash        VARCHAR(64),
+    -- What the old minutes recorded. Evidence only: it never makes the resolution 'passed'.
+    legacy_outcome      VARCHAR(10)
+        CHECK (legacy_outcome IS NULL OR legacy_outcome IN ('passed', 'rejected', 'unknown')),
     -- G-01: `passed` and `status` can no longer disagree, and a passed
     -- resolution must have reached its majority. (Quorum lives on the
     -- meeting row; trg_resolutions_validity checks it.)
@@ -15644,7 +15647,10 @@ CREATE TABLE resolutions (
         (passed = (status = 'passed'))
         AND (NOT passed OR (passed_on IS NOT NULL
                             AND votes_for_pct IS NOT NULL
-                            AND votes_for_pct >= majority_required)))
+                            AND votes_for_pct >= majority_required))),
+    -- V5.8: a legacy resolution is EVIDENCE. It is never 'passed', so no majority check, document link or decision
+    -- engine that tests resolutions.passed / status = 'passed' can ever use it.
+    CONSTRAINT ck_resolution_legacy_inert CHECK (NOT legacy OR (NOT passed AND status = 'draft' AND minutes_hash IS NOT NULL))
 );
 CREATE INDEX idx_resolutions_meeting ON resolutions (meeting_id);
 CREATE INDEX idx_resolutions_clause ON resolutions (clause_id);
@@ -21145,10 +21151,13 @@ CREATE TABLE esign_requests (
     evidence_ref      VARCHAR(255),          -- signed PDF / paper scan reference stored by the vendor or locally
     created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
     completed_at      TIMESTAMP,
-    error             TEXT
+    error             TEXT,
+    -- V5.6b: which login the request is for, so a completed request can only back that person's own signature.
+    signer_user_id    INT REFERENCES users (id)
 );
 CREATE INDEX idx_esign_requests_subject ON esign_requests (subject_kind, subject_id);
 CREATE INDEX idx_esign_requests_vendor_id ON esign_requests (vendor_request_id);
+CREATE INDEX idx_esign_requests_signer ON esign_requests (signer_user_id, subject_kind, subject_id);
 
 -- V5.9: Adviser appointment record (Auditor, CA, Advocate). Appointed by a resolution
 -- and signed by the President, Secretary and Treasurer (adviser_appointment signing
@@ -22143,20 +22152,8 @@ LANGUAGE sql STABLE AS $$
 $$;
 
 -- ════════════════════════════════════════════════════════════════════════════════
--- V5 follow-up: eSign signer link, inert legacy resolutions, adviser scope.
+-- V5 follow-up: adviser access.
 -- ════════════════════════════════════════════════════════════════════════════════
--- V5.6b: which login the eSign request is for, so a completed request can only back that person's own signature.
-ALTER TABLE esign_requests ADD COLUMN IF NOT EXISTS signer_user_id INT REFERENCES users (id);
-CREATE INDEX IF NOT EXISTS idx_esign_requests_signer ON esign_requests (signer_user_id, subject_kind, subject_id);
-
--- V5.8: a legacy resolution is EVIDENCE. It records what the old minutes said (legacy_outcome) but is never 'passed', so
--- no majority check, document link or decision engine that tests resolutions.passed / status = 'passed' can ever use it.
-ALTER TABLE resolutions ADD COLUMN IF NOT EXISTS legacy_outcome VARCHAR(10)
-    CHECK (legacy_outcome IS NULL OR legacy_outcome IN ('passed', 'rejected', 'unknown'));
-ALTER TABLE resolutions DROP CONSTRAINT IF EXISTS ck_resolution_legacy_inert;
-ALTER TABLE resolutions ADD CONSTRAINT ck_resolution_legacy_inert
-    CHECK (NOT legacy OR (NOT passed AND status = 'draft' AND minutes_hash IS NOT NULL));
-
 -- V5.9: is this login an adviser whose appointment is in force today? (the login itself is checked on every request)
 CREATE OR REPLACE FUNCTION fn_adviser_in_force(p_user_id INT, p_on DATE DEFAULT CURRENT_DATE)
 RETURNS TABLE (appointment_id INT, society_id INT, kind VARCHAR, term_end DATE)

@@ -114,7 +114,7 @@ def society_select_layout() -> list:
 
 # ── Stage 2: Multi-method login ───────────────────────────────
 
-def login_layout(society_name: str = "Society") -> list:
+def _login_layout_body(society_name: str = "Society") -> list:
     return [
         html.Div(
             [
@@ -375,6 +375,28 @@ def forgot_password_modal() -> dbc.Modal:
         centered=True,
         size="sm",
     )
+
+
+def grievance_footer(contact: dict | None):
+    """Who to ask about personal data (DPDP). Nothing is shown until the society has named a grievance officer."""
+    if not contact:
+        return None
+    reach = " · ".join(x for x in (contact.get("email"), contact.get("phone")) if x)
+    return html.Div(
+        [html.I(className="fas fa-user-shield me-2"),
+         html.Span(["Privacy questions or complaints: ", html.Strong(contact["name"]), f" ({reach})"])],
+        id="login-grievance-contact",
+        style={"fontSize": "11px", "color": "#6c757d", "textAlign": "center", "marginTop": "12px"},
+    )
+
+
+def login_layout(society_name: str = "Society", grievance: dict | None = None) -> list:
+    """Stage 2 of the login, with the society's grievance officer underneath when one is named."""
+    layout = _login_layout_body(society_name)
+    footer = grievance_footer(grievance)
+    if footer is not None:
+        layout.append(footer)
+    return layout
 
 
 def reset_password_modal() -> dbc.Modal:

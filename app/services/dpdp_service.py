@@ -138,6 +138,16 @@ def mark_dpdp_reviewed(society_id: int, item_key: str, actor_id: int, role: str 
 
 
 # ── the notice ────────────────────────────────────────────────────────────────────────────────────────────────────
+def grievance_contact(society_id: int) -> dict | None:
+    """The society's published privacy contact (name plus email and/or phone), or None until one is named.
+    Shown on the login page and in every notice (plan V5, DPDP: published contact for questions)."""
+    r = _row("SELECT grievance_officer_name AS name, grievance_officer_email AS email, grievance_officer_phone AS phone "
+             "FROM societies WHERE id=%s", (society_id,)) or {}
+    if not r.get("name") or not (r.get("email") or r.get("phone")):
+        return None
+    return {"name": r["name"], "email": r.get("email"), "phone": r.get("phone")}
+
+
 def default_notice_text(society_id: int) -> tuple[str, str]:
     s = _row("SELECT name, grievance_officer_name, grievance_officer_email, grievance_officer_phone FROM societies WHERE id=%s", (society_id,)) or {}
     officer = s.get("grievance_officer_name") or "the Secretary"
@@ -227,6 +237,30 @@ def accept_notice(society_id: int, user_id: int, optional_purposes: list[str] | 
                                                  AND notice_version=%s AND withdrawn_at IS NULL)""",
                         (society_id, p["person_key"], p["person_role"], purpose, n["version"], basis, user_id, user_id,
                          society_id, user_id, purpose, n["version"]))
+
+
+GATE_NOTICE_LINE = ("Visitor notice: your name, mobile number, purpose and vehicle number are recorded for building safety and are shown "
+                    "to the flat you are visiting. Ask the guard for the society's privacy contact.")
+
+
+def record_visitor_notice(society_id: int, visitor_id: int, recorded_by: int | None = None) -> bool:
+    """A visitor has no login, so the gate notice is logged against the visit: person 'visitor:<id>', purpose gate_safety,
+    the society's legitimate-use basis (flagged for legal review), and the notice version in force. Never raises: a logging
+    failure must not stop a person being let in or kept out for safety. Returns whether a row was written."""
+    try:
+        n = current_notice(society_id)
+        if not n:
+            return False
+        basis = PURPOSES["gate_safety"][1]
+        _row("""INSERT INTO consent_records (society_id, person_key, person_role, purpose, notice_version, lawful_basis, created_by)
+                SELECT %s, %s, 'visitor', 'gate_safety', %s, %s, %s
+                 WHERE NOT EXISTS (SELECT 1 FROM consent_records WHERE society_id=%s AND person_key=%s AND purpose='gate_safety')
+                RETURNING id""",
+             (society_id, f"visitor:{visitor_id}", n["version"], basis, recorded_by, society_id, f"visitor:{visitor_id}"))
+        return True
+    except Exception:                                                    # noqa: BLE001
+        log.exception("record_visitor_notice failed")
+        return False
 
 
 def my_consents(society_id: int, user_id: int) -> list[dict]:

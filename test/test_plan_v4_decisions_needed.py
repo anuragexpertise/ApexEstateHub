@@ -104,4 +104,4 @@ class TestV4DecisionsNeeded:
     def test_decision7_phase4_parallel_with_phase3(self):
         """Decision 7: Phase 4 starts alongside Phase 3"""
         # Just structural check
-        assert os.path.exists("test/plan_v4_phase4_hardening.py")
+        assert os.path.exists(os.path.join(os.path.dirname(__file__), "test_plan_v4_phase4_hardening.py"))
