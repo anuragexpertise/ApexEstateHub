@@ -144,13 +144,16 @@ class DatabaseManager:
         dsn = ""
         try:
             dsn = self._dsn()
-            # minconn=1: every gunicorn worker builds its own pool, and the
-            # old minconn=5 opened 5 connections per worker at import time,
-            # which exhausts the connection limit of small Aiven plans.
-            # Extra connections are opened on demand up to maxconn.
+            # psycopg2 CLOSES every returned connection once `minconn` idle ones are already held, and getconn() holds
+            # a lock while it opens a new TLS connection. With minconn=1 any concurrent Dash callbacks therefore
+            # reconnect on nearly every query, one at a time (the "getconn() took 0.8s, 1.6s, 2.4s" log pattern on
+            # Neon). Default to 4 idle connections; lower DB_POOL_MIN only if the database's connection limit
+            # demands it. maxconn must stay >= minconn.
+            _min = max(1, int(os.getenv("DB_POOL_MIN", "4")))
+            _max = max(_min, int(os.getenv("DB_POOL_MAX", "10")))
             self._pool = pool.ThreadedConnectionPool(
-                minconn=int(os.getenv("DB_POOL_MIN", "1")),
-                maxconn=int(os.getenv("DB_POOL_MAX", "10")),
+                minconn=_min,
+                maxconn=_max,
                 dsn=dsn,
                 cursor_factory=psycopg2.extras.RealDictCursor,
                 connect_timeout=15,
