@@ -42,8 +42,12 @@ def test_billing_basis_gate(basis, budget, rate, amt, ok):
 
 
 def test_review_shows_live_values_and_flags_gaps():
-    body = w.render_review({"state": "UP", "address": "", "apt_basis": "undivided_interest", "apt_budget": 0,
-                            "apt_interest": 2.5, "central_tds": True, "tan": "", "bf_ids": [], "bf_amts": []}, None)
+    # §4.12: Review is built from the saved draft, never from live component State.
+    draft = {"society_details": {"state": "UP", "address": ""},
+             "funds": {"apt_basis": "undivided_interest", "apt_budget": 0, "apt_interest": 2.5},
+             "legal_regime": {"central_tds": True}, "tds": {"tan": ""},
+             "brought_forward": {"rows": []}}
+    body = w.render_review(draft, None)
     text = json.dumps(body, default=lambda o: o.to_plotly_json() if hasattr(o, "to_plotly_json") else str(o))
     assert "2.5%" in text and "Address is empty" in text and "Monthly Common-Expense Budget" in text
 
