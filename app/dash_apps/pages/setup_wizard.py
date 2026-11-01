@@ -4,6 +4,7 @@ from dash import html, dcc, Input, Output, State, ALL, callback, no_update
 from app.utils.fiscal import fy_start_date, fy_start_year
 import dash_bootstrap_components as dbc
 from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
+from decimal import Decimal
 from database.db_manager import db
 
 
@@ -998,12 +999,12 @@ def _yn(v):
     return "Yes" if v else "No"
 
 
-def render_review(v, society_id=None):
-    """Review step body built from the LIVE form values `v` (dict), not from the database.
+def render_review(draft, society_id=None):
+    """Review step body built from the SAVED DRAFT (never from live component State).
 
-    Nothing is saved until Submit, so reading the database here could only ever show defaults or blanks.
-    Name / PAN / Registration are Master-owned, so they come from the database."""
-    v = v or {}
+    The draft is current because Next/Previous autosave first (§4.2). Master-owned values
+    (name / PAN / registration) come from the database. Returns a list of Dash components."""
+    draft = draft or {}
     db_s = {}
     if society_id:
         db_s = db._execute("SELECT name, pan_number, registration_number FROM societies WHERE id = :id",
@@ -1018,129 +1019,166 @@ def render_review(v, society_id=None):
     def rs(x):
         return f"₹{num(x):,.2f}"
 
-    basis = v.get("apt_basis") or "undivided_interest"
+    sd = draft.get("society_details") or {}
+    regime = draft.get("legal_regime") or {}
+    tds = draft.get("tds") or {}
+    gst = draft.get("gst") or {}
+    funds = draft.get("funds") or {}
+    accts = draft.get("accounts") or {}
+    bf = draft.get("brought_forward") or {}
+    images = draft.get("images") or {}
+    admin = draft.get("administrator") or {}
+
+    basis = funds.get("apt_billing_basis") or "undivided_interest"
     basis_label = {o["value"]: o["label"] for o in BILLING_BASIS_OPTIONS}.get(basis, basis)
     problems = []
-    for label, val in (("Address", v.get("address")), ("Email", v.get("email")), ("Phone", v.get("phone"))):
+    for label, val in (("Address", sd.get("address")), ("Email", sd.get("email")), ("Phone", sd.get("phone"))):
         if not str(val or "").strip():
             problems.append(f"{label} is empty (Society Details).")
-    if not v.get("state"):
+    if not sd.get("state"):
         problems.append("State is not selected (Society Details): the legal regime cannot be assigned.")
-    err = apt_charges_error(basis, v.get("apt_budget"), v.get("apt_rate"), v.get("apt_amt"))
+    err = apt_charges_error(basis, funds.get("apt_budget"), funds.get("apt_rate"), funds.get("apt_amt"))
     if err:
         problems.append(err)
-    if v.get("central_tds") and not str(v.get("tan") or "").strip():
+    if regime.get("central_tds") and not str(tds.get("tan") or "").strip():
         problems.append("TDS applies but no TAN is entered (TAN & TDS Rates).")
-    if v.get("central_gst") and not str(v.get("gstin") or "").strip():
+    if regime.get("central_gst") and not str(gst.get("gstin") or "").strip():
         problems.append("GST applies but no GSTIN is entered (GSTIN & GST Rate).")
-    if v.get("central_gst") and (v.get("cgst") in (None, "") or v.get("sgst") in (None, "")):
+    if regime.get("central_gst") and (gst.get("cgst") in (None, "") or gst.get("sgst") in (None, "")):
         problems.append("GST applies but CGST / SGST are not entered: no GST rate will exist until your CA's figures are entered.")
-    if not str(v.get("sec_name") or "").strip():
-        problems.append("Secretary name is empty (Administrator).")
+    if not str(admin.get("stepup_hash") or "").strip():
+        problems.append("Step-up password is not set (Administrator).")
 
     # Brought Forward totals
-    bf_dr = bf_cr = 0.0
+    bf_dr = bf_cr = Decimal(0)
     bf_n = 0
     try:
         from database.seed import ACCOUNTS
         drcr = {a[0]: a[5] for a in ACCOUNTS}
-        for acc_id, amt in zip(v.get("bf_ids") or [], v.get("bf_amts") or []):
-            a = num(amt)
+        for r in bf.get("rows") or []:
+            a = money(r.get("bf_amount"))
             if a:
                 bf_n += 1
-                if drcr.get(acc_id) == "Dr":
+                if r.get("side") == "Dr":
                     bf_dr += a
                 else:
                     bf_cr += a
     except Exception:
         pass
-    if bf_n and abs(bf_dr - bf_cr) > 0.005:
-        problems.append(f"Brought Forward does not balance: Dr ₹{bf_dr:,.2f} vs Cr ₹{bf_cr:,.2f}. Submit will reject it.")
+    if bf_n and bf_dr != bf_cr:
+        problems.append(f"Brought Forward does not balance: Dr ₹{bf_dr:,.2f} vs Cr ₹{bf_cr:,.2f}.")
 
-    rates = v.get("tds_rates") or []
-    tds_entered = sum(1 for r in rates if r not in (None, ""))
+    # Receivables tie-out
+    rec_total = Decimal(0)
+    for r in bf.get("receivables") or []:
+        rec_total += money(r.get("amount"))
+    sdr_total = Decimal(0)
+    for r in bf.get("rows") or []:
+        if r.get("side") == "Dr" and r.get("tab") in ("SDr", "SDrCash", "SDrDig"):
+            sdr_total += money(r.get("bf_amount"))
+    if bf.get("receivables") and rec_total != sdr_total:
+        problems.append(f"Pending receivables (₹{rec_total}) do not tie to Sundry Debtors (₹{sdr_total}).")
+
+    tds_rows = tds.get("rows") or []
+    tds_entered = sum(1 for r in tds_rows if r.get("rate") not in (None, ""))
 
     fund_rows = []
     try:
-        fp = fund_plan(society_id, v.get("state"), v.get("pol") or {})
-        for fund, rate in (("sinking", v.get("apt_sink")), ("repair", v.get("apt_repair"))):
+        fp = fund_plan(society_id, sd.get("state"), {})
+        for fund, rate in (("sinking", funds.get("apt_sinking")), ("repair", funds.get("apt_repair"))):
             f = fp["plan"][fund]
             status = "Prescribed by the state" if f["statutory"] else ("Opted in" if f["mode"] != "none" else "Not collected")
             fund_rows.append((FUND_NAMES[fund], f"{status}; {FUND_MODE_LABELS[f['mode']].lower()}"))
             if f["mode"] == "on_bill":
                 fund_rows.append((f"  {FUND_NAMES[fund]} basis and rate", f"{FUND_BASIS_LABELS[f['basis']]}: {num(rate):g}"))
-        _fe = funds_error(fp["plan"], v.get("apt_sink"), v.get("apt_repair"), v.get("apt_cost"))
+        _fe = funds_error(fp["plan"], funds.get("apt_sinking"), funds.get("apt_repair"), funds.get("apt_cost"))
         if _fe:
             problems.append(_fe)
     except Exception:
         fund_rows = [("Funds", "-")]
+
+    def yn(val):
+        return "Yes" if val else "No"
+
+    # Images with thumbnails
+    def thumb(key):
+        path = images.get(key)
+        if not path:
+            return "—"
+        return html.Img(src=f"/assets/{path}", style={"maxWidth": "120px", "maxHeight": "60px", "border": "1px solid #c9d2dc", "borderRadius": "4px", "marginTop": "4px"})
 
     sections = [
         ("Society Identity", [
             ("Society Name (Master)", db_s.get("name") or "—"),
             ("PAN (Master)", db_s.get("pan_number") or "—"),
             ("Registration No. (Master)", db_s.get("registration_number") or "— (ask Master to enter it)"),
-            ("State", v.get("state") or "—"),
-            ("Constitution", v.get("constitution") or "—"),
-            ("Address", v.get("address") or "—"),
-            ("Email", v.get("email") or "—"),
-            ("Phone", v.get("phone") or "—"),
+            ("State", sd.get("state") or "—"),
+            ("Constitution", sd.get("constitution") or "—"),
+            ("Address", sd.get("address") or "—"),
+            ("Email", sd.get("email") or "—"),
+            ("Phone", sd.get("phone") or "—"),
+            ("Gate Pass Enforcement", str(sd.get("gate_logic") or "—").title()),
+            ("Security Duty Hours", f"{sd.get('duty_hrs') or '—'} hours"),
+            ("Logo", thumb("logo")),
+            ("Background image", thumb("bg")),
         ]),
-        ("Central Acts", [
-            ("Income Tax - TAN required", _yn(v.get("central_it_tan"))),
-            ("TDS applicable", _yn(v.get("central_tds"))),
-            ("GST applicable", _yn(v.get("central_gst"))),
-            ("RERA applicable", _yn(v.get("central_rera"))),
+        ("Founding committee", _committee_review_rows(society_id)),
+        ("Step-up password", [("Status", "Set — initial, replace within 30 days of activation")] if admin.get("stepup_hash") else [("Status", "Not set")]),
+        ("Legal regime & compliance", [
+            ("Regime code", str(sd.get("state") or "") + " / " + str(sd.get("constitution") or "")),
+            ("Income Tax - TAN required", yn(regime.get("central_it_tan"))),
+            ("TDS applicable", yn(regime.get("central_tds"))),
+            ("GST applicable", yn(regime.get("central_gst"))),
+            ("RERA applicable", yn(regime.get("central_rera"))),
+            ("Has employees", yn(regime.get("has_employees"))),
+            ("Security agency", yn(regime.get("has_security_agency"))),
         ]),
-        ("TAN & TDS", [
-            ("TAN", v.get("tan") or "—"),
-            ("TDS effective date", v.get("tds_date") or "—"),
-            ("TDS rate rows entered (pending CA confirmation)", tds_entered),
-        ]),
-        ("GST", [
-            ("GSTIN", v.get("gstin") or "—"),
-            ("CGST / SGST (pending CA confirmation)",
-             (f"{num(v.get('cgst')):g}% / {num(v.get('sgst')):g}%" if v.get("cgst") not in (None, "") and v.get("sgst") not in (None, "")
-              else "Not entered")),
-        ]),
-        ("Apartment Charges (society default)", [
+        ("Funds", [
             ("Maintenance Billing Basis", basis_label),
-            ("Construction Cost of Project", rs(v.get("apt_cost"))),
-            ("Monthly Common-Expense Budget", rs(v.get("apt_budget"))),
-            ("Default Rate per sq ft", rs(v.get("apt_rate"))),
-            ("Default Fixed Amount", rs(v.get("apt_amt"))),
-            ("Billing Due Day", v.get("apt_due") or "—"),
-            ("Sinking Fund Rate", f"{num(v.get('apt_sink')):g}" if v.get("apt_sink") not in (None, "") else "Not entered"),
-            ("Repair Fund Rate", f"{num(v.get('apt_repair')):g}" if v.get("apt_repair") not in (None, "") else "Not entered"),
-            ("Interest (% per month, simple)", (f"{num(v.get('apt_interest')):g}%" if num(v.get("apt_interest")) > 0
+            ("Construction Cost of Project", rs(funds.get("apt_cost"))),
+            ("Monthly Common-Expense Budget", rs(funds.get("apt_budget"))),
+            ("Default Rate per sq ft", rs(funds.get("apt_rate"))),
+            ("Default Fixed Amount", rs(funds.get("apt_amt"))),
+            ("Billing Due Day", str(funds.get("apt_due") or "—")),
+            ("Sinking Fund Rate", f"{num(funds.get('apt_sinking')):g}" if funds.get("apt_sinking") not in (None, "") else "Not entered"),
+            ("Repair Fund Rate", f"{num(funds.get('apt_repair')):g}" if funds.get("apt_repair") not in (None, "") else "Not entered"),
+            ("Interest (% per month, simple)", (f"{num(funds.get('apt_interest')):g}%" if num(funds.get("apt_interest")) > 0
                                                 else "Not set: no interest is charged on overdue dues until the General Body rate is entered")),
         ]),
         ("Funds (Sinking / Repair)", fund_rows),
+        ("TAN & TDS", [
+            ("TAN", tds.get("tan") or "—"),
+            ("TDS effective date", tds.get("effective_date") or "—"),
+            ("TDS rate rows entered (pending CA confirmation)", tds_entered),
+        ]),
+        ("GST", [
+            ("GSTIN", gst.get("gstin") or "—"),
+            ("CGST / SGST (pending CA confirmation)",
+             (f"{num(gst.get('cgst')):g}% / {num(gst.get('sgst')):g}%" if gst.get("cgst") not in (None, "") and gst.get("sgst") not in (None, "")
+              else "Not entered")),
+        ]),
         ("Vendor Pass Charges", [
-            ("1 Day Pass", f"₹{num(v.get('ven1')):,.0f}"),
-            ("7 Day Pass", f"₹{num(v.get('ven7')):,.0f}"),
-            ("1 Month Pass", f"₹{num(v.get('ven30')):,.0f}"),
+            ("1 Day Pass", f"₹{num(draft.get('vendor', {}).get('vendor_1day')):,.0f}"),
+            ("7 Day Pass", f"₹{num(draft.get('vendor', {}).get('vendor_7day')):,.0f}"),
+            ("1 Month Pass", f"₹{num(draft.get('vendor', {}).get('vendor_1mth')):,.0f}"),
         ]),
-        ("Society Operations", [
-            ("Gate Pass Enforcement", str(v.get("gate") or "—").title()),
-            ("Security Duty Hours", f"{v.get('duty') or '—'} hours"),
+        ("Apartment Charges", []),
+        ("Accounts", [
+            ("Accounting/calculation start date", accts.get("calc_start") or "—"),
+            ("Payment QR", thumb("pay_qr") if accts.get("pay_qr") else "—"),
         ]),
-        ("Administrator", [
-            ("Secretary Name", v.get("sec_name") or "—"),
-            ("Secretary Email", v.get("sec_email") or "—"),
-            ("Secretary Phone", v.get("sec_phone") or "—"),
-        ]),
-        ("Accounts & Brought Forward", [
-            ("Accounting start date", v.get("calc_start") or "—"),
-            ("Brought Forward financial year", v.get("bf_fy") or "—"),
+        ("Brought Forward", [
+            ("Financial year", str(bf.get("fy") or "—")),
             ("Accounts with an opening balance", bf_n),
             ("Total Dr / Total Cr", f"₹{bf_dr:,.2f} / ₹{bf_cr:,.2f}"),
         ]),
+        ("Pending receivables by apartment", _receivables_review_rows(bf)),
+        ("Reconciliation & evidence", _reconciliation_review_rows(bf)),
     ]
 
     def card(title, items):
-        rows = [html.Tr([html.Td(html.Strong(k), style={"width": "34%", "fontSize": "12px"}),
-                         html.Td(str(val), style={"fontSize": "12px"})]) for k, val in items]
+        rows = [html.Tr([html.Td(html.Strong(k), style={"width": "36%", "fontSize": "12px"}),
+                         html.Td(val, style={"fontSize": "12px"})]) for k, val in items if val is not None]
         return dbc.Card([dbc.CardHeader(html.H6(title, className="mb-0", style={"fontSize": "13px"})),
                          dbc.CardBody(dbc.Table([html.Tbody(rows)], bordered=False, size="sm", style={"marginBottom": "0"}), className="py-2")],
                         className="mb-3 shadow-sm")
@@ -1166,16 +1204,70 @@ def render_review(v, society_id=None):
     if not ratification:
         ratification = [html.Li("No pending ratifications.", className="text-muted", style={"fontSize": "12px"})]
 
-    attention = (dbc.Alert([html.Strong("Fix before you submit:"), html.Ul([html.Li(x) for x in problems], className="mb-0")], color="danger", className="py-2")
+    attention = (dbc.Alert([html.Strong("Fix before you continue:"), html.Ul([html.Li(x) for x in problems], className="mb-0")], color="danger", className="py-2")
                  if problems else dbc.Alert("Nothing missing in the steps checked above.", color="success", className="py-2"))
     return [
-        _render_banner("Review & Confirm", "These are the values currently on screen. Nothing is saved until you Submit on the Agreement step."),
+        _render_banner("Review & Confirm", "These are the values saved in your draft. Nothing is posted to the ledger until the Agreement is signed and the society is activated."),
         attention,
         html.Div([card(t, i) for t, i in sections]),
         html.H6("Pending Ratification Checklist", className="text-primary mt-3 mb-2"),
         html.P("These provisional choices need a General Body resolution to become active:", className="text-muted small mb-2"),
         html.Ul(ratification, style={"fontSize": "12px"}),
     ]
+
+
+def _committee_review_rows(society_id):
+    """Review rows for the three founding office-bearers (from the DB, not the draft)."""
+    try:
+        officers = seated_officers(society_id)
+    except Exception:
+        officers = {}
+    rows = []
+    for office in ("president", "secretary", "treasurer"):
+        v = officers.get(office) or {}
+        name = v.get("holder_name") or "—"
+        flat = v.get("flat_number") or "—"
+        sig = v.get("signature_image")
+        sig_cell = html.Img(src=f"/assets/{sig}", style={"maxWidth": "100px", "maxHeight": "50px", "border": "1px solid #c9d2dc", "borderRadius": "4px", "marginTop": "3px"}) if sig else "no signature image"
+        rows.append((f"{office.replace('_', ' ').title()} — name", name))
+        rows.append((f"{office.replace('_', ' ').title()} — flat", flat))
+        rows.append((f"{office.replace('_', ' ').title()} — signature image", sig_cell))
+        rows.append((f"{office.replace('_', ' ').title()} — mobile", v.get("phone") or "—"))
+        rows.append((f"{office.replace('_', ' ').title()} — completeness", "complete" if v.get("complete") else "incomplete"))
+    return rows
+
+
+def _receivables_review_rows(bf):
+    rows = bf.get("receivables") or []
+    if not rows:
+        return [("Pending receivables", "None entered.")]
+    items = []
+    total = Decimal(0)
+    for r in rows:
+        amt = money(r.get("amount"))
+        total += amt
+        items.append(html.Tr([html.Td(r.get("flat_number") or "—", style={"fontSize": "12px"}),
+                              html.Td(f"₹{amt}", style={"fontSize": "12px"}),
+                              html.Td(str(r.get("overdue_days") or "—"), style={"fontSize": "12px"}),
+                              html.Td(r.get("remarks") or "", style={"fontSize": "12px"})]))
+    items.append(html.Tr([html.Td(html.Strong("Total"), style={"fontSize": "12px"}),
+                          html.Td(html.Strong(f"₹{total}"), style={"fontSize": "12px"}),
+                          html.Td(""), html.Td("")], style={"borderTop": "1px solid #999"}))
+    header = html.Tr([html.Th("Flat no.", style={"fontSize": "11px"}), html.Th("Value receivable (₹)", style={"fontSize": "11px"}),
+                      html.Th("Days overdue", style={"fontSize": "11px"}), html.Th("Remarks", style={"fontSize": "11px"})])
+    return [("Pending receivables", dbc.Table([html.Thead(header), html.Tbody(items)], bordered=False, size="sm"))]
+
+
+def _reconciliation_review_rows(bf):
+    rec = bf.get("reconciliation") or {}
+    if not rec:
+        return [("Reconciliation & evidence", "Not yet completed.")]
+    items = []
+    for key, val in rec.items():
+        if key.endswith("_sha256") or key.endswith("_stored"):
+            continue
+        items.append((key.replace("_", " ").title(), str(val)))
+    return [("Reconciliation & evidence", items if items else "Not yet completed.")]
 
 
 def legal_regime_live(society_id=None, state=None, constitution=None):

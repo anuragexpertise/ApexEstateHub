@@ -15,7 +15,7 @@ import dash_bootstrap_components as dbc
 from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
 from app.dash_apps.pages import onboarding_page as op
-from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label
+from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label, render_review
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
 from app.security.guards import require_session
 from app.services import onboarding_service as ob
@@ -557,5 +557,23 @@ def register_onboarding_wizard_callbacks(app):
         if idx is not None and idx < len(msgs):
             msgs[idx] = html.Small(msg, className="text-" + ("success" if ok else "danger"))
         return msgs
+
+    # ── review from draft (item 12) ─────────────────────────────────────────────
+    @app.callback(
+        Output("onb-review-container", "children"),
+        Input("onb-wizard-step", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def wizard_render_review(step):
+        s = _session()
+        if not s or not s[0]:
+            return no_update
+        sid, uid, role = s
+        # step is the index into CATEGORIES; Review is the last one.
+        if step is None or int(step) != NCAT - 1:
+            return no_update
+        draft = ob.load_draft(sid)
+        return render_review(draft, sid)
 
     print("  ✓ Onboarding wizard callbacks registered")

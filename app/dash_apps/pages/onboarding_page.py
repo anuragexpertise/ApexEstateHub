@@ -243,8 +243,12 @@ def setup_stage(society_id: int, current_step: int = 0) -> list:
     # ── main content ────────────────────────────────────────────────────────────
     containers = []
     for i, cat in enumerate(CATEGORIES):
-        containers.append(html.Div(render_category_content(cat, society_id), id={"type": "onb-step", "key": cat},
-                                   style={"display": "block" if i == current_step else "none", "paddingTop": "6px"}))
+        if cat == "Review":
+            # Review is filled from the saved draft by a callback (§4.12), never from live State.
+            containers.append(html.Div(id="onb-review-container", style={"display": "block" if i == current_step else "none", "paddingTop": "6px"}))
+        else:
+            containers.append(html.Div(render_category_content(cat, society_id), id={"type": "onb-step", "key": cat},
+                                       style={"display": "block" if i == current_step else "none", "paddingTop": "6px"}))
     main = html.Div([
         html.Div(containers, id="onb-step-containers"),
         html.Div([

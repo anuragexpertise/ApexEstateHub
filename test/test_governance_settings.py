@@ -291,11 +291,13 @@ def test_bye_law_tab_shows_the_policy_register(stub, monkeypatch):
 
 
 def test_setup_wizard_no_longer_says_master_links_resolutions():
+    """Item 8: the bye-law adoption panel moved out of the wizard into Stage 6."""
     src = open("app/dash_apps/pages/setup_wizard.py", encoding="utf-8").read()
     for stale in ("linked by Master", "Master links", "Master → AOA Rule Editor → Society Bye-Laws"):
         assert stale not in src, stale
-    assert "Settings → Society governance → Meetings & Resolutions" in src
-    assert "Order matters: save the choice first, then record the resolution." in src
+    panel = open("app/dash_apps/pages/adoption_panel.py", encoding="utf-8").read()
+    assert "Settings → Society governance → Meetings & Resolutions" in panel
+    assert "Order matters: save the choice first, then record the resolution." in panel
 
 
 # ── guided bye-law form ──────────────────────────────────────────────────────
