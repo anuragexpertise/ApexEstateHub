@@ -119,27 +119,37 @@ def register_onboarding_callbacks(app):
     )
     @require_session
     def onb_sig_preview(contents_list, filename_list):
+        """Show a thumbnail under the office whose signature file was just chosen.
+
+        The output is an ALL pattern, so Dash needs a list with one entry per preview box: the chosen office gets
+        the thumbnail, every other box is left untouched. (ctx.inputs_list holds the Input, ctx.states_list the State.)"""
         trig = ctx.triggered_id
         if not trig or not isinstance(trig, dict):
             return no_update
-        office = trig["office"]
-        for item in (ctx.states_list[0] or []):
-            iid = item.get("id")
-            if isinstance(iid, dict) and iid.get("office") == office and iid.get("field") == "sig":
+        office = trig.get("office")
+        contents = fname = None
+        for item in (ctx.inputs_list[0] or []):
+            iid = item.get("id") or {}
+            if iid.get("office") == office and iid.get("field") == "sig":
                 contents = item.get("value")
-                fname = ""
-                for it2 in (ctx.states_list[1] or []):
-                    i2 = it2.get("id")
-                    if isinstance(i2, dict) and i2.get("office") == office and i2.get("field") == "sig":
-                        fname = it2.get("value") or ""
-                        break
-                if contents:
-                    return html.Div([
-                        html.Img(src=contents, style={"maxWidth": "140px", "maxHeight": "70px",
-                                                      "border": "1px solid #c9d2dc", "borderRadius": "4px"}),
-                        html.Div(fname, style={"fontSize": "11px", "color": "#667", "marginTop": "2px"})])
-                return html.Div("Signature image selected.", style={"fontSize": "11.5px", "color": "#17976e"})
-        return no_update
+                break
+        for item in (ctx.states_list[0] or []):
+            iid = item.get("id") or {}
+            if iid.get("office") == office and iid.get("field") == "sig":
+                fname = item.get("value") or ""
+                break
+        if contents:
+            shown = html.Div([
+                html.Img(src=contents, style={"maxWidth": "140px", "maxHeight": "70px",
+                                              "border": "1px solid #c9d2dc", "borderRadius": "4px"}),
+                html.Div(fname or "", style={"fontSize": "11px", "color": "#667", "marginTop": "2px"})])
+        else:
+            shown = html.Div("Signature image selected.", style={"fontSize": "11.5px", "color": "#17976e"})
+        out = []
+        for o in (ctx.outputs_list or []):
+            oid = o.get("id") or {}
+            out.append(shown if oid.get("office") == office else no_update)
+        return out
 
     # ── seated officer Edit details: mobile and/or signature replace ──────────
     @app.callback(

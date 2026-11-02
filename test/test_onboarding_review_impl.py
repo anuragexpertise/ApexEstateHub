@@ -69,3 +69,43 @@ def test_missing_migration_column_does_not_crash_the_hub(monkeypatch):
     monkeypatch.setattr(ob, "_row", lambda sql, params=None, **k: boom(sql, params))
     assert ob.society_phase(1) == "complete"          # un-migrated DB: nothing is phase-locked
     assert ob.signing_mode(1) == "password"
+
+
+def _capture_callbacks(module, register_name):
+    """Register a callback module against a stub app and return {function name: undecorated function}."""
+    got = {}
+
+    class StubApp:
+        def callback(self, *a, **k):
+            def deco(f):
+                got[f.__name__] = getattr(f, "__wrapped__", f)
+                return f
+            return deco
+
+        def clientside_callback(self, *a, **k):
+            return None
+    getattr(module, register_name)(StubApp())
+    return got
+
+
+def test_signature_preview_reads_inputs_list_and_returns_one_entry_per_box(monkeypatch):
+    """Regression: ctx.states_list holds only States, so reading states_list[1] raised IndexError (500 on picking a signature)."""
+    from dash import no_update
+    from app.dash_apps.callbacks import onboarding_callbacks as oc
+
+    fn = _capture_callbacks(oc, "register_onboarding_callbacks")["onb_sig_preview"]
+
+    def ident(office, field):
+        return {"type": f"{oc.P}-f", "office": office, "field": field}
+
+    class FakeCtx:
+        triggered_id = ident("president", "sig")
+        inputs_list = [[{"id": ident("president", "sig"), "value": "data:image/png;base64,AAAA"},
+                        {"id": ident("secretary", "sig"), "value": None}]]
+        states_list = [[{"id": ident("president", "sig"), "value": "p.png"},
+                        {"id": ident("secretary", "sig"), "value": None}]]
+        outputs_list = [{"id": ident("president", "sig-preview")}, {"id": ident("secretary", "sig-preview")}]
+    monkeypatch.setattr(oc, "ctx", FakeCtx)
+    out = fn(["data:image/png;base64,AAAA", None], ["p.png", None])
+    assert isinstance(out, list) and len(out) == 2
+    assert out[0] is not no_update and out[1] is no_update
