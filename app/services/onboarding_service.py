@@ -567,7 +567,7 @@ def finalize_draft(society_id: int, actor_id: int, admin_password: str) -> str:
     """validate_all must be empty; write societies via fn_complete_society_setup(draft=True);
     state -> 'setup draft'. Keeps the 5 s throttle, lockout check and key seeding in one
     transaction (A14 atomicity)."""
-    from app.security.auth_service import verify_password_with_lockout as _verify
+    from app.services.auth_service import verify_password_with_lockout as _verify
     d = declaration(society_id)
     if d is None:
         raise OnboardingError("Submit the Setup Wizard first; its draft is what the annexes are built from.")
@@ -616,7 +616,7 @@ def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
     from database.db_manager import _to_pyformat
     from app.services import regime_rules_admin as _rra
     from app.services.auth_service import verify_password_with_lockout  # noqa: F401  (throttle+lockout shared)
-    from app.dash_apps.pages.setup_wizard import (_fund_flags_fn, _fund_plan_fn, apt_charges_error as _apt_charges_error,
+    from app.dash_apps.pages.setup_wizard import (apt_charges_error as _apt_charges_error,
                                                   funds_error as _funds_error, fund_plan as _fund_plan)
     from database.seed import tds_wizard_rows as _tds_wizard_rows, it2025_twin as _it2025_twin
     from app.utils.fiscal import fy_start_date as _fy_start_date
@@ -755,8 +755,8 @@ def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
         from database.seed import seed_accounts as _seed_accounts
         _seed_accounts(cur, conn, society_id, commit=False)
         cur.execute(_sql, _prm)
-        _row = cur.fetchone()
-        result = dict(_row) if _row else None
+        _fetched = cur.fetchone()
+        result = dict(_fetched) if _fetched else None
         _res = (result or {}).get("result") or ""
         if _res != "OK":
             raise OnboardingError(_res or "Setup could not be saved — please try again.")
@@ -848,37 +848,42 @@ def save_receivables(society_id: int, actor_id: int, rows: list[dict]) -> dict:
     return {"ok": not errors, "errors": errors, "total": str(total)}
 
 
-def link_opening_receivable(society_id: int, apartment_id: int, flat_number: str) -> str | None:
-    """When a flat is enrolled, create its receivable row from opening_receivables_pending
-    (idempotent) and mark it linked. Returns the receivable id or None if no pending row."""
-    pending = _row("""SELECT id, amount, overdue_days, remarks FROM opening_receivables_pending
-                       WHERE society_id=%s AND flat_number=%s AND status='pending_link'""",
-                   (society_id, flat_number), fetch_one=True)
-    if not pending:
-        return None
-    from database.seed import seed_receivable as _seed_receivable
-    try:
-        with db._conn() as conn:
-            cur = conn.cursor()
-            cur.execute("""SELECT id FROM receivables WHERE society_id=%s AND flat_number=%s""",
-                        (society_id, flat_number))
-            if cur.fetchone():
-                rec_id = None
-            else:
-                cur.execute("""INSERT INTO receivables (society_id, apartment_id, flat_number, amount, overdue_days,
-                                                           particulars, status, created_at)
-                                VALUES (%s,%s,%s,%s,%s,'Opening dues - Annex C arrears','open',NOW())
-                                RETURNING id""",
-                            (society_id, apartment_id, flat_number, pending["amount"],
-                             pending["overdue_days"]))
-                rec_id = (cur.fetchone() or {}).get("id")
-            cur.execute("""UPDATE opening_receivables_pending SET status='linked', apartment_id=%s,
-                              receivable_id=%s, linked_at=NOW() WHERE id=%s""",
-                        (apartment_id, rec_id, pending["id"]))
-            conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
+def link_opening_receivable(society_id: int, apartment_id: int, flat_number: str) -> int | None:
+    """When a flat is enrolled, create its opening receivable from opening_receivables_pending and mark the pending
+    row linked. Mirrors fn_activate_society §5.5 column for column. Idempotent: the pending row is locked and only a
+    'pending_link' row is acted on, so a second call (or a concurrent enrolment) returns None and creates nothing.
+    Returns the new receivable id, or None when there was nothing to link."""
+    flat_number = (flat_number or "").strip()
+    with db._conn() as conn:                       # one transaction: commits on exit, rolls back on error
+        cur = conn.cursor()
+        cur.execute("""SELECT id, amount FROM opening_receivables_pending
+                        WHERE society_id=%s AND flat_number=%s AND status='pending_link' FOR UPDATE""",
+                    (society_id, flat_number))
+        pending = cur.fetchone()
+        if not pending:
+            return None
+        cur.execute("SELECT id FROM accounts WHERE society_id=%s AND tab_name='SDr' ORDER BY id LIMIT 1", (society_id,))
+        acc = cur.fetchone()
+        if not acc:
+            raise OnboardingError("Cannot post opening dues: this society has no Sundry Debtors (SDr) account.")
+        cur.execute("""SELECT content->>'as_at_date' AS as_at FROM onboarding_annexes
+                        WHERE society_id=%s AND annex_code='C' AND status='sealed'
+                        ORDER BY sealed_at DESC NULLS LAST LIMIT 1""", (society_id,))
+        row = cur.fetchone() or {}
+        try:
+            as_at = date.fromisoformat(str(row.get("as_at") or "")[:10])
+        except ValueError:
+            as_at = date.today()
+        cur.execute("""INSERT INTO receivables (society_id, entity_id, role, acc_id, description, period_month,
+                                                 base_amount, interest_amount, interest_months_applied, amount,
+                                                 paid_amount, paid_principal, due_date, status)
+                        VALUES (%s,%s,'apartment',%s,'Opening dues - Annex C arrears',%s,%s,0,0,%s,0,0,%s,'pending')
+                        RETURNING id""",
+                    (society_id, apartment_id, acc["id"], as_at, pending["amount"], pending["amount"], as_at))
+        rec_id = cur.fetchone()["id"]
+        cur.execute("""UPDATE opening_receivables_pending
+                          SET status='linked', apartment_id=%s, receivable_id=%s, linked_at=NOW()
+                        WHERE id=%s""", (apartment_id, rec_id, pending["id"]))
     return rec_id
 
 
@@ -894,9 +899,11 @@ def void_pending_receivable(society_id: int, actor_id: int, flat_number: str, re
     """Mark a pending receivable as void (flat does not exist). Requires a reason >= 10 chars."""
     if not reason or len(reason.strip()) < 10:
         raise OnboardingError("Give a reason (at least 10 characters) for voiding this flat.")
-    _row("""UPDATE opening_receivables_pending SET status='void_requested', void_reason=%s
-             WHERE society_id=%s AND flat_number=%s AND status='pending_link'""",
-         (reason.strip(), society_id, flat_number))
+    done = _row("""UPDATE opening_receivables_pending SET status='void_requested', void_reason=%s
+                    WHERE society_id=%s AND flat_number=%s AND status='pending_link' RETURNING id""",
+                (reason.strip(), society_id, flat_number))
+    if not done:
+        raise OnboardingError(f"No pending opening receivable for flat {flat_number}.")
     _audit(society_id, actor_id, "OPENING_RECEIVABLE_VOIDED", "opening_receivables_pending", None,
            {"flat_number": flat_number, "reason": reason})
 
@@ -924,6 +931,17 @@ def save_bank_reconciliation(society_id: int, actor_id: int, values: dict) -> di
     return {"ok": True}
 
 
+def reconciliation_state(book, rec: dict | None) -> dict:
+    """Pure: where one bank/cash account stands. 'agrees' needs a statement balance equal to the book balance;
+    'evidenced' needs a stored scan (the server's SHA-256, never typed)."""
+    rec = rec or {}
+    raw = rec.get("statement_balance")
+    has = raw not in (None, "")
+    diff = (money(book) - money(raw)) if has else None
+    return {"has_statement": has, "diff": diff, "agrees": bool(has and diff == 0),
+            "evidenced": bool(rec.get("sha256"))}
+
+
 def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filename: str,
                         data: bytes, uploaded_by: int, meta: dict) -> dict:
     """Store an evidence file via _store_evidence extended with purpose; returns db row."""
@@ -949,7 +967,7 @@ def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filen
                     sha256, size_bytes, meta, uploaded_by)
                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s) RETURNING id""",
                (society_id, purpose, acc_id, filename, stored, digest, len(data),
-                json.dumps(meta or {}), uploaded_by), fetch_one=True)
+                json.dumps(meta or {}), uploaded_by))
     return {"id": row["id"], "sha256": digest, "stored_name": stored, "filename": filename}
 
 
@@ -1246,12 +1264,12 @@ def submit_setup_draft(society_id: int, actor_id: int, data: dict) -> str:
                 """INSERT INTO onboarding_declarations (society_id, declaration_json, status, created_by, submitted_at)
                    VALUES (%s, %s::jsonb, 'submitted', %s, NOW())
                    ON CONFLICT (society_id) DO UPDATE SET
-                       declaration_json = EXCLUDED.declaration_json,
+                       declaration_json = onboarding_declarations.declaration_json || EXCLUDED.declaration_json,
                        status = 'submitted', updated_at = NOW(), submitted_at = NOW()""",
                 (society_id, _json.dumps(_declaration), actor_id))
             cur.execute(_sql, _prm)
-            _row = cur.fetchone()
-            result = dict(_row) if _row else None
+            _fetched = cur.fetchone()
+            result = dict(_fetched) if _fetched else None
             _res = (result or {}).get("result") or ""
             if _res != "OK":
                 raise OnboardingError(_res or "Setup could not be saved — please try again.")
@@ -1355,12 +1373,29 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
             cr += amt
             if a["tab_name"] in FUND_TABS:
                 fund_cr += amt
-    arrears = inputs.get("arrears_by_flat") or []
+    draft_bf = ((decl.get("draft") or {}).get("brought_forward")) or {}
+    recon = draft_bf.get("reconciliation") or {}
+    # Arrears come from the Brought Forward step's receivables table; the old typed-inputs form is only a fallback.
+    arrears = [{"flat_number": r.get("flat_number"), "amount": str(money(r.get("amount"))), "overdue_days": r.get("overdue_days")}
+               for r in (draft_bf.get("receivables") or [])] or (inputs.get("arrears_by_flat") or [])
     arrears_total = sum((money(x["amount"]) for x in arrears), Decimal(0))
+    bank_lines = [(l, accs[l["acc_id"]]) for l in lines if accs[l["acc_id"]]["tab_name"] in BANK_TABS and money(l["amount"]) > 0
+                  and accs[l["acc_id"]]["drcr_account"] != "Cr"]
+    bank_rec, unreconciled = {}, []
+    for l, a in bank_lines:
+        r = recon.get(f"bank_{a['id']}") or {}
+        st = reconciliation_state(l["amount"], r)
+        bank_rec[str(a["id"])] = {"account": a["name"], "book": l["amount"], "statement_balance": r.get("statement_balance"),
+                                  "evidence_sha256": r.get("sha256")}
+        if not (st["agrees"] and st["evidenced"]):
+            unreconciled.append(a["name"] + (" (differs by Rs %s)" % st["diff"] if st["diff"] else
+                                            " (no statement balance)" if not st["has_statement"] else " (no scan attached)"))
+    audited = recon.get("audited_sha256") or inputs.get("audited_hash")
     content = {"financial_year": fy, "as_at_date": str(date(fy, 4, 1)), "opening_balances": lines,
                "total_debits": str(dr), "total_credits": str(cr), "fund_balances": str(fund_cr), "bank_and_deposit_balances": str(bank_dr),
                "receivables_control": str(debtors_dr), "arrears_by_flat": arrears,
-               "bank_agrees_to_statement": bool(inputs.get("bank_agrees")), "last_audited_statements_sha256": inputs.get("audited_hash"),
+               "bank_agrees_to_statement": (not unreconciled) if recon else bool(inputs.get("bank_agrees")),
+               "bank_reconciliation": bank_rec, "last_audited_statements_sha256": audited,
                "ca_review": inputs.get("ca_review_ref") or "none obtained", "ca_reviewed": bool(inputs.get("ca_review_ref")),
                "year_to_date_carry_ins": "not captured at setup; the CA to confirm TDS, GST and s.44AB carry-ins"}
     controls = {
@@ -1371,9 +1406,12 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
                              f"Funds of Rs {fund_cr} exceed bank, cash and deposits of Rs {bank_dr}: an unbacked fund would let general money be spent."),
         "arrears_tie": _ctl(arrears_total == debtors_dr, f"Arrears by flat (Rs {arrears_total}) tie to the receivables control (Rs {debtors_dr})." if arrears_total == debtors_dr else
                             f"Arrears by flat total Rs {arrears_total} but the receivables control is Rs {debtors_dr}."),
-        "bank_agrees": _ctl(bool(inputs.get("bank_agrees")) or bank_dr == 0, "Bank balances are attested as agreeing to the statement." if inputs.get("bank_agrees") else
-                            ("No bank balance is declared." if bank_dr == 0 else "Attest that bank and cash balances agree to the statement on the as-at date.")),
-        "audited_statements": _ctl(True, "Last audited statements are attached by SHA-256." if inputs.get("audited_hash") else
+        "bank_agrees": (_ctl(not unreconciled, "Every bank and cash balance agrees to its statement, with a scan attached." if not unreconciled
+                             else "Not reconciled: " + "; ".join(unreconciled) + ". Fix in Brought Forward.")
+                        if recon else
+                        _ctl(bool(inputs.get("bank_agrees")) or bank_dr == 0, "Bank balances are attested as agreeing to the statement." if inputs.get("bank_agrees") else
+                             ("No bank balance is declared." if bank_dr == 0 else "Reconcile each bank and cash account in the Brought Forward step."))),
+        "audited_statements": _ctl(True, "Last audited statements are attached by SHA-256." if audited else
                                    "No audited statements attached; the opening position is labelled unaudited.", False),
         "ca_review": _ctl(True, "A CA has reviewed this annex." if inputs.get("ca_review_ref") else
                           "No CA review obtained: every statement is labelled 'opening position unreviewed' until one is.", False),
@@ -1381,15 +1419,68 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
     return content, controls
 
 
+ANNEX_CODES = ("A", "B", "C", "D")
+
+# Where each failing control is fixed: a wizard rail key, or "committee" for the Stage 2 screen.
+CONTROL_FIX = {
+    ("A", "regime_assigned"): "Legal Regime Selection", ("A", "unverified_instruments"): "Legal Regime Selection",
+    ("B", "wizard_submitted"): "Instructions", ("B", "committee_seated"): "committee", ("B", "grievance_officer"): "committee",
+    ("B", "rates_pending_ca"): "TAN & TDS Rates",
+    ("C", "balanced"): "Brought Forward", ("C", "accounts_known"): "Brought Forward", ("C", "funds_backed"): "Brought Forward",
+    ("C", "arrears_tie"): "Brought Forward", ("C", "bank_agrees"): "Brought Forward",
+    ("D", "grievance_officer"): "committee", ("D", "grievance_contact"): "committee", ("D", "stepup_set"): "Administrator",
+}
+
+# Categories of sub-processor. Provider names are read from the environment, never invented here.
+SUB_PROCESSOR_CATEGORIES = (
+    ("Hosting and database", "HOSTING_PROVIDER"),
+    ("Transactional email and notifications", "EMAIL_PROVIDER"),
+    ("Aadhaar eSign / DSC provider (only where the signing method is eSign)", "ESIGN_PROVIDER"),
+)
+
+
+def _annex_d(society_id: int, soc: dict) -> tuple[dict, dict]:
+    """Annex D: data-protection and custody schedule (generated). Society = Data Fiduciary, Operator = Processor."""
+    import os as _os
+    operator, op_addr = _operator()
+    mode = (soc.get("signing_mode") or ("esign" if soc.get("esign_required") else "password"))
+    email, phone = (soc.get("grievance_officer_email") or "").strip(), (soc.get("grievance_officer_phone") or "").strip()
+    stepup = bool((soc.get("stepup_password_hash") or "").strip()) if "stepup_password_hash" in soc else None
+    content = {
+        "grievance_officer": {"name": soc.get("grievance_officer_name"), "email": email or None, "phone": phone or None},
+        "roles": {"data_fiduciary": soc.get("name"), "data_processor": operator, "processor_address": op_addr},
+        "sub_processors": [{"category": c, "provider": _os.environ.get(env) or "as notified by the Operator"}
+                           for c, env in SUB_PROCESSOR_CATEGORIES],
+        "signing_method": mode,
+        "stepup_custody": ("The step-up password confirms sensitive society actions. It is held by the Society, jointly by the "
+                           "President, Secretary and Treasurer; the administrator sets the first one so setup can finish, and it must be "
+                           "replaced under the three office-bearers' signatures within 30 days of go-live. The Operator holds no readable "
+                           "copy, and the society's signing keys are created and guarded by the server."),
+        "statement": ("The Society determines the purposes and means of processing its members' personal data and is the Data Fiduciary "
+                      "under the Digital Personal Data Protection Act, 2023. The Operator processes that data only on the Society's "
+                      "instructions as its Data Processor, through the sub-processors listed above."),
+    }
+    controls = {
+        "grievance_officer": _ctl(bool(soc.get("grievance_officer_name")), "A grievance officer is named." if soc.get("grievance_officer_name")
+                                  else "Name a grievance officer: the Agreement and every notice show them."),
+        "grievance_contact": _ctl(bool(email or phone), "The grievance officer has a contact address." if (email or phone)
+                                  else "Give the grievance officer an email or phone number."),
+    }
+    if stepup is not None:
+        controls["stepup_set"] = _ctl(stepup, "The step-up password is set." if stepup else "Create the step-up password in the Administrator step.")
+    return content, controls
+
+
 def build_annexes(society_id: int, actor_id: int | None = None) -> dict:
-    """Render Annexes A, B and C from the saved draft and store them as 'draft' with their control results."""
+    """Render Annexes A, B, C and D from the saved draft and store them as 'draft' with their control results."""
     soc = _row("SELECT * FROM societies WHERE id=%s", (society_id,))
     if not soc:
         raise OnboardingError("Society not found.")
     if soc["onboarding_state"] not in ("setup draft", "committee seated"):
         raise OnboardingError("Annexes can be prepared only before the society is active.")
     decl = declaration(society_id)
-    built = {"A": _annex_a(society_id, soc), "B": _annex_b(society_id, soc, decl), "C": _annex_c(society_id, decl)}
+    built = {"A": _annex_a(society_id, soc), "B": _annex_b(society_id, soc, decl), "C": _annex_c(society_id, decl),
+             "D": _annex_d(society_id, soc)}
     with db._conn() as conn:
         cur = conn.cursor()
         for code, (content, controls) in built.items():
@@ -1402,13 +1493,13 @@ def build_annexes(society_id: int, actor_id: int | None = None) -> dict:
 
 
 def seal_annexes(society_id: int, actor_id: int) -> dict:
-    """Seal A, B, C (refused while any control blocks) and write the Agreement text with their hashes into it."""
+    """Seal A, B, C, D (refused while any control blocks) and write the Agreement text with their hashes into it."""
     if state_of(society_id) != "setup draft":
         raise OnboardingError("Submit the Setup Wizard before sealing the annexes.")
     drafts = {r["annex_code"]: r for r in _rows(
         "SELECT annex_code, blocking FROM onboarding_annexes WHERE society_id=%s AND status IN ('draft','submitted')", (society_id,))}
-    if set(drafts) != {"A", "B", "C"}:
-        raise OnboardingError("Prepare the annexes first.")
+    if set(drafts) != set(ANNEX_CODES):
+        raise OnboardingError("Check the annexes first.")
     blocked = [c for c, v in drafts.items() if v["blocking"]]
     if blocked:
         raise OnboardingError("Fix the failing controls before sealing: Annex " + ", ".join(sorted(blocked)) + ".")
@@ -1421,6 +1512,18 @@ def seal_annexes(society_id: int, actor_id: int) -> dict:
                         (society_id, code))
     write_agreement(society_id)
     return annex_status(society_id)
+
+
+def seal_with_confirmation(society_id: int, actor_id: int, i_agree: str, admin_password: str) -> dict:
+    """Stage 4 step B: the administrator types I AGREE and confirms their password, then the annexes are sealed and the
+    Agreement issued. (Moved here from the old Agreement wizard step, which no longer exists.)"""
+    from app.services.auth_service import verify_password_with_lockout as _verify
+    if (i_agree or "").strip() != "I AGREE":
+        raise OnboardingError('Type I AGREE exactly (capital letters) to confirm you adopt these annexes.')
+    ok, msg = _verify(actor_id, admin_password or "")
+    if not ok:
+        raise OnboardingError(msg or "Admin password is wrong.")
+    return seal_annexes(society_id, actor_id)
 
 
 def _operator() -> tuple[str, str]:
@@ -1677,6 +1780,7 @@ def agreement_text(society_id: int, agreement_no: str, annex_hashes: dict, annex
         f"Annex B (review of the setup), SHA-256 {annex_hashes['B']}\n"
         f"Annex C (opening financial position as at {c.get('as_at_date')}: debits Rs {c.get('total_debits')}, credits Rs {c.get('total_credits')}, "
         f"CA review: {c.get('ca_review')}), SHA-256 {annex_hashes['C']}\n"
+        f"Annex D (data-protection and custody schedule), SHA-256 {annex_hashes['D']}\n"
         "The signatories sign the Society's declared legal basis and opening position as sealed in these annexes. A wrong opening figure "
         "found later is corrected by reversal, never by editing.\n\n"
         "EXECUTION\n"
@@ -1695,8 +1799,8 @@ def write_agreement(society_id: int) -> dict:
     if _row("SELECT 1 AS x FROM signed_records WHERE subject_kind='agreement' AND subject_id=%s AND status='valid'", (ag["id"],)):
         raise OnboardingError("The Agreement is already sealed.")
     sealed = {r["annex_code"]: r for r in _rows("SELECT annex_code, content, content_hash FROM onboarding_annexes WHERE society_id=%s AND status='sealed'", (society_id,))}
-    if set(sealed) != {"A", "B", "C"}:
-        raise OnboardingError("Seal annexes A, B and C first.")
+    if set(sealed) != set(ANNEX_CODES):
+        raise OnboardingError("Seal annexes A, B, C and D first.")
     hashes = {k: v["content_hash"] for k, v in sealed.items()}
     contents = {k: (v["content"] if isinstance(v["content"], dict) else json.loads(v["content"])) for k, v in sealed.items()}
     text = agreement_text(society_id, ag.get("agreement_no") or "", hashes, contents)
@@ -1711,8 +1815,8 @@ def assert_ready_to_sign(society_id: int) -> None:
         raise OnboardingError("The Agreement can be signed only after the Setup Wizard draft is submitted and before activation.")
     ag = _row("SELECT body_text FROM society_agreements WHERE society_id=%s", (society_id,))
     sealed = {r["annex_code"]: r["content_hash"] for r in _rows("SELECT annex_code, content_hash FROM onboarding_annexes WHERE society_id=%s AND status='sealed' AND NOT blocking", (society_id,))}
-    if set(sealed) != {"A", "B", "C"} or not ag:
-        raise OnboardingError("Annexes A, B and C must be sealed before the Agreement is signed.")
+    if set(sealed) != set(ANNEX_CODES) or not ag:
+        raise OnboardingError("Annexes A, B, C and D must be sealed before the Agreement is signed.")
     if any(h not in (ag["body_text"] or "") for h in sealed.values()):
         raise OnboardingError("The Agreement text no longer matches the sealed annexes; reissue it from the annexes.")
     if OPERATOR_LEGAL_NAME_DEFAULT not in (ag["body_text"] or ""):

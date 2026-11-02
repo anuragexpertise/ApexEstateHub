@@ -248,6 +248,7 @@ FUND_COLLECTION_DEFAULT = ("on_bill", "per_sq_ft")
 
 def fund_collection_for_regime(regime_code):
     """(fund_collection_mode, fund_allocation_basis) the regime sets for Sinking / Repair funds."""
+    from database.db_manager import db
     mode, basis = FUND_COLLECTION_FALLBACK.get(regime_code, FUND_COLLECTION_DEFAULT)
     try:
         rows = db._execute(
@@ -267,6 +268,7 @@ def scheme_for(state_code=None, constitution=None):
     """The scheme (regime pack) the BILLING ENGINE will assign: mirrors fn_sync_society_regime. A researched scheme
     exists for a state x constitution pair (UP + AOA today); every other society gets GENERIC. Not the same as
     regime_for_society(), which picks the statutes to DISPLAY and falls back to UP for an unknown state."""
+    from database.db_manager import db
     code = normalize_state(state_code) if state_code else None
     const = (constitution or "AOA").upper()
     try:
@@ -283,6 +285,7 @@ def scheme_for(state_code=None, constitution=None):
 
 def regime_reserve_pct(regime_code):
     """Share of net surplus moved to the Reserve Fund at FY close (regime parameter reserve_appropriation_pct)."""
+    from database.db_manager import db
     try:
         row = db._execute(
             """SELECT value FROM regime_rule_parameters
