@@ -56,7 +56,7 @@ def marker(society_id: int) -> str:
         sigs = (ob.db._execute("SELECT COUNT(*) AS n FROM document_signatures WHERE subject_kind='agreement' AND subject_id=%s", (ag["id"],), fetch_one=True) or {}).get("n", 0)
     es = ob.db._execute("SELECT esign_required, (SELECT string_agg(id || status, ',' ORDER BY id) FROM esign_requests WHERE society_id=s.id) AS r "
                         "FROM societies s WHERE id=%s", (society_id,), fetch_one=True) or {}
-    return json.dumps([st, ann, seated, sigs, es.get("esign_required"), es.get("r")], sort_keys=True, default=str)
+    return json.dumps([st, ann, seated, sigs, es.get("esign_required"), es.get("r"), ob.society_phase(society_id), ob.signing_mode(society_id)], sort_keys=True, default=str)
 
 
 # ── stage 2 ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -215,7 +215,8 @@ def setup_stage(society_id: int, current_step: int = 0) -> list:
     rail_items = []
     last = len(CATEGORIES) - 1
     for i, cat in enumerate(CATEGORIES):
-        st = statuses.get(cat, {}).get("status", "todo")
+        from app.dash_apps.pages.wizard_registry import status_of as _status_of
+        st = _status_of(statuses, cat)
         is_skipped = st == "skipped"
         base = {"type": "onb-rail", "key": cat}
         classes = ["onb-rail-item", st]
@@ -298,16 +299,29 @@ def esign_control(society_id: int, kind: str, subject_id: int, user_id: int, off
                        f"eSign request {req['status']} ({req['method'].replace('_', ' ')}). " +
                        ("It is complete: confirm with your password to record the signature." if req["status"] == "completed" else
                         "Finish it with the vendor; this page updates by itself."))
+    mode = ob.signing_mode(society_id)
+    if mode == "paper":
+        method_opts = [{"label": "Signed paper counterpart", "value": "paper"}]
+        method_val = "paper"
+    else:
+        method_opts = [{"label": "Aadhaar eSign", "value": "aadhaar_eSign"}, {"label": "Digital Signature Certificate", "value": "dsc"}]
+        method_val = (req or {}).get("method") if (req or {}).get("method") in ("aadhaar_eSign", "dsc") else "aadhaar_eSign"
+    paper_style = {"display": "inline-block", "marginRight": "8px"} if mode == "paper" else {"display": "none"}
+    start_style = {} if mode == "esign" else {"display": "none"}
     box = [html.Div([
-        dbc.Select(id=f"{P}-method", size="sm", value=(req or {}).get("method") or "aadhaar_eSign", style={"maxWidth": "230px", "display": "inline-block", "marginRight": "8px"},
-                   options=[{"label": "Aadhaar eSign", "value": "aadhaar_eSign"}, {"label": "Digital Signature Certificate", "value": "dsc"},
-                            {"label": "Signed paper counterpart", "value": "paper"}]),
-        dbc.Input(id=f"{P}-paper", size="sm", placeholder="Paper only: SHA-256 of the signed scan", maxLength=64,
-                  style={"maxWidth": "330px", "display": "inline-block", "marginRight": "8px"}),
-        dbc.Button("Start eSign", id=f"{P}-esign-start", color="primary", outline=True, size="sm", n_clicks=0, className="me-2"),
+        dbc.Select(id=f"{P}-method", size="sm", value=method_val, style={"maxWidth": "230px", "display": "inline-block", "marginRight": "8px"},
+                   options=method_opts),
+        html.Div([dcc.Upload(id=f"{P}-paper", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload signed scan"],
+                                                                  color="secondary", outline=True, size="sm", n_clicks=0),
+                             multiple=False, accept=".pdf,.png,.jpg,.jpeg"),
+                  html.Small("PDF, PNG or JPG up to 5 MB. The server computes the SHA-256; nobody types a hash.", style=_MUTED)],
+                 style=paper_style),
+        dbc.Button("Start eSign", id=f"{P}-esign-start", color="primary", outline=True, size="sm", n_clicks=0, className="me-2", style=start_style),
         dbc.Button("Complete with demo vendor", id=f"{P}-esign-demo", color="secondary", outline=True, size="sm", n_clicks=0,
-                   style={} if es.SANDBOX() else {"display": "none"}),
-        html.Div(status_line, style=_MUTED)], style={"marginBottom": "6px", **hide})]
+                   style={} if (es.SANDBOX() and mode == "esign") else {"display": "none"}),
+        html.Div(status_line if mode == "esign" else
+                 ("Print, sign, scan and upload the Agreement counterpart; then confirm with your password." if mode == "paper" else ""),
+                 style=_MUTED)], style={"marginBottom": "6px", **hide})]
     return html.Div(box + [
         dbc.Input(id=pw_id, type="password", placeholder="Your login password", autoComplete="current-password", size="sm",
                   style={"maxWidth": "240px", "display": "inline-block", "marginRight": "8px"}),
@@ -338,14 +352,18 @@ def signing_panel(society_id: int, user_id: int | None, role: str | None = None)
     # signed through the eSign adapter instead of a password confirmation.
     esign_row = html.Div()
     if role == "admin":
-        row = ob.db._execute("SELECT esign_required FROM societies WHERE id=%s", (society_id,), fetch_one=True)
-        on = bool((row or {}).get("esign_required"))
+        mode = ob.signing_mode(society_id)
+        copy = {"password": "A password confirmation records who confirmed and when; it is not by itself a legal electronic signature.",
+                "esign": "Each signer uses Aadhaar eSign or a Digital Signature Certificate through a licensed provider. The Society and the Operator never see or store the Aadhaar number.",
+                "paper": "Each signer prints, signs and scans the Agreement, uploads the scan, and confirms with their login password."}
         esign_row = html.Div([
-            html.Strong("eSign required for signing", style={"fontSize": "12px", "color": "#556", "marginRight": "8px"}),
-            dbc.Switch(id=f"{P}-esign", value=on, size="sm"),
-            html.Span("Default No. When on, a password alone is not accepted: each signer uses Aadhaar eSign, a DSC or a signed paper counterpart. Cannot be changed once signing starts.",
-                      style={"fontSize": "11.5px", "color": "#667", "marginLeft": "6px"})],
-            style={"marginTop": "8px", "display": "flex", "alignItems": "center", "gap": "8px"})
+            html.Strong("Signing method", style={"fontSize": "12px", "color": "#556", "marginRight": "8px"}),
+            dbc.RadioItems(id=f"{P}-signmode", value=mode, inline=True, className="btn-group", inputClassName="btn-check",
+                           labelClassName="btn btn-outline-primary btn-sm", labelCheckedClassName="active",
+                           options=[{"label": "Password", "value": "password"}, {"label": "eSign", "value": "esign"},
+                                    {"label": "Paper", "value": "paper"}]),
+            html.Div(copy[mode] + " Cannot be changed once signing starts.", style={"fontSize": "11.5px", "color": "#667", "flexBasis": "100%"})],
+            style={"marginTop": "8px", "display": "flex", "alignItems": "center", "gap": "8px", "flexWrap": "wrap"})
     return html.Div([
         html.Strong("The Agreement"),
         html.Div("Each signature records who signed, when, and the SHA-256 of this exact text and its annex hashes.", style=_MUTED),
@@ -417,15 +435,70 @@ def advisers_section(society_id: int, role: str | None, user_id: int | None) -> 
     return out
 
 
+def _celebrate_store(society_id: int):
+    """Carries the agreement_signed event id; a clientside callback fires the confetti once per browser per event."""
+    ev = ob.db._execute("SELECT id FROM onboarding_events WHERE society_id=%s AND event='agreement_signed' ORDER BY id DESC LIMIT 1",
+                        (society_id,), fetch_one=True)
+    if not ev or ob.society_phase(society_id) != "enrollment":
+        return html.Div()
+    name = (ob.db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True) or {}).get("name") or "Your society"
+    return dcc.Store(id={"type": "onb-celebrate", "sid": society_id}, data={"key": f"onb-celebrated-{society_id}-{ev['id']}", "name": name})
+
+
+def _enrollment_counts(society_id: int) -> dict:
+    out = {}
+    for label, role in (("Apartments", "apartment"), ("Vendors", "vendor"), ("Security", "security")):
+        out[label] = (ob.db._execute("SELECT COUNT(*) AS n FROM users WHERE society_id=%s AND role=%s", (society_id, role), fetch_one=True) or {}).get("n", 0)
+    return out
+
+
+def _stage_enrollment(society_id: int, role: str | None):
+    counts = _enrollment_counts(society_id)
+    pend = ob.db._execute("SELECT flat_number, amount FROM opening_receivables_pending WHERE society_id=%s AND status='pending_link' ORDER BY flat_number",
+                          (society_id,)) or []
+    is_admin = role == "admin"
+    kids = [html.H6("Stage 5: Enrollment"),
+            html.Div("Enrol owners, vendors and guards from the Enrolled tab (bulk enrolment is there too). Their portals stay closed until you mark "
+                     "enrollment complete. Each person accepts the privacy notice at first sign-in.", style=_MUTED),
+            html.Div([dbc.Badge(f"{k}: {v}", color="light", text_color="dark", className="me-2") for k, v in counts.items()], className="my-2")]
+    if pend:
+        total = sum((r["amount"] for r in pend), 0)
+        kids.append(dbc.Alert([html.Strong(f"Opening receivables awaiting enrolment: {len(pend)} flat(s), ₹{total}. "),
+                               ", ".join(str(r["flat_number"]) for r in pend[:30]) + (" …" if len(pend) > 30 else "")],
+                              color="warning", className="py-2", style={"fontSize": "12.5px"}))
+    if is_admin:
+        kids += [dbc.Checkbox(id=f"{P}-enrol-later", label="I will enrol the rest later", value=False, className="mb-1"),
+                 dbc.Input(id=f"{P}-enrol-later-reason", placeholder="Reason (10 characters or more)", size="sm",
+                           style={"maxWidth": "420px", "marginBottom": "8px"}),
+                 dbc.Button("Mark enrollment complete", id=f"{P}-enrol-done", color="success", size="sm", n_clicks=0)]
+    return html.Div(kids, style=_CARD)
+
+
 def _stage_active(society_id: int, role: str | None = None, user_id: int | None = None):
-    return [dbc.Alert([html.I(className="fas fa-check-circle me-2"), "The society is active. The Agreement is sealed and the opening position is posted."],
-                      color="success", className="py-2"),
-            html.H6("What is next"),
-            html.Ul([html.Li("Stage 5, Enrollment: enrol owners, vendors, guards and staff from the Enrolled tab. Each person accepts the privacy notice at first sign-in."),
-                     html.Li("Stage 6, Adoption: adopt bye-laws and record resolutions under Settings, Society By-laws and Meetings & Resolutions."),
-                     html.Li("Stage 7, Advisers: appoint the auditor, CA and advocate once a resolution is recorded.")], style={"fontSize": "13px"}),
-            html.Hr(), advisers_section(society_id, role, user_id),
-            html.Hr(), legacy_resolutions_section(society_id, role)]
+    phase = ob.society_phase(society_id) or "complete"
+    is_admin = role == "admin"
+    head = [dbc.Alert([html.I(className="fas fa-check-circle me-2"),
+                       "Stages 1 to 4 are complete. The Agreement is sealed and the opening position is posted."],
+                      color="success", className="py-2"), _celebrate_store(society_id)]
+    if phase == "enrollment":
+        return head + [_stage_enrollment(society_id, role)]
+    out = list(head)
+    if phase == "adoption":
+        from app.dash_apps.pages.adoption_panel import render_adoption_panel
+        out += [html.H6("Stage 6: Adoption"), render_adoption_panel(society_id)]
+        if is_admin:
+            out += [dbc.Button("Mark adoption done", id=f"{P}-phase-next", color="success", size="sm", n_clicks=0, className="me-2"),
+                    dbc.Button("Do later", id=f"{P}-phase-later", color="secondary", outline=True, size="sm", n_clicks=0)]
+        out += [html.Hr(), legacy_resolutions_section(society_id, role)]
+    elif phase == "advisers":
+        out += [html.H6("Stage 7: Adviser access"), advisers_section(society_id, role, user_id)]
+        if is_admin:
+            out += [dbc.Button("Finish onboarding", id=f"{P}-phase-next", color="success", size="sm", n_clicks=0, className="me-2"),
+                    dbc.Button("Do later", id=f"{P}-phase-later", color="secondary", outline=True, size="sm", n_clicks=0)]
+    else:
+        out += [html.Div("Onboarding is complete.", style=_MUTED), html.Hr(), advisers_section(society_id, role, user_id),
+                html.Hr(), legacy_resolutions_section(society_id, role)]
+    return out
 
 
 # ── stage: legacy resolutions (V5.8) ────────────────────────────────────────
@@ -509,8 +582,23 @@ def render_pending(role: str, society_id: int | None, user_id: int | None):
         dcc.Store(id="onb-setup-step", data=0),
         dcc.Store(id="onb-wizard-step", storage_type="session", data=0),
         dcc.Store(id="onb-view", data="current"),
+        html.Div(id="onb-celebrate-sink", style={"display": "none"}),
         html.Div(hub_body(role, society_id, user_id), id=f"{P}-body"),
     ], className="portal-page onb-root")
+
+
+# ── item 14: progress view for the platform signature job ───────────────────────────────────────────────────────
+JOB_PERCENT = {0: 0, 1: 10, 2: 25, 3: 45, 4: 65, 5: 80, 6: 90, 7: 97}
+
+
+def job_view(sid: int, job_id: str):
+    """Store + Interval + bar. The Interval polls onboarding_jobs by id; a page refresh rebuilds this for a running job."""
+    return html.Div([
+        dcc.Store(id={"type": f"{P}-jobid", "sid": sid}, data=job_id),
+        dcc.Interval(id={"type": f"{P}-jobpoll", "sid": sid}, interval=700, n_intervals=0),
+        html.Div(dbc.Progress(value=5, striped=True, animated=True, label="Starting", style={"height": "20px"}),
+                 id={"type": f"{P}-jobbar", "sid": sid}),
+    ])
 
 
 # ── Master queue ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -530,20 +618,28 @@ def master_queue():
         elif core:
             from app.services import esign_adapter as es
             esign_on = es.is_required(r["id"])
+            mmode = ob.signing_mode(r["id"])
+            mopts = ([{"label": "Signed paper counterpart", "value": "paper"}] if mmode == "paper" else
+                     [{"label": "Digital Signature Certificate", "value": "dsc"}, {"label": "Aadhaar eSign", "value": "aadhaar_eSign"}])
             esign_bits = [html.Div([
-                dbc.Select(id={"type": f"{P}-mmethod", "sid": r["id"]}, size="sm", value="dsc", style={"maxWidth": "230px", "display": "inline-block", "marginRight": "8px"},
-                           options=[{"label": "Digital Signature Certificate", "value": "dsc"}, {"label": "Aadhaar eSign", "value": "aadhaar_eSign"},
-                                    {"label": "Signed paper counterpart", "value": "paper"}]),
-                dbc.Input(id={"type": f"{P}-mpaper", "sid": r["id"]}, size="sm", placeholder="Paper only: SHA-256 of the signed scan", maxLength=64,
-                          style={"maxWidth": "330px", "display": "inline-block", "marginRight": "8px"}),
-                dbc.Button("Start eSign", id={"type": f"{P}-mstart", "sid": r["id"]}, color="primary", outline=True, size="sm", n_clicks=0, className="me-2"),
+                dbc.Select(id={"type": f"{P}-mmethod", "sid": r["id"]}, size="sm", value=mopts[0]["value"], style={"maxWidth": "230px", "display": "inline-block", "marginRight": "8px"},
+                           options=mopts),
+                dcc.Upload(id={"type": f"{P}-mpaper", "sid": r["id"]}, multiple=False, accept=".pdf,.png,.jpg,.jpeg",
+                           children=dbc.Button("Upload signed scan", color="secondary", outline=True, size="sm", n_clicks=0),
+                           style={"display": "inline-block", "marginRight": "8px"} if mmode == "paper" else {"display": "none"}),
+                dbc.Button("Start eSign", id={"type": f"{P}-mstart", "sid": r["id"]}, color="primary", outline=True, size="sm", n_clicks=0, className="me-2",
+                           style={} if mmode == "esign" else {"display": "none"}),
                 dbc.Button("Complete with demo vendor", id={"type": f"{P}-mdemo", "sid": r["id"]}, color="secondary", outline=True, size="sm", n_clicks=0,
-                           style={} if es.SANDBOX() else {"display": "none"})],
+                           style={} if (es.SANDBOX() and mmode == "esign") else {"display": "none"})],
                 style={"marginBottom": "6px", **({} if esign_on else {"display": "none"})})]
             body = html.Div(esign_bits + [dbc.Input(id={"type": f"{P}-mpw", "sid": r["id"]}, type="password", placeholder="Your password", size="sm",
                                        autoComplete="current-password", style={"maxWidth": "230px", "display": "inline-block", "marginRight": "8px"}),
                              dbc.Button("Sign for the platform and activate", id={"type": f"{P}-msign", "sid": r["id"]}, color="success", size="sm", n_clicks=0)])
         else:
             body = html.Div("Waiting for the President, Secretary and Treasurer to sign first.", style=_MUTED)
-        cards.append(html.Div([head, html.Div(id={"type": f"{P}-mmsg", "sid": r["id"]}), body], style=_CARD))
-    return html.Div([html.H5("Onboarding queue"), html.Div("Societies whose Agreement waits for the platform.", style=_MUTED)] + cards, style={"padding": "16px"})
+        from app.services import onboarding_jobs as _jobs
+        _running = _jobs.latest_running(r["id"])
+        cards.append(html.Div([head, html.Div(job_view(r["id"], str(_running["id"])) if _running else None,
+                                              id={"type": f"{P}-mmsg", "sid": r["id"]}), body], style=_CARD))
+    return html.Div([html.H5("Onboarding queue"), html.Div("Societies whose Agreement waits for the platform.", style=_MUTED),
+                     html.Div(id="onb-celebrate-sink", style={"display": "none"})] + cards, style={"padding": "16px"})

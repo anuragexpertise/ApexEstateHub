@@ -6,10 +6,15 @@
   if (!window.dash_clientside.onboarding) {
     window.dash_clientside.onboarding = {};
   }
-  window.dash_clientside.onboarding.celebrate = function(eventId) {
+  window.dash_clientside.onboarding.celebrate = function(data) {
     try {
+      // data = {key, name}: celebrate once per browser per event (localStorage), never with reduced motion.
+      var key = data && data.key ? data.key : null, name = data && data.name ? data.name : 'Your society';
+      if (key) {
+        try { if (window.localStorage.getItem(key)) { return ''; } window.localStorage.setItem(key, '1'); } catch (e) {}
+      }
       if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        return;
+        return '';
       }
       var canvas = document.createElement('canvas');
       canvas.style.position = 'fixed';
@@ -69,9 +74,10 @@
       card.style.fontSize = '18px';
       card.style.fontWeight = '700';
       card.style.zIndex = '20001';
-      card.textContent = '🎉 Society is live';
+      card.textContent = '🎉 ' + name + ' is live';
       document.body.appendChild(card);
       setTimeout(function(){ try { document.body.removeChild(card); } catch(e){} }, 5000);
     } catch(e) {}
+    return '';
   };
 })();

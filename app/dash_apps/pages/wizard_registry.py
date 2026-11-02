@@ -16,7 +16,34 @@ from __future__ import annotations
 from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label
 
 # Display label -> internal key (as listed in CATEGORIES)
-STEP_KEYS = {cat: cat for cat in CATEGORIES}
+STEP_KEYS = {
+    "Instructions": None,                    # read-only page: never saved, never gates navigation
+    "Society Details": "society_details",
+    "Administrator": "administrator",
+    "Legal Regime Selection": "legal_regime",
+    "Funds": "funds",
+    "TAN & TDS Rates": "tds",
+    "GSTIN & GST Rate": "gst",
+    "Apartment Charges": "apartment",
+    "Vendor Charges": "vendor",
+    "Accounts Heads": "accounts",
+    "Brought Forward": "brought_forward",
+    "Review": "review",
+}
+assert set(STEP_KEYS) == set(CATEGORIES), "STEP_KEYS must cover every wizard step"
+
+
+def draft_key(cat: str):
+    """CATEGORIES entry -> key used in the draft / step_statuses (None for Instructions)."""
+    return STEP_KEYS.get(cat)
+
+
+def status_of(statuses: dict, cat: str) -> str:
+    """Rail status for one wizard step, looked up by its draft key. Instructions counts as done."""
+    k = draft_key(cat)
+    if k is None:
+        return "done"
+    return ((statuses or {}).get(k) or {}).get("status", "todo")
 
 # Draft key -> [(draft_field, component_id, prop)]
 # component_id may be a plain string id or a dict-id pattern; the prop is what

@@ -121,6 +121,17 @@ def stage_report(society_id: int) -> list[dict]:
             status = "todo"
         if st == "suspended":
             status = "done" if i <= 4 else "todo"
+        if st == "active":
+            # Stages 5-7 follow onboarding_phase (item 15).
+            phase = society_phase(society_id) or "complete"
+            done_from = {5: ("adoption", "advisers", "complete"), 6: ("advisers", "complete"), 7: ("complete",)}
+            if i >= 5:
+                if phase in done_from[i]:
+                    status = "done"
+                elif (i == 5 and phase == "enrollment") or (i == 6 and phase == "adoption") or (i == 7 and phase == "advisers"):
+                    status = "current"
+                else:
+                    status = "todo"
         out.append({"n": i, "code": code, "label": label, "text": text, "status": status})
     return out
 
@@ -364,14 +375,30 @@ def save_step(society_id: int, actor_id: int, step_key: str, values: dict) -> di
     d = declaration(society_id) or {}
     draft = d.setdefault("draft", {})
     steps = d.setdefault("steps", {})
-    errors = validate_step(step_key, draft, society_id)
+    values = dict(values or {})
+    pre_errors: list[str] = []
+    if step_key == "administrator":
+        # The step-up password is hashed the moment it is accepted; plaintext is never stored (non-negotiable 6).
+        plain = values.pop("stepup_secret", None)
+        confirm = values.pop("stepup_confirm", None)
+        values.pop("stepup_hash", None)
+        if plain not in (None, ""):
+            from app.security.password_policy import validate_signing_secret as _vss
+            from werkzeug.security import generate_password_hash as _gph
+            if confirm is not None and plain != confirm:
+                pre_errors.append("The step-up password and its confirmation do not match.")
+            elif _vss(str(plain)):
+                pre_errors.append(_vss(str(plain)))
+            else:
+                values["stepup_hash"] = _gph(str(plain))
     changed = False
     step_values = dict(draft.get(step_key) or {})
-    for k, v in (values or {}).items():
+    for k, v in values.items():
         if v is not None and step_values.get(k) != v:
             step_values[k] = v
             changed = True
     draft[step_key] = step_values
+    errors = pre_errors + validate_step(step_key, draft, society_id)
 
     status = "done" if not errors else "todo"
     steps[step_key] = {"status": status, "saved_at": date.today().isoformat(),
@@ -425,19 +452,15 @@ def validate_step(step_key: str, draft: dict, society_id: int) -> list[str]:
             errors.append("Constitution is required.")
 
     elif step_key == "administrator":
-        secret = step.get("stepup_hash")
-        if not secret:
+        if not step.get("stepup_hash"):
             errors.append("Step-up password is required.")
-        from app.security.password_policy import validate_signing_secret as _vss
-        if secret and _vss(str(secret)):
-            errors.append(_vss(str(secret)))
         if not _committee_complete(society_id):
             errors.append("All three office-bearers (President, Secretary, Treasurer) must be seated with a signature image and mobile.")
 
     elif step_key == "legal_regime":
         from app.services.statutory_rules import regime_for_society as _rfs
         try:
-            _rfs(society_id, step.get("state") or None)
+            _rfs(society_id, (draft.get("society_details") or {}).get("state") or None)
         except Exception as exc:
             errors.append(f"Legal regime could not be resolved: {exc}")
 
@@ -452,7 +475,7 @@ def validate_step(step_key: str, draft: dict, society_id: int) -> list[str]:
                     errors.append(f"{fund.title()} fund rate must be a number >= 0.")
 
     elif step_key == "tds":
-        if not step.get("central_tds", True):
+        if (draft.get("legal_regime") or {}).get("central_tds") is False:
             return errors
         if not str(step.get("tan") or "").strip():
             errors.append("TAN is required when TDS applies.")
@@ -472,7 +495,7 @@ def validate_step(step_key: str, draft: dict, society_id: int) -> list[str]:
                         errors.append(f"TDS row {row.get('section')}: {fld} must be 0-100.")
 
     elif step_key == "gst":
-        if not step.get("central_gst", True):
+        if (draft.get("legal_regime") or {}).get("central_gst") is False:
             return errors
         gstin = str(step.get("gstin") or "").strip()
         if gstin and len(gstin) != 15:
@@ -1422,6 +1445,40 @@ def set_esign_required(society_id: int, actor_id: int, required: bool) -> None:
     _audit_adviser(society_id, actor_id, "ESIGN_REQUIRED_SET", 0, {"required": bool(required)})
 
 
+SIGNING_MODES = ("password", "esign", "paper")
+
+
+def signing_mode(society_id: int) -> str:
+    try:
+        r = _row("SELECT signing_mode, esign_required FROM societies WHERE id=%s", (society_id,))
+    except Exception as exc:                                           # noqa: BLE001
+        if "signing_mode" not in str(exc):
+            raise
+        _missing_column(exc, "signing_mode")
+        r = _row("SELECT esign_required FROM societies WHERE id=%s", (society_id,))
+    if not r:
+        return "password"
+    return r.get("signing_mode") or ("esign" if r.get("esign_required") else "password")
+
+
+def set_signing_mode(society_id: int, actor_id: int, mode: str) -> None:
+    """Item 13: password | esign | paper. Locked once anyone has signed (same guard as set_esign_required).
+    esign_required is kept in sync (esign_required = signing_mode == 'esign') so existing callers keep working;
+    a paper society also needs the esign_adapter gate, so both non-password modes keep esign_required TRUE
+    only for 'esign'; 'paper' is handled by ds.sign(method='paper') with an uploaded-scan evidence hash."""
+    if mode not in SIGNING_MODES:
+        raise OnboardingError("Choose password, eSign or paper.")
+    if _row("""SELECT 1 AS x FROM document_signatures ds JOIN society_agreements sa
+                 ON ds.subject_kind='agreement' AND ds.subject_id=sa.id
+                WHERE sa.society_id=%s AND ds.action IN ('sign','approve')""", (society_id,)):
+        raise OnboardingError("Signing has started; the signing method can no longer be changed.")
+    if state_of(society_id) == "active":
+        raise OnboardingError("The society is already active.")
+    db._execute("UPDATE societies SET signing_mode=%s, esign_required=%s WHERE id=%s",
+                (mode, mode != "password", society_id))
+    _audit_adviser(society_id, actor_id, "SIGNING_MODE_SET", 0, {"mode": mode})
+
+
 def esign_required(society_id: int) -> bool:
     r = _row("SELECT esign_required FROM societies WHERE id=%s", (society_id,))
     return bool(r and r["esign_required"])
@@ -1663,29 +1720,138 @@ def assert_ready_to_sign(society_id: int) -> None:
 
 
 # ── activation ────────────────────────────────────────────────────────────────────────────────────────────────────
-def activate(society_id: int, actor_id: int) -> str:
+ONBOARDING_PHASES = ("enrollment", "adoption", "advisers", "complete")
+
+
+def _progress(progress, step: int, message: str) -> None:
+    if progress:
+        try:
+            progress(step, message)
+        except Exception:                                              # noqa: BLE001 - progress must never break activation
+            log.exception("progress callback failed")
+
+
+def activate(society_id: int, actor_id: int, progress=None) -> str:
+    _progress(progress, 4, "Opening the ledger and posting opening balances")
     try:
         r = _row("SELECT fn_activate_society(%s,%s) AS r", (society_id, actor_id))
     except Exception as exc:                                           # noqa: BLE001
         raise OnboardingError(str(exc).split("\n")[0].replace("ERROR:", "").strip() or "Activation failed.") from exc
+    result = (r or {}).get("r") or "OK"
+    _progress(progress, 5, "Creating opening receivables")
+    if result != "ALREADY_ACTIVE":
+        # Item 15: the society lands on Enrollment; apartment, vendor and security portals open when it is complete.
+        db._execute("UPDATE societies SET onboarding_phase='enrollment' WHERE id=%s AND onboarding_phase IS NULL", (society_id,))
+    _progress(progress, 6, "Publishing the privacy notice and DPDP register")
     try:
         from app.services import dpdp_service
         dpdp_service.ensure_notice(society_id, actor_id)
         dpdp_service.init_dpdp_review(society_id, actor_id)
     except Exception:                                                  # noqa: BLE001 - the notice can be published later from the register
         log.exception("could not publish the first privacy notice for society %s", society_id)
+    _progress(progress, 7, "Taking the first ledger anchor")
     try:
         from app.security import ledger_anchor as _la
         _la.anchor_society(society_id, actor_id, method="manual")      # first ledger anchor, signed
     except Exception:                                                  # noqa: BLE001 - no chain yet; the scheduled job anchors after the first entry
         log.exception("could not take the first ledger anchor for society %s", society_id)
-    return (r or {}).get("r") or "OK"
+    if result != "ALREADY_ACTIVE":
+        _record_agreement_signed(society_id, actor_id)
+    return result
 
 
-def try_activate(society_id: int, actor_id: int) -> dict:
+def _record_agreement_signed(society_id: int, actor_id: int) -> None:
+    """Item 14.6: one 'agreement_signed' event per society (the celebration and the admin's jump to Enrollment key off it)."""
+    try:
+        if not _row("SELECT 1 AS x FROM onboarding_events WHERE society_id=%s AND event='agreement_signed'", (society_id,)):
+            db._execute("INSERT INTO onboarding_events (society_id, event, payload) VALUES (%s,'agreement_signed','{}'::jsonb)",
+                        (society_id,))
+    except Exception:                                                  # noqa: BLE001
+        log.exception("could not record the agreement_signed event for society %s", society_id)
+    try:
+        for uid in _recipient_user_ids(society_id):
+            db._execute("INSERT INTO notifications (user_id, society_id, title, body, notification_type) VALUES (%s,%s,%s,%s,'push')",
+                        (uid, society_id, "Your society is live",
+                         "The Agreement is signed and the society is active. Next: enrol your members."))
+    except Exception:                                                  # noqa: BLE001
+        log.exception("could not alert the office-bearers for society %s", society_id)
+
+
+def _recipient_user_ids(society_id: int) -> list[int]:
+    rows = _rows("""SELECT DISTINCT u.id FROM users u WHERE u.society_id=%s AND u.role='admin'""", (society_id,)) or []
+    ids = [r["id"] for r in rows]
+    for o in (seated_officers(society_id) or {}).values():
+        if o and o.get("user_id") and o["user_id"] not in ids:
+            ids.append(o["user_id"])
+    return ids
+
+
+_MIGRATION_WARNED: set = set()
+
+
+def _missing_column(exc: Exception, what: str) -> None:
+    """A database built before the onboarding-review schema: say so once and let the page render with defaults."""
+    if what not in _MIGRATION_WARNED:
+        _MIGRATION_WARNED.add(what)
+        log.warning("societies.%s is missing: rebuild the database from database/estatehub.sql (`python3 database/reset_database.py --yes --after seed`) (%s)", what, exc)
+
+
+def society_phase(society_id: int) -> str | None:
+    try:
+        r = _row("SELECT onboarding_phase FROM societies WHERE id=%s", (society_id,))
+    except Exception as exc:                                           # noqa: BLE001 - psycopg2 UndefinedColumn
+        if "onboarding_phase" not in str(exc):
+            raise
+        _missing_column(exc, "onboarding_phase")
+        return "complete"        # before the migration nothing is phase-locked
+    return (r or {}).get("onboarding_phase")
+
+
+def enrollment_blockers(society_id: int) -> list[str]:
+    """Item 15 completion rule (b): no opening receivable may still be waiting for its flat."""
+    n = _row("SELECT COUNT(*) AS n, COALESCE(SUM(amount),0) AS amt FROM opening_receivables_pending "
+             "WHERE society_id=%s AND status='pending_link'", (society_id,)) or {}
+    out = []
+    if int(n.get("n") or 0):
+        out.append(f"{n['n']} flat(s) with opening receivables (₹{n['amt']}) are not enrolled yet.")
+    return out
+
+
+def mark_enrollment_complete(society_id: int, actor_id: int, enrol_later_reason: str | None = None) -> str:
+    """Stage 5 -> 6. (a) another apartment than the three office-bearers' flats has a login, or the admin gives a
+    reason >= 10 chars (audited); (b) no pending_link receivables. Opens the apartment/vendor/security portals."""
+    if society_phase(society_id) != "enrollment":
+        raise OnboardingError("Enrollment is not the current stage.")
+    blockers = enrollment_blockers(society_id)
+    if blockers:
+        raise OnboardingError(" ".join(blockers) + " Enrol them, or record why they do not exist.")
+    others = _row("""SELECT COUNT(*) AS n FROM users u
+                      WHERE u.society_id=%s AND u.role='apartment'
+                        AND NOT EXISTS (SELECT 1 FROM committee_offices co WHERE co.society_id=u.society_id AND co.user_id=u.id
+                                         AND co.office_code IN ('president','secretary','treasurer'))""", (society_id,)) or {}
+    reason = (enrol_later_reason or "").strip()
+    if not int(others.get("n") or 0) and len(reason) < 10:
+        raise OnboardingError("Enrol at least one more apartment, or tick “I will enrol the rest later” with a reason of 10 characters or more.")
+    db._execute("UPDATE societies SET onboarding_phase='adoption' WHERE id=%s AND onboarding_phase='enrollment'", (society_id,))
+    _audit(society_id, actor_id, "ENROLLMENT_COMPLETED", "society", society_id, {"enrol_later_reason": reason or None})
+    return "Enrollment marked complete. The apartment, vendor and security portals are now open."
+
+
+def advance_phase(society_id: int, actor_id: int, to_phase: str) -> str:
+    """Stages 6 and 7 are never blocking: 'Mark done' or 'Do later' both just move on."""
+    order = {"adoption": "advisers", "advisers": "complete"}
+    cur = society_phase(society_id)
+    if cur not in order or order[cur] != to_phase:
+        raise OnboardingError("That stage is not the current one.")
+    db._execute("UPDATE societies SET onboarding_phase=%s WHERE id=%s", (to_phase, society_id))
+    _audit(society_id, actor_id, "ONBOARDING_PHASE", "society", society_id, {"phase": to_phase})
+    return "Saved."
+
+
+def try_activate(society_id: int, actor_id: int, progress=None) -> dict:
     """Called when the fourth signature seals the Agreement; never raises, so the seal is not lost if activation is held."""
     try:
-        return {"ok": True, "result": activate(society_id, actor_id)}
+        return {"ok": True, "result": activate(society_id, actor_id, progress=progress)}
     except OnboardingError as exc:
         log.warning("activation of society %s held: %s", society_id, exc)
         return {"ok": False, "error": str(exc)}
