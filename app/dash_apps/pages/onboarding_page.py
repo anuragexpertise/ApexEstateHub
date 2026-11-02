@@ -60,13 +60,13 @@ def marker(society_id: int) -> str:
 
 
 # ── stage 2 ───────────────────────────────────────────────────────────────────────────────────────────────────────
-def _office_card(office: str, seated: dict | None):
+def _office_card(office: str, seated: dict | None, society_id: int | None = None):
     label = ob.OFFICE_LABEL[office]
     if seated:
-        sig = seated.get("signature_image")
+        sig = ob.signature_url(society_id, seated.get("signature_image")) if society_id else None
         sig_img = html.Div()
         if sig:
-            sig_img = html.Img(src=f"/assets/{sig}", style={"maxWidth": "120px", "maxHeight": "60px", "marginTop": "6px",
+            sig_img = html.Img(src=sig, style={"maxWidth": "120px", "maxHeight": "60px", "marginTop": "6px",
                                                            "border": "1px solid #c9d2dc", "borderRadius": "4px"})
         def fid(f):
             return {"type": f"{P}-f", "office": office, "field": f}
@@ -128,7 +128,7 @@ def _stage_committee(society_id: int):
            html.Div("The President, Secretary and Treasurer sign the Agreement, so they must hold office first. Each is seated with the "
                     "resolution that elected them and the signed minutes; the file's SHA-256 is kept as evidence. Use a different flat "
                     "for each person: the Agreement needs four different people to sign.", style=_MUTED)]
-    out += [_office_card(o, seated[o]) for o in ob.CORE_OFFICES]
+    out += [_office_card(o, seated[o], society_id) for o in ob.CORE_OFFICES]
     out.append(html.Div([
         html.Strong("Grievance officer (DPDP)"), html.Div("Named on the login page and in every privacy notice.", style=_MUTED),
         dbc.Row([dbc.Col(_field("Name", dbc.Input(id=f"{P}-g-name", size="sm", value=s.get("grievance_officer_name") or "")), md=4),
@@ -177,8 +177,37 @@ def _controls(code: str, a: dict, sealed_ok: bool = False):
     titles = {"A": "Annex A: legal regime and bye-laws", "B": "Annex B: review of the setup",
               "C": "Annex C: opening financial position", "D": "Annex D: data-protection and custody schedule"}
     badge = dbc.Badge("Sealed", color="success") if a["status"] == "sealed" else (dbc.Badge("Blocked", color="danger") if a["blocking"] else dbc.Badge("Ready to seal", color="info"))
-    return html.Div([html.Div([html.Strong(titles[code]), html.Span("  "), badge, html.Span(f"  SHA-256 {a['content_hash'][:16]}...", style=_MUTED)]),
-                     html.Ul(rows, style={"padding": "0", "margin": "6px 0 0"})], style=_CARD)
+    body = [html.Div([html.Strong(titles[code]), html.Span("  "), badge, html.Span(f"  SHA-256 {a['content_hash'][:16]}...", style=_MUTED)]),
+            html.Ul(rows, style={"padding": "0", "margin": "6px 0 0"})]
+    if code == "B":
+        body.append(_annex_b_signatures(a))
+    return html.Div(body, style=_CARD)
+
+
+def _annex_b_signatures(a: dict):
+    """Thumbnails of the office-bearers' signature images exactly as recorded in Annex B (read from the annex, not the live record)."""
+    content = a.get("content") or {}
+    if isinstance(content, str):
+        try:
+            content = json.loads(content)
+        except ValueError:
+            content = {}
+    items = []
+    for office in ob.CORE_OFFICES:
+        o = (content.get("office_bearers") or {}).get(office)
+        if not o:
+            continue
+        path = o.get("signature_image")
+        thumb = (html.Img(src=f"/assets/{path}", alt=f"Signature of {o.get('name')}",
+                          style={"maxWidth": "120px", "maxHeight": "60px", "border": "1px solid #c9d2dc", "borderRadius": "4px", "background": "#fff"})
+                 if path else html.Span("no signature image", style={"fontSize": "11.5px", "color": "#c0392b"}))
+        items.append(html.Div([thumb, html.Div(f"{ob.OFFICE_LABEL[office]}: {o.get('name')}", style={"fontSize": "11.5px", "marginTop": "2px"}),
+                               html.Div(f"SHA-256 {str(o.get('signature_sha256') or '')[:12]}", style=_MUTED)],
+                              style={"marginRight": "16px", "marginTop": "6px"}))
+    if not items:
+        return html.Div()
+    return html.Div([html.Strong("Signature images on record", style={"fontSize": "11.5px", "color": "#556"}),
+                     html.Div(items, style={"display": "flex", "flexWrap": "wrap"})], style={"marginTop": "8px"})
 
 
 def step_from_view(view: str | None) -> int | None:
@@ -299,7 +328,11 @@ def setup_stage(society_id: int, current_step: int | None = None) -> list:
             if i == current_step:                      # opened straight on Review: the nav callback will not fire
                 from app.dash_apps.pages.setup_wizard import render_review
                 review_body = render_review(ob.load_draft(society_id), society_id)
-            containers.append(html.Div(html.Div(review_body, id="onb-review-container"), id={"type": "onb-step", "key": cat},
+            print_link = html.Div(html.A([html.I(className="fas fa-print me-2"), "Print / open review in a new window"],
+                                         href="/print_wizard/review", target="_blank", rel="noopener",
+                                         className="btn btn-outline-secondary btn-sm"),
+                                  style={"textAlign": "right", "marginBottom": "8px"})
+            containers.append(html.Div([print_link, html.Div(review_body, id="onb-review-container")], id={"type": "onb-step", "key": cat},
                                        style={"display": "block" if i == current_step else "none", "paddingTop": "6px"}))
         else:
             containers.append(html.Div(render_category_content(cat, society_id), id={"type": "onb-step", "key": cat},
@@ -314,6 +347,8 @@ def setup_stage(society_id: int, current_step: int | None = None) -> list:
                        disabled=(current_step == last), style={"fontSize": "12px"}),
             dbc.Button("Save & continue to Agreement", id="onb-btn-finalize", color="success", size="sm", n_clicks=0,
                        style={"fontSize": "12px", "display": "none" if current_step != last else "inline-block"}),
+            dbc.Button([html.I(className="fas fa-book me-2"), "Acts & Rules"], id="onb-btn-rules", color="secondary", outline=True,
+                       size="sm", n_clicks=0, style={"fontSize": "12px", "marginLeft": "auto"}),
         ], style={"marginTop": "10px", "display": "flex", "gap": "6px", "flexWrap": "wrap", "alignItems": "center"}),
     ], className="onb-main")
 
@@ -334,8 +369,15 @@ def setup_stage(society_id: int, current_step: int | None = None) -> list:
         ]),
     ], id="onb-finalize-modal", is_open=False, centered=True, backdrop="static")
 
+    # ── Acts & Rules (item 1.4): a side panel, so it never takes layout width from the step ──────────────────
+    rules = dbc.Offcanvas(
+        html.Div(id="onb-rules-body", style={"fontSize": "12.5px", "color": "#3a4a5c"}),
+        id="onb-rules-canvas", title="Acts & Rules", placement="end", is_open=False, scrollable=True,
+        style={"width": "min(440px, 92vw)"})
+
     out.append(setup)
     out.append(modal)
+    out.append(rules)
     return out
 
 
