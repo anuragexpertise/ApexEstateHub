@@ -289,9 +289,11 @@ def register_onboarding_wizard_callbacks(app):
             return _nav_outputs(n, statuses)
 
         # Forward-jump guard: only up to the frontier (first not-done/skipped step).
+        # Moving from the frontier step to the next step is allowed (the step is saved after).
         statuses = ob.step_statuses(sid)
         fr = _frontier(statuses)
-        if n > old_n and fr is not None and n > fr:
+        max_allowed = fr + 1 if old_n == fr else fr
+        if n > old_n and fr is not None and n > max_allowed:
             return _nav_outputs(old_n, statuses,
                                 f'Complete “{step_label(CATEGORIES[fr])}” first.')
 
