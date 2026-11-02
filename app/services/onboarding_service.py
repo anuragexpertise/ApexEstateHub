@@ -1790,10 +1790,10 @@ _MIGRATION_WARNED: set = set()
 
 
 def _missing_column(exc: Exception, what: str) -> None:
-    """A database that has not had migrations/002 applied: say so once and let the page render with defaults."""
+    """A database built before the onboarding-review schema: say so once and let the page render with defaults."""
     if what not in _MIGRATION_WARNED:
         _MIGRATION_WARNED.add(what)
-        log.warning("societies.%s is missing: run `python3 database/apply_migration.py 002` (%s)", what, exc)
+        log.warning("societies.%s is missing: rebuild the database from database/estatehub.sql (`python3 database/reset_database.py --yes --after seed`) (%s)", what, exc)
 
 
 def society_phase(society_id: int) -> str | None:
