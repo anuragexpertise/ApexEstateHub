@@ -900,14 +900,16 @@ def _office_bearer_status(society_id):
 def legal_hierarchy_rows(society_id=None, state=None, answers=None):
     """Body rows of the Legal Hierarchy table, driven by the society's regime (no hard-coded state).
 
-    Columns: Layer | Instrument | Active | Status.
-    * Active is a dedicated green column ("Active" badge in green / "Not active" in grey) — this
-      replaces the old rule where bold font meant applicable.
-    * Status: Locked [green] | Provisional [yellow] | Normal [light blue].
+    Columns: Level | Name | Status.
+    * Name carries the instrument with a verification badge: "verified" (green) when the row has been
+      verified in Master Settings → RWA Compliance (UP), "unverified" (yellow) otherwise.
+    * Status: "Locked" [green] = applies to every society, not a choice; "In-active" [grey] = not
+      triggered by the Yes/No answers; "Provisional" [yellow] = society-adopted bye-laws before Stage 6;
+      "Normal" [light blue] = General Body / Managing Committee layer.
 
     `answers` maps the Yes/No keys (central_it_tan, central_tds, central_gst, central_rera,
     has_employees, has_security_agency) to booleans. An instrument whose applies_when key matches
-    a "No" answer shows "Not active" with the reason.
+    a "No" answer shows "Not active" with the reason inside the Name cell.
 
     Verification: every catalog row starts as "unverified" (the database default). A Treasurer or an
     Auditor verifies a row in Master Settings → RWA Compliance (UP) — opening the source text and
@@ -926,20 +928,17 @@ def legal_hierarchy_rows(society_id=None, state=None, answers=None):
     except Exception:
         central_links = []
 
-    STATUS_COLOR = {"locked": "success", "provisional": "warning", "normal": "info"}
+    STATUS_COLOR = {"locked": "success", "inactive": "secondary", "provisional": "warning", "normal": "info"}
 
     def instrument_cell(r):
-        """(instrument_component, active_component) for one catalog row."""
+        """(instrument_component, applies_bool) for one catalog row."""
         applies, reason = instrument_applies(r, answers)
         link = _instrument_link(r["title"], r.get("source_url") if r.get("verification") == "verified" else None, r.get("enactment_year"))
-        if r.get("verification") != "verified":
-            link = html.Span([link, html.Br(), html.Span("unverified", className="text-warning", style={"fontSize": "11px"})])
-        parts = [link]
+        v_badge = dbc.Badge("verified", color="success", pill=True, className="me-1", style={"fontSize": "10px"}) if r.get("verification") == "verified" else dbc.Badge("unverified", color="warning", pill=True, className="me-1", style={"fontSize": "10px"})
+        parts = [html.Div([link, html.Span(" "), v_badge], className="mb-1", style={"fontSize": "12px"})]
         if not applies and reason:
             parts.append(html.Span(f" — {reason}", style={"color": "#8a8f98", "fontSize": "11px"}))
-        active = dbc.Badge("Active" if applies else "Not active", color="success" if applies else "secondary", pill=True, className="me-1", style={"fontSize": "10px"})
-        active_cell = active if applies else html.Div([active, html.Br(), html.Span(reason or "", style={"color": "#8a8f98", "fontSize": "11px"})], style={"fontSize": "11px"})
-        return html.Div(parts, className="mb-1", style={"fontSize": "12px"}), active_cell
+        return html.Div(parts, className="mb-1", style={"fontSize": "12px"}), applies
 
     def layer_cells(types):
         cells = []
@@ -956,15 +955,14 @@ def legal_hierarchy_rows(society_id=None, state=None, answers=None):
             base = html.Span(label, style={"fontSize": "12px", "color": "#223" if applies else "#8a8f98"})
             if not applies:
                 base = html.Span([base, html.Span(f" — {reason}", style={"color": "#8a8f98", "fontSize": "11px", "marginLeft": "6px"})])
-            active = dbc.Badge("Active" if applies else "Not active", color="success" if applies else "secondary", pill=True, className="me-1", style={"fontSize": "10px"})
-            active_cell = active if applies else html.Div([active, html.Span(f" — {reason}" if reason else "", style={"color": "#8a8f98", "fontSize": "11px"})], style={"fontSize": "11px"})
-            cells.append((html.Div([base], className="mb-1"), active_cell))
+            act = dbc.Badge("Active" if applies else "Not active", color="success" if applies else "secondary", pill=True, className="me-1", style={"fontSize": "10px"})
+            cells.append((html.Div([base, html.Span(" "), act], className="mb-1", style={"fontSize": "12px"}), applies))
         return cells
 
     applicable_keys = {}
     central_acts = layer_cells(("Central Act",))
     if not central_acts:
-        central_acts = [(html.Div(_instrument_link(l.label.split(" — ")[0], l.url), style={"fontSize": "12px"}), dbc.Badge("Active", color="success", pill=True, className="me-1", style={"fontSize": "10px"})) for l in central_links]
+        central_acts = [(html.Div([html.Div(_instrument_link(l.label.split(" — ")[0], l.url), style={"fontSize": "12px"}), html.Span(" "), dbc.Badge("unverified", color="warning", pill=True, className="me-1", style={"fontSize": "10px"})], className="mb-1"), True) for l in central_links]
     central_rules = layer_cells(("Central Rules",))
     state_act = layer_cells(("Act",))
     state_rules = layer_cells(("Rules", "Notification"))
@@ -985,17 +983,21 @@ def legal_hierarchy_rows(society_id=None, state=None, answers=None):
     ]
     out = []
     for label, cells, badge_type in spec:
-        inst_parts, act_parts = [], []
-        for cell, active in cells:
+        inst_parts = []
+        any_active = False
+        for cell, applies in cells:
             inst_parts.append(cell)
-            if active is not None:
-                act_parts.append(active)
+            if applies:
+                any_active = True
+        if badge_type == "locked" and label == "L0 Operational laws":
+            status_key = "locked" if any_active else "inactive"
+        else:
+            status_key = badge_type
         layer_badge = dbc.Badge(label, color="primary" if badge_type == "locked" else "secondary", className="me-2", pill=True, style={"fontSize": "10px"})
-        status = dbc.Badge(badge_type.capitalize(), color=STATUS_COLOR[badge_type], pill=True, style={"fontSize": "9px"})
+        status = dbc.Badge(status_key.capitalize(), color=STATUS_COLOR[status_key], pill=True, style={"fontSize": "9px"})
         out.append(html.Tr([
             html.Td(layer_badge, style={"verticalAlign": "top"}),
             html.Td(html.Div(inst_parts) if inst_parts else html.Span("—", className="text-muted"), style={"verticalAlign": "top", "fontSize": "12px"}),
-            html.Td(html.Div(act_parts) if act_parts else html.Span("—", className="text-muted"), style={"verticalAlign": "top"}),
             html.Td(status, style={"verticalAlign": "top"}),
         ]))
     return out, applicable_keys
@@ -1513,9 +1515,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
             html.P("This page is part of the Agreement. It is sealed as Annex A and signed by the office-bearers.", className="text-muted small mb-2"),
             dbc.Table([
                 html.Thead(html.Tr([
-                    html.Th("Layer", style={"fontSize": "11px", "width": "170px"}),
-                    html.Th("Instrument", style={"fontSize": "11px"}),
-                    html.Th("Active", style={"fontSize": "11px", "width": "120px"}),
+                    html.Th("Level", style={"fontSize": "11px", "width": "170px"}),
+                    html.Th("Name", style={"fontSize": "11px"}),
                     html.Th("Status", style={"fontSize": "11px", "width": "120px"}),
                 ])),
                 html.Tbody(id="sw-legal-hierarchy-body"),
