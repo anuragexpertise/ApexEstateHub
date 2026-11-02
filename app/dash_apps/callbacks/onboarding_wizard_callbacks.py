@@ -311,6 +311,26 @@ def register_onboarding_wizard_callbacks(app):
         statuses = ob.step_statuses(sid)
         return _nav_outputs(n, statuses)
 
+    # ── clear step-up passwords when the Administrator step is (re)opened ─────
+    @app.callback(
+        Output("sw-qr-secret", "value", allow_duplicate=True),
+        Output("sw-qr-secret-confirm", "value", allow_duplicate=True),
+        Input("onb-setup-step", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def clear_admin_passwords(step):
+        s = _session()
+        if not s or not s[0]:
+            return no_update, no_update
+        try:
+            idx = int(step or 0)
+        except (TypeError, ValueError):
+            return no_update, no_update
+        if 0 <= idx < NCAT and CATEGORIES[idx] == "Administrator":
+            return None, None
+        return no_update, no_update
+
     # ── finalize (Review → "Save & continue to Agreement", item 3) ──────────────
     @app.callback(
         Output("onb-finalize-modal", "is_open", allow_duplicate=True),

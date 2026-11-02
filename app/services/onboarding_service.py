@@ -603,7 +603,14 @@ def finalize_draft(society_id: int, actor_id: int, admin_password: str) -> str:
 
 def _committee_complete(society_id: int) -> bool:
     officers = seated_officers(society_id)
-    return all(bool(officers.get(o)) and officers[o].get("complete") for o in CORE_OFFICES)
+    return all(
+        bool(officers.get(o))
+        and bool(officers[o].get("holder_name"))
+        and bool(officers[o].get("email"))
+        and bool(officers[o].get("phone"))
+        and bool(officers[o].get("signature_image"))
+        for o in CORE_OFFICES
+    )
 
 
 def _audit(society_id: int, actor_id: int, action: str, resource_type: str, resource_id: int | None,
