@@ -900,8 +900,20 @@ def _office_bearer_status(society_id):
 def legal_hierarchy_rows(society_id=None, state=None, answers=None):
     """Body rows of the Legal Hierarchy table, driven by the society's regime (no hard-coded state).
 
-    Bold rule (§4.7.5): an instrument row is bold when applies_when=='always' or the matching
-    Yes/No answer is True; otherwise normal weight with a muted reason. Returns (rows, applicable_keys).
+    Columns: Layer | Instrument | Active | Status.
+    * Active is a dedicated green column ("Active" badge in green / "Not active" in grey) — this
+      replaces the old rule where bold font meant applicable.
+    * Status: Locked [green] | Provisional [yellow] | Normal [light blue].
+
+    `answers` maps the Yes/No keys (central_it_tan, central_tds, central_gst, central_rera,
+    has_employees, has_security_agency) to booleans. An instrument whose applies_when key matches
+    a "No" answer shows "Not active" with the reason.
+
+    Verification: every catalog row starts as "unverified" (the database default). A Treasurer or an
+    Auditor verifies a row in Master Settings → RWA Compliance (UP) — opening the source text and
+    recording the notification number, verification date and an opinion reference — after which the
+    row becomes "verified" and its link opens the source text. Until then the row is information
+    only and never drives enforcement.
     """
     from app.services.statutory_rules import instruments_for_society, grouped_instruments, normalize_state, instrument_applies
     st = normalize_state(state or _society_state(society_id))
@@ -914,83 +926,77 @@ def legal_hierarchy_rows(society_id=None, state=None, answers=None):
     except Exception:
         central_links = []
 
-    def items(types, applicable_keys):
-        out = []
+    STATUS_COLOR = {"locked": "success", "provisional": "warning", "normal": "info"}
+
+    def instrument_cell(r):
+        """(instrument_component, active_component) for one catalog row."""
+        applies, reason = instrument_applies(r, answers)
+        link = _instrument_link(r["title"], r.get("source_url") if r.get("verification") == "verified" else None, r.get("enactment_year"))
+        if r.get("verification") != "verified":
+            link = html.Span([link, html.Br(), html.Span("unverified", className="text-warning", style={"fontSize": "11px"})])
+        parts = [link]
+        if not applies and reason:
+            parts.append(html.Span(f" — {reason}", style={"color": "#8a8f98", "fontSize": "11px"}))
+        active = dbc.Badge("Active" if applies else "Not active", color="success" if applies else "secondary", pill=True, className="me-1", style={"fontSize": "10px"})
+        active_cell = active if applies else html.Div([active, html.Br(), html.Span(reason or "", style={"color": "#8a8f98", "fontSize": "11px"})], style={"fontSize": "11px"})
+        return html.Div(parts, className="mb-1", style={"fontSize": "12px"}), active_cell
+
+    def layer_cells(types):
+        cells = []
         for t in types:
             for r in groups.get(t, []):
-                applies, reason = instrument_applies(r, answers)
-                key = f"instr_{r.get('title','')}"
-                applicable_keys[key] = applies
-                link = _instrument_link(r["title"], r.get("source_url") if r.get("verification") == "verified" else None, r.get("enactment_year"))
-                if r.get("verification") != "verified":          # unverified rows are labelled and carry no link
-                    link = html.Span([link, html.Span(" (unverified)", style={"color": "#b26a00", "fontSize": "11px"})])
-                weight = html.Strong(link) if applies else link
-                reason_txt = None if applies or reason is None else html.Span(f" — {reason}", style={"color": "#8a8f98", "fontSize": "11px"})
-                out.append(html.Div([weight, reason_txt] if reason_txt else [weight], className="mb-1",
-                                    style={"fontWeight": "700" if applies else "400",
-                                           "color": "#223" if applies else "#8a8f98"}))
-        return out
+                cells.append(instrument_cell(r))
+        return cells
+
+    def op_layer():
+        cells = []
+        for trig, label in (("has_employees", "Employees / labour laws"), ("has_security_agency", "Security agency / PSARA")):
+            applies = answers.get(trig) is True
+            reason = None if applies else f"not triggered: you answered “No” to {trig.replace('_', ' ')}"
+            base = html.Span(label, style={"fontSize": "12px", "color": "#223" if applies else "#8a8f98"})
+            if not applies:
+                base = html.Span([base, html.Span(f" — {reason}", style={"color": "#8a8f98", "fontSize": "11px", "marginLeft": "6px"})])
+            active = dbc.Badge("Active" if applies else "Not active", color="success" if applies else "secondary", pill=True, className="me-1", style={"fontSize": "10px"})
+            active_cell = active if applies else html.Div([active, html.Span(f" — {reason}" if reason else "", style={"color": "#8a8f98", "fontSize": "11px"})], style={"fontSize": "11px"})
+            cells.append((html.Div([base], className="mb-1"), active_cell))
+        return cells
 
     applicable_keys = {}
-    central = items(("Central Act", "Central Rules"), applicable_keys)
-    if not central:   # catalog has no Central Act rows: use the official-portal links
-        central = [html.Div(_instrument_link(l.label.split(" — ")[0], l.url), className="mb-1") for l in central_links]
-    pending = html.Small("link pending verification", className="text-muted")
-    state_act = items(("Act",), applicable_keys) or [html.Span(f"No {regime} Act in the catalog yet.", className="text-muted")]
-    rules = items(("Rules", "Notification"), applicable_keys) or [html.Span(f"No {regime} Rules in the catalog yet.", className="text-muted")]
-    model_bl = items(("Bye-laws",), applicable_keys) or [html.Span(f"No {regime} Model Bye-laws in the catalog yet.", className="text-muted")]
+    central_acts = layer_cells(("Central Act",))
+    if not central_acts:
+        central_acts = [(html.Div(_instrument_link(l.label.split(" — ")[0], l.url), style={"fontSize": "12px"}), dbc.Badge("Active", color="success", pill=True, className="me-1", style={"fontSize": "10px"})) for l in central_links]
+    central_rules = layer_cells(("Central Rules",))
+    state_act = layer_cells(("Act",))
+    state_rules = layer_cells(("Rules", "Notification"))
+    model_bl = layer_cells(("Bye-laws",))
+    op_laws = op_layer()
 
-    # Operational laws group: has_employees / has_security_agency (new Yes/No radios, default No).
-    op_laws = []
-    for trig, label in (("has_employees", "Employees / labour laws"), ("has_security_agency", "Security agency / PSARA")):
-        applies = answers.get(trig) is True
-        op_laws.append(html.Div([
-            html.Strong(label) if applies else html.Span(label, style={"color": "#8a8f98"}),
-            html.Span(f" — {'applies' if applies else 'not triggered: you answered “No”'}",
-                      style={"fontSize": "11px", "color": "#8a8f98", "marginLeft": "6px"})
-        ], className="mb-1", style={"fontWeight": "700" if applies else "400",
-                                    "color": "#223" if applies else "#8a8f98"}))
-        applicable_keys[f"instr_op_{trig}"] = applies
-
-    try:
-        from app.services import regime_rules_admin as _rra
-        _dts = {d["code"]: d for d in _rra.list_decision_types()}
-    except Exception:
-        _dts = {}
-
-    def _maj(code):
-        """'66.67% of all votes (provisional)' for a decision type, read from decision_types (single source)."""
-        d = _dts.get(code)
-        if not d:
-            return "see Settings > Society governance"
-        tag = "" if d.get("verification") == "verified" else " (provisional - confirm with your advocate)"
-        if d["required_body"] == "GBM":
-            return f"{float(d['majority_pct']):g}% of all votes, by undivided interest{tag}"
-        return f"simple majority of the committee{tag}"
-
-    def _note(text):
-        return html.Div(html.Small(text, className="text-muted"))
-
-    rows = [
-        ("L0 Central Acts", central + [_note("Income-tax, GST, RERA. Apply to every society; not a choice.")], "locked"),
-        ("L0 Central Rules & Notifications", [_note("Central rules and notifications under the central Acts.")], "locked"),
+    spec = [
+        ("L0 Central Acts", central_acts, "locked"),
+        ("L0 Central Rules & Notifications", central_rules, "locked"),
         ("L0 State Acts", state_act, "locked"),
-        ("L0 State Rules", rules, "locked"),
-        ("L0 Model Bye-laws (notified)", model_bl + [_note("Made by the Governor under the Act; a society makes its bye-laws in accordance with them.")], "locked"),
+        ("L0 State Rules", state_rules, "locked"),
+        ("L0 Model Bye-laws (notified)", model_bl, "locked"),
         ("L0 Operational laws", op_laws, "locked"),
-        ("L1 Society-adopted Bye-laws", [html.Span("Before Stage 6: "), html.Strong("Model Bye-Laws apply as notified; "),
-                                      html.Span("the society may adopt or vary them in Stage 6 (Adoption)."), _note(
-                                          "After Stage 6: clause list with adopted clauses bold.")], "provisional"),
-        ("L2 General Body Resolutions", [html.Span("Majority rules from "), html.Strong("decision_types"),
-                                      html.Span(" (existing _maj()).")], "normal"),
-        ("L3 Board / Managing Committee", [html.Span("Existing text — meetings and decisions.")], "normal"),
+        ("L1 Society-adopted Bye-laws", [(html.Div([html.Span("Before Stage 6: Model Bye-Laws apply as notified; ", className="text-muted"),
+                                              html.Strong("the society may adopt or vary them in Stage 6 (Adoption).")], className="mb-1", style={"fontSize": "12px"}), None)], "provisional"),
+        ("L2 General Body Resolutions", [(html.Div([html.Span("Majority rules from decision_types (existing rule engine layer).", className="text-muted")], className="mb-1", style={"fontSize": "12px"}), None)], "normal"),
+        ("L3 Board / Managing Committee", [(html.Div([html.Span("Meetings and decisions of the Managing Committee.", className="text-muted")], className="mb-1", style={"fontSize": "12px"}), None)], "normal"),
     ]
     out = []
-    for label, body, badge_type in rows:
+    for label, cells, badge_type in spec:
+        inst_parts, act_parts = [], []
+        for cell, active in cells:
+            inst_parts.append(cell)
+            if active is not None:
+                act_parts.append(active)
+        layer_badge = dbc.Badge(label, color="primary" if badge_type == "locked" else "secondary", className="me-2", pill=True, style={"fontSize": "10px"})
+        status = dbc.Badge(badge_type.capitalize(), color=STATUS_COLOR[badge_type], pill=True, style={"fontSize": "9px"})
         out.append(html.Tr([
-            html.Td(dbc.Badge(label, color="primary" if badge_type == "locked" else "warning", className="me-2", pill=True, style={"fontSize": "10px"})),
-            html.Td(body, style={"fontSize": "12px"}),
-            html.Td(dbc.Badge(badge_type.capitalize(), color="secondary" if badge_type == "locked" else "info", pill=True, style={"fontSize": "9px"})),
+            html.Td(layer_badge, style={"verticalAlign": "top"}),
+            html.Td(html.Div(inst_parts) if inst_parts else html.Span("—", className="text-muted"), style={"verticalAlign": "top", "fontSize": "12px"}),
+            html.Td(html.Div(act_parts) if act_parts else html.Span("—", className="text-muted"), style={"verticalAlign": "top"}),
+            html.Td(status, style={"verticalAlign": "top"}),
         ]))
     return out, applicable_keys
 
@@ -1295,7 +1301,6 @@ def legal_regime_live(society_id=None, state=None, constitution=None):
     regime = regime_for_society(society_id, picked_state)
     name, status = regime_profile(regime)
     own = state_has_own_regime(picked_state)
-    hierarchy_rows, _applicable_keys = legal_hierarchy_rows(society_id, picked_state)
     _sel = regime_selection(picked_state, picked_constitution or "AOA")
     _opt_rows = [html.Tr([
         html.Td(html.B(o["label"]) if o["constitution"] == (picked_constitution or "AOA").upper() else o["label"]),
@@ -1322,15 +1327,6 @@ def legal_regime_live(society_id=None, state=None, constitution=None):
                 html.Span(name, className="small"),
             ], className="mb-2"),
             html.Small(f"This regime is {'active' if own else 'a fallback (UP reference)'} — confirm applicable law with an advocate if not a dedicated regime." if not own else "", className="text-muted d-block mb-3"),
-            html.H6("Legal Hierarchy (Precedence Order)", className="text-primary mt-3 mb-2"),
-            dbc.Table([
-                html.Thead(html.Tr([
-                    html.Th("Layer", style={"fontSize": "11px", "width": "150px"}),
-                    html.Th("Instrument", style={"fontSize": "11px"}),
-                    html.Th("Status", style={"fontSize": "11px", "width": "120px"}),
-                ])),
-                html.Tbody(hierarchy_rows),
-            ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
         ]),
     ]
 
@@ -1472,10 +1468,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
             # re-rendering does not reset the Central Act radios further down this step.
             html.Div(id="sw-legal-regime-live", children=legal_regime_live(society_id, state, constitution)),
             html.Hr(),
-            html.H6([html.I(className="fas fa-landmark me-2"), "Central Acts (Layer 0 - apply to every society, not a choice)"], className="text-primary mt-3 mb-2"),
-            _central_acts_banner(),
-            html.H6("Central Act Settings", className="text-primary mt-3 mb-2"),
-            html.P("The Acts above apply to every society whatever you answer. What depends on your society's facts is whether a duty "
+            html.H6([html.I(className="fas fa-landmark me-2"), "Central Act Settings"], className="text-primary mt-3 mb-2"),
+            html.P("The Layer 0 Central Acts below apply to every society whatever you answer; nothing here is a choice. What depends on your society's facts is whether a duty "
                    "under them has been triggered (a GST registration threshold, TDS on payments you make). All answers default to Yes; "
                    "answer No only on your CA's advice. TDS = No hides the TAN & TDS Rates step and GST = No hides the GSTIN & GST Rate step:", className="text-muted small mb-3"),
             dbc.Row([
@@ -1498,8 +1492,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
                     dbc.RadioItems(id="sw-central-rera", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3"),
                 ], width=6),
             ]),
-            html.H6("Operational laws (Yes / No)", className="text-primary mt-4 mb-2"),
-            html.P("These decide whether employment or security-agency instruments appear in bold on this page "
+            html.H6("Operational Laws (Yes / No)", className="text-primary mt-4 mb-2"),
+            html.P("These decide whether employment or security-agency instruments are Active on this page "
                    "and in Annex A. Default No.", className="text-muted small mb-2"),
             dbc.Row([
                 dbc.Col([
@@ -1511,21 +1505,26 @@ def render_category_content(category, society_id=None, state=None, constitution=
                     dbc.RadioItems(id="sw-central-security-agency", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=False, inline=True, className="mb-3"),
                 ], width=6),
             ]),
+            html.Hr(),
+            html.H6([html.I(className="fas fa-landmark me-2"), "Central Acts (Layer 0 - apply to every society, not a choice)"], className="text-primary mt-3 mb-2"),
+            _central_acts_banner(),
+            html.Hr(),
             html.H6("Legal Hierarchy (Precedence Order)", className="text-primary mt-4 mb-2"),
-            html.P("This page is part of the Agreement. It is sealed as Annex A and signed by the office-bearers. "
-                   "Bold = applicable to this society; normal weight = not triggered (reason shown).", className="text-muted small mb-2"),
+            html.P("This page is part of the Agreement. It is sealed as Annex A and signed by the office-bearers.", className="text-muted small mb-2"),
             dbc.Table([
                 html.Thead(html.Tr([
-                    html.Th("Layer", style={"fontSize": "11px", "width": "160px"}),
+                    html.Th("Layer", style={"fontSize": "11px", "width": "170px"}),
                     html.Th("Instrument", style={"fontSize": "11px"}),
+                    html.Th("Active", style={"fontSize": "11px", "width": "120px"}),
                     html.Th("Status", style={"fontSize": "11px", "width": "120px"}),
                 ])),
                 html.Tbody(id="sw-legal-hierarchy-body"),
             ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
             dbc.Alert([
-                html.Strong("Non-applicable rows: ", className="me-2"),
-                "non-bold, grey, with the reason why they do not apply. Applicable rows are bold. "
-                "Annex A seals this hierarchy and its SHA-256 digest when the Agreement is sealed.",
+                html.Strong("Verification — why “unverified” everywhere: ", className="me-2"),
+                "Every catalog row starts as “unverified” (the database default). A Treasurer or an Auditor verifies a row in Master Settings → RWA Compliance (UP): "
+                "they open the source text and record the notification number, verification date and an opinion reference, after which the row becomes “verified” and its link opens the source text. "
+                "Until then the row is shown for information only and never drives enforcement. Confirm applicable law with your advocate — nothing here is a legal opinion.",
             ], color="info", className="py-2 mt-3", style={"fontSize": "12.5px"}),
         ]
     elif category == "TAN & TDS Rates":
