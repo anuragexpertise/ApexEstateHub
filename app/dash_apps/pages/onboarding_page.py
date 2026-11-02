@@ -686,6 +686,18 @@ def _initial_step(society_id: int) -> int:
         return 0
 
 
+POLL_MS = 20000                                    # was 6000: this is a human workflow, not a live feed
+
+
+def poll_disabled(role: str | None, society_id: int | None) -> bool:
+    """True while the admin is alone on the committee/setup screens. Nobody else can change the state there, and every
+    admin action already refreshes the marker itself, so polling only burns ~8 DB queries per tick for nothing."""
+    try:
+        return role == "admin" and ob.state_of(society_id) in ("registered", "committee seated")
+    except Exception:                                                      # noqa: BLE001
+        return False
+
+
 def render_pending(role: str, society_id: int | None, user_id: int | None):
     """What a not-yet-active society sees in place of its dashboard."""
     if not society_id:
@@ -693,7 +705,7 @@ def render_pending(role: str, society_id: int | None, user_id: int | None):
     return html.Div([
         html.H4("Society onboarding", style={"fontWeight": "700", "marginTop": "8px"}),
         html.Div(id=f"{P}-toast"),
-        dcc.Interval(id=f"{P}-poll", interval=6000, n_intervals=0),
+        dcc.Interval(id=f"{P}-poll", interval=POLL_MS, n_intervals=0, disabled=poll_disabled(role, society_id)),
         dcc.Store(id=f"{P}-marker", data=marker(society_id)),
         dcc.Store(id="onb-setup-step", data=_initial_step(society_id)),
         dcc.Store(id="onb-wizard-step", storage_type="session", data=_initial_step(society_id)),

@@ -460,6 +460,21 @@ def register_onboarding_callbacks(app):
             return op.tracker(sid), no_update, mk
         return op.tracker(sid), op.hub_body(role, sid, uid, view=view or "current"), mk
 
+    # ── pause/resume the poller as the society moves between stages ───────────────────────────────────────────
+    # The body is re-rendered on every stage transition, so it is the natural trigger. Keeps the poll off while the
+    # admin is alone on the committee/setup screens and back on once others (signers) can change the state.
+    @app.callback(
+        Output(f"{P}-poll", "disabled"),
+        Input(f"{P}-body", "children"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_poll_toggle(_children):
+        s = _session()
+        if not s or not s[0]:
+            return no_update
+        return op.poll_disabled(s[2], s[0])
+
     # ── Master queue ────────────────────────────────────────────────────────────────────────────────────────
     def _master_ok():
         s = _session()
