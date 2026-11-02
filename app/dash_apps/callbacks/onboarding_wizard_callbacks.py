@@ -20,7 +20,9 @@ from app.security.audit_context import get_current_society_id, get_current_user_
 from app.security.guards import require_session
 from app.services import onboarding_service as ob
 from app.services import regime_rules_admin as rra
-from app.services.xlsx_templates import build_receivables_template
+from app.dash_apps.pages.wizard_registry import draft_key as _draft_key, status_of as _status_of
+from app.services.xlsx_templates import (build_receivables_template, build_tds_template, build_bf_template,
+                                         parse_upload)
 
 P = op.P
 NCAT = len(CATEGORIES)
@@ -55,22 +57,57 @@ def _decode(contents):
 
 
 def _gather(states_list):
+    """ctx.states_list entries -> {component id: value} and, for pattern-ALL states, {type: {index: value}}."""
     out = {}
     for item in (states_list or []):
-        iid = item.get("id")
-        if not iid:
+        if isinstance(item, list):
+            for sub in item:
+                iid = sub.get("id") or {}
+                idx = iid.get("index") if "index" in iid else iid.get("acc_id")
+                out.setdefault(iid.get("type"), {})[idx] = sub.get("value")
             continue
-        if isinstance(iid, dict):
-            key = iid.get("index") or iid.get("key") or iid.get("field") or iid.get("acc_id") or iid.get("clause")
-            if key:
-                out[key] = item.get("value")
-        else:
+        iid = item.get("id")
+        if iid is not None and not isinstance(iid, dict):
             out[iid] = item.get("value")
     return out
 
 
+def _num(v):
+    return None if v in (None, "") else v
+
+
+def _tds_rows(form):
+    secs, discs = form.get("tds-section") or {}, form.get("tds-discriminator") or {}
+    rows = []
+    for i in sorted(secs):
+        row = {"section": secs[i], "discriminator": discs.get(i) or "",
+               "nature": (form.get("tds-nature") or {}).get(i),
+               "rate": _num((form.get("tds-rate") or {}).get(i)),
+               "rate_no_pan": _num((form.get("tds-rate-no-pan") or {}).get(i)),
+               "single_bill": _num((form.get("tds-single-bill") or {}).get(i)),
+               "annual_aggregate": _num((form.get("tds-agg-bill") or {}).get(i))}
+        if any(row[k] is not None for k in ("rate", "rate_no_pan", "single_bill", "annual_aggregate")):
+            rows.append(row)          # blank means "not entered": never a silent default (non-negotiable 4)
+    return rows
+
+
+def _bf_rows(form):
+    from database.seed import ACCOUNTS
+    meta = {a[0]: a for a in ACCOUNTS}
+    amts, rems = form.get("sw-bf-amt") or {}, form.get("sw-bf-remarks") or {}
+    rows = []
+    for aid, amt in amts.items():
+        a = meta.get(aid)
+        if not a:
+            continue
+        if amt in (None, "", 0, 0.0) and not rems.get(aid):
+            continue
+        rows.append({"acc_id": aid, "tab": a[2], "side": a[5], "bf_amount": str(amt or 0), "remarks": rems.get(aid) or ""})
+    return rows
+
+
 def _to_step_values(step_key, form):
-    """Map live form values -> draft fields for one step (the §2.1 draft shape)."""
+    """Map live form values -> draft fields for one step, keyed by DRAFT key (wizard_registry.STEP_KEYS)."""
     v = {}
     if step_key == "society_details":
         v = {"address": form.get("sw-society-address"), "email": form.get("sw-society-email"),
@@ -78,27 +115,31 @@ def _to_step_values(step_key, form):
              "constitution": form.get("sw-society-constitution"),
              "gate_logic": form.get("sw-gate-logic"), "duty_hrs": form.get("sw-duty-hrs")}
     elif step_key == "administrator":
-        v = {"stepup_hash": form.get("sw-qr-secret")}
+        v = {"stepup_secret": form.get("sw-qr-secret"), "stepup_confirm": form.get("sw-qr-secret-confirm")}
     elif step_key == "legal_regime":
         v = {"central_it_tan": form.get("sw-central-it-tan"), "central_tds": form.get("sw-central-tds"),
-             "central_gst": form.get("sw-central-gst"), "central_rera": form.get("sw-central-rera")}
+             "central_gst": form.get("sw-central-gst"), "central_rera": form.get("sw-central-rera"),
+             "has_employees": form.get("sw-central-employees"),
+             "has_security_agency": form.get("sw-central-security-agency")}
     elif step_key == "funds":
+        v = {"apt_sinking": form.get("sw-apt-sinking"), "apt_repair": form.get("sw-apt-repair")}
+    elif step_key == "tds":
+        v = {"tan": form.get("sw-society-tan"), "effective_date": form.get("sw-tds-effective-date"),
+             "rows": _tds_rows(form)}
+    elif step_key == "gst":
+        v = {"gstin": form.get("sw-society-gstin"), "cgst": form.get("sw-cgst"), "sgst": form.get("sw-sgst")}
+    elif step_key == "apartment":
         v = {"apt_cost": form.get("sw-apt-cost"), "apt_budget": form.get("sw-apt-budget"),
              "apt_rate": form.get("sw-apt-rate"), "apt_amt": form.get("sw-apt-amt"),
              "apt_billing_basis": form.get("sw-apt-billing-basis"), "apt_due_day": form.get("sw-apt-due"),
-             "apt_interest": form.get("sw-apt-interest"), "apt_sinking": form.get("sw-apt-sinking"),
-             "apt_repair": form.get("sw-apt-repair")}
-    elif step_key == "tds":
-        v = {"tan": form.get("sw-society-tan"), "effective_date": form.get("sw-tds-effective-date")}
-    elif step_key == "gst":
-        v = {"gstin": form.get("sw-society-gstin"), "cgst": form.get("sw-cgst"), "sgst": form.get("sw-sgst")}
-    elif step_key in ("apartment", "vendor"):
+             "apt_interest": form.get("sw-apt-interest")}
+    elif step_key == "vendor":
         v = {"vendor_1day": form.get("sw-ven-1day"), "vendor_7day": form.get("sw-ven-7day"),
              "vendor_1mth": form.get("sw-ven-1mth")}
     elif step_key == "accounts":
         v = {"calc_start": form.get("sw-calc-start-date")}
     elif step_key == "brought_forward":
-        v = {"fy": form.get("sw-bf-fy"),
+        v = {"fy": form.get("sw-bf-fy"), "rows": _bf_rows(form),
              "receivables": form.get("onb-receivables-json"),
              "reconciliation": form.get("onb-reconciliation-json")}
     return {k: val for k, val in v.items() if val is not None}
@@ -107,7 +148,7 @@ def _to_step_values(step_key, form):
 def _rail_item_classes(statuses, current):
     classes = []
     for i, cat in enumerate(CATEGORIES):
-        st = (statuses or {}).get(cat, {}).get("status", "todo")
+        st = _status_of(statuses, cat)
         cls = ["onb-rail-item", st]
         if i == current:
             cls.append("current")
@@ -118,7 +159,7 @@ def _rail_item_classes(statuses, current):
 def _rail_item_styles(statuses, current):
     styles = []
     for i, cat in enumerate(CATEGORIES):
-        st = (statuses or {}).get(cat, {}).get("status", "todo")
+        st = _status_of(statuses, cat)
         is_skipped = st == "skipped"
         dot_color = _STATUS_DOT_COLOR.get(st, "#b8c2cf")
         styles.append({"display": "flex", "alignItems": "center", "gap": "8px", "padding": "8px 10px",
@@ -139,13 +180,14 @@ def _nav_outputs(n, statuses, error=""):
 def _frontier(statuses):
     """First step that is not done/skipped; None if all done/skipped."""
     for i, cat in enumerate(CATEGORIES):
-        st = (statuses or {}).get(cat, {}).get("status", "todo")
+        st = _status_of(statuses, cat)
         if st not in ("done", "skipped"):
             return i
     return None
 
 
 def register_onboarding_wizard_callbacks(app):
+    _register_xlsx_callbacks(app)
     # ── nav + per-step save ──────────────────────────────────────────────────────
     _rail_inputs = [Input({"type": "onb-rail", "key": cat}, "n_clicks") for cat in CATEGORIES]
 
@@ -176,15 +218,23 @@ def register_onboarding_wizard_callbacks(app):
         State("sw-society-gstin", "value"), State("sw-cgst", "value"), State("sw-sgst", "value"),
         State("sw-ven-1day", "value"), State("sw-ven-7day", "value"), State("sw-ven-1mth", "value"),
         State("sw-calc-start-date", "value"), State("sw-bf-fy", "value"),
+        State("sw-qr-secret-confirm", "value"),
+        State("sw-central-employees", "value"), State("sw-central-security-agency", "value"),
+        State("onb-receivables-json", "data"), State("onb-reconciliation-json", "data"),
+        State({"type": "tds-section", "index": ALL}, "value"), State({"type": "tds-discriminator", "index": ALL}, "value"),
+        State({"type": "tds-nature", "index": ALL}, "value"), State({"type": "tds-rate", "index": ALL}, "value"),
+        State({"type": "tds-rate-no-pan", "index": ALL}, "value"), State({"type": "tds-single-bill", "index": ALL}, "value"),
+        State({"type": "tds-agg-bill", "index": ALL}, "value"),
+        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"), State({"type": "sw-bf-remarks", "acc_id": ALL}, "value"),
         prevent_initial_call=True,
     )
     @require_session
     def wizard_nav(*args):
         s = _session()
-        if not ctx.triggered_id:
+        if not ctx.triggered_id or not s:
             return no_update, no_update, no_update, no_update, no_update, no_update, no_update
         sid, uid, role = s
-        if not s or role != "admin" or not sid:
+        if role != "admin" or not sid:
             statuses = ob.step_statuses(sid) if sid else {}
             return _nav_outputs(0, statuses, "Only the administrator can navigate setup.")
         trig = ctx.triggered_id
@@ -192,8 +242,7 @@ def register_onboarding_wizard_callbacks(app):
         # States, then every field State.
         n = int(args[NCAT + 2] or 0)          # onb-setup-step State
         old_n = n
-        fields = args[NCAT + 4:]               # every wizard field State value
-        form = _gather(fields)
+        form = _gather(ctx.states_list[2:])    # every wizard field State (skips the two step stores)
 
         leaving = old_n
         if trig == "onb-btn-prev":
@@ -221,11 +270,14 @@ def register_onboarding_wizard_callbacks(app):
                                 f'Complete “{step_label(CATEGORIES[fr])}” first.')
 
         # Save the step being left (§4.2.1: Next saves; only fields of the step being left).
-        step_key = CATEGORIES[leaving] if 0 <= leaving < NCAT else CATEGORIES[n]
+        step_key = _draft_key(CATEGORIES[leaving]) if 0 <= leaving < NCAT else None
+        if step_key in (None, "review"):
+            return _nav_outputs(n, ob.step_statuses(sid))
         res = ob.save_step(sid, uid, step_key, _to_step_values(step_key, form))
-        if not res["ok"]:
-            # stay on the failing step, show errors
-            return _nav_outputs(leaving, statuses, "; ".join(res["errors"]))
+        if not res["ok"] and n > leaving:
+            # Next / forward jump: stay on the failing step and show the errors.
+            # Previous / backward jump saves silently; the status simply stays "todo" (§4.2.2).
+            return _nav_outputs(leaving, ob.step_statuses(sid), "; ".join(res["errors"]))
 
         # Re-read statuses after save (done + dependents marked needs_review).
         statuses = ob.step_statuses(sid)
@@ -577,3 +629,265 @@ def register_onboarding_wizard_callbacks(app):
         return render_review(draft, sid)
 
     print("  ✓ Onboarding wizard callbacks registered")
+
+
+
+# ── items 6 and 9: TDS-rate and Brought-Forward xlsx template / upload ─────────────────
+import re as _re
+from decimal import Decimal as _D, InvalidOperation as _IO
+
+_TAN_RE = _re.compile(r"^[A-Z]{4}[0-9]{5}[A-Z]$")
+
+
+def _dec(v, lo=None, hi=None):
+    """Parse an xlsx cell to a 2-dp Decimal, or None when blank. Raises ValueError when invalid."""
+    if v is None or str(v).strip() == "":
+        return None
+    try:
+        d = _D(str(v).strip()).quantize(_D("0.01"))
+    except (_IO, ValueError):
+        raise ValueError("not a number")
+    if lo is not None and d < lo:
+        raise ValueError(f"must be >= {lo}")
+    if hi is not None and d > hi:
+        raise ValueError(f"must be <= {hi}")
+    return d
+
+
+def _msg(text, color):
+    return dbc.Alert(text, color=color, className="py-2 mb-2", style={"fontSize": "12.5px"})
+
+
+def _register_xlsx_callbacks(app):
+    # TDS template download ---------------------------------------------------------
+    @app.callback(
+        Output("onb-tds-download", "data"),
+        Input("onb-tds-template", "n_clicks"),
+        State({"type": "tds-section", "index": ALL}, "value"),
+        State({"type": "tds-discriminator", "index": ALL}, "value"),
+        State({"type": "tds-nature", "index": ALL}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def tds_template(n, sections, discs, natures):
+        if not n:
+            return no_update
+        from database.seed import tds_wizard_rows
+        seed = {(r[0], r[1] or ""): r for r in tds_wizard_rows()}
+        rows = []
+        for i, sec in enumerate(sections or []):
+            disc = (discs[i] if i < len(discs or []) else "") or ""
+            r = seed.get((sec, disc))
+            rows.append({
+                "section": sec, "discriminator": disc,
+                "section_2025": (r[9] if r and len(r) > 9 else "") or "",
+                "reference_rate": (r[3] if r else "") if r else "",      # hint only, never copied into rate
+                "nature_of_income": (natures[i] if i < len(natures or []) else None) or (r[2] if r else ""),
+            })
+        return dcc.send_bytes(build_tds_template(rows), "tds_rates_template.xlsx")
+
+    # TDS upload -> preview (nothing is applied yet) ---------------------------------
+    @app.callback(
+        Output("onb-tds-preview", "children"),
+        Output("onb-tds-pending", "data"),
+        Output("onb-tds-apply", "disabled"),
+        Input("onb-tds-upload", "contents"),
+        State("onb-tds-upload", "filename"),
+        State({"type": "tds-section", "index": ALL}, "value"),
+        State({"type": "tds-discriminator", "index": ALL}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def tds_upload(contents, filename, sections, discs):
+        if not contents:
+            return no_update, no_update, no_update
+        res = parse_upload(contents, filename, "TDS Rates", ["section", "discriminator"], max_rows=200)
+        errors = list(res.errors)
+        if errors and not res.rows:
+            return _msg("; ".join(errors), "danger"), None, True
+        onscreen = {(sections[i], (discs[i] or "")): i for i in range(len(sections or []))}
+        seen, matched, blank = set(), {}, 0
+        for n, rec in enumerate(res.rows, start=2):
+            key = (str(rec.get("section") or "").strip(), str(rec.get("discriminator") or "").strip())
+            if key in seen:
+                errors.append(f"Row {n}: duplicate {key[0]} / {key[1] or '-'}.")
+                continue
+            seen.add(key)
+            if key not in onscreen:
+                errors.append(f"Row {n}: unknown section/discriminator {key[0]} / {key[1] or '-'}.")
+                continue
+            item = {"nature": rec.get("nature_of_income")}
+            try:
+                for col, name, hi in (("rate", "rate", _D(100)), ("rate_no_pan", "rate_no_pan", _D(100)),
+                                      ("single_bill_threshold", "single", None),
+                                      ("annual_aggregate_threshold", "agg", None)):
+                    item[name] = _dec(rec.get(col), _D(0), hi)
+            except ValueError as exc:
+                errors.append(f"Row {n}: {col} {exc}.")
+                continue
+            if all(item[k] is None for k in ("rate", "rate_no_pan", "single", "agg")):
+                blank += 1
+            matched[onscreen[key]] = {k: (str(v) if isinstance(v, _D) else v) for k, v in item.items()}
+        head = parse_upload(contents, filename, "Header", [])
+        tan, eff = None, None
+        if head.rows:
+            tan = str(head.rows[0].get("tan") or "").strip().upper() or None
+            eff = head.rows[0].get("effective_date")
+            eff = eff.date().isoformat() if hasattr(eff, "date") else (str(eff).strip()[:10] if eff else None)
+            if eff and not _re.match(r"^\d{4}-\d{2}-\d{2}$", eff):
+                eff = None
+        if tan and not _TAN_RE.match(tan):
+            errors.append("Header: TAN must look like ABCD12345E.")
+        if errors:
+            shown = errors[:25]
+            more = f" (+{len(errors) - 25} more)" if len(errors) > 25 else ""
+            return (_msg("Nothing was applied. " + " ".join(shown) + more, "danger"), None, True)
+        pending = {"rows": {str(k): v for k, v in matched.items()}, "tan": tan, "effective_date": eff}
+        return (_msg(f"{len(matched)} row(s) matched ({blank} with no rate entered). Press Apply to form, then Next to save.",
+                     "success"), pending, False)
+
+    # TDS apply -> write the grid inputs (does not save; Next saves) -----------------
+    @app.callback(
+        Output({"type": "tds-nature", "index": ALL}, "value"),
+        Output({"type": "tds-rate", "index": ALL}, "value"),
+        Output({"type": "tds-rate-no-pan", "index": ALL}, "value"),
+        Output({"type": "tds-single-bill", "index": ALL}, "value"),
+        Output({"type": "tds-agg-bill", "index": ALL}, "value"),
+        Output("sw-society-tan", "value", allow_duplicate=True),
+        Output("sw-tds-effective-date", "date", allow_duplicate=True),
+        Output("onb-tds-apply", "disabled", allow_duplicate=True),
+        Input("onb-tds-apply", "n_clicks"),
+        State("onb-tds-pending", "data"),
+        State({"type": "tds-section", "index": ALL}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def tds_apply(n, pending, sections):
+        if not n or not pending:
+            return [no_update] * 8
+        cnt = len(sections or [])
+        outs = {k: [no_update] * cnt for k in ("nature", "rate", "rate_no_pan", "single", "agg")}
+        for idx, item in (pending.get("rows") or {}).items():
+            i = int(idx)
+            if not 0 <= i < cnt:
+                continue
+            if item.get("nature"):
+                outs["nature"][i] = item["nature"]
+            for k in ("rate", "rate_no_pan", "single", "agg"):
+                if item.get(k) is not None:
+                    outs[k][i] = float(item[k])
+        return (outs["nature"], outs["rate"], outs["rate_no_pan"], outs["single"], outs["agg"],
+                pending.get("tan") or no_update, pending.get("effective_date") or no_update, True)
+
+    # BF template download: exactly the accounts listed on screen ----------------------
+    def _acc_meta():
+        from database.seed import ACCOUNTS
+        return {a[0]: a for a in ACCOUNTS}
+
+    @app.callback(
+        Output("onb-bf-download", "data"),
+        Input("onb-bf-template", "n_clicks"),
+        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
+        State({"type": "sw-bf-remarks", "acc_id": ALL}, "value"),
+        State("sw-bf-fy", "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def bf_template(n, amts, remarks, fy):
+        if not n:
+            return no_update
+        meta = _acc_meta()
+        ids = [d["id"]["acc_id"] for d in (ctx.states_list[0] or [])]
+        rows = []
+        for i, aid in enumerate(ids):
+            a = meta.get(aid)
+            if not a:
+                continue
+            amt = amts[i] if i < len(amts or []) else None
+            rows.append({"account_id": aid, "tab": a[2], "account_name": a[3] or a[1], "side": a[5],
+                         "bf_amount": amt if amt else None,
+                         "remarks": (remarks[i] if i < len(remarks or []) else None) or None})
+        return dcc.send_bytes(build_bf_template(rows, fy), "brought_forward_template.xlsx")
+
+    # BF upload -> preview with live Dr / Cr totals -----------------------------------
+    @app.callback(
+        Output("onb-bf-preview", "children"),
+        Output("onb-bf-pending", "data"),
+        Output("onb-bf-apply", "disabled"),
+        Input("onb-bf-upload", "contents"),
+        State("onb-bf-upload", "filename"),
+        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def bf_upload(contents, filename, amts):
+        if not contents:
+            return no_update, no_update, no_update
+        ids = {d["id"]["acc_id"] for d in (ctx.states_list[2] or [])}
+        meta = _acc_meta()
+        res = parse_upload(contents, filename, "Brought Forward", ["account_id"])
+        errors = list(res.errors)
+        if errors and not res.rows:
+            return _msg("; ".join(errors), "danger"), None, True
+        seen, rows, dr, cr = set(), {}, _D(0), _D(0)
+        for n, rec in enumerate(res.rows, start=2):
+            try:
+                aid = int(str(rec.get("account_id")).strip().split(".")[0])
+            except ValueError:
+                errors.append(f"Row {n}: account_id is not a number.")
+                continue
+            if aid in seen:
+                errors.append(f"Row {n}: duplicate account_id {aid}.")
+                continue
+            seen.add(aid)
+            if aid not in ids:
+                errors.append(f"Row {n}: account_id {aid} is unknown or not postable for this society.")
+                continue
+            try:
+                amt = _dec(rec.get("bf_amount"), _D(0)) or _D(0)
+            except ValueError as exc:
+                errors.append(f"Row {n}: bf_amount {exc}.")
+                continue
+            rows[aid] = {"amount": str(amt), "remarks": (str(rec.get("remarks") or "").strip() or None)}
+            if meta[aid][5] == "Dr":
+                dr += amt
+            else:
+                cr += amt
+        fy = None
+        head = parse_upload(contents, filename, "Header", [])
+        if head.rows and head.rows[0].get("financial_year") not in (None, ""):
+            try:
+                fy = int(float(str(head.rows[0]["financial_year"])))
+            except ValueError:
+                errors.append("Header: financial_year must be a year.")
+        if errors:
+            return _msg("Nothing was applied. " + " ".join(errors[:25]), "danger"), None, True
+        diff = dr - cr
+        colour = "success" if diff == 0 else "warning"
+        return (_msg(f"{len(rows)} account(s) read. Total Dr ₹{dr:,.2f} · Total Cr ₹{cr:,.2f} · Difference ₹{diff:,.2f}"
+                     + ("" if diff == 0 else " (it must be 0.00 before the Review step passes)."), colour),
+                {"rows": {str(k): v for k, v in rows.items()}, "fy": fy}, False)
+
+    # BF apply ---------------------------------------------------------------------
+    @app.callback(
+        Output({"type": "sw-bf-amt", "acc_id": ALL}, "value", allow_duplicate=True),
+        Output({"type": "sw-bf-remarks", "acc_id": ALL}, "value", allow_duplicate=True),
+        Output("sw-bf-fy", "value", allow_duplicate=True),
+        Output("onb-bf-apply", "disabled", allow_duplicate=True),
+        Input("onb-bf-apply", "n_clicks"),
+        State("onb-bf-pending", "data"),
+        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def bf_apply(n, pending, amts):
+        if not n or not pending:
+            return no_update, no_update, no_update, no_update
+        ids = [d["id"]["acc_id"] for d in (ctx.states_list[2] or [])]
+        rows = pending.get("rows") or {}
+        a_out, r_out = [], []
+        for aid in ids:
+            item = rows.get(str(aid))
+            a_out.append(float(item["amount"]) if item else no_update)
+            r_out.append(item["remarks"] if item and item.get("remarks") else no_update)
+        return a_out, r_out, (pending.get("fy") if pending.get("fy") else no_update), True

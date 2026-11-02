@@ -8,7 +8,7 @@ import threading
 import uuid
 from typing import Callable
 
-from app.services import db
+from database.db_manager import db
 
 
 def start(kind: str, society_id: int, actor_id: int | None, fn: Callable, **kwargs) -> str:
@@ -28,13 +28,8 @@ def start(kind: str, society_id: int, actor_id: int | None, fn: Callable, **kwar
             res = fn(progress=progress, **kwargs)
             db._execute(
                 "UPDATE onboarding_jobs SET status='done', step=steps_total, message=%s, result=%s::jsonb, finished_at=NOW() WHERE id=%s",
-                ("Society is live", json.dumps(res or {"ok": True}), job_id),
+                ("Society is live", json.dumps(res or {"ok": True}, default=str), job_id),
             )
-            try:
-                db._execute("INSERT INTO onboarding_events (society_id, event, payload) VALUES (%s,'agreement_signed','{}'::jsonb)",
-                            (society_id,))
-            except Exception:
-                pass
         except Exception as exc:
             try:
                 db._execute(
@@ -48,5 +43,14 @@ def start(kind: str, society_id: int, actor_id: int | None, fn: Callable, **kwar
     return job_id
 
 
-def get(job_id: str):
+def get(job_id: str, society_id: int | None = None):
+    """Fetch a job. When society_id is given the job must belong to it, so one society can never poll another's job."""
+    if society_id is not None:
+        return db._execute("SELECT * FROM onboarding_jobs WHERE id=%s AND society_id=%s", (job_id, society_id), fetch_one=True)
     return db._execute("SELECT * FROM onboarding_jobs WHERE id=%s", (job_id,), fetch_one=True)
+
+
+def latest_running(society_id: int):
+    """A page refresh resumes polling for any queued/running job of this society."""
+    return db._execute("SELECT * FROM onboarding_jobs WHERE society_id=%s AND status IN ('queued','running') "
+                       "ORDER BY created_at DESC LIMIT 1", (society_id,), fetch_one=True)

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "unclassified_baseline": 132,
+  "unclassified_baseline": 154,
   "endpoints": {
     "callback:account_callbacks.py::handle_change_password": {
       "classification": "unclassified"
@@ -588,13 +588,28 @@
     "callback:onboarding_callbacks.py::onb_adviser_sign": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_callbacks.py::onb_back_to_committee": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_back_to_setup": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_c_download": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_c_upload": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_enrol_done": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_callbacks.py::onb_esign_start": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_callbacks.py::onb_esign_toggle": {
+    "callback:onboarding_callbacks.py::onb_grievance": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_callbacks.py::onb_grievance": {
+    "callback:onboarding_callbacks.py::onb_job_poll": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_legacy_import": {
@@ -609,9 +624,15 @@
     "callback:onboarding_callbacks.py::onb_master_sign": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_callbacks.py::onb_officer_update": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_callbacks.py::onb_open_wizard": {
       "classification": "exempt",
       "reason": "Pure UI trigger: bumps pwd-gate-store so the wizard re-checks. Server re-verifies admin role and 'committee seated' state before anything opens; writes nothing."
+    },
+    "callback:onboarding_callbacks.py::onb_phase_next": {
+      "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_poll": {
       "classification": "exempt",
@@ -626,7 +647,67 @@
     "callback:onboarding_callbacks.py::onb_seat": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_callbacks.py::onb_sig_preview": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_callbacks.py::onb_sign": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_signmode": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::bf_apply": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::bf_reconciliation_render": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::bf_recv_add_remove": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::bf_recv_download": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::bf_recv_render": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::bf_recv_upload": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::bf_template": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::bf_upload": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::legal_hierarchy_render": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::tds_apply": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::tds_template": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::tds_upload": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::wizard_finalize": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::wizard_finalize_toggle": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::wizard_nav": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::wizard_render_review": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::wizard_save_bye_law": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::wizard_save_policy": {
       "classification": "legacy-gated"
     },
     "callback:poll_callbacks.py::save_poll": {
@@ -750,46 +831,6 @@
       "classification": "unclassified"
     },
     "callback:security_callbacks.py::validate_qr": {
-      "classification": "unclassified"
-    },
-    "callback:setup_wizard_callbacks.py::handle_wizard_navigation": {
-      "classification": "unclassified"
-    },
-    "callback:setup_wizard_callbacks.py::refresh_legal_regime_step": {
-      "classification": "legacy-gated"
-    },
-    "callback:setup_wizard_callbacks.py::refresh_review": {
-      "classification": "legacy-gated"
-    },
-    "callback:setup_wizard_callbacks.py::refresh_state_dependent_steps": {
-      "classification": "exempt",
-      "reason": "Session-guarded (@require_session). Read-only: re-renders the Setup Wizard's State-dependent step bodies from the State dropdown; the society is taken from the server session (get_current_society_id), not the browser-side sw-society-id store. Writes nothing."
-    },
-    "callback:setup_wizard_callbacks.py::save_wizard_bye_law_choice": {
-      "classification": "unclassified"
-    },
-    "callback:setup_wizard_callbacks.py::save_wizard_policy_choice": {
-      "classification": "unclassified"
-    },
-    "callback:setup_wizard_callbacks.py::submit_setup_wizard": {
-      "classification": "unclassified"
-    },
-    "callback:setup_wizard_callbacks.py::sync_collection_with_levy": {
-      "classification": "exempt",
-      "reason": "Session-guarded (@require_session). Pure UI helper: derives a hint / dependent form value from the other form inputs; reads and writes no server data."
-    },
-    "callback:setup_wizard_callbacks.py::toggle_fund_fields": {
-      "classification": "exempt",
-      "reason": "Session-guarded (@require_session). Read-only: shows/hides the Sinking/Repair fund inputs from the State dropdown and the bye-law opt-ins; the society is taken from the server session, not the browser store. Writes nothing."
-    },
-    "callback:setup_wizard_callbacks.py::trigger_setup_wizard": {
-      "classification": "unclassified"
-    },
-    "callback:setup_wizard_callbacks.py::update_basis_hint": {
-      "classification": "exempt",
-      "reason": "Session-guarded (@require_session). Pure UI helper: derives a hint / dependent form value from the other form inputs; reads and writes no server data."
-    },
-    "callback:setup_wizard_callbacks.py::validate_setup_fields": {
       "classification": "unclassified"
     },
     "callback:shell_callbacks.py::_drill_back": {
