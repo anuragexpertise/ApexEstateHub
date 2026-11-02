@@ -67,12 +67,16 @@ def _patched_dispatch(self):
         # (e.g. zero matches for a State dependency), inputs + state is
         # shorter than inputs_state_indices expects. Pad with empty lists
         # so map_grouping() and validate_and_group_input_args() don't
-        # raise IndexError / CallbackException.
+        # raise IndexError / CallbackException. Also pad ctx.states_list
+        # (g.states_list) so callbacks that index into it don't raise
+        # IndexError: list index out of range.
         expected_len = grouping_len(inputs_state_indices)
         inputs_state = inputs + state
         if len(inputs_state) < expected_len:
             padding = [[] for _ in range(expected_len - len(inputs_state))]
             inputs_state = list(inputs_state) + padding
+            state = list(state) + padding
+            g.states_list = state
             args = inputs_to_vals(inputs_state)
         # ──────────────────────────────────────────────────────────────
 

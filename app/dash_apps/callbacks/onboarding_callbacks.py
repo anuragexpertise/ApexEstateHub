@@ -238,10 +238,12 @@ def register_onboarding_callbacks(app):
         Output("onb-wizard-step", "data", allow_duplicate=True),
         Input(f"{P}-body", "children"),
         State("onb-view", "data"),
+        State("onb-setup-step", "data"),
+        State("onb-wizard-step", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_sync_step_stores(_children, view):
+    def onb_sync_step_stores(_children, view, setup_step, wizard_step):
         s = _session()
         if not s or not s[0] or s[2] != "admin":
             return no_update, no_update
@@ -250,6 +252,8 @@ def register_onboarding_callbacks(app):
         n = op.step_from_view(view)
         if n is None:
             n = op.start_step(s[0])
+        if setup_step == n and wizard_step == n:
+            return no_update, no_update
         return n, n
 
     @app.callback(
