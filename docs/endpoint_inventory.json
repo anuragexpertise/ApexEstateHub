@@ -3514,7 +3514,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "bf_apply",
-    "line": 964,
+    "line": 995,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3651,7 +3651,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "bf_template",
-    "line": 877,
+    "line": 908,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3670,7 +3670,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "bf_upload",
-    "line": 904,
+    "line": 935,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3710,7 +3710,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "tds_apply",
-    "line": 846,
+    "line": 877,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3731,7 +3731,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "tds_template",
-    "line": 753,
+    "line": 784,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3750,7 +3750,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "tds_upload",
-    "line": 782,
+    "line": 813,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3839,6 +3839,27 @@
     "outputs": [
       "onb-review-container",
       "onb-btn-finalize"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:onboarding_wizard_callbacks.py::wizard_rules_panel",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
+    "function": "wizard_rules_panel",
+    "line": 724,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "onb-rules-canvas",
+      "onb-rules-canvas",
+      "onb-rules-body"
     ],
     "guards": [
       "require_session"

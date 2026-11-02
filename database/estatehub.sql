@@ -14756,6 +14756,7 @@ $$;
 -- Runs in ONE transaction:
 --   1. Verifies the Agreement is sealed with President, Secretary, Treasurer,
 --      and platform signatures (via signed_records + document_signatures).
+--   1b. Requires sealed, non-blocked Annexes A, B, C and D (D = data-protection and custody schedule).
 --   2. Posts the opening journal from the sealed Annex C (onboarding_annexes C).
 --   3. Re-checks bye-law 7 (arrears) for the three office-bearers against the
 --      opening balances.
@@ -14818,12 +14819,12 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    -- 3) Annexes A, B and C must be sealed, and none may still be blocked by a failing control.
-    FOR v_annex IN SELECT c AS code FROM unnest(ARRAY['A','B','C']) c LOOP
+    -- 3) Annexes A, B, C and D must be sealed, and none may still be blocked by a failing control.
+    FOR v_annex IN SELECT c AS code FROM unnest(ARRAY['A','B','C','D']) c LOOP
         IF NOT EXISTS (SELECT 1 FROM onboarding_annexes
                         WHERE society_id = p_society_id AND annex_code = v_annex.code
                           AND status = 'sealed' AND NOT blocking) THEN
-            RAISE EXCEPTION 'Annex % is not sealed. Annexes A, B and C must be sealed before activation.', v_annex.code
+            RAISE EXCEPTION 'Annex % is not sealed. Annexes A, B, C and D must be sealed before activation.', v_annex.code
                 USING ERRCODE = 'check_violation';
         END IF;
     END LOOP;

@@ -88,13 +88,28 @@ def state_of(society_id: int) -> str | None:
 
 def seated_officers(society_id: int) -> dict:
     out = {o: None for o in CORE_OFFICES}
-    for r in _rows("""SELECT co.office_code, co.holder_name, co.email, co.evidence_hash, co.resolution_ref, co.user_id, a.flat_number
+    for r in _rows("""SELECT co.office_code, co.holder_name, co.email, co.phone, co.signature_image, co.evidence_hash, co.resolution_ref,
+                             co.user_id, a.flat_number
                         FROM committee_offices co JOIN apartments a ON a.id = co.apartment_id
                        WHERE co.society_id=%s AND co.status='active' AND co.office_code = ANY(%s)
                          AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE)""",
                    (society_id, list(CORE_OFFICES))):
         out[r["office_code"]] = dict(r)
     return out
+
+
+def signature_path(society_id: int, stored: str | None) -> str | None:
+    """Relative asset path of a stored signature image (`<society>/signatures/<sha256>.webp`), or None.
+    _store_signature keeps only the file name in committee_offices; the file lives under the society's signatures folder."""
+    stored = (stored or "").strip()
+    if not stored:
+        return None
+    return stored if "/" in stored else f"{society_id}/signatures/{stored}"
+
+
+def signature_url(society_id: int, stored: str | None) -> str | None:
+    p = signature_path(society_id, stored)
+    return f"/assets/{p}" if p else None
 
 
 def annex_status(society_id: int) -> dict:
@@ -1335,13 +1350,20 @@ def _annex_b(society_id: int, soc: dict, decl: dict | None) -> tuple[dict, dict]
                            "pan": soc.get("pan_number"), "tan": soc.get("tan_number"), "gstin": soc.get("gstin")},
                "declaration": decl or {},
                "office_bearers": {o: ({"name": v["holder_name"], "flat": v["flat_number"], "evidence_hash": v["evidence_hash"],
-                                       "resolution_ref": v["resolution_ref"]} if v else None) for o, v in officers.items()},
+                                       "resolution_ref": v["resolution_ref"],
+                                       "signature_image": signature_path(society_id, v.get("signature_image")),
+                                       "signature_sha256": ((v.get("signature_image") or "").rsplit("/", 1)[-1].split(".")[0] or None)}
+                                      if v else None) for o, v in officers.items()},
                "grievance_officer": soc.get("grievance_officer_name"),
                "rates_confirmed_by_ca": bool(soc.get("ca_rates_confirmed_at"))}
     missing = [OFFICE_LABEL[o] for o, v in officers.items() if not v]
     controls = {"wizard_submitted": _ctl(bool(decl), "The Setup Wizard draft is saved." if decl else "Submit the Setup Wizard first."),
                 "committee_seated": _ctl(not missing, "President, Secretary and Treasurer are seated." if not missing else
                                          "Not seated: " + ", ".join(missing)),
+                "officers_complete": _ctl(not missing and _committee_complete(society_id),
+                                          "Each office-bearer's record is complete, with mobile and signature image."
+                                          if (not missing and _committee_complete(society_id)) else
+                                          "An office-bearer record is incomplete (mobile or signature image). Fix it in the Founding committee."),
                 "grievance_officer": _ctl(bool(soc.get("grievance_officer_name")), "A grievance officer is named." if soc.get("grievance_officer_name")
                                           else "Name a grievance officer (DPDP): they are shown on the login page and every notice."),
                 "rates_pending_ca": _ctl(True, "TDS and GST rates are confirmed by the CA." if soc.get("ca_rates_confirmed_at")
@@ -1424,7 +1446,7 @@ ANNEX_CODES = ("A", "B", "C", "D")
 # Where each failing control is fixed: a wizard rail key, or "committee" for the Stage 2 screen.
 CONTROL_FIX = {
     ("A", "regime_assigned"): "Legal Regime Selection", ("A", "unverified_instruments"): "Legal Regime Selection",
-    ("B", "wizard_submitted"): "Instructions", ("B", "committee_seated"): "committee", ("B", "grievance_officer"): "committee",
+    ("B", "wizard_submitted"): "Instructions", ("B", "committee_seated"): "committee", ("B", "officers_complete"): "committee", ("B", "grievance_officer"): "committee",
     ("B", "rates_pending_ca"): "TAN & TDS Rates",
     ("C", "balanced"): "Brought Forward", ("C", "accounts_known"): "Brought Forward", ("C", "funds_backed"): "Brought Forward",
     ("C", "arrears_tie"): "Brought Forward", ("C", "bank_agrees"): "Brought Forward",
@@ -1743,7 +1765,14 @@ def agreement_text(society_id: int, agreement_no: str, annex_hashes: dict, annex
     soc = _row("SELECT * FROM societies WHERE id=%s", (society_id,)) or {}
     op_name, op_addr = _operator()
     officers = seated_officers(society_id)
-    sign_lines = "\n".join(f"  {OFFICE_LABEL[o]}: {(officers[o] or {}).get('holder_name') or '____'}" for o in CORE_OFFICES)
+    def _sign_line(o):
+        v = officers[o] or {}
+        if not v:
+            return f"  {OFFICE_LABEL[o]}: ____"
+        sig = signature_path(society_id, v.get("signature_image"))
+        return (f"  {OFFICE_LABEL[o]}: {v.get('holder_name')}, flat {v.get('flat_number')}"
+                + (f" (signature image {sig})" if sig else " (no signature image on record)"))
+    sign_lines = "\n".join(_sign_line(o) for o in CORE_OFFICES)
     c = annexes.get("C", {})
     return (
         "ESTATEHUB SOFTWARE LICENCE, DATA PROCESSING AND DECLARATION AGREEMENT\n"
