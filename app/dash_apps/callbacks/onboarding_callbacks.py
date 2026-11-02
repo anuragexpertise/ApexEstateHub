@@ -126,25 +126,33 @@ def register_onboarding_callbacks(app):
     def onb_sig_preview(contents_list, filename_list):
         trig = ctx.triggered_id
         if not trig or not isinstance(trig, dict):
-            return no_update
+            n = len(contents_list) if contents_list else 1
+            return [no_update] * n
         office = trig["office"]
+        triggered_contents = ctx.triggered[0].get("value") if ctx.triggered else None
+        fname = ""
         for item in (ctx.states_list[0] or []):
             iid = item.get("id")
             if isinstance(iid, dict) and iid.get("office") == office and iid.get("field") == "sig":
-                contents = item.get("value")
-                fname = ""
-                for it2 in (ctx.states_list[1] or []):
-                    i2 = it2.get("id")
-                    if isinstance(i2, dict) and i2.get("office") == office and i2.get("field") == "sig":
-                        fname = it2.get("value") or ""
-                        break
-                if contents:
-                    return html.Div([
-                        html.Img(src=contents, style={"maxWidth": "140px", "maxHeight": "70px",
+                fname = item.get("value") or ""
+                break
+        n = len(contents_list) if contents_list else 1
+        out = [no_update] * n
+        idx = None
+        for i, c in enumerate(contents_list or []):
+            if c == triggered_contents:
+                idx = i
+                break
+        if idx is None:
+            idx = 0
+        if triggered_contents:
+            out[idx] = html.Div([
+                html.Img(src=triggered_contents, style={"maxWidth": "140px", "maxHeight": "70px",
                                                       "border": "1px solid #c9d2dc", "borderRadius": "4px"}),
-                        html.Div(fname, style={"fontSize": "11px", "color": "#667", "marginTop": "2px"})])
-                return html.Div("Signature image selected.", style={"fontSize": "11.5px", "color": "#17976e"})
-        return no_update
+                html.Div(fname, style={"fontSize": "11px", "color": "#667", "marginTop": "2px"})])
+        else:
+            out[idx] = html.Div("Signature image selected.", style={"fontSize": "11.5px", "color": "#17976e"})
+        return out
 
     # ── seated officer Edit details: mobile and/or signature replace ──────────
     @app.callback(
