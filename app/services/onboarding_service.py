@@ -1449,7 +1449,13 @@ SIGNING_MODES = ("password", "esign", "paper")
 
 
 def signing_mode(society_id: int) -> str:
-    r = _row("SELECT signing_mode, esign_required FROM societies WHERE id=%s", (society_id,))
+    try:
+        r = _row("SELECT signing_mode, esign_required FROM societies WHERE id=%s", (society_id,))
+    except Exception as exc:                                           # noqa: BLE001
+        if "signing_mode" not in str(exc):
+            raise
+        _missing_column(exc, "signing_mode")
+        r = _row("SELECT esign_required FROM societies WHERE id=%s", (society_id,))
     if not r:
         return "password"
     return r.get("signing_mode") or ("esign" if r.get("esign_required") else "password")
@@ -1780,8 +1786,24 @@ def _recipient_user_ids(society_id: int) -> list[int]:
     return ids
 
 
+_MIGRATION_WARNED: set = set()
+
+
+def _missing_column(exc: Exception, what: str) -> None:
+    """A database that has not had migrations/002 applied: say so once and let the page render with defaults."""
+    if what not in _MIGRATION_WARNED:
+        _MIGRATION_WARNED.add(what)
+        log.warning("societies.%s is missing: run `python3 database/apply_migration.py 002` (%s)", what, exc)
+
+
 def society_phase(society_id: int) -> str | None:
-    r = _row("SELECT onboarding_phase FROM societies WHERE id=%s", (society_id,))
+    try:
+        r = _row("SELECT onboarding_phase FROM societies WHERE id=%s", (society_id,))
+    except Exception as exc:                                           # noqa: BLE001 - psycopg2 UndefinedColumn
+        if "onboarding_phase" not in str(exc):
+            raise
+        _missing_column(exc, "onboarding_phase")
+        return "complete"        # before the migration nothing is phase-locked
     return (r or {}).get("onboarding_phase")
 
 

@@ -54,8 +54,13 @@ def society_portal_state(society_id, role) -> str:
     if not society_id or role == "master":
         return "open"
     from database.db_manager import db
-    row = db._execute("SELECT onboarding_state, onboarding_phase FROM societies WHERE id = :sid",
-                      {"sid": society_id}, fetch_one=True)
+    try:
+        row = db._execute("SELECT onboarding_state, onboarding_phase FROM societies WHERE id = :sid",
+                          {"sid": society_id}, fetch_one=True)
+    except Exception as exc:                          # noqa: BLE001 - migrations/002 not applied yet: no phase lock
+        if "onboarding_phase" not in str(exc):
+            raise
+        row = db._execute("SELECT onboarding_state FROM societies WHERE id = :sid", {"sid": society_id}, fetch_one=True)
     if not row:
         return "open"
     if row.get("onboarding_state") != "active":
@@ -70,6 +75,11 @@ def admin_in_onboarding(society_id, role) -> bool:
     if role != "admin" or not society_id:
         return False
     from database.db_manager import db
-    row = db._execute("SELECT onboarding_state, onboarding_phase FROM societies WHERE id = :sid",
-                      {"sid": society_id}, fetch_one=True)
+    try:
+        row = db._execute("SELECT onboarding_state, onboarding_phase FROM societies WHERE id = :sid",
+                          {"sid": society_id}, fetch_one=True)
+    except Exception as exc:                          # noqa: BLE001
+        if "onboarding_phase" not in str(exc):
+            raise
+        return False
     return bool(row) and row.get("onboarding_state") == "active" and row.get("onboarding_phase") in ("enrollment", "adoption", "advisers")

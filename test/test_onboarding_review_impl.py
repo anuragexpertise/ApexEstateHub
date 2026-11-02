@@ -57,3 +57,15 @@ def test_signing_modes_and_phases_declared():
 def test_enrollment_lock_roles():
     from app.security.setup_guard import ENROLLMENT_LOCKED_ROLES
     assert set(ENROLLMENT_LOCKED_ROLES) == {"apartment", "vendor", "security"}
+
+
+def test_missing_migration_column_does_not_crash_the_hub(monkeypatch):
+    from app.services import onboarding_service as ob
+
+    def boom(sql, params=None, fetch_one=False):
+        if "onboarding_phase" in sql or "signing_mode" in sql:
+            raise Exception('column "onboarding_phase" does not exist (signing_mode)')
+        return {"esign_required": False}
+    monkeypatch.setattr(ob, "_row", lambda sql, params=None, **k: boom(sql, params))
+    assert ob.society_phase(1) == "complete"          # un-migrated DB: nothing is phase-locked
+    assert ob.signing_mode(1) == "password"
