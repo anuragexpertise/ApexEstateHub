@@ -135,14 +135,32 @@ def _stage_committee(society_id: int):
                  dbc.Col(_field("Email", dbc.Input(id=f"{P}-g-email", size="sm", value=s.get("grievance_officer_email") or "")), md=5),
                  dbc.Col(_field("Mobile", dbc.Input(id=f"{P}-g-phone", size="sm", value=s.get("grievance_officer_phone") or "")), md=3)], className="g-2"),
         dbc.Button("Save grievance officer", id=f"{P}-g-save", color="secondary", size="sm", outline=True, n_clicks=0)], style=_CARD))
-    if s.get("onboarding_state") == "committee seated":
-        out.append(html.Div("All three office-bearers are seated. Complete society setup below; nothing posts until the Agreement is signed and the society is activated.",
-                            style=_MUTED))
+    state = s.get("onboarding_state")
+    named = bool((s.get("grievance_officer_name") or "").strip())
+    if state == "committee seated":
+        # The founding committee is complete, but Stage 2 is not finished until the grievance officer is named:
+        # the wizard must never swallow this card (it used to vanish the moment the Treasurer was seated).
+        if named:
+            out.append(html.Div([
+                html.Div("All three office-bearers are seated and the grievance officer is named. Next: society setup. "
+                         "Nothing posts until the Agreement is signed and the society is activated.", style=_MUTED),
+                dbc.Button([html.I(className="fas fa-arrow-right me-2"), "Continue to society setup"],
+                           id=f"{P}-continue-setup", color="primary", size="sm", n_clicks=0)], style={"marginTop": "8px"}))
+        else:
+            out.append(dbc.Alert("All three office-bearers are seated. Name the grievance officer above to continue to society setup.",
+                                 color="info", className="py-2 mt-2", style={"fontSize": "12.5px"}))
+    elif state == "setup draft":
+        out.append(dbc.Button([html.I(className="fas fa-arrow-left me-2"), "Back to society setup"],
+                              id=f"{P}-back-to-setup", color="secondary", size="sm", outline=True, n_clicks=0, style={"marginTop": "8px"}))
     return out
 
 
 # ── stage 3 → 4 ───────────────────────────────────────────────────────────────────────────────────────────────────
-def _controls(code: str, a: dict):
+def _fix_label(target: str) -> str:
+    return "Fix in " + ("Founding committee" if target == "committee" else step_label(target))
+
+
+def _controls(code: str, a: dict, sealed_ok: bool = False):
     ctl = a["controls_json"] if isinstance(a["controls_json"], dict) else json.loads(a["controls_json"] or "{}")
     rows = []
     for k, c in ctl.items():
@@ -150,55 +168,82 @@ def _controls(code: str, a: dict):
             icon, color = "fa-check-circle", "#2e9e5b"
         else:
             icon, color = ("fa-times-circle", "#c0392b") if c["blocking"] else ("fa-exclamation-triangle", "#d68910")
-        rows.append(html.Li([html.I(className=f"fas {icon} me-2", style={"color": color}), c["reason"]], style={"listStyle": "none", "fontSize": "12.5px", "margin": "2px 0"}))
-    titles = {"A": "Annex A: legal regime and bye-laws", "B": "Annex B: review of the setup", "C": "Annex C: opening financial position"}
+        line = [html.I(className=f"fas {icon} me-2", style={"color": color}), c["reason"]]
+        target = ob.CONTROL_FIX.get((code, k))
+        if not c["passed"] and target and a["status"] != "sealed":
+            line.append(dbc.Button(_fix_label(target), id={"type": f"{P}-fix", "annex": code, "ctl": k, "key": target},
+                                   color="link", size="sm", n_clicks=0, style={"fontSize": "12px", "padding": "0 0 0 8px"}))
+        rows.append(html.Li(line, style={"listStyle": "none", "fontSize": "12.5px", "margin": "2px 0"}))
+    titles = {"A": "Annex A: legal regime and bye-laws", "B": "Annex B: review of the setup",
+              "C": "Annex C: opening financial position", "D": "Annex D: data-protection and custody schedule"}
     badge = dbc.Badge("Sealed", color="success") if a["status"] == "sealed" else (dbc.Badge("Blocked", color="danger") if a["blocking"] else dbc.Badge("Ready to seal", color="info"))
     return html.Div([html.Div([html.Strong(titles[code]), html.Span("  "), badge, html.Span(f"  SHA-256 {a['content_hash'][:16]}...", style=_MUTED)]),
                      html.Ul(rows, style={"padding": "0", "margin": "6px 0 0"})], style=_CARD)
+
+
+def step_from_view(view: str | None) -> int | None:
+    """'setup:<rail key>' deep-links the wizard to that step; anything else means 'no preference'."""
+    if view and view.startswith("setup:") and view[6:] in CATEGORIES:
+        return CATEGORIES.index(view[6:])
+    return None
 
 
 def _stage_annexes(society_id: int):
     drafts = {r["annex_code"]: r for r in ob.db._execute(
         "SELECT * FROM onboarding_annexes WHERE society_id=%s AND status IN ('draft','submitted','sealed') ORDER BY annex_code, "
         "CASE status WHEN 'sealed' THEN 0 ELSE 1 END", (society_id,), fetch_all=True) or []}
-    decl = ob.declaration(society_id) or {}
-    inp = decl.get("annex_c_inputs") or {}
-    arrears = "\n".join(f"{x['flat_number']}, {x['amount']}, {x.get('overdue_days') or ''}".rstrip(", ") for x in inp.get("arrears_by_flat") or [])
+    codes = ob.ANNEX_CODES
     out = [html.H6("Stage 4: check, seal and sign"),
-           html.Div("The Setup Wizard saved a draft and posted nothing. These three annexes are what the Agreement declares: the legal basis, "
-                    "the reviewed setup and the opening position. Each failing control blocks signing.", style=_MUTED),
-           html.Div([
-               html.Strong("Opening-position details the wizard does not capture"),
-               _field("Arrears by flat (one per line: flat, amount, days overdue)", dbc.Textarea(id=f"{P}-in-arrears", value=arrears, rows=3, style={"fontSize": "12px"})),
-               dbc.Checkbox(id=f"{P}-in-bank", label="Bank and cash balances agree to the bank statement and cash count on the as-at date", value=bool(inp.get("bank_agrees")), className="mb-2"),
-               dbc.Row([dbc.Col(_field("SHA-256 of last audited statements (optional)", dbc.Input(id=f"{P}-in-audit", size="sm", value=inp.get("audited_hash") or "")), md=6),
-                         dbc.Col(_field("CA review reference, or leave blank for 'none obtained'", dbc.Input(id=f"{P}-in-ca", size="sm", value=inp.get("ca_review_ref") or "")), md=6)], className="g-2"),
-                dbc.Row([dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Download opening-position template (xlsx)"],
-                                            id=f"{P}-c-template", color="secondary", size="sm", outline=True, n_clicks=0), md=6),
-                         dbc.Col(dcc.Upload(id=f"{P}-c-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload opening-position xlsx"],
-                                            color="secondary", size="sm", outline=True, n_clicks=0),
-                                            multiple=False, accept=".xlsx,.xls"), md=6)], className="g-2"),
-                dcc.Download(id=f"{P}-c-download"),
-                html.Div(id=f"{P}-c-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
-                dbc.Button("Save and check the annexes", id=f"{P}-prepare", color="primary", size="sm", n_clicks=0)], style=_CARD)]
-    for code in ("A", "B", "C"):
+           html.Div("The Setup Wizard saved a draft and posted nothing. The four annexes below are generated from that draft and are what "
+                    "the Agreement declares: the legal basis, the reviewed setup, the opening position and the data-protection schedule. "
+                    "Each failing control blocks sealing and links to the step that fixes it.", style=_MUTED)]
+    all_sealed = len(drafts) == len(codes) and all(v["status"] == "sealed" for v in drafts.values())
+    if not all_sealed:
+        out.append(dbc.Button([html.I(className="fas fa-sync me-2"), "Check annexes"], id=f"{P}-prepare", color="primary", size="sm", n_clicks=0,
+                              style={"marginBottom": "10px"}))
+    if not drafts:
+        out.append(html.Div("Press Check annexes to generate Annexes A to D from your wizard draft.", style=_MUTED))
+        return out
+    for code in codes:
         if code in drafts:
             out.append(_controls(code, drafts[code]))
-    any_blocked = any(drafts.get(c, {}).get("blocking") for c in ("A", "B", "C"))
-    if any_blocked:
-        out.append(dbc.Button([html.I(className="fas fa-arrow-left me-2"), "Back to society setup to fix the blocker"],
-                              id=f"{P}-back-to-setup", color="secondary", size="sm", outline=True, n_clicks=0))
-    ready = len(drafts) == 3 and all(v["status"] != "sealed" and not v["blocking"] for v in drafts.values())
-    all_sealed = len(drafts) == 3 and all(v["status"] == "sealed" for v in drafts.values())
+    ready = len(drafts) == len(codes) and all(v["status"] != "sealed" and not v["blocking"] for v in drafts.values())
     if ready:
-        out.append(dbc.Button([html.I(className="fas fa-stamp me-2"), "Seal the annexes and issue the Agreement"], id=f"{P}-seal", color="success", n_clicks=0))
+        out.append(html.Div([
+            html.Strong("Seal the annexes and issue the Agreement"),
+            html.Div("Sealing fixes these four annexes by their SHA-256 inside the Agreement text. Changing anything afterwards would void any "
+                     "signature already given. Type I AGREE and confirm it is you.", style=_MUTED),
+            dbc.Row([dbc.Col(dbc.Input(id=f"{P}-agree", size="sm", placeholder="Type I AGREE", autoComplete="off"), md=4),
+                     dbc.Col(dbc.Input(id=f"{P}-seal-pw", size="sm", type="password", placeholder="Your login password", autoComplete="current-password"), md=4),
+                     dbc.Col(dbc.Button([html.I(className="fas fa-stamp me-2"), "Seal annexes and issue the Agreement"], id=f"{P}-seal",
+                                        color="success", size="sm", n_clicks=0), md=4)], className="g-2 mt-1"),
+        ], style=_CARD))
     elif all_sealed:
-        out.append(html.Div("Annexes sealed. Re-saving the details above would change them and void any signature already given.", style=_MUTED))
+        out.append(html.Div("Annexes sealed and the Agreement issued. The office-bearers sign below.", style=_MUTED))
     return out
 
 
 # ── stage 3: society setup, rendered inline inside the Hub (non-modal) ────────────────────────────
-def setup_stage(society_id: int, current_step: int = 0) -> list:
+def start_step(society_id: int) -> int:
+    """Index into CATEGORIES where the wizard opens: step 0 for a fresh draft, otherwise the first step that is
+    neither done nor skipped (the frontier). Used by BOTH the rendered DOM and the onb-setup-step store so
+    they can never disagree (F3)."""
+    from app.services import onboarding_service as ob
+    from app.dash_apps.pages.wizard_registry import status_of as _status_of
+    try:
+        statuses = ob.step_statuses(society_id) or {}
+    except Exception:                                                      # noqa: BLE001
+        return 0
+    keyed = [c for c in CATEGORIES if c != "Instructions"]
+    if all(_status_of(statuses, c) == "todo" for c in keyed):
+        return 0
+    for i, cat in enumerate(CATEGORIES):
+        if _status_of(statuses, cat) not in ("done", "skipped"):
+            return i
+    return len(CATEGORIES) - 1
+
+
+def setup_stage(society_id: int, current_step: int | None = None) -> list:
     """Render the Setup Wizard categories as inline navigable stages inside the Onboarding Hub.
 
     Layout: left step-rail inside the page, main content area to the right (item 1).
@@ -206,6 +251,8 @@ def setup_stage(society_id: int, current_step: int = 0) -> list:
     Nothing is posted until the Agreement is signed and the society is activated."""
     from app.services import onboarding_service as ob
     statuses = ob.step_statuses(society_id) or {}
+    if current_step is None:
+        current_step = start_step(society_id)
     heading = "Stage 3: society setup"
     out = [html.H6(heading),
            html.Div("Declare the legal regime, rates, charges, accounts and opening balances. The wizard draft is saved as you move "
@@ -246,7 +293,14 @@ def setup_stage(society_id: int, current_step: int = 0) -> list:
     for i, cat in enumerate(CATEGORIES):
         if cat == "Review":
             # Review is filled from the saved draft by a callback (§4.12), never from live State.
-            containers.append(html.Div(id="onb-review-container", style={"display": "block" if i == current_step else "none", "paddingTop": "6px"}))
+            # The wrapper carries the same pattern id as every other step, so the {"type": "onb-step", "key": ALL}
+            # outputs of wizard_nav always resolve to len(CATEGORIES) components (was 11 vs 12 -> InvalidCallbackReturnValue).
+            review_body = None
+            if i == current_step:                      # opened straight on Review: the nav callback will not fire
+                from app.dash_apps.pages.setup_wizard import render_review
+                review_body = render_review(ob.load_draft(society_id), society_id)
+            containers.append(html.Div(html.Div(review_body, id="onb-review-container"), id={"type": "onb-step", "key": cat},
+                                       style={"display": "block" if i == current_step else "none", "paddingTop": "6px"}))
         else:
             containers.append(html.Div(render_category_content(cat, society_id), id={"type": "onb-step", "key": cat},
                                        style={"display": "block" if i == current_step else "none", "paddingTop": "6px"}))
@@ -542,7 +596,15 @@ def legacy_resolutions_section(society_id: int, role: str | None) -> list:
     return out
 
 
+def grievance_named(society_id: int) -> bool:
+    r = ob.db._execute("SELECT grievance_officer_name FROM societies WHERE id=%s", (society_id,), fetch_one=True) or {}
+    return bool((r.get("grievance_officer_name") or "").strip())
+
+
 def hub_body(role: str, society_id: int, user_id: int | None, view: str | None = None) -> list:
+    deep_step = step_from_view(view)
+    if deep_step is not None:
+        view = "setup"
     st = ob.state_of(society_id) or "registered"
     out = [html.Div(id="onb-tracker", children=tracker(society_id))]
     is_admin = role == "admin"
@@ -550,13 +612,18 @@ def hub_body(role: str, society_id: int, user_id: int | None, view: str | None =
         out += _stage_committee(society_id) if is_admin else [html.Div("The administrator is seating the founding committee.", style=_MUTED)]
     elif st == "committee seated":
         if is_admin:
-            out += setup_stage(society_id)
+            if view == "committee" or (view != "setup" and not grievance_named(society_id)):
+                out += _stage_committee(society_id)
+            else:
+                out += setup_stage(society_id, current_step=deep_step)
         else:
             out.append(html.Div("The founding committee is seated; the administrator is completing society setup.", style=_MUTED))
     elif st == "setup draft":
-        if view == "setup" and is_admin:
+        if view == "committee" and is_admin:
+            out += _stage_committee(society_id)
+        elif view == "setup" and is_admin:
             out.append(html.Div("Back to society setup to fix the blocked control.", style=_MUTED))
-            out += setup_stage(society_id)
+            out += setup_stage(society_id, current_step=deep_step)
         else:
             if is_admin:
                 out += _stage_annexes(society_id)
@@ -570,6 +637,13 @@ def hub_body(role: str, society_id: int, user_id: int | None, view: str | None =
     return out
 
 
+def _initial_step(society_id: int) -> int:
+    try:
+        return start_step(society_id) if ob.state_of(society_id) in ("committee seated", "setup draft") else 0
+    except Exception:                                                      # noqa: BLE001
+        return 0
+
+
 def render_pending(role: str, society_id: int | None, user_id: int | None):
     """What a not-yet-active society sees in place of its dashboard."""
     if not society_id:
@@ -579,8 +653,8 @@ def render_pending(role: str, society_id: int | None, user_id: int | None):
         html.Div(id=f"{P}-toast"),
         dcc.Interval(id=f"{P}-poll", interval=6000, n_intervals=0),
         dcc.Store(id=f"{P}-marker", data=marker(society_id)),
-        dcc.Store(id="onb-setup-step", data=0),
-        dcc.Store(id="onb-wizard-step", storage_type="session", data=0),
+        dcc.Store(id="onb-setup-step", data=_initial_step(society_id)),
+        dcc.Store(id="onb-wizard-step", storage_type="session", data=_initial_step(society_id)),
         dcc.Store(id="onb-view", data="current"),
         html.Div(id="onb-celebrate-sink", style={"display": "none"}),
         html.Div(hub_body(role, society_id, user_id), id=f"{P}-body"),

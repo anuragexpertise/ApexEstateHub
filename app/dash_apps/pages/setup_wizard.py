@@ -1219,6 +1219,7 @@ def render_review(draft, society_id=None):
 def _committee_review_rows(society_id):
     """Review rows for the three founding office-bearers (from the DB, not the draft)."""
     try:
+        from app.services.onboarding_service import seated_officers
         officers = seated_officers(society_id)
     except Exception:
         officers = {}
@@ -1256,6 +1257,14 @@ def _receivables_review_rows(bf):
     header = html.Tr([html.Th("Flat no.", style={"fontSize": "11px"}), html.Th("Value receivable (₹)", style={"fontSize": "11px"}),
                       html.Th("Days overdue", style={"fontSize": "11px"}), html.Th("Remarks", style={"fontSize": "11px"})])
     return [("Pending receivables", dbc.Table([html.Thead(header), html.Tbody(items)], bordered=False, size="sm"))]
+
+
+def _saved_reconciliation(society_id):
+    try:
+        from app.services import onboarding_service as _ob
+        return _ob.get_bank_reconciliation(society_id) if society_id else {}
+    except Exception:                                                      # noqa: BLE001
+        return {}
 
 
 def _reconciliation_review_rows(bf):
@@ -1962,7 +1971,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
             html.H6("Reconciliation & evidence", className="mt-4 mb-2 text-primary"),
             html.P("Reconcile every bank/cash account that carries a brought-forward balance, and attach the supporting scans "
                    "(the server computes each file's SHA-256; nobody types a hash).", className="text-muted small mb-2"),
-            dcc.Store(id="onb-reconciliation-json", data={}),
+            dcc.Store(id="onb-reconciliation-json", data=_saved_reconciliation(society_id)),
             html.Div(id="onb-bf-reconciliation-cards", className="mb-3"),
             dcc.Upload(id="onb-bf-evidence-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Attach scan"],
                                                color="secondary", size="sm", outline=True, n_clicks=0),

@@ -11,6 +11,8 @@ step lives in the onb-setup-step store (mirrored to the session onb-wizard-step 
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 import dash_bootstrap_components as dbc
 from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
@@ -19,6 +21,7 @@ from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label, render_revi
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
 from app.security.guards import require_session
 from app.services import onboarding_service as ob
+from app.services.onboarding_service import money
 from app.services import regime_rules_admin as rra
 from app.dash_apps.pages.wizard_registry import draft_key as _draft_key, status_of as _status_of
 from app.services.xlsx_templates import (build_receivables_template, build_tds_template, build_bf_template,
@@ -172,9 +175,30 @@ def _step_styles(current):
     return [{"display": "block" if i == current else "none"} for i in range(NCAT)]
 
 
+def _rec_status(st: dict, rec: dict):
+    """One line under a reconciliation card: what is still missing, or that it is done."""
+    bits = []
+    if not st["has_statement"]:
+        bits.append(html.Span("Enter the statement / cash-count balance.", className="text-muted"))
+    elif st["agrees"]:
+        bits.append(html.Span("Agrees to the books.", className="text-success"))
+    else:
+        bits.append(html.Span(f"Differs by ₹{st['diff']}: correct the book balance or the statement figure.", className="text-danger"))
+    if st["evidenced"]:
+        bits.append(html.Span(f" · scan {rec.get('filename') or ''} attached (SHA-256 {str(rec.get('sha256'))[:12]}…)", className="text-success"))
+    elif st["has_statement"]:
+        bits.append(html.Span(" · attach the scan.", className="text-warning"))
+    return bits
+
+
+def _finalize_style(n):
+    return {"fontSize": "12px", "display": "inline-block" if n == LAST else "none"}
+
+
 def _nav_outputs(n, statuses, error=""):
+    """One tuple per wizard_nav output, in declaration order (9 values)."""
     return (n, n, _step_styles(n), _rail_item_classes(statuses, n),
-            _rail_item_styles(statuses, n), (n == 0), error)
+            _rail_item_styles(statuses, n), (n == 0), (n == LAST), _finalize_style(n), error)
 
 
 def _frontier(statuses):
@@ -198,6 +222,8 @@ def register_onboarding_wizard_callbacks(app):
         Output({"type": "onb-rail", "key": ALL}, "className", allow_duplicate=True),
         Output({"type": "onb-rail", "key": ALL}, "style", allow_duplicate=True),
         Output("onb-btn-prev", "disabled", allow_duplicate=True),
+        Output("onb-btn-next", "disabled", allow_duplicate=True),
+        Output("onb-btn-finalize", "style", allow_duplicate=True),
         Output("onb-setup-error", "children", allow_duplicate=True),
         *_rail_inputs,
         Input("onb-btn-prev", "n_clicks"),
@@ -232,7 +258,7 @@ def register_onboarding_wizard_callbacks(app):
     def wizard_nav(*args):
         s = _session()
         if not ctx.triggered_id or not s:
-            return no_update, no_update, no_update, no_update, no_update, no_update, no_update
+            return (no_update,) * 9
         sid, uid, role = s
         if role != "admin" or not sid:
             statuses = ob.step_statuses(sid) if sid else {}
@@ -476,45 +502,95 @@ def register_onboarding_wizard_callbacks(app):
         return dbc.Alert(f"Uploaded {len(new_rows)} receivable row(s). Review them below, then click Next to save.",
                          color="success", className="py-2", style={"fontSize": "12px"}), merged
 
-    # ── item 11: reconciliation cards render ─────────────────────────────────────
+    # ── item 11: reconciliation cards (driven by the live Brought Forward amounts) ────────────
     @app.callback(
         Output("onb-bf-reconciliation-cards", "children"),
-        Input("onb-reconciliation-json", "data"),
-        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
+        Input({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
+        State("onb-reconciliation-json", "data"),
+    )
+    @require_session
+    def bf_reconciliation_render(amts, rec_json):
+        s = _session()
+        if not s or not s[0]:
+            return no_update
+        sid, uid, role = s
+        ids = [it["id"]["acc_id"] for it in (ctx.inputs_list[0] or [])]
+        live = {int(i): money(v) for i, v in zip(ids, amts or []) if v not in (None, "")}
+        accs = {a["id"]: a for a in ob._rows("SELECT id, name, tab_name, drcr_account FROM accounts WHERE society_id=%s", (sid,))}
+        rec_json = rec_json or {}
+        cards = []
+        for acc_id, book in live.items():
+            a = accs.get(acc_id)
+            if not a or a["tab_name"] not in ob.BANK_TABS or a["drcr_account"] == "Cr" or book <= 0:
+                continue
+            r = rec_json.get(f"bank_{acc_id}") or {}
+            stmt = r.get("statement_balance", "")
+            st = ob.reconciliation_state(book, r)
+            cards.append(html.Div([
+                dcc.Store(id={"type": "onb-bf-rec-book", "acc_id": acc_id}, data=str(book)),
+                html.Strong(f"{a['tab_name']} · {a['name']}", className="d-block"),
+                html.Small(f"Book balance: ₹{book}", className="text-muted d-block mb-1"),
+                dbc.Input(id={"type": "onb-bf-rec-stmt", "acc_id": acc_id}, type="number", debounce=True, step=0.01, min=0, size="sm",
+                          value=float(money(stmt)) if stmt not in (None, "") else None, placeholder="Balance per bank statement / cash count"),
+                dbc.Input(id={"type": "onb-bf-rec-diff", "acc_id": acc_id}, type="number", size="sm", disabled=True, className="mt-1",
+                          value=float(st["diff"]) if st["diff"] is not None else None, placeholder="Difference"),
+                html.Div(_rec_status(st, r), id={"type": "onb-bf-rec-status", "acc_id": acc_id}, style={"fontSize": "11.5px", "marginTop": "2px"}),
+                dcc.Upload(id={"type": "onb-bf-evidence", "acc_id": acc_id},
+                           children=dbc.Button("Attach scan", size="sm", outline=True, color="secondary", n_clicks=0),
+                           multiple=False, accept=".pdf,.png,.jpg,.jpeg", className="mt-1"),
+            ], style={"border": "1px solid #c9d2dc", "borderRadius": "6px", "padding": "10px", "marginBottom": "8px"}))
+        return cards or [html.Div("No bank/cash accounts with a non-zero brought-forward balance.", className="text-muted small")]
+
+    @app.callback(
+        Output("onb-reconciliation-json", "data"),
+        Output({"type": "onb-bf-rec-diff", "acc_id": ALL}, "value"),
+        Output({"type": "onb-bf-rec-status", "acc_id": ALL}, "children"),
+        Input({"type": "onb-bf-rec-stmt", "acc_id": ALL}, "value"),
+        Input({"type": "onb-bf-evidence", "acc_id": ALL}, "contents"),
+        State({"type": "onb-bf-evidence", "acc_id": ALL}, "filename"),
+        State({"type": "onb-bf-rec-book", "acc_id": ALL}, "data"),
+        State("onb-reconciliation-json", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def bf_reconciliation_render(rec_json, bf_amts):
+    def bf_reconciliation_update(stmts, contents, filenames, books, rec_json):
         s = _session()
-        if not s:
-            return no_update
+        trig = ctx.triggered_id
+        if not s or not s[0] or not isinstance(trig, dict):
+            return no_update, no_update, no_update
         sid, uid, role = s
-        rec = ob.get_bank_reconciliation(sid) or {}
-        # Build bank/cash accounts from the draft BF rows.
-        draft = ob.load_draft(sid)
-        bf_rows = (draft.get("brought_forward") or {}).get("rows") or []
-        bank_accounts = [r for r in bf_rows if r.get("tab") in ob.BANK_TABS and money(r.get("bf_amount")) > 0]
-        cards = []
-        for acc in bank_accounts:
-            acc_id = acc.get("acc_id")
-            book = money(acc.get("bf_amount"))
-            st_key = f"bank_{acc_id}"
-            card_rec = (rec.get(st_key) or {})
-            stmt = card_rec.get("statement_balance", "")
-            diff = book - money(stmt) if stmt not in (None, "") else None
-            cards.append(html.Div([
-                html.Strong(f"{acc.get('tab', '')} · {acc.get('name', acc_id)}", className="d-block"),
-                html.Small(f"Book balance: ₹{book}", className="text-muted d-block"),
-                dbc.Input(id={"type": "onb-bf-rec-stmt", "acc_id": acc_id}, type="number", value=float(stmt) if stmt not in (None, "") else None, step=0.01, min=0, size="sm", placeholder="Statement balance"),
-                dbc.Input(id={"type": "onb-bf-rec-diff", "acc_id": acc_id}, type="number", value=float(diff) if diff is not None else None, step=0.01, size="sm", placeholder="Difference", disabled=True, className="sw-bf-remarks"),
-                html.Div(id={"type": "onb-bf-rec-status", "acc_id": acc_id},
-                         style={"fontSize": "11.5px", "marginTop": "2px"}),
-                dcc.Upload(id={"type": "onb-bf-evidence", "acc_id": acc_id}, children=dbc.Button("Attach scan", size="sm", outline=True, color="secondary", n_clicks=0),
-                           multiple=False, accept=".pdf,.png,.jpg,.jpeg", className="mt-1"),
-            ], style={"border": "1px solid #c9d2dc", "borderRadius": "6px", "padding": "10px", "marginBottom": "8px"}))
-        if not cards:
-            cards = [html.Div("No bank/cash accounts with a non-zero brought-forward balance.", className="text-muted small")]
-        return cards
+        acc_ids = [it["id"]["acc_id"] for it in (ctx.states_list[1] or [])]
+        book_of = dict(zip(acc_ids, books or []))
+        rec = dict(rec_json or {})
+        key = f"bank_{trig['acc_id']}"
+        item = dict(rec.get(key) or {})
+        errors = {}
+        if trig["type"] == "onb-bf-rec-stmt":
+            val = stmts[acc_ids.index(trig["acc_id"])] if trig["acc_id"] in acc_ids else None
+            item["statement_balance"] = "" if val in (None, "") else str(money(val))
+        else:
+            n = acc_ids.index(trig["acc_id"]) if trig["acc_id"] in acc_ids else -1
+            raw = None
+            try:
+                import base64
+                c = contents[n] if n >= 0 else None
+                raw = base64.b64decode(c.split(",", 1)[1]) if c and "," in c else None
+                if not raw:
+                    raise ob.OnboardingError("Attach the scan as a PDF, PNG or JPG.")
+                ev = ob.store_evidence_file(sid, "bank_statement", int(trig["acc_id"]), filenames[n] or "", raw, uid, {})
+                item.update({"evidence_id": ev["id"], "sha256": ev["sha256"], "filename": ev["filename"]})
+            except ob.OnboardingError as exc:
+                errors[trig["acc_id"]] = str(exc)
+            except Exception:                                            # noqa: BLE001
+                errors[trig["acc_id"]] = "That file could not be read; attach a PDF, PNG or JPG."
+        rec[key] = item
+        diffs, statuses = [], []
+        for a in acc_ids:
+            r = rec.get(f"bank_{a}") or {}
+            st = ob.reconciliation_state(money(book_of.get(a) or 0), r)
+            diffs.append(float(st["diff"]) if st["diff"] is not None else None)
+            statuses.append(html.Span(errors[a], className="text-danger") if a in errors else _rec_status(st, r))
+        return rec, diffs, statuses
 
     print("  ✓ Onboarding wizard callbacks registered")
 
@@ -613,6 +689,7 @@ def register_onboarding_wizard_callbacks(app):
     # ── review from draft (item 12) ─────────────────────────────────────────────
     @app.callback(
         Output("onb-review-container", "children"),
+        Output("onb-btn-finalize", "disabled"),
         Input("onb-wizard-step", "data"),
         prevent_initial_call=True,
     )
@@ -620,13 +697,17 @@ def register_onboarding_wizard_callbacks(app):
     def wizard_render_review(step):
         s = _session()
         if not s or not s[0]:
-            return no_update
+            return no_update, no_update
         sid, uid, role = s
         # step is the index into CATEGORIES; Review is the last one.
         if step is None or int(step) != NCAT - 1:
-            return no_update
+            return no_update, no_update
         draft = ob.load_draft(sid)
-        return render_review(draft, sid)
+        try:
+            blocked = any(v for v in (ob.validate_all(draft, sid) or {}).values())
+        except Exception:                                                  # noqa: BLE001
+            blocked = True
+        return render_review(draft, sid), blocked
 
     print("  ✓ Onboarding wizard callbacks registered")
 

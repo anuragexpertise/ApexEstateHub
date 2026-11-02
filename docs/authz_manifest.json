@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "unclassified_baseline": 154,
+  "unclassified_baseline": 126,
   "endpoints": {
     "callback:account_callbacks.py::handle_change_password": {
       "classification": "unclassified"
@@ -594,16 +594,16 @@
     "callback:onboarding_callbacks.py::onb_back_to_setup": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_callbacks.py::onb_c_download": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_callbacks.py::onb_c_upload": {
+    "callback:onboarding_callbacks.py::onb_continue_setup": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_enrol_done": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_esign_start": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_fix": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_grievance": {
@@ -656,10 +656,16 @@
     "callback:onboarding_callbacks.py::onb_signmode": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_callbacks.py::onb_sync_step_stores": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_wizard_callbacks.py::bf_apply": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::bf_reconciliation_render": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::bf_reconciliation_update": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::bf_recv_add_remove": {

@@ -265,7 +265,7 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
     if action == "decline" and len((reason or "").strip()) < 10:
         raise SigningRefused("Say why you decline (at least 10 characters).")
     if kind == "agreement" and action != "decline":
-        # Plan v5 stage 4: nobody signs before the committee is seated and annexes A, B, C are sealed inside the text.
+        # Plan v5 stage 4: nobody signs before the committee is seated and annexes A, B, C, D are sealed inside the text.
         from app.services import onboarding_service as ob
         try:
             ob.assert_ready_to_sign(society_id)

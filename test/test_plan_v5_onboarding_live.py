@@ -170,16 +170,17 @@ def test_09_agreement_cannot_be_signed_before_annexes_are_sealed(world):
     from app.dash_apps.callbacks.drilldown_callbacks import _get_or_create_agreement
     ag = _get_or_create_agreement(db, sid)
     pres = world["ob"].seated_officers(sid)["president"]["user_id"]
-    with pytest.raises(ds.SigningRefused, match="Annexes A, B and C must be sealed"):
+    with pytest.raises(ds.SigningRefused, match="Annexes A, B, C and D must be sealed"):
         ds.sign("agreement", ag["id"], pres, "pw")
 
 
 def test_10_seal_annexes_puts_their_hashes_in_the_agreement(world):
     ob, sid, db = world["ob"], world["sid"], world["db"]
     ob.save_annex_inputs(sid, "", True, None, None)
+    ob.set_grievance_officer(sid, "G. Officer", "grievance@example.com", None)    # Annex D needs one
     ob.build_annexes(sid, world["admin"])
     st = ob.seal_annexes(sid, world["admin"])
-    assert {k: v["status"] for k, v in st.items()} == {"A": "sealed", "B": "sealed", "C": "sealed"}
+    assert {k: v["status"] for k, v in st.items()} == {"A": "sealed", "B": "sealed", "C": "sealed", "D": "sealed"}
     text = db._execute("SELECT body_text FROM society_agreements WHERE society_id=%s", (sid,), fetch_one=True)["body_text"]
     assert all(v["content_hash"] in text for v in st.values())
     assert "EstateHub LLP" in text and "Treasurer" in text and "DATA PROTECTION" in text

@@ -58,8 +58,13 @@ def _paper_evidence(sid, uid, contents, filename):
         raise ds.SigningRefused(str(exc)) from exc
 
 
-def _body(sid, uid, role):
-    return op.hub_body(role, sid, uid), op.marker(sid)
+def _body(sid, uid, role, view=None):
+    return op.hub_body(role, sid, uid, view=view), op.marker(sid)
+
+
+def _committee_view(sid):
+    """Admin edits made on the committee screen should leave the admin on it (not jump into the wizard)."""
+    return "committee" if ob.state_of(sid) in ("committee seated", "setup draft") else None
 
 
 def register_onboarding_callbacks(app):
@@ -107,7 +112,7 @@ def register_onboarding_callbacks(app):
                                            apartment_size=int(size) if size not in (None, "") else None)
         except ob.OnboardingError as exc:
             return no_update, _alert(str(exc), False), no_update
-        body, mk = _body(sid, uid, role)
+        body, mk = _body(sid, uid, role, view=_committee_view(sid))
         return body, _alert(msg), mk
 
     # ── signature thumbnail preview while choosing a signature image ──────────
@@ -181,26 +186,68 @@ def register_onboarding_callbacks(app):
                                            signature_bytes=_decode(sig_contents))
         except ob.OnboardingError as exc:
             return no_update, _alert(str(exc), False), no_update
-        body, mk = _body(sid, uid, role)
+        body, mk = _body(sid, uid, role, view=_committee_view(sid))
         return body, _alert(msg), mk
 
     # ── Administrator step: jump back to Stage 2 to finish an officer ─────────
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
+        Output("onb-view", "data", allow_duplicate=True),
         Input("onb-back-to-committee", "n_clicks"),
         prevent_initial_call=True,
     )
     @require_session
     def onb_back_to_committee(n):
         s = _session()
-        if not n or not s:
-            return no_update
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update
         sid, uid, role = s
-        return op.hub_body(role, sid, uid)
+        return op.hub_body(role, sid, uid, view="committee"), "committee"
+
+    # ── committee screen → wizard (only once the grievance officer is named) ──
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output("onb-view", "data", allow_duplicate=True),
+        Input(f"{P}-continue-setup", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_continue_setup(n):
+        s = _session()
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        if ob.state_of(sid) != "committee seated":
+            return no_update, no_update, no_update
+        if not op.grievance_named(sid):
+            return no_update, _alert("Name the grievance officer first.", False), no_update
+        return op.hub_body(role, sid, uid, view="setup"), no_update, "setup"
+
+    # ── wizard step stores always follow whatever the body was just re-rendered to (F3) ──
+    @app.callback(
+        Output("onb-setup-step", "data", allow_duplicate=True),
+        Output("onb-wizard-step", "data", allow_duplicate=True),
+        Input(f"{P}-body", "children"),
+        State("onb-view", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_sync_step_stores(_children, view):
+        s = _session()
+        if not s or not s[0] or s[2] != "admin":
+            return no_update, no_update
+        if ob.state_of(s[0]) not in ("committee seated", "setup draft"):
+            return no_update, no_update
+        n = op.step_from_view(view)
+        if n is None:
+            n = op.start_step(s[0])
+        return n, n
 
     @app.callback(
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-body", "children", allow_duplicate=True),
+        Output("onb-view", "data", allow_duplicate=True),
         Input(f"{P}-g-save", "n_clicks"),
         State(f"{P}-g-name", "value"), State(f"{P}-g-email", "value"), State(f"{P}-g-phone", "value"),
         prevent_initial_call=True,
@@ -209,15 +256,16 @@ def register_onboarding_callbacks(app):
     def onb_grievance(n, name, email, phone):
         s = _session()
         if not n or not s:
-            return no_update, no_update
+            return no_update, no_update, no_update
         sid, uid, role = s
         if role != "admin" or not sid:
-            return _alert("Only the society's administrator can name the grievance officer.", False), no_update
+            return _alert("Only the society's administrator can name the grievance officer.", False), no_update, no_update
         try:
             ob.set_grievance_officer(sid, name, email, phone)
         except ob.OnboardingError as exc:
-            return _alert(str(exc), False), no_update
-        return _alert("Grievance officer saved."), op.hub_body(role, sid, uid)
+            return _alert(str(exc), False), no_update, no_update
+        view = _committee_view(sid)               # stay here so the "Continue to society setup" button is visible
+        return _alert("Grievance officer saved."), op.hub_body(role, sid, uid, view=view), (view or no_update)
 
     @app.callback(
         Output("pwd-gate-store", "data", allow_duplicate=True),
@@ -235,35 +283,57 @@ def register_onboarding_callbacks(app):
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
+        Output("onb-view", "data", allow_duplicate=True),
         Input(f"{P}-prepare", "n_clicks"),
-        State(f"{P}-in-arrears", "value"), State(f"{P}-in-bank", "value"), State(f"{P}-in-audit", "value"), State(f"{P}-in-ca", "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_prepare(n, arrears, bank, audit, ca):
+    def onb_prepare(n):
         s = _session()
         if not n or not s:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
         sid, uid, role = s
         if role != "admin" or not sid:
-            return no_update, _alert("Only the society's administrator can prepare the annexes.", False), no_update
+            return no_update, _alert("Only the society's administrator can check the annexes.", False), no_update, no_update
         try:
-            ob.save_annex_inputs(sid, arrears, bool(bank), audit, ca)
             ob.build_annexes(sid, uid)
         except ob.OnboardingError as exc:
-            return no_update, _alert(str(exc), False), no_update
-        body, mk = _body(sid, uid, role)
-        return body, _alert("Annexes checked. Fix anything marked red, then seal."), mk
+            return no_update, _alert(str(exc), False), no_update, no_update
+        body, mk = _body(sid, uid, role, view="current")
+        return body, _alert("Annexes checked. Fix anything marked red using its link, then seal."), mk, "current"
+
+    # ── "Fix in <step>" links on a failing annex control ─────────────────────
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output("onb-view", "data", allow_duplicate=True),
+        Input({"type": f"{P}-fix", "annex": ALL, "ctl": ALL, "key": ALL}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_fix(clicks):
+        s = _session()
+        trig = ctx.triggered_id
+        if not s or not s[0] or s[2] != "admin" or not isinstance(trig, dict):
+            return no_update, no_update
+        if not (ctx.triggered and ctx.triggered[0].get("value")):          # a re-render, not a click
+            return no_update, no_update
+        sid, uid, role = s
+        if ob.state_of(sid) not in ("committee seated", "setup draft"):
+            return no_update, no_update
+        key = trig.get("key")
+        view = "committee" if key == "committee" else f"setup:{key}"
+        return op.hub_body(role, sid, uid, view=view), view
 
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
         Input(f"{P}-seal", "n_clicks"),
+        State(f"{P}-agree", "value"), State(f"{P}-seal-pw", "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_seal(n):
+    def onb_seal(n, agree, password):
         s = _session()
         if not n or not s:
             return no_update, no_update, no_update
@@ -271,7 +341,7 @@ def register_onboarding_callbacks(app):
         if role != "admin" or not sid:
             return no_update, _alert("Only the society's administrator can seal the annexes.", False), no_update
         try:
-            ob.seal_annexes(sid, uid)
+            ob.seal_with_confirmation(sid, uid, agree, password)
         except ob.OnboardingError as exc:
             return no_update, _alert(str(exc), False), no_update
         body, mk = _body(sid, uid, role)
@@ -672,79 +742,6 @@ def register_onboarding_callbacks(app):
             return no_update, no_update
         sid, uid, role = s
         return op.hub_body(role, sid, uid, view="setup"), "setup"
-
-    @app.callback(
-        Output(f"{P}-c-download", "data"),
-        Input(f"{P}-c-template", "n_clicks"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def onb_c_download(n):
-        if not n:
-            return no_update
-        s = _session()
-        if not s or s[2] != "admin" or not s[0]:
-            return no_update
-        cols = ["account_code", "account_name", "opening_debit", "opening_credit",
-                "flat_number", "arrears_amount", "overdue_days"]
-        df = pd.DataFrame(columns=cols)
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False)
-        return dcc.send_bytes(output.getvalue(), filename="opening_position_template.xlsx")
-
-    @app.callback(
-        Output(f"{P}-c-feedback", "children"),
-        Input(f"{P}-c-upload", "contents"),
-        State(f"{P}-c-upload", "filename"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def onb_c_upload(contents, filename):
-        s = _session()
-        if not contents or not s or s[2] != "admin" or not s[0]:
-            return no_update
-        sid, _uid, _role = s
-        if not str(filename or "").lower().endswith((".xlsx", ".xls")):
-            return _alert("Choose an Excel .xlsx or .xls file.", False)
-        try:
-            raw = base64.b64decode(contents.split(",", 1)[1])
-            df = pd.read_excel(io.BytesIO(raw))
-        except Exception as exc:  # noqa: BLE001
-            return _alert(f"Could not read the file: {exc}", False)
-        required = {"account_code", "account_name", "opening_debit", "opening_credit"}
-        missing = required - set(df.columns)
-        if missing:
-            return _alert(f"Template missing columns: {', '.join(sorted(missing))}", False)
-        dr = float(pd.to_numeric(df.get("opening_debit", pd.Series([0])), errors="coerce").fillna(0).sum() or 0)
-        cr = float(pd.to_numeric(df.get("opening_credit", pd.Series([0])), errors="coerce").fillna(0).sum() or 0)
-        if abs(dr - cr) > 0.005:
-            return _alert(f"Opening position must balance: total debit {dr:.2f} != total credit {cr:.2f}.", False)
-        accts = {str(r["id"]) for r in ob.db._execute("SELECT id FROM accounts WHERE society_id=%s", (sid,), fetch_all=True) or []}
-        bad = [str(v) for v in df["account_code"].dropna().astype(str) if str(v) not in accts]
-        if bad:
-            return _alert(f"Unknown account codes: {', '.join(bad[:5])}", False)
-        arrears = []
-        for _, row in df.iterrows():
-            flat = str(row.get("flat_number") or "").strip()
-            amt = row.get("arrears_amount")
-            if flat and amt not in (None, ""):
-                try:
-                    arrears.append({"flat_number": flat, "amount": str(float(amt)),
-                                    "overdue_days": int(row.get("overdue_days") or 0)})
-                except (TypeError, ValueError):
-                    pass
-        d = ob.declaration(sid) or {}
-        d["annex_c_inputs"] = {
-            "arrears_by_flat": arrears,
-            "bank_agrees": False,
-            "audited_hash": None,
-            "ca_review_ref": None,
-            "opening_position": df.to_dict("records"),
-        }
-        ob.db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s",
-                       (json.dumps(d), sid))
-        return _alert(f"Opening position loaded: {len(df)} rows; debits {dr:.2f} = credits {cr:.2f}.")
 
     def _tds_wizard_names():
         from database.seed import tds_wizard_rows as _rows
