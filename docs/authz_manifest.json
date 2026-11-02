@@ -710,6 +710,9 @@
     "callback:onboarding_wizard_callbacks.py::wizard_render_review": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_wizard_callbacks.py::wizard_rules_panel": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_wizard_callbacks.py::wizard_save_bye_law": {
       "classification": "legacy-gated"
     },

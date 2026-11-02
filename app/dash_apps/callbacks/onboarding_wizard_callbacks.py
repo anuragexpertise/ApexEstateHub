@@ -709,6 +709,37 @@ def register_onboarding_wizard_callbacks(app):
             blocked = True
         return render_review(draft, sid), blocked
 
+    # ── Acts & Rules side panel (item 1.4) ──────────────────────────────────────
+    @app.callback(
+        Output("onb-rules-canvas", "is_open"),
+        Output("onb-rules-canvas", "title"),
+        Output("onb-rules-body", "children"),
+        Input("onb-btn-rules", "n_clicks"),
+        Input("onb-wizard-step", "data"),
+        State("onb-rules-canvas", "is_open"),
+        State("sw-society-state", "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def wizard_rules_panel(n_rules, step, is_open, picked_state):
+        """The button opens the panel for the current step; moving between steps refreshes it only while it is open."""
+        from app.dash_apps.pages.setup_wizard import build_rules_panel, rules_subtitle
+        s = _session()
+        if not s or not s[0]:
+            return no_update, no_update, no_update
+        sid = s[0]
+        opened_now = ctx.triggered_id == "onb-btn-rules"
+        if not opened_now and not is_open:
+            return no_update, no_update, no_update
+        try:
+            idx = max(0, min(int(step or 0), NCAT - 1))
+        except (TypeError, ValueError):
+            idx = 0
+        cat = CATEGORIES[idx]
+        state = (picked_state or "").strip() or None      # a State picked on Society Details but not yet saved
+        title = rules_subtitle(step_label(cat), sid, state)
+        return (True if opened_now else no_update), title, build_rules_panel(cat, sid, state)
+
     print("  ✓ Onboarding wizard callbacks registered")
 
 
