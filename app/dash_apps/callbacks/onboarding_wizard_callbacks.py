@@ -17,7 +17,7 @@ import dash_bootstrap_components as dbc
 from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
 from app.dash_apps.pages import onboarding_page as op
-from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label, render_review
+from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label, render_review, legal_hierarchy_rows, legal_regime_live
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
 from app.security.guards import require_session
 from app.services import onboarding_service as ob
@@ -616,8 +616,12 @@ def register_onboarding_wizard_callbacks(app):
 
     print("  ✓ Onboarding wizard callbacks registered")
 
-    # ── legal hierarchy table body (item 7): re-render when central-act answers change ─────
+    # ── Legal Regime Selection: "Your Legal Regime" card + Legal Hierarchy table (item 7) ──────────────────
+    # Re-rendered when a Yes/No answer changes AND when State / Constitution change on Society Details (they are only
+    # saved on Next, so without these inputs the card and the table stayed on the society's previously saved regime).
+    # The initial render is done by render_category_content, hence prevent_initial_call.
     @app.callback(
+        Output("sw-legal-regime-live", "children"),
         Output("sw-legal-hierarchy-body", "children"),
         Input("sw-central-it-tan", "value"),
         Input("sw-central-tds", "value"),
@@ -625,22 +629,21 @@ def register_onboarding_wizard_callbacks(app):
         Input("sw-central-rera", "value"),
         Input("sw-central-employees", "value"),
         Input("sw-central-security-agency", "value"),
-        State("onb-setup-step", "data"),
+        Input("sw-society-state", "value"),
+        Input("sw-society-constitution", "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def legal_hierarchy_render(it_tan, tds, gst, rera, employees, security, step):
+    def legal_regime_refresh(it_tan, tds, gst, rera, employees, security, state, constitution):
         s = _session()
         if not s or not s[0]:
-            return no_update
+            return no_update, no_update
         sid, uid, role = s
-        if step not in (None, 0, 3) and CATEGORIES[step] != "Legal Regime Selection":
-            return no_update
         answers = {"central_it_tan": bool(it_tan), "central_tds": bool(tds),
                    "central_gst": bool(gst), "central_rera": bool(rera),
                    "has_employees": bool(employees), "has_security_agency": bool(security)}
-        rows, _ = op.legal_hierarchy_rows(sid, answers=answers)
-        return rows
+        rows, _ = legal_hierarchy_rows(sid, state, answers, constitution)
+        return legal_regime_live(sid, state, constitution), rows
 
     # ── bye-law choice live-save (item 8) ──────────────────────────────────────
     @app.callback(
