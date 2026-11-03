@@ -80,6 +80,15 @@ def _num(v):
     return None if v in (None, "") else v
 
 
+def _iso(v):
+    """Convert a date/datetime from a picker to an ISO string, or None."""
+    if v is None or v == "":
+        return None
+    if hasattr(v, "isoformat"):
+        return v.isoformat()
+    return str(v)
+
+
 def _tds_rows(form):
     secs, discs = form.get("tds-section") or {}, form.get("tds-discriminator") or {}
     rows = []
@@ -128,7 +137,7 @@ def _to_step_values(step_key, form):
     elif step_key == "funds":
         v = {"apt_sinking": form.get("sw-apt-sinking"), "apt_repair": form.get("sw-apt-repair")}
     elif step_key == "tds":
-        v = {"tan": form.get("sw-society-tan"), "effective_date": form.get("sw-tds-effective-date"),
+        v = {"tan": form.get("sw-society-tan"), "effective_date": _iso(form.get("sw-tds-effective-date")),
              "rows": _tds_rows(form)}
     elif step_key == "gst":
         v = {"gstin": form.get("sw-society-gstin"), "cgst": form.get("sw-cgst"), "sgst": form.get("sw-sgst")}
@@ -141,7 +150,7 @@ def _to_step_values(step_key, form):
         v = {"vendor_1day": form.get("sw-ven-1day"), "vendor_7day": form.get("sw-ven-7day"),
              "vendor_1mth": form.get("sw-ven-1mth")}
     elif step_key == "accounts":
-        v = {"calc_start": form.get("sw-calc-start-date") or str(_fy_start_date())}
+        v = {"calc_start": _iso(form.get("sw-calc-start-date")) or str(_fy_start_date())}
     elif step_key == "brought_forward":
         v = {"fy": form.get("sw-bf-fy"), "rows": _bf_rows(form),
              "receivables": form.get("onb-receivables-json"),
@@ -707,10 +716,12 @@ def register_onboarding_wizard_callbacks(app):
         Output({"type": "sw-bl-msg", "clause": ALL}, "children"),
         Input({"type": "sw-bl-choice", "clause": ALL}, "value"),
         Input({"type": "sw-bl-var", "clause": ALL}, "value"),
+        State({"type": "sw-bl-choice", "clause": ALL}, "value"),
+        State({"type": "sw-bl-var", "clause": ALL}, "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def wizard_save_bye_law(choices, variations):
+    def wizard_save_bye_law(choices, variations, _c, _v):
         s = _session()
         if not s or not s[0]:
             return no_update
@@ -740,10 +751,11 @@ def register_onboarding_wizard_callbacks(app):
     @app.callback(
         Output({"type": "sw-pol-msg", "key": ALL}, "children"),
         Input({"type": "sw-pol-choice", "key": ALL}, "value"),
+        State({"type": "sw-pol-choice", "key": ALL}, "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def wizard_save_policy(values):
+    def wizard_save_policy(values, _vals):
         s = _session()
         if not s or not s[0]:
             return no_update

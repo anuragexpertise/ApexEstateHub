@@ -1292,7 +1292,7 @@ def render_review(draft, society_id=None):
 def _committee_review_rows(society_id):
     """Review rows for the three founding office-bearers (from the DB, not the draft)."""
     try:
-        from app.services.onboarding_service import seated_officers
+        from app.services.onboarding_service import seated_officers, signature_url
         officers = seated_officers(society_id)
     except Exception:
         officers = {}
@@ -1302,12 +1302,13 @@ def _committee_review_rows(society_id):
         name = v.get("holder_name") or "—"
         flat = v.get("flat_number") or "—"
         sig = v.get("signature_image")
-        sig_cell = html.Img(src=f"/assets/{sig}", style={"maxWidth": "100px", "maxHeight": "50px", "border": "1px solid #c9d2dc", "borderRadius": "4px", "marginTop": "3px"}) if sig else "no signature image"
+        sig_url = signature_url(society_id, sig)
+        sig_cell = html.Img(src=sig_url, style={"maxWidth": "100px", "maxHeight": "50px", "border": "1px solid #c9d2dc", "borderRadius": "4px", "marginTop": "3px"}) if sig_url else "no signature image"
         rows.append((f"{office.replace('_', ' ').title()} — name", name))
         rows.append((f"{office.replace('_', ' ').title()} — flat", flat))
         rows.append((f"{office.replace('_', ' ').title()} — signature image", sig_cell))
         rows.append((f"{office.replace('_', ' ').title()} — mobile", v.get("phone") or "—"))
-        rows.append((f"{office.replace('_', ' ').title()} — completeness", "complete" if v.get("complete") else "incomplete"))
+        rows.append((f"{office.replace('_', ' ').title()} — completeness", "complete" if v.get("holder_name") and v.get("email") and v.get("phone") and v.get("signature_image") else "incomplete"))
     return rows
 
 
