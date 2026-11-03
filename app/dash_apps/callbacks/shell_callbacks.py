@@ -373,6 +373,7 @@ _PATH_LABELS = {
     "master":            "Societies",
     "master-societies":  "Societies",
     "master-onboarding": "Onboarding",
+    "master-compliance-india": "RWA Compliance- INDIA",
     "master-compliance-up": "RWA Compliance (UP)",
     "master-aoa-rules":  "AOA Rule Editor",
     "master-tests":      "Tests",
@@ -535,6 +536,7 @@ def _portal_content(role, society_id, pathname, auth=None):
         tab = (
             "master-settings"     if "/master-settings"     in p else
             "onboarding"          if "/master-onboarding"    in p else
+            "rwa-compliance-india" if "/master-compliance-india" in p else
             "rwa-compliance-up"   if "/master-compliance-up" in p else
             "aoa-rules"           if "/master-aoa-rules"    in p else
             "tests"               if "/master-tests"        in p else

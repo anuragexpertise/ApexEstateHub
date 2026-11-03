@@ -76,7 +76,7 @@ def register_master_rules_callbacks(app):
     @require_session
     @require_action(Cap.PLATFORM_RULES_MANAGE, "platform_rule")
     def prefill_catalog(iid):
-        row = next((i for i in rra.list_instruments(REGIME) if i["id"] == iid), None)
+        row = rra.get_instrument(iid) if iid else None
         if not row:
             return None, None, "", "", ""
         ver = row.get("last_verified_on")

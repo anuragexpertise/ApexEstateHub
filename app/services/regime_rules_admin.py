@@ -209,10 +209,19 @@ def societies_on_regime(regime_code: str) -> int:
 
 def list_instruments(regime_code: str) -> list[dict]:
     return _rows(
-        """SELECT id, instrument_type, title, enactment_year, issuing_authority, applicability,
+        """SELECT id, instrument_type, title, enactment_year, issuing_authority,
                   key_provisions, source_reference, status, last_verified_on
            FROM legal_instrument_catalog WHERE regime_code = %(r)s ORDER BY display_order, id""",
         {"r": regime_code})
+
+
+def get_instrument(instrument_id: int) -> dict | None:
+    """Fetch one catalog entry by id, regardless of regime (ids are globally unique SERIAL PKs)."""
+    return _row(
+        """SELECT id, instrument_type, title, enactment_year, issuing_authority,
+                  key_provisions, source_reference, status, last_verified_on
+           FROM legal_instrument_catalog WHERE id = %(id)s""",
+        {"id": instrument_id})
 
 
 def list_societies_cash_mode(regime_code: str) -> list[dict]:
