@@ -1040,7 +1040,7 @@ def _register_xlsx_callbacks(app):
     def bf_upload(contents, filename, amts):
         if not contents:
             return no_update, no_update, no_update
-        ids = {d["id"]["acc_id"] for d in (ctx.states_list[2] or [])}
+        ids = {d["id"]["acc_id"] for d in (ctx.states_list[0] or [])}
         meta = _acc_meta()
         res = parse_upload(contents, filename, "Brought Forward", ["account_id"])
         errors = list(res.errors)
