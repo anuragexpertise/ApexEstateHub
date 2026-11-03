@@ -1390,6 +1390,10 @@ def _annex_b(society_id: int, soc: dict, decl: dict | None) -> tuple[dict, dict]
 def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
     decl = decl or {}
     bf = decl.get("bf") or {}
+    draft_bf = ((decl.get("draft") or {}).get("brought_forward")) or {}
+    # Brought-forward rows live in the draft; fall back to the legacy top-level bf key.
+    if not bf.get("rows"):
+        bf = {"fy": draft_bf.get("fy") or bf.get("fy"), "rows": draft_bf.get("rows") or bf.get("rows") or []}
     inputs = decl.get("annex_c_inputs") or {}
     fy = int(bf.get("fy") or date.today().year)
     accs = {a["id"]: a for a in _rows("SELECT id, name, tab_name, drcr_account FROM accounts WHERE society_id=%s", (society_id,))}
@@ -1416,6 +1420,12 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
     # Arrears come from the Brought Forward step's receivables table; the old typed-inputs form is only a fallback.
     arrears = [{"flat_number": r.get("flat_number"), "amount": str(money(r.get("amount"))), "overdue_days": r.get("overdue_days")}
                for r in (draft_bf.get("receivables") or [])] or (inputs.get("arrears_by_flat") or [])
+    if isinstance(arrears, str):
+        import json as _j
+        try:
+            arrears = _j.loads(arrears)
+        except Exception:
+            arrears = []
     arrears_total = sum((money(x["amount"]) for x in arrears), Decimal(0))
     bank_lines = [(l, accs[l["acc_id"]]) for l in lines if accs[l["acc_id"]]["tab_name"] in BANK_TABS and money(l["amount"]) > 0
                   and accs[l["acc_id"]]["drcr_account"] != "Cr"]
