@@ -1212,7 +1212,7 @@ def render_review(draft, society_id=None):
             ("Monthly Common-Expense Budget", rs(funds.get("apt_budget"))),
             ("Default Rate per sq ft", rs(funds.get("apt_rate"))),
             ("Default Fixed Amount", rs(funds.get("apt_amt"))),
-            ("Billing Due Day", str(funds.get("apt_due") or "—")),
+            ("Billing Due Day", str(funds.get("apt_due_day") or "—")),
             ("Sinking Fund Rate", f"{num(funds.get('apt_sinking')):g}" if funds.get("apt_sinking") not in (None, "") else "Not entered"),
             ("Repair Fund Rate", f"{num(funds.get('apt_repair')):g}" if funds.get("apt_repair") not in (None, "") else "Not entered"),
             ("Interest (% per month, simple)", (f"{num(funds.get('apt_interest')):g}%" if num(funds.get("apt_interest")) > 0
