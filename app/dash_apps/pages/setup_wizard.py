@@ -929,8 +929,9 @@ def verification_badge(verified):
 
 def _picked_state_constitution(society_id=None, state=None, constitution=None):
     """(state, constitution) as the Society Details step has them: the live dropdown value when given (they are only
-    persisted on Next), else what is saved on the society. State is None until one is chosen; constitution defaults to AOA."""
-    st = (state or "").strip() or _society_state(society_id) or None
+    persisted on Next), else what is saved on the society. State defaults to DEFAULT_STATE when unset; constitution
+    defaults to AOA."""
+    st = (state or "").strip() or _society_state(society_id) or DEFAULT_STATE
     const = (constitution or "").strip()
     if not const and society_id:
         try:
