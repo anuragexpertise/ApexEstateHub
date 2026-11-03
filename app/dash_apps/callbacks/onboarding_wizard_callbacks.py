@@ -26,6 +26,7 @@ from app.services import regime_rules_admin as rra
 from app.dash_apps.pages.wizard_registry import draft_key as _draft_key, status_of as _status_of
 from app.services.xlsx_templates import (build_receivables_template, build_tds_template, build_bf_template,
                                          parse_upload)
+from app.utils.fiscal import fy_start_date as _fy_start_date
 
 P = op.P
 NCAT = len(CATEGORIES)
@@ -140,7 +141,7 @@ def _to_step_values(step_key, form):
         v = {"vendor_1day": form.get("sw-ven-1day"), "vendor_7day": form.get("sw-ven-7day"),
              "vendor_1mth": form.get("sw-ven-1mth")}
     elif step_key == "accounts":
-        v = {"calc_start": form.get("sw-calc-start-date")}
+        v = {"calc_start": form.get("sw-calc-start-date") or str(_fy_start_date())}
     elif step_key == "brought_forward":
         v = {"fy": form.get("sw-bf-fy"), "rows": _bf_rows(form),
              "receivables": form.get("onb-receivables-json"),
