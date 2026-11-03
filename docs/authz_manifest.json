@@ -686,7 +686,7 @@
     "callback:onboarding_wizard_callbacks.py::bf_upload": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_wizard_callbacks.py::legal_hierarchy_render": {
+    "callback:onboarding_wizard_callbacks.py::legal_regime_refresh": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::tds_apply": {

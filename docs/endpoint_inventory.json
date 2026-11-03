@@ -3687,16 +3687,17 @@
     "public": false
   },
   {
-    "id": "callback:onboarding_wizard_callbacks.py::legal_hierarchy_render",
+    "id": "callback:onboarding_wizard_callbacks.py::legal_regime_refresh",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
-    "function": "legal_hierarchy_render",
-    "line": 610,
+    "function": "legal_regime_refresh",
+    "line": 637,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
     ],
     "outputs": [
+      "sw-legal-regime-live",
       "sw-legal-hierarchy-body"
     ],
     "guards": [
