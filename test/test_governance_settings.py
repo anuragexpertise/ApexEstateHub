@@ -536,7 +536,7 @@ def test_guide_edit_claims_match_forms_that_really_exist(stub):
     owner_ids = _ids(stub.render_governance_tabs("apartment", 5))
     admin_controls = {"cash": ["gov-cash-save"], "ruledec": ["gov-rule-save"], "bye": ["gov-bye-save"], "policy": ["gov-pol-save"],
                       "meetings": ["gov-mtg-save", "gov-res-save"]}
-    master_controls = {"catalog": ["mrl-cat-save"], "rules": ["mrl-save"]}
+    master_controls = {"catalog": ["mrl-cat-save"], "catalog_india": ["mrl-cat-save"], "rules": ["mrl-save"]}
     cat_ids = _ids(mrp.catalog_edit_form())
     from unittest import mock
     with mock.patch.multiple(rra, list_instruments=lambda r: [], effective_rules=lambda r, on=None: [],
