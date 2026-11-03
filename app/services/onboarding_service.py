@@ -413,6 +413,11 @@ def save_step(society_id: int, actor_id: int, step_key: str, values: dict) -> di
             step_values[k] = v
             changed = True
     draft[step_key] = step_values
+    if step_key == "apartment":
+        for k in ("apt_cost", "apt_budget", "apt_rate", "apt_amt", "apt_billing_basis",
+                  "apt_due_day", "apt_interest"):
+            if step_values.get(k) is not None:
+                draft.setdefault("funds", {})[k] = step_values[k]
     errors = pre_errors + validate_step(step_key, draft, society_id)
 
     status = "done" if not errors else "todo"
