@@ -1,3 +1,4 @@
+import logging
 import os
 
 from dash import html, dcc, Input, Output, State, ALL, callback, no_update
@@ -21,6 +22,8 @@ DEFAULT_VENDOR_1DAY, DEFAULT_VENDOR_7DAY, DEFAULT_VENDOR_1MTH = 100, 500, 2000
 
 # UP AOA is the default regime. The program is not UP-only: other states / constitutions are chosen on Society Details.
 DEFAULT_STATE = "UP"
+
+_log = logging.getLogger(__name__)
 
 # Legal hierarchy rows are built from the society's regime: see legal_hierarchy_rows()
 
@@ -263,6 +266,8 @@ CONVERSATION_DATA = load_conversation_data()
 CONVERSATION_TEXT_OVERRIDES = {
     "Vendor Charges": ("Set the price of Vendor Passes (1-day, 7-day, 1-month) that vendors pay to work in the society. "
                        "These are pass prices, not penalties or fines. Match them to your vendor policy."),
+    "Legal Regime Selection": ("Check that the State and Constitution you set on Society Details give the legal regime you expect, then answer the Yes/No questions. "
+                               "Rows marked unverified have not yet been verified in RWA Compliance; they are shown for reference and drive no enforcement."),
 }
 REVIEW_STEP_NAME = "Review"
 WIZARD_GROUPS = {
@@ -897,110 +902,169 @@ def _office_bearer_status(society_id):
                         style={"marginTop": "6px"})], className="mb-3")
 
 
-def legal_hierarchy_rows(society_id=None, state=None, answers=None):
-    """Body rows of the Legal Hierarchy table, driven by the society's regime (no hard-coded state).
+LEGAL_ANSWER_DEFAULTS = {"central_it_tan": True, "central_tds": True, "central_gst": True, "central_rera": True,
+                         "has_employees": False, "has_security_agency": False}
+_OPERATIONAL_TRIGGERS = ("has_employees", "has_security_agency")
+
+# Status column of the Legal Hierarchy table: key -> (label, badge colour).
+LEGAL_STATUS = {
+    "locked": ("Locked", "success"),            # fixed by law: applies to every society, not a choice
+    "inactive": ("In-active", "secondary"),     # listed, but not triggered by the Yes/No answers, or superseded
+    "provisional": ("Provisional", "warning"),  # not final until adopted (society bye-laws before Stage 6, draft catalog rows)
+    "normal": ("Normal", "info"),               # General Body / Managing Committee layer
+}
+_MUTED = "#8a8f98"
+
+
+def legal_status_badge(key):
+    label, colour = LEGAL_STATUS[key]
+    return dbc.Badge(label, color=colour, text_color="dark" if colour == "warning" else None, pill=True, style={"fontSize": "10px"})
+
+
+def verification_badge(verified):
+    """green 'verified' / yellow 'unverified' (a row is verified only in Master Settings -> RWA Compliance)."""
+    return dbc.Badge("verified" if verified else "unverified", color="success" if verified else "warning",
+                     text_color=None if verified else "dark", pill=True, className="ms-1", style={"fontSize": "10px"})
+
+
+def _picked_state_constitution(society_id=None, state=None, constitution=None):
+    """(state, constitution) as the Society Details step has them: the live dropdown value when given (they are only
+    persisted on Next), else what is saved on the society. State is None until one is chosen; constitution defaults to AOA."""
+    st = (state or "").strip() or _society_state(society_id) or None
+    const = (constitution or "").strip()
+    if not const and society_id:
+        try:
+            row = db._execute("SELECT constitution FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+        except Exception:                                                      # noqa: BLE001
+            row = None
+        const = (row or {}).get("constitution") or ""
+    return st, (const or "AOA").upper()
+
+
+def _state_label(state):
+    """Full State name for display ('UP' -> 'Uttar Pradesh'); the value as given when it is not a known code."""
+    raw = (state or "").strip()
+    if not raw:
+        return None
+    try:
+        from app.services.kpi_rule_links_service import get_states
+        return get_states().get(raw.upper()) or raw
+    except Exception:                                                          # noqa: BLE001
+        return raw
+
+
+def _saved_legal_answers(society_id=None):
+    """The six Yes/No answers of this step: the saved draft where there is one, else the defaults (Central Acts Yes,
+    Operational laws No). Without this the radios came back at their defaults after a reload and Next saved them over the draft."""
+    saved = {}
+    if society_id:
+        try:
+            from app.services import onboarding_service as _ob
+            saved = (_ob.load_draft(society_id) or {}).get("legal_regime") or {}
+        except Exception:                                                      # noqa: BLE001
+            saved = {}
+    return {k: (default if saved.get(k) is None else bool(saved.get(k))) for k, default in LEGAL_ANSWER_DEFAULTS.items()}
+
+
+def legal_hierarchy_rows(society_id=None, state=None, answers=None, constitution=None):
+    """Body rows of the Legal Hierarchy (Precedence Order) table. One row per instrument, highest level first.
 
     Columns: Level | Name | Status.
-    * Name carries the instrument with a verification badge: "verified" (green) when the row has been
-      verified in Master Settings → RWA Compliance (UP), "unverified" (yellow) otherwise.
-    * Status: "Locked" [green] = applies to every society, not a choice; "In-active" [grey] = not
-      triggered by the Yes/No answers; "Provisional" [yellow] = society-adopted bye-laws before Stage 6;
-      "Normal" [light blue] = General Body / Managing Committee layer.
+    * Name: the instrument (a link to its source text once verified) and a verification badge:
+      "verified" [green] / "unverified" [yellow]. A row is verified in Master Settings -> RWA Compliance, where a
+      Treasurer or an Auditor records the notification number, date and opinion reference. Until then it is shown
+      for information only and never drives enforcement.
+    * Status: "Locked" [green] fixed by law, applies to every society; "In-active" [grey] listed but not triggered
+      by the Yes/No answers (or superseded); "Provisional" [yellow] not final until adopted (society bye-laws before
+      Stage 6); "Normal" [light blue] General Body / Managing Committee layer.
 
-    `answers` maps the Yes/No keys (central_it_tan, central_tds, central_gst, central_rera,
-    has_employees, has_security_agency) to booleans. An instrument whose applies_when key matches
-    a "No" answer shows "Not active" with the reason inside the Name cell.
+    The instruments come from the regime the State + Constitution select (the same one the billing engine and Annex A
+    use). A State + Constitution with no researched pack gets the Central Acts only.
 
-    Verification: every catalog row starts as "unverified" (the database default). A Treasurer or an
-    Auditor verifies a row in Master Settings → RWA Compliance (UP) — opening the source text and
-    recording the notification number, verification date and an opinion reference — after which the
-    row becomes "verified" and its link opens the source text. Until then the row is information
-    only and never drives enforcement.
+    `answers` maps the six Yes/No keys (central_it_tan, central_tds, central_gst, central_rera, has_employees,
+    has_security_agency) to booleans; a missing key takes its default. Returns (rows, {}).
     """
-    from app.services.statutory_rules import instruments_for_society, grouped_instruments, normalize_state, instrument_applies
-    st = normalize_state(state or _society_state(society_id))
-    regime, instruments = instruments_for_society(society_id, st)
-    answers = answers or {}
-    groups = grouped_instruments(instruments)
+    from app.services.statutory_rules import (regime_selection, instruments_for_regime, instrument_applies, grouped_instruments,
+                                          normalize_state)
+    st, const = _picked_state_constitution(society_id, state, constitution)
+    regime = regime_selection(st, const)["regime"] or "GENERIC"
+    instruments = instruments_for_regime(regime)
+    answers = {**LEGAL_ANSWER_DEFAULTS, **(answers or {})}
     try:
         from app.services.kpi_rule_links_service import get_links_for_categories
-        central_links = get_links_for_categories(["central_acts"], state=st).get("central_acts", [])
-    except Exception:
+        central_links = get_links_for_categories(["central_acts"], state=normalize_state(st)).get("central_acts", [])
+    except Exception:                                                          # noqa: BLE001
         central_links = []
 
-    STATUS_COLOR = {"locked": "success", "inactive": "secondary", "provisional": "warning", "normal": "info"}
-
-    def instrument_cell(r):
-        """(instrument_component, applies_bool) for one catalog row."""
+    def entry(r):
+        """(Name cell, status key) for one catalog instrument."""
         applies, reason = instrument_applies(r, answers)
-        link = _instrument_link(r["title"], r.get("source_url") if r.get("verification") == "verified" else None, r.get("enactment_year"))
-        v_badge = dbc.Badge("verified", color="success", pill=True, className="me-1", style={"fontSize": "10px"}) if r.get("verification") == "verified" else dbc.Badge("unverified", color="warning", pill=True, className="me-1", style={"fontSize": "10px"})
-        parts = [html.Div([link, html.Span(" "), v_badge], className="mb-1", style={"fontSize": "12px"})]
-        if not applies and reason:
-            parts.append(html.Span(f" — {reason}", style={"color": "#8a8f98", "fontSize": "11px"}))
-        return html.Div(parts, className="mb-1", style={"fontSize": "12px"}), applies
+        verified = r.get("verification") == "verified"
+        note = None
+        if r.get("status") == "superseded":
+            key, note = "inactive", "superseded, no longer in force"
+        elif (r.get("applies_when") or "always") == "info":
+            key, note = "locked", "informational"
+        elif applies:
+            key = "provisional" if r.get("status") == "draft" else "locked"
+        else:
+            key, note = "inactive", reason
+        year = r.get("enactment_year")
+        link = _instrument_link(r["title"], r.get("source_url") if verified else None, None if year and str(year) in r["title"] else year)
+        parts = [link, verification_badge(verified)]
+        if note:
+            parts.append(html.Span(f" — {note}", style={"color": _MUTED, "fontSize": "11px"}))
+        return html.Div(parts, style={"fontSize": "12px", **({"color": _MUTED} if key == "inactive" else {})}), key
 
-    def layer_cells(types):
-        cells = []
-        for t in types:
-            for r in groups.get(t, []):
-                cells.append(instrument_cell(r))
-        return cells
+    def text_entry(text, key, strong=None):
+        body = [html.Span(text, className="text-muted")] + ([html.Strong(strong)] if strong else [])
+        return html.Div(body, style={"fontSize": "12px"}), key
 
-    def op_layer():
-        cells = []
+    operational = [r for r in instruments if r.get("applies_when") in _OPERATIONAL_TRIGGERS]
+    _op_ids = {id(r) for r in operational}
+    groups = grouped_instruments([r for r in instruments if id(r) not in _op_ids])
+
+    def of_types(*types):
+        return [entry(r) for t in types for r in groups.get(t, [])]
+
+    central_acts = of_types("Central Act")
+    if not central_acts:       # catalog not integrated: fall back to the official links
+        central_acts = [(html.Div([_instrument_link(l.label.split(" — ")[0], l.url), verification_badge(False)],
+                                  style={"fontSize": "12px"}), "locked") for l in central_links]
+    if operational:
+        operational_laws = [entry(r) for r in operational]
+    else:                      # catalog has no operational rows: say what the two questions switch on
+        operational_laws = []
         for trig, label in (("has_employees", "Employees / labour laws"), ("has_security_agency", "Security agency / PSARA")):
-            applies = answers.get(trig) is True
-            reason = None if applies else f"not triggered: you answered “No” to {trig.replace('_', ' ')}"
-            base = html.Span(label, style={"fontSize": "12px", "color": "#223" if applies else "#8a8f98"})
-            if not applies:
-                base = html.Span([base, html.Span(f" — {reason}", style={"color": "#8a8f98", "fontSize": "11px", "marginLeft": "6px"})])
-            act = dbc.Badge("Active" if applies else "Not active", color="success" if applies else "secondary", pill=True, className="me-1", style={"fontSize": "10px"})
-            cells.append((html.Div([base, html.Span(" "), act], className="mb-1", style={"fontSize": "12px"}), applies))
-        return cells
+            on = answers.get(trig) is True
+            operational_laws.append((html.Div([html.Span(label), html.Span("" if on else f" — not triggered: you answered “No” to {trig.replace('_', ' ')}",
+                                                                          style={"color": _MUTED, "fontSize": "11px"})],
+                                              style={"fontSize": "12px", **({} if on else {"color": _MUTED})}), "locked" if on else "inactive"))
 
-    applicable_keys = {}
-    central_acts = layer_cells(("Central Act",))
-    if not central_acts:
-        central_acts = [(html.Div([html.Div(_instrument_link(l.label.split(" — ")[0], l.url), style={"fontSize": "12px"}), html.Span(" "), dbc.Badge("unverified", color="warning", pill=True, className="me-1", style={"fontSize": "10px"})], className="mb-1"), True) for l in central_links]
-    central_rules = layer_cells(("Central Rules",))
-    state_act = layer_cells(("Act",))
-    state_rules = layer_cells(("Rules", "Notification"))
-    model_bl = layer_cells(("Bye-laws",))
-    op_laws = op_layer()
-
-    spec = [
-        ("L0 Central Acts", central_acts, "locked"),
-        ("L0 Central Rules & Notifications", central_rules, "locked"),
-        ("L0 State Acts", state_act, "locked"),
-        ("L0 State Rules", state_rules, "locked"),
-        ("L0 Model Bye-laws (notified)", model_bl, "locked"),
-        ("L0 Operational laws", op_laws, "locked"),
-        ("L1 Society-adopted Bye-laws", [(html.Div([html.Span("Before Stage 6: Model Bye-Laws apply as notified; ", className="text-muted"),
-                                              html.Strong("the society may adopt or vary them in Stage 6 (Adoption).")], className="mb-1", style={"fontSize": "12px"}), None)], "provisional"),
-        ("L2 General Body Resolutions", [(html.Div([html.Span("Majority rules from decision_types (existing rule engine layer).", className="text-muted")], className="mb-1", style={"fontSize": "12px"}), None)], "normal"),
-        ("L3 Board / Managing Committee", [(html.Div([html.Span("Meetings and decisions of the Managing Committee.", className="text-muted")], className="mb-1", style={"fontSize": "12px"}), None)], "normal"),
+    blocks = [
+        ("L0 Central Acts", central_acts),
+        ("L0 Central Rules & Notifications", of_types("Central Rules")),
+        ("L0 State Acts", of_types("Act")),
+        ("L0 State Rules", of_types("Rules", "Notification")),
+        ("L0 Model Bye-laws (notified)", of_types("Bye-laws")),
+        ("L0 Operational laws", operational_laws),
+        ("L1 Society-adopted Bye-laws", [text_entry("Before Stage 6 the Model Bye-Laws apply as notified; ", "provisional",
+                                                    "the society may adopt or vary them in Stage 6 (Adoption).")]),
+        ("L2 General Body Resolutions", [text_entry("Majority rules from decision_types (existing rule engine layer).", "normal")]),
+        ("L3 Board / Managing Committee", [text_entry("Meetings and decisions of the Managing Committee.", "normal")]),
     ]
     out = []
-    for label, cells, badge_type in spec:
-        inst_parts = []
-        any_active = False
-        for cell, applies in cells:
-            inst_parts.append(cell)
-            if applies:
-                any_active = True
-        if badge_type == "locked" and label == "L0 Operational laws":
-            status_key = "locked" if any_active else "inactive"
-        else:
-            status_key = badge_type
-        layer_badge = dbc.Badge(label, color="primary" if badge_type == "locked" else "secondary", className="me-2", pill=True, style={"fontSize": "10px"})
-        status = dbc.Badge(status_key.capitalize(), color=STATUS_COLOR[status_key], pill=True, style={"fontSize": "9px"})
-        out.append(html.Tr([
-            html.Td(layer_badge, style={"verticalAlign": "top"}),
-            html.Td(html.Div(inst_parts) if inst_parts else html.Span("—", className="text-muted"), style={"verticalAlign": "top", "fontSize": "12px"}),
-            html.Td(status, style={"verticalAlign": "top"}),
-        ]))
-    return out, applicable_keys
+    for label, entries in blocks:
+        entries = entries or [text_entry("None recorded for this regime.", "inactive")]
+        level = dbc.Badge(label, color="primary" if label.startswith("L0") else "secondary", pill=True, style={"fontSize": "10px"})
+        for i, (name, key) in enumerate(entries):
+            # The Level badge sits on the first row of its group; later rows keep an empty cell so the columns stay aligned
+            # in the printed view too (that renderer drops rowSpan).
+            first = {"borderTop": "2px solid #c9d2dc"} if i == 0 else {}
+            out.append(html.Tr([html.Td(level if i == 0 else "", style={"verticalAlign": "top", **first}),
+                                html.Td(name, style={"verticalAlign": "top", "fontSize": "12px", **first}),
+                                html.Td(legal_status_badge(key), style={"verticalAlign": "top", **first})]))
+    return out, {}
 
 
 def _yn(v):
@@ -1288,48 +1352,47 @@ def _reconciliation_review_rows(bf):
 
 
 def legal_regime_live(society_id=None, state=None, constitution=None):
-    """State/Constitution-dependent part of the Legal Regime Selection step.
+    """'Your Legal Regime' card of the Legal Regime Selection step: State and Constitution (both chosen on Society Details)
+    and the regime they select.
 
-    `state` / `constitution` are the live Society Details dropdown values (they are only persisted on
-    submit); when absent we fall back to what is saved on the society.
+    `state` / `constitution` are the live Society Details dropdown values (they are only persisted on Next); when absent
+    we fall back to what is saved on the society. Re-rendered live by legal_regime_refresh when either dropdown changes.
     """
-    from app.services.statutory_rules import regime_for_society, regime_profile, state_has_own_regime, regime_options, regime_selection
-    picked_state = state or _society_state(society_id)
-    picked_constitution = constitution or ""
-    if not picked_constitution and society_id:
-        row = db._execute("SELECT constitution FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
-        if row:
-            picked_constitution = row.get("constitution", "AOA") or "AOA"
-    regime = regime_for_society(society_id, picked_state)
-    name, status = regime_profile(regime)
-    own = state_has_own_regime(picked_state)
-    _sel = regime_selection(picked_state, picked_constitution or "AOA")
-    _opt_rows = [html.Tr([
-        html.Td(html.B(o["label"]) if o["constitution"] == (picked_constitution or "AOA").upper() else o["label"]),
-        html.Td(dbc.Badge(o["regime"], color="primary" if o["dedicated"] else "secondary", pill=True)),
-        html.Td("Central Acts + State Act + Rules + Model Bye-Laws" if o["dedicated"] else "Central Acts only"),
-        html.Td(dbc.Badge("Your choice", color="success", pill=True) if o["constitution"] == (picked_constitution or "AOA").upper() else ""),
-    ]) for o in regime_options(picked_state)]
+    from app.services.statutory_rules import regime_selection
+    st, const = _picked_state_constitution(society_id, state, constitution)
+    sel = regime_selection(st, const)
+    state_name = _state_label(st)
+
+    def fact(label, value):
+        return dbc.Col([html.Div(label, className="text-muted", style={"fontSize": "11px", "textTransform": "uppercase", "letterSpacing": ".04em"}),
+                        html.Div(value, style={"fontWeight": "600", "fontSize": "14px"})], md=4, className="mb-2")
+
+    if st:
+        regime_value = [dbc.Badge(sel["regime"], color="primary" if sel["dedicated"] else "secondary", className="me-2"),
+                        html.Span(sel["name"] or "", className="small fw-normal")]
+        if sel["status"] == "draft":
+            regime_value.append(dbc.Badge("draft", color="warning", text_color="dark", className="ms-1"))
+    else:
+        regime_value = html.Span("—", className="text-muted")
+
+    if not st:
+        note = dbc.Alert("Choose a State on the Society Details step. The legal regime is worked out from the State and the Constitution together.",
+                         color="warning", className="py-2 mb-0", style={"fontSize": "12.5px"})
+    elif sel["dedicated"]:
+        note = html.Div(f"{sel['constitution_label']} in {state_name} is governed by the Central Acts, the State Act, its Rules and the Model Bye-Laws bundled in "
+                        f"{sel['regime']}. They are listed, highest level first, in the Legal Hierarchy table below.", className="small text-muted")
+    else:
+        note = dbc.Alert(f"No State Act, Rules or Model Bye-Laws pack is available yet for {sel['constitution_label']} in {state_name}, so only the Central Acts "
+                         "apply (regime GENERIC). Confirm the applicable law with an advocate.", color="warning", className="py-2 mb-0", style={"fontSize": "12.5px"})
     return [
         dbc.Card(dbc.CardBody([
-            html.H6([html.I(className="fas fa-balance-scale me-2"), "Your legal regime"], className="text-primary mb-2"),
-            html.Div([html.Span("State: ", className="text-muted"), html.B(picked_state or "not chosen"),
-                      html.Span("   Constitution: ", className="text-muted ms-2"), html.B(_sel["constitution_label"]),
-                      html.Span("   \u2192   ", className="mx-1"),
-                      dbc.Badge(_sel["regime"] or "\u2014", color="primary" if _sel["dedicated"] else "secondary", className="fs-6")], className="mb-2"),
-            html.Small("The regime is the named bundle of instruments that govern the society: central Acts, the State Act, Rules and Model Bye-Laws. "
-                       "State and Constitution are chosen on the Society Details step.", className="text-muted d-block mb-2"),
-            dbc.Table([html.Thead(html.Tr([html.Th("Constitution"), html.Th("Regime"), html.Th("Instruments"), html.Th("")])),
-                       html.Tbody(_opt_rows)], bordered=True, size="sm", style={"fontSize": "12px"}),
+            html.H6([html.I(className="fas fa-balance-scale me-2"), "Your Legal Regime"], className="text-primary mb-3"),
+            dbc.Row([fact("State", state_name or html.Span("not chosen", className="text-muted")),
+                     fact("Constitution", sel["constitution_label"]),
+                     fact("Legal regime", regime_value)]),
+            note,
+            html.Div("State and Constitution come from the Society Details step; change them there.", className="small text-muted mt-2"),
         ]), className="mb-3 shadow-sm"),
-        html.Div([
-            html.H6([html.I(className="fas fa-sitemap me-2"), f"Active Regime: {regime}"], className="text-primary mb-3"),
-            html.Div([
-                dbc.Badge(regime, color="primary" if own else "secondary", className="me-2"),
-                html.Span(name, className="small"),
-            ], className="mb-2"),
-            html.Small(f"This regime is {'active' if own else 'a fallback (UP reference)'} — confirm applicable law with an advocate if not a dedicated regime." if not own else "", className="text-muted d-block mb-3"),
-        ]),
     ]
 
 
@@ -1463,70 +1526,70 @@ def render_category_content(category, society_id=None, state=None, constitution=
             _render_image_capture_control("society", "bg", _imgs.get("bg"), society_id),
         ]
     elif category == "Legal Regime Selection":
+        # The six Yes/No answers come from the saved draft, so they survive a reload and the table below starts out right.
+        lr = _saved_legal_answers(society_id)
+
+        def yes_no(component_id, key):
+            return dbc.RadioItems(id=component_id, options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}],
+                                  value=lr[key], inline=True, className="mb-3")
+
+        try:
+            hierarchy_rows, _ = legal_hierarchy_rows(society_id, state, lr, constitution)
+        except Exception:                                                      # noqa: BLE001
+            _log.exception("Legal Hierarchy could not be rendered")
+            hierarchy_rows = []
         return elements + [
-            _render_banner("Legal Regime Selection", "Your State and Constitution together determine the legal regime. The hierarchy below shows how rules flow \u2014 a lower layer can never loosen a higher one."),
-            # State/Constitution are only persisted on submit, so this block is re-rendered live from the
-            # Society Details dropdowns (refresh_state_dependent_steps). It is its own container so that
-            # re-rendering does not reset the Central Act radios further down this step.
+            _render_banner("Legal Regime Selection", "Your State and Constitution, chosen on the Society Details step, decide which Acts, Rules and Bye-laws govern the society. "
+                                                     "A lower level can never loosen a higher one."),
+            # State/Constitution are only persisted on Next, so this card is re-rendered live from the Society Details dropdowns
+            # (legal_regime_refresh). It is its own container so that re-rendering does not reset the radios further down this step.
             html.Div(id="sw-legal-regime-live", children=legal_regime_live(society_id, state, constitution)),
             html.Hr(),
-            html.H6([html.I(className="fas fa-landmark me-2"), "Central Act Settings"], className="text-primary mt-3 mb-2"),
-            html.P("The Layer 0 Central Acts below apply to every society whatever you answer; nothing here is a choice. What depends on your society's facts is whether a duty "
+            html.H6([html.I(className="fas fa-sliders-h me-2"), "Central Act Settings"], className="text-primary mt-3 mb-2"),
+            html.P("The Central Acts below apply to every society whatever you answer; nothing here is a choice. What depends on your society's facts is whether a duty "
                    "under them has been triggered (a GST registration threshold, TDS on payments you make). All answers default to Yes; "
                    "answer No only on your CA's advice. TDS = No hides the TAN & TDS Rates step and GST = No hides the GSTIN & GST Rate step:", className="text-muted small mb-3"),
             dbc.Row([
-                dbc.Col([
-                    _label("Income Tax — TAN Required?"),
-                    dbc.RadioItems(id="sw-central-it-tan", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3"),
-                ], width=6),
-                dbc.Col([
-                    _label("TDS Applicable?"),
-                    dbc.RadioItems(id="sw-central-tds", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3"),
-                ], width=6),
+                dbc.Col([_label("Income Tax — TAN Required?"), yes_no("sw-central-it-tan", "central_it_tan")], width=6),
+                dbc.Col([_label("TDS Applicable?"), yes_no("sw-central-tds", "central_tds")], width=6),
             ]),
             dbc.Row([
-                dbc.Col([
-                    _label("GST Applicable?"),
-                    dbc.RadioItems(id="sw-central-gst", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3"),
-                ], width=6),
-                dbc.Col([
-                    _label("RERA - is the project RERA-registered? (handover rules only)"),
-                    dbc.RadioItems(id="sw-central-rera", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=True, inline=True, className="mb-3"),
-                ], width=6),
+                dbc.Col([_label("GST Applicable?"), yes_no("sw-central-gst", "central_gst")], width=6),
+                dbc.Col([_label("RERA - is the project RERA-registered? (handover rules only)"), yes_no("sw-central-rera", "central_rera")], width=6),
             ]),
             html.H6("Operational Laws (Yes / No)", className="text-primary mt-4 mb-2"),
-            html.P("These decide whether employment or security-agency instruments are Active on this page "
-                   "and in Annex A. Default No.", className="text-muted small mb-2"),
+            html.P("These decide whether the employment and security-agency laws are In-active or Locked in the table below and in Annex A. Default No.", className="text-muted small mb-2"),
             dbc.Row([
-                dbc.Col([
-                    _label("Does the society have employees?"),
-                    dbc.RadioItems(id="sw-central-employees", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=False, inline=True, className="mb-3"),
-                ], width=6),
-                dbc.Col([
-                    _label("Does the society engage a security agency?"),
-                    dbc.RadioItems(id="sw-central-security-agency", options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}], value=False, inline=True, className="mb-3"),
-                ], width=6),
+                dbc.Col([_label("Does the society have employees?"), yes_no("sw-central-employees", "has_employees")], width=6),
+                dbc.Col([_label("Does the society engage a security agency?"), yes_no("sw-central-security-agency", "has_security_agency")], width=6),
             ]),
             html.Hr(),
-            html.H6([html.I(className="fas fa-landmark me-2"), "Central Acts (Layer 0 - apply to every society, not a choice)"], className="text-primary mt-3 mb-2"),
+            html.H6([html.I(className="fas fa-landmark me-2"), "Central Acts (Layer 0 - apply to every society, not a choice)",
+                     dbc.Badge("informational", color="secondary", pill=True, className="ms-2", style={"fontSize": "10px"})], className="text-primary mt-3 mb-2"),
+            html.P("Nothing in this table is entered or chosen here. The figures themselves go on the TAN & TDS Rates and GSTIN & GST Rate steps.", className="text-muted small mb-2"),
             _central_acts_banner(),
+            dbc.Alert([
+                html.Strong("Verification: ", className="me-1"),
+                "Master Settings → RWA Compliance verifies every Central Act, Central Rule and Bye-law, and every State Act, State Rule and Model Bye-law, listed in the table below. "
+                "A Treasurer or an Auditor opens the source text and records the notification number, date and opinion reference there; the row then turns ",
+                verification_badge(True), " and its name links to the source text. A ", verification_badge(False),
+                " row is shown for information only and never drives enforcement. Confirm the applicable law with your advocate — nothing here is a legal opinion.",
+            ], color="info", className="py-2 mt-3", style={"fontSize": "12.5px"}),
             html.Hr(),
             html.H6("Legal Hierarchy (Precedence Order)", className="text-primary mt-4 mb-2"),
-            html.P("This page is part of the Agreement. It is sealed as Annex A and signed by the office-bearers.", className="text-muted small mb-2"),
+            html.P("Highest level first. This page is part of the Agreement. It is sealed as Annex A and signed by the office-bearers.", className="text-muted small mb-2"),
             dbc.Table([
                 html.Thead(html.Tr([
-                    html.Th("Level", style={"fontSize": "11px", "width": "170px"}),
+                    html.Th("Level", style={"fontSize": "11px", "width": "190px"}),
                     html.Th("Name", style={"fontSize": "11px"}),
                     html.Th("Status", style={"fontSize": "11px", "width": "120px"}),
                 ])),
-                html.Tbody(id="sw-legal-hierarchy-body"),
+                html.Tbody(id="sw-legal-hierarchy-body", children=hierarchy_rows),
             ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
-            dbc.Alert([
-                html.Strong("Verification — why “unverified” everywhere: ", className="me-2"),
-                "Every catalog row starts as “unverified” (the database default). A Treasurer or an Auditor verifies a row in Master Settings → RWA Compliance (UP): "
-                "they open the source text and record the notification number, verification date and an opinion reference, after which the row becomes “verified” and its link opens the source text. "
-                "Until then the row is shown for information only and never drives enforcement. Confirm applicable law with your advocate — nothing here is a legal opinion.",
-            ], color="info", className="py-2 mt-3", style={"fontSize": "12.5px"}),
+            html.Div([legal_status_badge("locked"), " fixed by law, applies to every society · ",
+                      legal_status_badge("inactive"), " listed, but not triggered by your Yes/No answers (or superseded) · ",
+                      legal_status_badge("provisional"), " not final until adopted · ",
+                      legal_status_badge("normal"), " day-to-day governance"], className="small text-muted mt-2"),
         ]
     elif category == "TAN & TDS Rates":
         from database.seed import tds_wizard_rows
