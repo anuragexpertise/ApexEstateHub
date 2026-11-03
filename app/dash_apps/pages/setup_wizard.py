@@ -1099,7 +1099,9 @@ def render_review(draft, society_id=None):
     funds = draft.get("funds") or {}
     accts = draft.get("accounts") or {}
     bf = draft.get("brought_forward") or {}
-    images = draft.get("images") or {}
+    images = dict(draft.get("images") or {})
+    if accts.get("pay_qr"):
+        images["pay_qr"] = accts["pay_qr"]          # the payment QR is saved under the Accounts step
     admin = draft.get("administrator") or {}
 
     basis = funds.get("apt_billing_basis") or "undivided_interest"

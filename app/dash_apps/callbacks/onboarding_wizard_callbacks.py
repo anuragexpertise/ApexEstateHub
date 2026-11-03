@@ -67,7 +67,7 @@ def _gather(states_list):
         if isinstance(item, list):
             for sub in item:
                 iid = sub.get("id") or {}
-                idx = iid.get("index") if "index" in iid else iid.get("acc_id")
+                idx = iid.get("index") if "index" in iid else (iid.get("acc_id") if "acc_id" in iid else iid.get("field"))
                 out.setdefault(iid.get("type"), {})[idx] = sub.get("value")
             continue
         iid = item.get("id")
@@ -119,6 +119,13 @@ def _bf_rows(form):
     return rows
 
 
+def _uploaded(form, field):
+    """Saved filename of a wizard image upload/camera capture (the hidden form-field-hidden value), else None.
+    A raw 'data:image' value is a capture still being converted to a file, so it is not stored."""
+    val = (form.get("form-field-hidden") or {}).get(field)
+    return val if isinstance(val, str) and val.strip() and not val.startswith("data:") else None
+
+
 def _to_step_values(step_key, form):
     """Map live form values -> draft fields for one step, keyed by DRAFT key (wizard_registry.STEP_KEYS)."""
     v = {}
@@ -126,7 +133,8 @@ def _to_step_values(step_key, form):
         v = {"address": form.get("sw-society-address"), "email": form.get("sw-society-email"),
              "phone": form.get("sw-society-phone"), "state": form.get("sw-society-state"),
              "constitution": form.get("sw-society-constitution"),
-             "gate_logic": form.get("sw-gate-logic"), "duty_hrs": form.get("sw-duty-hrs")}
+             "gate_logic": form.get("sw-gate-logic"), "duty_hrs": form.get("sw-duty-hrs"),
+             "logo": _uploaded(form, "logo"), "bg": _uploaded(form, "bg")}
     elif step_key == "administrator":
         v = {"stepup_secret": form.get("sw-qr-secret"), "stepup_confirm": form.get("sw-qr-secret-confirm")}
     elif step_key == "legal_regime":
@@ -150,7 +158,8 @@ def _to_step_values(step_key, form):
         v = {"vendor_1day": form.get("sw-ven-1day"), "vendor_7day": form.get("sw-ven-7day"),
              "vendor_1mth": form.get("sw-ven-1mth")}
     elif step_key == "accounts":
-        v = {"calc_start": _iso(form.get("sw-calc-start-date")) or str(_fy_start_date())}
+        v = {"calc_start": _iso(form.get("sw-calc-start-date")) or str(_fy_start_date()),
+             "pay_qr": _uploaded(form, "pay_qr")}
     elif step_key == "brought_forward":
         v = {"fy": form.get("sw-bf-fy"), "rows": _bf_rows(form),
              "receivables": form.get("onb-receivables-json"),
@@ -262,6 +271,8 @@ def register_onboarding_wizard_callbacks(app):
         State({"type": "tds-rate-no-pan", "index": ALL}, "value"), State({"type": "tds-single-bill", "index": ALL}, "value"),
         State({"type": "tds-agg-bill", "index": ALL}, "value"),
         State({"type": "sw-bf-amt", "acc_id": ALL}, "value"), State({"type": "sw-bf-remarks", "acc_id": ALL}, "value"),
+        # saved filenames of the logo / login background / payment QR uploads (hidden inputs, keyed by field)
+        State({"type": "form-field-hidden", "entity": "society", "field": ALL}, "value"),
         prevent_initial_call=True,
     )
     @require_session
