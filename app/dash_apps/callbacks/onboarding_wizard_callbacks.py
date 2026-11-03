@@ -126,7 +126,11 @@ def _to_step_values(step_key, form):
              "has_employees": form.get("sw-central-employees"),
              "has_security_agency": form.get("sw-central-security-agency")}
     elif step_key == "funds":
-        v = {"apt_sinking": form.get("sw-apt-sinking"), "apt_repair": form.get("sw-apt-repair")}
+        v = {"apt_cost": form.get("sw-apt-cost"), "apt_budget": form.get("sw-apt-budget"),
+             "apt_rate": form.get("sw-apt-rate"), "apt_amt": form.get("sw-apt-amt"),
+             "apt_billing_basis": form.get("sw-apt-billing-basis"), "apt_due_day": form.get("sw-apt-due"),
+             "apt_interest": form.get("sw-apt-interest"), "apt_sinking": form.get("sw-apt-sinking"),
+             "apt_repair": form.get("sw-apt-repair")}
     elif step_key == "tds":
         v = {"tan": form.get("sw-society-tan"), "effective_date": form.get("sw-tds-effective-date"),
              "rows": _tds_rows(form)}
