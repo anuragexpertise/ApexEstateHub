@@ -160,7 +160,7 @@ def _fix_label(target: str) -> str:
     return "Fix in " + ("Founding committee" if target == "committee" else step_label(target))
 
 
-def _controls(code: str, a: dict, sealed_ok: bool = False):
+def _controls(code: str, a: dict, society_id: int, sealed_ok: bool = False):
     ctl = a["controls_json"] if isinstance(a["controls_json"], dict) else json.loads(a["controls_json"] or "{}")
     rows = []
     for k, c in ctl.items():
@@ -180,11 +180,11 @@ def _controls(code: str, a: dict, sealed_ok: bool = False):
     body = [html.Div([html.Strong(titles[code]), html.Span("  "), badge, html.Span(f"  SHA-256 {a['content_hash'][:16]}...", style=_MUTED)]),
             html.Ul(rows, style={"padding": "0", "margin": "6px 0 0"})]
     if code == "B":
-        body.append(_annex_b_signatures(a))
+        body.append(_annex_b_signatures(a, society_id))
     return html.Div(body, style=_CARD)
 
 
-def _annex_b_signatures(a: dict):
+def _annex_b_signatures(a: dict, society_id: int):
     """Thumbnails of the office-bearers' signature images exactly as recorded in Annex B (read from the annex, not the live record)."""
     content = a.get("content") or {}
     if isinstance(content, str):
@@ -197,8 +197,8 @@ def _annex_b_signatures(a: dict):
         o = (content.get("office_bearers") or {}).get(office)
         if not o:
             continue
-        path = o.get("signature_image")
-        thumb = (html.Img(src=f"/assets/{path}", alt=f"Signature of {o.get('name')}",
+        path = ob.signature_url(society_id, o.get("signature_image"))
+        thumb = (html.Img(src=path, alt=f"Signature of {o.get('name')}",
                           style={"maxWidth": "120px", "maxHeight": "60px", "border": "1px solid #c9d2dc", "borderRadius": "4px", "background": "#fff"})
                  if path else html.Span("no signature image", style={"fontSize": "11.5px", "color": "#c0392b"}))
         items.append(html.Div([thumb, html.Div(f"{ob.OFFICE_LABEL[office]}: {o.get('name')}", style={"fontSize": "11.5px", "marginTop": "2px"}),
@@ -235,7 +235,7 @@ def _stage_annexes(society_id: int):
         return out
     for code in codes:
         if code in drafts:
-            out.append(_controls(code, drafts[code]))
+            out.append(_controls(code, drafts[code], society_id))
     ready = len(drafts) == len(codes) and all(v["status"] != "sealed" and not v["blocking"] for v in drafts.values())
     if ready:
         out.append(html.Div([
