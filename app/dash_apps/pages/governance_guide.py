@@ -45,6 +45,8 @@ LAYERS_NOTE = ("A society's choice at layers 1 to 3 stays provisional until a ma
 WHO_EDITS = [
     ("catalog", "Legal instrument catalog (RWA Compliance (UP))", EDIT, VIEW, VIEW,
      "Master edits status, provisions, source link and verified date."),
+    ("catalog_india", "Legal instrument catalog (RWA Compliance (INDIA))", EDIT, VIEW, VIEW,
+     "Master edits status, provisions, source link and verified date."),
     ("rules", "Statute & Policy rule values (Rules)", EDIT, VIEW, VIEW,
      "Master uses Change a rule; each change is dated and audited."),
     ("ruledec", "Society decision on a Policy rule (Rules, Edit)", NONE, EDIT, VIEW,
