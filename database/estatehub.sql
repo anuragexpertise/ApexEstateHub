@@ -75,8 +75,17 @@ CREATE TABLE societies (
     state VARCHAR(50),
     -- How the society is constituted; with `state` it selects the legal scheme (fn_sync_society_regime).
     -- Existing societies were all treated as apartment owners' associations, hence the default.
-    constitution VARCHAR(20) NOT NULL DEFAULT 'AOA' CHECK (constitution IN ('AOA', 'REG_SOCIETY', 'COOP', 'GENERIC')),
-    undivided_interest_basis VARCHAR(12) CHECK (undivided_interest_basis IN ('area', 'declaration')), -- how flats' undivided-interest % were set: derived from area, or typed from the Declaration
+    constitution VARCHAR(20) NOT NULL DEFAULT 'AOA' CHECK (
+        constitution IN (
+            'AOA',
+            'REG_SOCIETY',
+            'COOP',
+            'GENERIC'
+        )
+    ),
+    undivided_interest_basis VARCHAR(12) CHECK (
+        undivided_interest_basis IN ('area', 'declaration')
+    ), -- how flats' undivided-interest % were set: derived from area, or typed from the Declaration
     -- stepup_password_hash: one-way hash (werkzeug, like login passwords) of the admin's step-up password. It
     -- signs nothing; it only confirms sensitive actions (QR reissue, key rotation). Signing keys live in
     -- society_signing_keys (wrapped under SECRET_VAULT_KEY). NULL means the Setup Wizard is not finished, which
@@ -87,7 +96,9 @@ CREATE TABLE societies (
     -- 'warn' (default NULL behaviour) logs an over-limit cash payment,
     -- 'block' refuses it. Kept as society data rather than a global switch
     -- because the rule is enforced per AOA bye-laws / general-body resolution.
-    cash_limit_mode VARCHAR(5) CHECK (cash_limit_mode IN ('warn', 'block')),
+    cash_limit_mode VARCHAR(5) CHECK (
+        cash_limit_mode IN ('warn', 'block')
+    ),
     -- V5 onboarding state machine. Registered societies start at 'registered'.
     -- The Setup Wizard drafts move it to 'setup draft'; the activation function
     -- (V5.7) moves it to 'active' only when all four Agreement signatures are
@@ -95,8 +106,15 @@ CREATE TABLE societies (
     -- post receipts, expenses or journals, generate bills, or log in a resident
     -- (enforced by trg_onboarding_guard on receipts/expenses/transactions and
     -- app/security/setup_guard.py for logins).
-    onboarding_state VARCHAR(20) NOT NULL DEFAULT 'registered'
-        CHECK (onboarding_state IN ('registered', 'committee seated', 'setup draft', 'active', 'suspended')),
+    onboarding_state VARCHAR(20) NOT NULL DEFAULT 'registered' CHECK (
+        onboarding_state IN (
+            'registered',
+            'committee seated',
+            'setup draft',
+            'active',
+            'suspended'
+        )
+    ),
     -- V5: grievance officer named at the founding committee stage (V5.3), shown
     -- on the login page and in every notice (DPDP obligation). The admin may hold
     -- this capacity in addition to setup custody; it is not a signing office.
@@ -106,7 +124,7 @@ CREATE TABLE societies (
     -- V5.6b: per-society eSign toggle. When TRUE the Agreement (and any record whose
     -- signer_policy demands it) must be signed by the eSign adapter (aadhaar_eSign /
     -- dsc / paper) instead of a password confirmation. Default No (FALSE).
-    ,
+,
     esign_required BOOLEAN NOT NULL DEFAULT FALSE
 );
 
@@ -125,13 +143,16 @@ CREATE TABLE onboarding_declarations (
     created_by        INT,
     submitted_at      TIMESTAMP
 );
+
 CREATE INDEX idx_onboarding_declarations_society ON onboarding_declarations (society_id);
+
 CREATE OR REPLACE FUNCTION fn_trg_onboarding_declarations_updated_at() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
     NEW.updated_at := NOW();
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER trg_onboarding_declarations_updated_at
     BEFORE UPDATE ON onboarding_declarations
     FOR EACH ROW
@@ -157,14 +178,20 @@ CREATE TABLE onboarding_annexes (
     updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (society_id, annex_code, status)
 );
+
 CREATE INDEX idx_onboarding_annexes_society ON onboarding_annexes (society_id);
-CREATE INDEX idx_onboarding_annexes_blocking ON onboarding_annexes (society_id, blocking) WHERE blocking;
+
+CREATE INDEX idx_onboarding_annexes_blocking ON onboarding_annexes (society_id, blocking)
+WHERE
+    blocking;
+
 CREATE OR REPLACE FUNCTION fn_trg_onboarding_annexes_updated_at() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
     NEW.updated_at := NOW();
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER trg_onboarding_annexes_updated_at
     BEFORE UPDATE ON onboarding_annexes
     FOR EACH ROW
@@ -286,17 +313,30 @@ CREATE TABLE accounts (
     -- an absolute amount so the lock survives further contributions: a Corpus
     -- Fund that accrues is still fully locked, while a fund an admin
     -- deliberately unlocks just sets 0.
-    statutory_lock_pct NUMERIC(5,2) NOT NULL DEFAULT 0
-        CHECK (statutory_lock_pct >= 0 AND statutory_lock_pct <= 100),
-    is_gst_exempt_supply BOOLEAN DEFAULT FALSE,   -- legacy: superseded by gst_supply_class (X-02)
+    statutory_lock_pct NUMERIC(5, 2) NOT NULL DEFAULT 0 CHECK (
+        statutory_lock_pct >= 0
+        AND statutory_lock_pct <= 100
+    ),
+    is_gst_exempt_supply BOOLEAN DEFAULT FALSE, -- legacy: superseded by gst_supply_class (X-02)
     -- X-02: the society's classification for the s.2(6) aggregate-turnover worksheet. NULL = use the default by
     -- ledger head where the head is unambiguous, otherwise unclassified.
-    gst_supply_class VARCHAR(14) CHECK (gst_supply_class IN ('taxable', 'exempt', 'not_a_supply', 'tax')),
+    gst_supply_class VARCHAR(14) CHECK (
+        gst_supply_class IN (
+            'taxable',
+            'exempt',
+            'not_a_supply',
+            'tax'
+        )
+    ),
     gst_class_ref TEXT,
-    CONSTRAINT ck_gst_class_ref CHECK (gst_supply_class IS NULL OR gst_supply_class = 'taxable'
-        OR LENGTH(BTRIM(COALESCE(gst_class_ref, ''))) >= 5)
+    CONSTRAINT ck_gst_class_ref CHECK (
+        gst_supply_class IS NULL
+        OR gst_supply_class = 'taxable'
+        OR LENGTH(
+            BTRIM (COALESCE(gst_class_ref, ''))
+        ) >= 5
+    )
 );
-
 
 CREATE TABLE apartments (
     id SERIAL PRIMARY KEY,
@@ -371,23 +411,24 @@ CREATE TABLE security_staff (
 
 -- Direct employees for EPF/ESIC tracking (distinct from security_staff)
 CREATE TABLE employees (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    name                VARCHAR(100) NOT NULL,
-    designation         VARCHAR(50),
-    department          VARCHAR(50),
-    pan_number          VARCHAR(10),
-    uan_number          VARCHAR(20),          -- Universal Account Number for EPF
-    esic_number         VARCHAR(20),
-    date_of_joining     DATE NOT NULL,
-    date_of_leaving     DATE,
-    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
-    basic_salary        NUMERIC(12,2),
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at          TIMESTAMP,
-    updated_by          INT REFERENCES users (id)
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    designation VARCHAR(50),
+    department VARCHAR(50),
+    pan_number VARCHAR(10),
+    uan_number VARCHAR(20), -- Universal Account Number for EPF
+    esic_number VARCHAR(20),
+    date_of_joining DATE NOT NULL,
+    date_of_leaving DATE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    basic_salary NUMERIC(12, 2),
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP,
+    updated_by INT REFERENCES users (id)
 );
+
 CREATE INDEX idx_employees_society ON employees (society_id, is_active);
 
 -- Same DROP-then-reset-DEFAULT treatment as users above — see that
@@ -448,7 +489,7 @@ CREATE TABLE deposits (
     disposed_by INT REFERENCES users (id),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
-    institution_type VARCHAR(50)  -- classifies the holding for fn_investment_check
+    institution_type VARCHAR(50) -- classifies the holding for fn_investment_check
 );
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -764,30 +805,39 @@ CREATE TABLE concerns_assigns (
 -- illegal jumps and is idempotent on (assignment_id, from_state, to_state, actor).
 -- ════════════════════════════════════════════════════════════════════════
 CREATE TABLE concern_transitions (
-    id              SERIAL PRIMARY KEY,
-    concern_id      INT NOT NULL REFERENCES concerns (id) ON DELETE CASCADE,
-    assignment_id   INT REFERENCES concerns_assigns (id) ON DELETE SET NULL,
-    society_id      INT REFERENCES societies (id) ON DELETE CASCADE,
-    entity_role     VARCHAR(10) CHECK (entity_role IN ('ADM', 'VND', 'SEC')),
-    entity_id       INT,
-    from_state      VARCHAR(20),
-    to_state        VARCHAR(20) NOT NULL CHECK (
-        to_state IN ('invited', 'bid_submitted', 'declined', 'assigned',
-                     'accepted', 'resolved', 'closed')
+    id SERIAL PRIMARY KEY,
+    concern_id INT NOT NULL REFERENCES concerns (id) ON DELETE CASCADE,
+    assignment_id INT REFERENCES concerns_assigns (id) ON DELETE SET NULL,
+    society_id INT REFERENCES societies (id) ON DELETE CASCADE,
+    entity_role VARCHAR(10) CHECK (
+        entity_role IN ('ADM', 'VND', 'SEC')
     ),
-    actor_id        INT REFERENCES users (id),
-    permission_used VARCHAR(60),  -- e.g. 'concern.assign', 'concern.resolve'
-    comment         TEXT,
-    evidence        JSONB,        -- doc_hash / correlation_id / before-after snapshot
-    correlation_id  UUID,
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    entity_id INT,
+    from_state VARCHAR(20),
+    to_state VARCHAR(20) NOT NULL CHECK (
+        to_state IN (
+            'invited',
+            'bid_submitted',
+            'declined',
+            'assigned',
+            'accepted',
+            'resolved',
+            'closed'
+        )
+    ),
+    actor_id INT REFERENCES users (id),
+    permission_used VARCHAR(60), -- e.g. 'concern.assign', 'concern.resolve'
+    comment TEXT,
+    evidence JSONB, -- doc_hash / correlation_id / before-after snapshot
+    correlation_id UUID,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_concern_transitions_concern
-    ON concern_transitions (concern_id, created_at);
-CREATE INDEX idx_concern_transitions_assignment
-    ON concern_transitions (assignment_id, created_at);
-CREATE INDEX idx_concern_transitions_society
-    ON concern_transitions (society_id, created_at);
+
+CREATE INDEX idx_concern_transitions_concern ON concern_transitions (concern_id, created_at);
+
+CREATE INDEX idx_concern_transitions_assignment ON concern_transitions (assignment_id, created_at);
+
+CREATE INDEX idx_concern_transitions_society ON concern_transitions (society_id, created_at);
 
 -- ── security_roster & attendance (needed before payables FK) ──
 CREATE TABLE security_roster (
@@ -910,8 +960,14 @@ CREATE TABLE receivables (
     -- the Association assesses on owners (Act s.2 "common expenses"). 'transfer_fee' = the bye-law
     -- transfer fee: payable by the TRANSFEROR on a sale, so it is not a common-expense arrear for
     -- bye-law 7 or the s.22 six-month test (and does not pass to a purchaser under s.23).
-    charge_kind VARCHAR(20) NOT NULL DEFAULT 'common_expense'
-        CHECK (charge_kind IN ('common_expense', 'transfer_fee', 'depreciation_fund', 'other')),
+    charge_kind VARCHAR(20) NOT NULL DEFAULT 'common_expense' CHECK (
+        charge_kind IN (
+            'common_expense',
+            'transfer_fee',
+            'depreciation_fund',
+            'other'
+        )
+    ),
     -- Task 1.6: the GST exemption authority this line relied on when it was issued, copied then so that a later change
     -- to the settings cannot rewrite what an old bill said. NULL on a line that relies on no exemption.
     gst_exempt_authority TEXT
@@ -948,7 +1004,11 @@ CREATE TABLE receivable_disputes (
             AND LENGTH(BTRIM(COALESCE(decision_reason, ''))) > 0
             AND LENGTH(BTRIM(COALESCE(decision_resolution_ref, ''))) > 0))
 );
-CREATE UNIQUE INDEX uq_receivable_dispute_open ON receivable_disputes (receivable_id) WHERE status = 'open';
+
+CREATE UNIQUE INDEX uq_receivable_dispute_open ON receivable_disputes (receivable_id)
+WHERE
+    status = 'open';
+
 CREATE INDEX idx_receivable_disputes_society ON receivable_disputes (society_id, status);
 
 -- Is this bill held by a dispute on that date? Date-based (not status-based) so a past "as at" test, such as the
@@ -978,6 +1038,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_receivable_dispute_guard BEFORE UPDATE OR DELETE ON receivable_disputes
     FOR EACH ROW EXECUTE FUNCTION fn_trg_receivable_dispute_guard();
 
@@ -1000,14 +1061,15 @@ END $$;
 -- paid_on is the posting date (CURRENT_DATE) unless the session sets app.payment_date
 -- (SET LOCAL app.payment_date = 'YYYY-MM-DD') to back-date a late-entered receipt.
 CREATE TABLE receivable_payment_log (
-    id              BIGSERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    receivable_id   INT NOT NULL REFERENCES receivables (id) ON DELETE CASCADE,
-    paid_on         DATE NOT NULL,
+    id BIGSERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    receivable_id INT NOT NULL REFERENCES receivables (id) ON DELETE CASCADE,
+    paid_on DATE NOT NULL,
     principal_delta NUMERIC(12, 2) NOT NULL,
-    total_delta     NUMERIC(12, 2) NOT NULL,
-    logged_at       TIMESTAMP NOT NULL DEFAULT NOW()
+    total_delta NUMERIC(12, 2) NOT NULL,
+    logged_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_receivable_payment_log_rec ON receivable_payment_log (receivable_id, paid_on);
 
 CREATE OR REPLACE FUNCTION fn_trg_log_receivable_payment() RETURNS TRIGGER
@@ -1038,6 +1100,7 @@ CREATE TRIGGER trg_receivable_payment_log_upd
     FOR EACH ROW
     WHEN (NEW.paid_amount IS DISTINCT FROM OLD.paid_amount OR NEW.paid_principal IS DISTINCT FROM OLD.paid_principal)
     EXECUTE FUNCTION fn_trg_log_receivable_payment();
+
 CREATE TRIGGER trg_receivable_payment_log_ins
     AFTER INSERT ON receivables
     FOR EACH ROW
@@ -1090,8 +1153,7 @@ CREATE TABLE bank_statement_lines (
     -- The bank account a line belongs to can never be another society's
     -- account. A single-column FK on bank_acc_id alone would permit exactly
     -- that, because accounts.id is only unique per society.
-    CONSTRAINT fk_bank_lines_account FOREIGN KEY (society_id, bank_acc_id)
-        REFERENCES accounts (society_id, id) ON DELETE SET NULL
+    CONSTRAINT fk_bank_lines_account FOREIGN KEY (society_id, bank_acc_id) REFERENCES accounts (society_id, id) ON DELETE SET NULL
 );
 
 -- ── RECEIPTS — manual credits, deemed paid on creation ────────
@@ -1304,7 +1366,9 @@ CREATE TABLE fund_utilizations (
     approval_ref VARCHAR(255), -- General Body / Managing Committee resolution reference
     approval_date DATE, -- date of the resolution
     -- Signatures needed before the money moves; frozen when the withdrawal is requested (fund_spend_policy).
-    signatories_required INT NOT NULL DEFAULT 1 CHECK (signatories_required BETWEEN 1 AND 5),
+    signatories_required INT NOT NULL DEFAULT 1 CHECK (
+        signatories_required BETWEEN 1 AND 5
+    ),
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
         status IN (
             'pending', -- awaiting admin confirmation
@@ -1339,11 +1403,11 @@ CREATE TABLE fund_utilizations (
 -- sets one.
 -- ═══════════════════════════════════════════════════════════════════════════
 CREATE TABLE fund_bank_account_map (
-    society_id  INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     fund_acc_id INT NOT NULL,
     bank_acc_id INT NOT NULL,
-    updated_by  INT REFERENCES users (id),
-    updated_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_by INT REFERENCES users (id),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     PRIMARY KEY (society_id, fund_acc_id),
     FOREIGN KEY (society_id, fund_acc_id) REFERENCES accounts (society_id, id) ON DELETE CASCADE,
     FOREIGN KEY (society_id, bank_acc_id) REFERENCES accounts (society_id, id) ON DELETE CASCADE
@@ -1369,7 +1433,10 @@ CREATE TABLE fund_appropriations (
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     user_id INT REFERENCES users (id), -- admin who initiated
     from_income_acc_id INT NOT NULL, -- Cr-natured income account (e.g. Interest Income)
-    FOREIGN KEY (society_id, from_income_acc_id) REFERENCES accounts (society_id, id),
+    FOREIGN KEY (
+        society_id,
+        from_income_acc_id
+    ) REFERENCES accounts (society_id, id),
     to_fund_acc_id INT NOT NULL, -- Cr-natured fund/equity account being topped up
     FOREIGN KEY (society_id, to_fund_acc_id) REFERENCES accounts (society_id, id),
     particulars TEXT NOT NULL,
@@ -1377,7 +1444,11 @@ CREATE TABLE fund_appropriations (
     approval_ref VARCHAR(255), -- General Body / Managing Committee resolution reference
     approval_date DATE,
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
-        status IN ('pending', 'confirmed', 'cancelled')
+        status IN (
+            'pending',
+            'confirmed',
+            'cancelled'
+        )
     ),
     confirmed_by INT REFERENCES users (id),
     confirmed_at TIMESTAMP,
@@ -1388,15 +1459,18 @@ CREATE TABLE fund_appropriations (
 -- The card's appropriation log (and the pending-confirm scan behind it)
 -- reads this table newest-first per society; without this it is a seq scan
 -- over every appropriation ever made, on every Fund Management render.
-CREATE INDEX idx_fund_appropr_society_created
-    ON fund_appropriations (society_id, created_at DESC, id DESC);
+CREATE INDEX idx_fund_appropr_society_created ON fund_appropriations (
+    society_id,
+    created_at DESC,
+    id DESC
+);
 
 -- Partial on the rows that actually have work outstanding — pending rows
 -- are a small slice of the table but are the only ones ever looked up by
 -- status.
-CREATE INDEX idx_fund_appropr_pending
-    ON fund_appropriations (society_id, created_at DESC)
-    WHERE status = 'pending';
+CREATE INDEX idx_fund_appropr_pending ON fund_appropriations (society_id, created_at DESC)
+WHERE
+    status = 'pending';
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FY CLOSURES — one row per society per financial year, recording that the
@@ -1424,17 +1498,18 @@ CREATE TABLE fy_closures (
     financial_year SMALLINT NOT NULL, -- START year of FY, e.g. 2026 = FY 1-Apr-2026..31-Mar-2027
     -- Net surplus computed at close time, Cr-positive (same convention as
     -- fn_fy_closing_report's own_closing). Negative = deficit.
-    surplus NUMERIC(15,2) NOT NULL DEFAULT 0,
+    surplus NUMERIC(15, 2) NOT NULL DEFAULT 0,
     -- The percentage of surplus that was appropriated, e.g. 25.00. Stored
     -- per-closure rather than read from a settings table so that a later
     -- change to the society's policy cannot retroactively rewrite what a
     -- past year's close actually did.
-    reserve_pct NUMERIC(5,2) NOT NULL DEFAULT 0
-        CHECK (reserve_pct >= 0 AND reserve_pct <= 100),
+    reserve_pct NUMERIC(5, 2) NOT NULL DEFAULT 0 CHECK (
+        reserve_pct >= 0
+        AND reserve_pct <= 100
+    ),
     -- Amount actually credited to the reserve account. May be less than
     -- surplus * reserve_pct/100 only via ROUND; it is 0 for a deficit close.
-    reserve_transferred NUMERIC(15,2) NOT NULL DEFAULT 0
-        CHECK (reserve_transferred >= 0),
+    reserve_transferred NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (reserve_transferred >= 0),
     -- Which ledger account received the appropriation. Resolved
     -- jurisdiction-aware (see fn_resolve_reserve_account), never hardcoded.
     reserve_acc_id INT,
@@ -1445,27 +1520,26 @@ CREATE TABLE fy_closures (
     journal_id INT,
     status VARCHAR(20) NOT NULL DEFAULT 'closed' CHECK (
         status IN (
-            'closed',         -- year closed, appropriation posted
-            'no_surplus',     -- year closed, nothing appropriated (deficit or zero surplus)
-            'reversed'        -- administrator reversed the appropriation
+            'closed', -- year closed, appropriation posted
+            'no_surplus', -- year closed, nothing appropriated (deficit or zero surplus)
+            'reversed' -- administrator reversed the appropriation
         )
     ),
-    reversed_journal_id INT,       -- reversing journal, if status='reversed'
+    reversed_journal_id INT, -- reversing journal, if status='reversed'
     reversal_reason TEXT,
     closed_by INT REFERENCES users (id),
     closed_at TIMESTAMP NOT NULL DEFAULT NOW(),
     reversed_by INT REFERENCES users (id),
     reversed_at TIMESTAMP,
     CONSTRAINT uq_fy_closure UNIQUE (society_id, financial_year),
-    CONSTRAINT fk_fy_closure_reserve_acc
-        FOREIGN KEY (society_id, reserve_acc_id)
-        REFERENCES accounts (society_id, id) ON DELETE SET NULL,
-    CONSTRAINT fk_fy_closure_contra_acc
-        FOREIGN KEY (society_id, contra_acc_id)
-        REFERENCES accounts (society_id, id) ON DELETE SET NULL
+    CONSTRAINT fk_fy_closure_reserve_acc FOREIGN KEY (society_id, reserve_acc_id) REFERENCES accounts (society_id, id) ON DELETE SET NULL,
+    CONSTRAINT fk_fy_closure_contra_acc FOREIGN KEY (society_id, contra_acc_id) REFERENCES accounts (society_id, id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_fy_closures_society ON fy_closures (society_id, financial_year DESC);
+CREATE INDEX idx_fy_closures_society ON fy_closures (
+    society_id,
+    financial_year DESC
+);
 
 CREATE TABLE rcm_liability (
     id SERIAL PRIMARY KEY,
@@ -1562,7 +1636,11 @@ CREATE INDEX idx_bank_lines_batch ON bank_statement_lines (batch_id);
 -- Per-account statement lookup (2026-09). Partial on matched_id IS NULL
 -- because that is the only state the reconciliation screens ever filter by,
 -- and it keeps the index small on a table that keeps every historical line.
-CREATE INDEX idx_bank_lines_account ON bank_statement_lines (society_id, bank_acc_id, txn_date)
+CREATE INDEX idx_bank_lines_account ON bank_statement_lines (
+    society_id,
+    bank_acc_id,
+    txn_date
+)
 WHERE
     matched_id IS NULL;
 
@@ -1684,7 +1762,7 @@ CREATE TABLE transactions (
     created_by INTEGER REFERENCES users (id),
     journal_id INT,
     transaction_number VARCHAR(64) UNIQUE,
-    voucher_no INT,                      -- per-society voucher number shared by every leg of a journal (Plan v3 3.8); gapless
+    voucher_no INT, -- per-society voucher number shared by every leg of a journal (Plan v3 3.8); gapless
     bank_reconciled BOOLEAN NOT NULL DEFAULT TRUE,
     bank_line_id INT REFERENCES bank_statement_lines (id),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -1699,14 +1777,25 @@ CREATE TABLE transactions (
     ledger_hash VARCHAR(64),
     prev_ledger_hash VARCHAR(64),
     CONSTRAINT ck_transactions_reversal_shape CHECK (
-        (is_reversal = FALSE AND reverses_id IS NULL)
-        OR (is_reversal = TRUE AND reverses_id IS NOT NULL
-            AND NULLIF(BTRIM(reversal_reason), '') IS NOT NULL))
+        (
+            is_reversal = FALSE
+            AND reverses_id IS NULL
+        )
+        OR (
+            is_reversal = TRUE
+            AND reverses_id IS NOT NULL
+            AND NULLIF(BTRIM (reversal_reason), '') IS NOT NULL
+        )
+    )
 );
-CREATE UNIQUE INDEX uq_transactions_one_reversal_per_leg
-    ON transactions (reverses_id) WHERE reverses_id IS NOT NULL;
-CREATE UNIQUE INDEX uq_transactions_ledger_seq
-    ON transactions (society_id, ledger_seq) WHERE ledger_seq IS NOT NULL;
+
+CREATE UNIQUE INDEX uq_transactions_one_reversal_per_leg ON transactions (reverses_id)
+WHERE
+    reverses_id IS NOT NULL;
+
+CREATE UNIQUE INDEX uq_transactions_ledger_seq ON transactions (society_id, ledger_seq)
+WHERE
+    ledger_seq IS NOT NULL;
 
 -- ── Vendor passes ─────────────────────────────────────────────
 CREATE TABLE vendor_passes (
@@ -1764,7 +1853,7 @@ CREATE TABLE apt_charges_fines_basis (
     apt_maintenance_amount NUMERIC(10, 2) NOT NULL DEFAULT 1500, -- amount overide rate
     apt_maintenance_rate NUMERIC(10, 2) NOT NULL DEFAULT 3.0,
     apt_due_day INTEGER DEFAULT 5,
-    apt_interest_pct NUMERIC(10, 4),   -- no cap: the rate the General Body resolved
+    apt_interest_pct NUMERIC(10, 4), -- no cap: the rate the General Body resolved
     -- Task 1.9: the number of that General Body resolution. No resolution number = no interest is billed.
     interest_resolution_ref VARCHAR(100),
     apt_status BOOLEAN DEFAULT TRUE,
@@ -1772,7 +1861,7 @@ CREATE TABLE apt_charges_fines_basis (
     updated_at TIMESTAMP,
     -- created_by/updated_by removed: apt charge/fine basis is an
     -- admin-only settings table (no self-service, no PROFILE_ACTIONS).
-    apt_sinking_fund_rate NUMERIC(14, 4) DEFAULT 0,   -- no default rate, no cap (0 = not levied)
+    apt_sinking_fund_rate NUMERIC(14, 4) DEFAULT 0, -- no default rate, no cap (0 = not levied)
     apt_repair_fund_rate NUMERIC(14, 4) DEFAULT 0,
     charges_interest BOOLEAN DEFAULT TRUE,
     -- Billing basis:
@@ -1785,15 +1874,24 @@ CREATE TABLE apt_charges_fines_basis (
     -- A row with apt_id IS NULL is the SOCIETY default; a row with apt_id set
     -- overrides it for that one apartment, so apartments may differ.
     -- Sinking / repair fund levies stay per-sq-ft in all modes.
-    billing_basis VARCHAR(20) NOT NULL DEFAULT 'per_sqft'
-        CHECK (billing_basis IN ('per_sqft', 'undivided_interest', 'fixed')),
-    common_expense_budget_monthly NUMERIC(12, 2)
-        CHECK (common_expense_budget_monthly IS NULL OR common_expense_budget_monthly >= 0),
+    billing_basis VARCHAR(20) NOT NULL DEFAULT 'per_sqft' CHECK (
+        billing_basis IN (
+            'per_sqft',
+            'undivided_interest',
+            'fixed'
+        )
+    ),
+    common_expense_budget_monthly NUMERIC(12, 2) CHECK (
+        common_expense_budget_monthly IS NULL
+        OR common_expense_budget_monthly >= 0
+    ),
     -- Construction cost of the whole project (INR). Recorded at setup; it is the
     -- base for any fund whose basis is a % of construction cost, and a reference
     -- figure for the Declaration. It is NOT itself billed as maintenance.
-    project_construction_cost NUMERIC(14, 2)
-        CHECK (project_construction_cost IS NULL OR project_construction_cost >= 0)
+    project_construction_cost NUMERIC(14, 2) CHECK (
+        project_construction_cost IS NULL
+        OR project_construction_cost >= 0
+    )
 );
 
 -- ── Vendor charges ─────────────────────────────────────────────
@@ -1865,28 +1963,33 @@ CREATE TABLE brought_forward (
 --    scope 'platform' => applies system-wide (NULL society in assignments).
 --    scope 'society'  => must carry a society_id in user_role_assignments.
 CREATE TABLE role_definitions (
-    id          SERIAL PRIMARY KEY,
-    code        VARCHAR(40) NOT NULL,
-    scope       VARCHAR(10) NOT NULL CHECK (scope IN ('platform', 'society')),
-    name        VARCHAR(100) NOT NULL,
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(40) NOT NULL,
+    scope VARCHAR(10) NOT NULL CHECK (
+        scope IN ('platform', 'society')
+    ),
+    name VARCHAR(100) NOT NULL,
     description TEXT,
-    created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (code, scope)
 );
+
 CREATE INDEX idx_role_definitions_code ON role_definitions (code);
+
 CREATE INDEX idx_role_definitions_scope ON role_definitions (scope);
 
 -- 2. permissions — (resource, action) pairs the policy engine checks.
 --    resource is namespaced (e.g. 'concern', 'poll', 'finance', 'enrollment',
 --    'role', 'visitor'). action is the verb on that resource.
 CREATE TABLE permissions (
-    id          SERIAL PRIMARY KEY,
-    resource    VARCHAR(60) NOT NULL,
-    action      VARCHAR(60) NOT NULL,
+    id SERIAL PRIMARY KEY,
+    resource VARCHAR(60) NOT NULL,
+    action VARCHAR(60) NOT NULL,
     description TEXT,
-    created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (resource, action)
 );
+
 CREATE INDEX idx_permissions_resource ON permissions (resource);
 
 -- 3. role_permissions — GRANT: which role_definition may do which permission.
@@ -1907,168 +2010,458 @@ CREATE TABLE role_permissions (
     role_definition_id INT NOT NULL REFERENCES role_definitions (id) ON DELETE CASCADE,
     permission_id INT NOT NULL REFERENCES permissions (id) ON DELETE CASCADE,
     scope_society_id INT REFERENCES societies (id) ON DELETE CASCADE,
-    min_amount NUMERIC(12,2),
-    approval_threshold NUMERIC(12,2),
+    min_amount NUMERIC(12, 2),
+    approval_threshold NUMERIC(12, 2),
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_role_permissions_role_def  ON role_permissions (role_definition_id);
-CREATE INDEX idx_role_permissions_perm      ON role_permissions (permission_id);
-CREATE INDEX idx_role_permissions_scope     ON role_permissions (scope_society_id);
+
+CREATE INDEX idx_role_permissions_role_def ON role_permissions (role_definition_id);
+
+CREATE INDEX idx_role_permissions_perm ON role_permissions (permission_id);
+
+CREATE INDEX idx_role_permissions_scope ON role_permissions (scope_society_id);
 -- A grant must be unique, or a re-run silently stacks duplicates that the
 -- policy engine then has to de-duplicate at read time. NULL scope_society_id
 -- means "applies wherever the role is held" (platform-wide), and NULLs compare
 -- as distinct in a plain unique index, so the two cases need two partial
 -- indexes. The grant seeds below name them explicitly in ON CONFLICT.
-CREATE UNIQUE INDEX uq_role_permissions_grant_global
-    ON role_permissions (role_definition_id, permission_id)
-    WHERE scope_society_id IS NULL;
-CREATE UNIQUE INDEX uq_role_permissions_grant_scoped
-    ON role_permissions (role_definition_id, permission_id, scope_society_id)
-    WHERE scope_society_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_role_permissions_grant_global ON role_permissions (
+    role_definition_id,
+    permission_id
+)
+WHERE
+    scope_society_id IS NULL;
+
+CREATE UNIQUE INDEX uq_role_permissions_grant_scoped ON role_permissions (
+    role_definition_id,
+    permission_id,
+    scope_society_id
+)
+WHERE
+    scope_society_id IS NOT NULL;
 
 -- 4. user_role_assignments — effective-dated membership of a user in a role.
 --    The auth-store / users.role gate the PORTAL; these rows drive policy.can_do.
 --    NULL society_id is only valid for a platform-scoped role_definition.
 CREATE TABLE user_role_assignments (
-    id                SERIAL PRIMARY KEY,
-    user_id           INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     role_definition_id INT NOT NULL REFERENCES role_definitions (id) ON DELETE CASCADE,
-    society_id        INT REFERENCES societies (id) ON DELETE CASCADE,
-    entity_link       INT,  -- nullable FK to apartments/vendors/security_staff by context
-    effective_from    TIMESTAMP NOT NULL DEFAULT NOW(),
-    effective_to      TIMESTAMP,
-    granted_by        INT REFERENCES users (id),
-    source            VARCHAR(20) NOT NULL CHECK (source IN ('seed', 'grant', 'aoa', 'inherit')),
-    status            VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'expired')),
-    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_ura_user_role_society_entity UNIQUE
-        (user_id, role_definition_id, society_id, entity_link, effective_from)
+    society_id INT REFERENCES societies (id) ON DELETE CASCADE,
+    entity_link INT, -- nullable FK to apartments/vendors/security_staff by context
+    effective_from TIMESTAMP NOT NULL DEFAULT NOW(),
+    effective_to TIMESTAMP,
+    granted_by INT REFERENCES users (id),
+    source VARCHAR(20) NOT NULL CHECK (
+        source IN (
+            'seed',
+            'grant',
+            'aoa',
+            'inherit'
+        )
+    ),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (
+        status IN (
+            'active',
+            'revoked',
+            'expired'
+        )
+    ),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_ura_user_role_society_entity UNIQUE (
+        user_id,
+        role_definition_id,
+        society_id,
+        entity_link,
+        effective_from
+    )
 );
-CREATE INDEX idx_ura_user_active
-    ON user_role_assignments (user_id, status) WHERE status = 'active';
-CREATE INDEX idx_ura_role_society
-    ON user_role_assignments (role_definition_id, society_id, status);
-CREATE INDEX idx_ura_effective
-    ON user_role_assignments (user_id, role_definition_id, society_id) WHERE status = 'active';
+
+CREATE INDEX idx_ura_user_active ON user_role_assignments (user_id, status)
+WHERE
+    status = 'active';
+
+CREATE INDEX idx_ura_role_society ON user_role_assignments (
+    role_definition_id,
+    society_id,
+    status
+);
+
+CREATE INDEX idx_ura_effective ON user_role_assignments (
+    user_id,
+    role_definition_id,
+    society_id
+)
+WHERE
+    status = 'active';
 
 -- 5. delegations — maker/checker hand-over: delegator grants a permission to a
 --    delegatee for a bounded scope + time window.
 CREATE TABLE delegations (
-    id              SERIAL PRIMARY KEY,
-    delegator_id    INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    delegatee_id    INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    permission_id   INT NOT NULL REFERENCES permissions (id) ON DELETE CASCADE,
-    society_id      INT REFERENCES societies (id) ON DELETE CASCADE,
-    entity_id       INT,  -- scope the delegation to one entity, if applicable
-    effective_from  TIMESTAMP NOT NULL DEFAULT NOW(),
-    effective_to    TIMESTAMP,
-    revoked_at      TIMESTAMP,
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_delegation UNIQUE
-        (delegator_id, delegatee_id, permission_id, society_id, effective_from)
+    id SERIAL PRIMARY KEY,
+    delegator_id INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    delegatee_id INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    permission_id INT NOT NULL REFERENCES permissions (id) ON DELETE CASCADE,
+    society_id INT REFERENCES societies (id) ON DELETE CASCADE,
+    entity_id INT, -- scope the delegation to one entity, if applicable
+    effective_from TIMESTAMP NOT NULL DEFAULT NOW(),
+    effective_to TIMESTAMP,
+    revoked_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_delegation UNIQUE (
+        delegator_id,
+        delegatee_id,
+        permission_id,
+        society_id,
+        effective_from
+    )
 );
-CREATE INDEX idx_delegations_delegatee
-    ON delegations (delegatee_id) WHERE revoked_at IS NULL;
-CREATE INDEX idx_delegations_delegator
-    ON delegations (delegator_id) WHERE revoked_at IS NULL;
+
+CREATE INDEX idx_delegations_delegatee ON delegations (delegatee_id)
+WHERE
+    revoked_at IS NULL;
+
+CREATE INDEX idx_delegations_delegator ON delegations (delegator_id)
+WHERE
+    revoked_at IS NULL;
 
 -- 6. societies_memberships — normalised link between a user and the entity they
 --    act through (apartment / vendor / security) in a society. This is the
 --    long-term home for what users.linked_id currently models; existing callers
 --    keep using linked_id until the migration is complete (deferred per D1).
 CREATE TABLE societies_memberships (
-    id                 SERIAL PRIMARY KEY,
-    society_id         INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    user_id            INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    entity_type        VARCHAR(20) NOT NULL CHECK (entity_type IN ('apartment', 'vendor', 'security')),
-    entity_id          INT NOT NULL,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    user_id INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    entity_type VARCHAR(20) NOT NULL CHECK (
+        entity_type IN (
+            'apartment',
+            'vendor',
+            'security'
+        )
+    ),
+    entity_id INT NOT NULL,
     role_definition_id INT REFERENCES role_definitions (id) ON DELETE SET NULL,
-    effective_from     TIMESTAMP NOT NULL DEFAULT NOW(),
-    effective_to       TIMESTAMP,
-    status             VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'revoked')),
-    created_at         TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by         INT REFERENCES users (id),
-    CONSTRAINT uq_sm_society_entity UNIQUE (society_id, entity_type, entity_id),
-    CONSTRAINT uq_sm_society_user    UNIQUE (society_id, user_id)
+    effective_from TIMESTAMP NOT NULL DEFAULT NOW(),
+    effective_to TIMESTAMP,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (
+        status IN (
+            'active',
+            'inactive',
+            'revoked'
+        )
+    ),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by INT REFERENCES users (id),
+    CONSTRAINT uq_sm_society_entity UNIQUE (
+        society_id,
+        entity_type,
+        entity_id
+    ),
+    CONSTRAINT uq_sm_society_user UNIQUE (society_id, user_id)
 );
-CREATE INDEX idx_sm_entity   ON societies_memberships (entity_type, entity_id);
-CREATE INDEX idx_sm_user     ON societies_memberships (society_id, user_id);
-CREATE INDEX idx_sm_active   ON societies_memberships (society_id, user_id, status)
-    WHERE status = 'active';
+
+CREATE INDEX idx_sm_entity ON societies_memberships (entity_type, entity_id);
+
+CREATE INDEX idx_sm_user ON societies_memberships (society_id, user_id);
+
+CREATE INDEX idx_sm_active ON societies_memberships (society_id, user_id, status)
+WHERE
+    status = 'active';
 
 -- Seed reference data for the RBAC vocabulary (declared inline in this file).
 -- These rows define the system's role + permission catalogue; the backfill of
 -- real users happens in seed.py.
 
-INSERT INTO role_definitions (code, scope, name, description) VALUES
-    ('platform_operator',  'platform', 'Platform Operator',  'System-wide operator (migrated master_admin).'),
-    ('society_president',  'society',  'Society President',  'AOA president: chairs the committee; assigns concerns, declares poll results, approves (never prepares) payments.'),
-    ('society_secretary',  'society',  'Society Secretary',  'AOA secretary: assign concerns, declare poll results, approve payments.'),
-    ('treasurer',          'society',  'Treasurer',          'AOA treasurer: view receipts, approve payments, close periods.'),
-    ('committee_member',   'society',  'Committee Member',   'MC member: declare poll results.'),
-    ('accountant',         'society',  'Accountant',         'Society accountant: view receipts, approve payments up to threshold.'),
-    ('resident_owner',     'society',  'Resident Owner',     'Apartment owner: view own receipts.'),
-    ('resident_tenant',    'society',  'Resident Tenant',    'Apartment tenant: view own receipts.'),
-    ('vendor_contact',     'society',  'Vendor Contact',     'Registered vendor: view own concerns/bids.'),
-    ('security_staff',     'society',  'Security Staff',     'Society security: manage channel events, view roster.')
-ON CONFLICT (code, scope) DO NOTHING;
+INSERT INTO
+    role_definitions (
+        code,
+        scope,
+        name,
+        description
+    )
+VALUES (
+        'platform_operator',
+        'platform',
+        'Platform Operator',
+        'System-wide operator (migrated master_admin).'
+    ),
+    (
+        'society_president',
+        'society',
+        'Society President',
+        'AOA president: chairs the committee; assigns concerns, declares poll results, approves (never prepares) payments.'
+    ),
+    (
+        'society_secretary',
+        'society',
+        'Society Secretary',
+        'AOA secretary: assign concerns, declare poll results, approve payments.'
+    ),
+    (
+        'treasurer',
+        'society',
+        'Treasurer',
+        'AOA treasurer: view receipts, approve payments, close periods.'
+    ),
+    (
+        'committee_member',
+        'society',
+        'Committee Member',
+        'MC member: declare poll results.'
+    ),
+    (
+        'accountant',
+        'society',
+        'Accountant',
+        'Society accountant: view receipts, approve payments up to threshold.'
+    ),
+    (
+        'resident_owner',
+        'society',
+        'Resident Owner',
+        'Apartment owner: view own receipts.'
+    ),
+    (
+        'resident_tenant',
+        'society',
+        'Resident Tenant',
+        'Apartment tenant: view own receipts.'
+    ),
+    (
+        'vendor_contact',
+        'society',
+        'Vendor Contact',
+        'Registered vendor: view own concerns/bids.'
+    ),
+    (
+        'security_staff',
+        'society',
+        'Security Staff',
+        'Society security: manage channel events, view roster.'
+    ) ON CONFLICT (code, scope) DO NOTHING;
 
-INSERT INTO permissions (resource, action, description) VALUES
-    ('concern',     'assign',              'Assign/invite an entity to a concern'),
-    ('concern',     'resolve',             'Mark a concern assignment resolved/closed'),
-    ('poll',        'declare_results',     'Declare poll results and close a poll'),
-    ('finance',     'receipt.view_own',    'View own financial receipts'),
-    ('finance',     'payment.approve',     'Approve a payment against the approval threshold'),
-    ('finance',     'period.close',        'Close a financial period / FY'),
-    ('finance',     'taxrates.manage',     'Edit and confirm the society TDS / GST rates (CA and Treasurer)'),
-    ('enrollment',  'import',              'Bulk-enroll apartment/vendor/security members'),
-    ('role',        'grant',               'Grant or revoke a society role on a user'),
-    ('visitor',     'approve',             'Approve / deny a visitor / gate alert')
-ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO
+    permissions (resource, action, description)
+VALUES (
+        'concern',
+        'assign',
+        'Assign/invite an entity to a concern'
+    ),
+    (
+        'concern',
+        'resolve',
+        'Mark a concern assignment resolved/closed'
+    ),
+    (
+        'poll',
+        'declare_results',
+        'Declare poll results and close a poll'
+    ),
+    (
+        'finance',
+        'receipt.view_own',
+        'View own financial receipts'
+    ),
+    (
+        'finance',
+        'payment.approve',
+        'Approve a payment against the approval threshold'
+    ),
+    (
+        'finance',
+        'period.close',
+        'Close a financial period / FY'
+    ),
+    (
+        'finance',
+        'taxrates.manage',
+        'Edit and confirm the society TDS / GST rates (CA and Treasurer)'
+    ),
+    (
+        'enrollment',
+        'import',
+        'Bulk-enroll apartment/vendor/security members'
+    ),
+    (
+        'role',
+        'grant',
+        'Grant or revoke a society role on a user'
+    ),
+    (
+        'visitor',
+        'approve',
+        'Approve / deny a visitor / gate alert'
+    ) ON CONFLICT (resource, action) DO NOTHING;
 
 -- Default role->permission grants. scope_society_id NULL => grant applies
 -- wherever the role is held (society-scoped roles are tied to a society via
 -- user_role_assignments.society_id, not here). Accountant payment.approve has a
 -- min_amount floor: amounts at/above this require a higher authority.
-INSERT INTO role_permissions (role_definition_id, permission_id, scope_society_id, min_amount, approval_threshold)
+INSERT INTO
+    role_permissions (
+        role_definition_id,
+        permission_id,
+        scope_society_id,
+        min_amount,
+        approval_threshold
+    )
 SELECT rd.id, p.id, NULL, NULL, NULL
-FROM role_definitions rd, permissions p
-WHERE (rd.code = 'platform_operator' AND p.resource = 'role' AND p.action = 'grant')
-   OR (rd.code = 'platform_operator' AND p.resource = 'finance' AND p.action = 'period.close')
-   OR (rd.code = 'society_president' AND p.resource = 'concern' AND p.action = 'assign')
-   OR (rd.code = 'society_president' AND p.resource = 'concern' AND p.action = 'resolve')
-   OR (rd.code = 'society_president' AND p.resource = 'poll' AND p.action = 'declare_results')
-   OR (rd.code = 'society_president' AND p.resource = 'finance' AND p.action = 'payment.approve')
-   OR (rd.code = 'society_secretary' AND p.resource = 'concern' AND p.action = 'assign')
-   OR (rd.code = 'society_secretary' AND p.resource = 'concern' AND p.action = 'resolve')
-   OR (rd.code = 'society_secretary' AND p.resource = 'poll' AND p.action = 'declare_results')
-   OR (rd.code = 'society_secretary' AND p.resource = 'finance' AND p.action = 'payment.approve')
-   OR (rd.code = 'society_secretary' AND p.resource = 'role' AND p.action = 'grant')
-   OR (rd.code = 'society_secretary' AND p.resource = 'enrollment' AND p.action = 'import')
-ON CONFLICT (role_definition_id, permission_id) WHERE scope_society_id IS NULL DO NOTHING;
+FROM
+    role_definitions rd,
+    permissions p
+WHERE (
+        rd.code = 'platform_operator'
+        AND p.resource = 'role'
+        AND p.action = 'grant'
+    )
+    OR (
+        rd.code = 'platform_operator'
+        AND p.resource = 'finance'
+        AND p.action = 'period.close'
+    )
+    OR (
+        rd.code = 'society_president'
+        AND p.resource = 'concern'
+        AND p.action = 'assign'
+    )
+    OR (
+        rd.code = 'society_president'
+        AND p.resource = 'concern'
+        AND p.action = 'resolve'
+    )
+    OR (
+        rd.code = 'society_president'
+        AND p.resource = 'poll'
+        AND p.action = 'declare_results'
+    )
+    OR (
+        rd.code = 'society_president'
+        AND p.resource = 'finance'
+        AND p.action = 'payment.approve'
+    )
+    OR (
+        rd.code = 'society_secretary'
+        AND p.resource = 'concern'
+        AND p.action = 'assign'
+    )
+    OR (
+        rd.code = 'society_secretary'
+        AND p.resource = 'concern'
+        AND p.action = 'resolve'
+    )
+    OR (
+        rd.code = 'society_secretary'
+        AND p.resource = 'poll'
+        AND p.action = 'declare_results'
+    )
+    OR (
+        rd.code = 'society_secretary'
+        AND p.resource = 'finance'
+        AND p.action = 'payment.approve'
+    )
+    OR (
+        rd.code = 'society_secretary'
+        AND p.resource = 'role'
+        AND p.action = 'grant'
+    )
+    OR (
+        rd.code = 'society_secretary'
+        AND p.resource = 'enrollment'
+        AND p.action = 'import'
+    ) ON CONFLICT (
+        role_definition_id,
+        permission_id
+    )
+WHERE
+    scope_society_id IS NULL DO NOTHING;
 
-INSERT INTO role_permissions (role_definition_id, permission_id, scope_society_id)
+INSERT INTO
+    role_permissions (
+        role_definition_id,
+        permission_id,
+        scope_society_id
+    )
 SELECT rd.id, p.id, NULL
-FROM role_definitions rd, permissions p
-WHERE (rd.code = 'treasurer' AND p.resource = 'finance' AND p.action = 'receipt.view_own')
-   OR (rd.code = 'treasurer' AND p.resource = 'finance' AND p.action = 'period.close')
-   OR (rd.code = 'treasurer' AND p.resource = 'finance' AND p.action = 'taxrates.manage')
-   OR (rd.code = 'accountant' AND p.resource = 'finance' AND p.action = 'taxrates.manage')
-   OR (rd.code = 'accountant' AND p.resource = 'finance' AND p.action = 'receipt.view_own')
-   OR (rd.code = 'committee_member' AND p.resource = 'poll' AND p.action = 'declare_results')
-   OR (rd.code = 'resident_owner' AND p.resource = 'finance' AND p.action = 'receipt.view_own')
-   OR (rd.code = 'resident_tenant' AND p.resource = 'finance' AND p.action = 'receipt.view_own')
-   OR (rd.code = 'treasurer' AND p.resource = 'finance' AND p.action = 'payment.approve')
-ON CONFLICT (role_definition_id, permission_id) WHERE scope_society_id IS NULL DO NOTHING;
+FROM
+    role_definitions rd,
+    permissions p
+WHERE (
+        rd.code = 'treasurer'
+        AND p.resource = 'finance'
+        AND p.action = 'receipt.view_own'
+    )
+    OR (
+        rd.code = 'treasurer'
+        AND p.resource = 'finance'
+        AND p.action = 'period.close'
+    )
+    OR (
+        rd.code = 'treasurer'
+        AND p.resource = 'finance'
+        AND p.action = 'taxrates.manage'
+    )
+    OR (
+        rd.code = 'accountant'
+        AND p.resource = 'finance'
+        AND p.action = 'taxrates.manage'
+    )
+    OR (
+        rd.code = 'accountant'
+        AND p.resource = 'finance'
+        AND p.action = 'receipt.view_own'
+    )
+    OR (
+        rd.code = 'committee_member'
+        AND p.resource = 'poll'
+        AND p.action = 'declare_results'
+    )
+    OR (
+        rd.code = 'resident_owner'
+        AND p.resource = 'finance'
+        AND p.action = 'receipt.view_own'
+    )
+    OR (
+        rd.code = 'resident_tenant'
+        AND p.resource = 'finance'
+        AND p.action = 'receipt.view_own'
+    )
+    OR (
+        rd.code = 'treasurer'
+        AND p.resource = 'finance'
+        AND p.action = 'payment.approve'
+    ) ON CONFLICT (
+        role_definition_id,
+        permission_id
+    )
+WHERE
+    scope_society_id IS NULL DO NOTHING;
 
 -- Accountant payment approval is capped: min_amount = 5000 means a payment at/above
 -- this threshold needs escalation beyond the accountant role.
-INSERT INTO role_permissions (role_definition_id, permission_id, scope_society_id, min_amount)
+INSERT INTO
+    role_permissions (
+        role_definition_id,
+        permission_id,
+        scope_society_id,
+        min_amount
+    )
 SELECT rd.id, p.id, NULL, 5000
-FROM role_definitions rd, permissions p
-WHERE rd.code = 'accountant' AND p.resource = 'finance' AND p.action = 'payment.approve'
-ON CONFLICT (role_definition_id, permission_id) WHERE scope_society_id IS NULL DO UPDATE
-    SET min_amount = EXCLUDED.min_amount;
+FROM
+    role_definitions rd,
+    permissions p
+WHERE
+    rd.code = 'accountant'
+    AND p.resource = 'finance'
+    AND p.action = 'payment.approve' ON CONFLICT (
+        role_definition_id,
+        permission_id
+    )
+WHERE
+    scope_society_id IS NULL DO
+UPDATE
+SET
+    min_amount = EXCLUDED.min_amount;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- AUDIT, APPROVAL & OUTBOX FOUNDATIONS
@@ -2092,41 +2485,55 @@ ON CONFLICT (role_definition_id, permission_id) WHERE scope_society_id IS NULL D
 --    rewriting history. Back this table up separately from the rest of the
 --    database and test retrieval after restore.
 CREATE TABLE audit_events (
-    id                BIGSERIAL PRIMARY KEY,
-    society_id        INT REFERENCES societies (id) ON DELETE SET NULL,
-    actor_id          INT REFERENCES users (id) ON DELETE SET NULL,
-    actor_role        VARCHAR(20),
-    action            VARCHAR(60) NOT NULL,
-    resource_type     VARCHAR(60) NOT NULL,
-    resource_id       VARCHAR(64),
+    id BIGSERIAL PRIMARY KEY,
+    society_id INT REFERENCES societies (id) ON DELETE SET NULL,
+    actor_id INT REFERENCES users (id) ON DELETE SET NULL,
+    actor_role VARCHAR(20),
+    action VARCHAR(60) NOT NULL,
+    resource_type VARCHAR(60) NOT NULL,
+    resource_id VARCHAR(64),
     -- before/after as JSONB so one log covers every domain's shape; the
     -- sensitive-value concern is handled by restricting read access, not by
     -- splitting the schema per resource.
-    before_value      JSONB,
-    after_value       JSONB,
-    reason            TEXT,
-    source            VARCHAR(30) NOT NULL DEFAULT 'app'
-                      CHECK (source IN ('app', 'seed', 'sql', 'migration', 'import', 'system')),
+    before_value JSONB,
+    after_value JSONB,
+    reason TEXT,
+    source VARCHAR(30) NOT NULL DEFAULT 'app' CHECK (
+        source IN (
+            'app',
+            'seed',
+            'sql',
+            'migration',
+            'import',
+            'system'
+        )
+    ),
     -- Correlation ties one user action to the workflow rows, notification and
     -- accounting entries it produced, across all three logs.
-    correlation_id    UUID,
-    permission_used   VARCHAR(60),
-    policy_version    VARCHAR(20),   -- authorization policy version that decided (RWA3 §3.3 inv. 5)
-    document_hash     VARCHAR(128),
-    approval_ref      VARCHAR(100),
-    ip_address        VARCHAR(45),
-    created_at        TIMESTAMP NOT NULL DEFAULT NOW()
+    correlation_id UUID,
+    permission_used VARCHAR(60),
+    policy_version VARCHAR(20), -- authorization policy version that decided (RWA3 §3.3 inv. 5)
+    document_hash VARCHAR(128),
+    approval_ref VARCHAR(100),
+    ip_address VARCHAR(45),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_audit_events_society_time
-    ON audit_events (society_id, created_at DESC);
-CREATE INDEX idx_audit_events_resource
-    ON audit_events (resource_type, resource_id, created_at DESC);
-CREATE INDEX idx_audit_events_actor
-    ON audit_events (actor_id, created_at DESC);
-CREATE INDEX idx_audit_events_correlation
-    ON audit_events (correlation_id) WHERE correlation_id IS NOT NULL;
-CREATE INDEX idx_audit_events_action
-    ON audit_events (action, created_at DESC);
+
+CREATE INDEX idx_audit_events_society_time ON audit_events (society_id, created_at DESC);
+
+CREATE INDEX idx_audit_events_resource ON audit_events (
+    resource_type,
+    resource_id,
+    created_at DESC
+);
+
+CREATE INDEX idx_audit_events_actor ON audit_events (actor_id, created_at DESC);
+
+CREATE INDEX idx_audit_events_correlation ON audit_events (correlation_id)
+WHERE
+    correlation_id IS NOT NULL;
+
+CREATE INDEX idx_audit_events_action ON audit_events (action, created_at DESC);
 
 CREATE OR REPLACE FUNCTION trg_audit_events_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -2144,37 +2551,60 @@ CREATE TRIGGER audit_events_immutable BEFORE UPDATE OR DELETE ON audit_events
 --    approver is exactly the case the application must reject, and a
 --    constraint here would block recording the attempt rather than prevent it.
 CREATE TABLE approval_steps (
-    id                SERIAL PRIMARY KEY,
-    society_id        INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    resource_type     VARCHAR(60) NOT NULL,
-    resource_id       VARCHAR(64) NOT NULL,
-    step_no           INT NOT NULL CHECK (step_no > 0),
-    action            VARCHAR(60) NOT NULL,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    resource_type VARCHAR(60) NOT NULL,
+    resource_id VARCHAR(64) NOT NULL,
+    step_no INT NOT NULL CHECK (step_no > 0),
+    action VARCHAR(60) NOT NULL,
     -- Maker / Checker / Approver are the roles in the chain, not users: the
     -- same request can need a treasurer then a secretary then the general body.
-    required_role     VARCHAR(60),
-    threshold_amount  NUMERIC(14, 2),
-    requested_by      INT REFERENCES users (id) ON DELETE SET NULL,
-    requested_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    decided_by        INT REFERENCES users (id) ON DELETE SET NULL,
-    decided_at        TIMESTAMP,
-    outcome           VARCHAR(20) CHECK (outcome IN ('pending', 'approved', 'rejected', 'skipped', 'expired')),
-    decision_reason   TEXT,
+    required_role VARCHAR(60),
+    threshold_amount NUMERIC(14, 2),
+    requested_by INT REFERENCES users (id) ON DELETE SET NULL,
+    requested_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    decided_by INT REFERENCES users (id) ON DELETE SET NULL,
+    decided_at TIMESTAMP,
+    outcome VARCHAR(20) CHECK (
+        outcome IN (
+            'pending',
+            'approved',
+            'rejected',
+            'skipped',
+            'expired'
+        )
+    ),
+    decision_reason TEXT,
     -- General-body resolution / bye-law clause / board minute this step rests
     -- on, so an approval is traceable to an authority rather than a name.
-    resolution_ref    VARCHAR(100),
-    delegation_id     INT REFERENCES delegations (id) ON DELETE SET NULL,
-    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_approval_step UNIQUE (society_id, resource_type, resource_id, step_no),
+    resolution_ref VARCHAR(100),
+    delegation_id INT REFERENCES delegations (id) ON DELETE SET NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_approval_step UNIQUE (
+        society_id,
+        resource_type,
+        resource_id,
+        step_no
+    ),
     CONSTRAINT approval_step_decided CHECK (
-        (outcome IS NULL OR outcome = 'pending')
+        (
+            outcome IS NULL
+            OR outcome = 'pending'
+        )
         OR decided_by IS NOT NULL
     )
 );
-CREATE INDEX idx_approval_steps_resource
-    ON approval_steps (society_id, resource_type, resource_id, step_no);
-CREATE INDEX idx_approval_steps_pending
-    ON approval_steps (society_id, outcome) WHERE outcome = 'pending';
+
+CREATE INDEX idx_approval_steps_resource ON approval_steps (
+    society_id,
+    resource_type,
+    resource_id,
+    step_no
+);
+
+CREATE INDEX idx_approval_steps_pending ON approval_steps (society_id, outcome)
+WHERE
+    outcome = 'pending';
 
 -- 9. outbox — transactional hand-off. The business change and this row commit
 --    together; a separate consumer drains it. Consumers MUST be idempotent on
@@ -2182,36 +2612,51 @@ CREATE INDEX idx_approval_steps_pending
 --    business transition, and a notification failure can never roll back — or
 --    silently lose — the workflow change that produced it.
 CREATE TABLE outbox (
-    id                BIGSERIAL PRIMARY KEY,
-    society_id        INT REFERENCES societies (id) ON DELETE CASCADE,
-    event_type        VARCHAR(80) NOT NULL,
-    aggregate_type    VARCHAR(60) NOT NULL,
-    aggregate_id      VARCHAR(64) NOT NULL,
-    payload           JSONB NOT NULL,
-    correlation_id    UUID,
-    status            VARCHAR(20) NOT NULL DEFAULT 'pending'
-                      CHECK (status IN ('pending', 'processing', 'delivered', 'failed', 'dead')),
-    attempts          INT NOT NULL DEFAULT 0,
-    available_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    claimed_by        VARCHAR(80),
-    claimed_at        TIMESTAMP,
-    delivered_at      TIMESTAMP,
-    last_error        TEXT,
-    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    id BIGSERIAL PRIMARY KEY,
+    society_id INT REFERENCES societies (id) ON DELETE CASCADE,
+    event_type VARCHAR(80) NOT NULL,
+    aggregate_type VARCHAR(60) NOT NULL,
+    aggregate_id VARCHAR(64) NOT NULL,
+    payload JSONB NOT NULL,
+    correlation_id UUID,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',
+            'processing',
+            'delivered',
+            'failed',
+            'dead'
+        )
+    ),
+    attempts INT NOT NULL DEFAULT 0,
+    available_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    claimed_by VARCHAR(80),
+    claimed_at TIMESTAMP,
+    delivered_at TIMESTAMP,
+    last_error TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     -- The idempotency key, on the business identity and nothing else: one
     -- committed business change produces at most one outbox row per
     -- (event_type, aggregate). Keying this on correlation_id instead would not
     -- work — that column is nullable and NULLs compare as DISTINCT in a unique
     -- index, so every retry of an event written without one would insert a fresh
     -- row and the guarantee would silently evaporate.
-    CONSTRAINT uq_outbox_event UNIQUE (event_type, aggregate_type, aggregate_id)
+    CONSTRAINT uq_outbox_event UNIQUE (
+        event_type,
+        aggregate_type,
+        aggregate_id
+    )
 );
-CREATE INDEX idx_outbox_ready
-    ON outbox (available_at, id) WHERE status IN ('pending', 'failed');
-CREATE INDEX idx_outbox_society
-    ON outbox (society_id, created_at DESC);
-CREATE INDEX idx_outbox_correlation
-    ON outbox (correlation_id) WHERE correlation_id IS NOT NULL;
+
+CREATE INDEX idx_outbox_ready ON outbox (available_at, id)
+WHERE
+    status IN ('pending', 'failed');
+
+CREATE INDEX idx_outbox_society ON outbox (society_id, created_at DESC);
+
+CREATE INDEX idx_outbox_correlation ON outbox (correlation_id)
+WHERE
+    correlation_id IS NOT NULL;
 
 CREATE TABLE Dashboard_settings (
     id SERIAL PRIMARY KEY,
@@ -2252,27 +2697,72 @@ CREATE TABLE society_compliance_settings (
     fund_gst_exempt BOOLEAN NOT NULL DEFAULT FALSE,
     fund_gst_exempt_resolution_ref VARCHAR(100),
     fund_gst_exempt_opinion_ref VARCHAR(100),
-    fund_gst_exempt_opinion_by  VARCHAR(150),     -- task 1.6: who gave the opinion (name and capacity, e.g. "CA R. Gupta, Gupta & Co")
+    fund_gst_exempt_opinion_by VARCHAR(150), -- task 1.6: who gave the opinion (name and capacity, e.g. "CA R. Gupta, Gupta & Co")
     CONSTRAINT ck_fund_gst_exempt_authority CHECK (
         NOT fund_gst_exempt
-        OR (NULLIF(BTRIM(fund_gst_exempt_resolution_ref), '') IS NOT NULL
-            AND NULLIF(BTRIM(fund_gst_exempt_opinion_ref), '') IS NOT NULL
-            AND NULLIF(BTRIM(fund_gst_exempt_opinion_by), '') IS NOT NULL)),
+        OR (
+            NULLIF(
+                BTRIM (
+                    fund_gst_exempt_resolution_ref
+                ),
+                ''
+            ) IS NOT NULL
+            AND NULLIF(
+                BTRIM (fund_gst_exempt_opinion_ref),
+                ''
+            ) IS NOT NULL
+            AND NULLIF(
+                BTRIM (fund_gst_exempt_opinion_by),
+                ''
+            ) IS NOT NULL
+        )
+    ),
     -- Task 1.7: the CA's confirmation of the ITC reversal formula, and the two accounts the CA chose for its journal.
     -- All-or-nothing; nothing is posted until both are on file (fn_post_itc_reversal).
-    itc_reversal_confirmed_by    VARCHAR(150),
-    itc_reversal_confirmed_ref   VARCHAR(100),
-    itc_reversal_confirmed_on    DATE,
-    itc_reversal_debit_acc_id    INT,
-    itc_reversal_credit_acc_id   INT,
-    itc_reversal_nonbusiness_pct NUMERIC(5, 2) NOT NULL DEFAULT 0 CHECK (itc_reversal_nonbusiness_pct BETWEEN 0 AND 100),
-    CONSTRAINT fk_itc_reversal_debit_acc  FOREIGN KEY (society_id, itc_reversal_debit_acc_id)  REFERENCES accounts (society_id, id),
-    CONSTRAINT fk_itc_reversal_credit_acc FOREIGN KEY (society_id, itc_reversal_credit_acc_id) REFERENCES accounts (society_id, id),
+    itc_reversal_confirmed_by VARCHAR(150),
+    itc_reversal_confirmed_ref VARCHAR(100),
+    itc_reversal_confirmed_on DATE,
+    itc_reversal_debit_acc_id INT,
+    itc_reversal_credit_acc_id INT,
+    itc_reversal_nonbusiness_pct NUMERIC(5, 2) NOT NULL DEFAULT 0 CHECK (
+        itc_reversal_nonbusiness_pct BETWEEN 0 AND 100
+    ),
+    CONSTRAINT fk_itc_reversal_debit_acc FOREIGN KEY (
+        society_id,
+        itc_reversal_debit_acc_id
+    ) REFERENCES accounts (society_id, id),
+    CONSTRAINT fk_itc_reversal_credit_acc FOREIGN KEY (
+        society_id,
+        itc_reversal_credit_acc_id
+    ) REFERENCES accounts (society_id, id),
     CONSTRAINT ck_itc_reversal_confirmation CHECK (
-        (itc_reversal_confirmed_by IS NULL) = (itc_reversal_confirmed_ref IS NULL)
-        AND (itc_reversal_confirmed_ref IS NULL) = (itc_reversal_confirmed_on IS NULL)
-        AND (itc_reversal_confirmed_by IS NULL OR (LENGTH(BTRIM(itc_reversal_confirmed_by)) > 0 AND LENGTH(BTRIM(itc_reversal_confirmed_ref)) > 0))
-        AND (itc_reversal_debit_acc_id IS NULL OR itc_reversal_credit_acc_id IS NULL OR itc_reversal_debit_acc_id <> itc_reversal_credit_acc_id)),
+        (
+            itc_reversal_confirmed_by IS NULL
+        ) = (
+            itc_reversal_confirmed_ref IS NULL
+        )
+        AND (
+            itc_reversal_confirmed_ref IS NULL
+        ) = (
+            itc_reversal_confirmed_on IS NULL
+        )
+        AND (
+            itc_reversal_confirmed_by IS NULL
+            OR (
+                LENGTH(
+                    BTRIM (itc_reversal_confirmed_by)
+                ) > 0
+                AND LENGTH(
+                    BTRIM (itc_reversal_confirmed_ref)
+                ) > 0
+            )
+        )
+        AND (
+            itc_reversal_debit_acc_id IS NULL
+            OR itc_reversal_credit_acc_id IS NULL
+            OR itc_reversal_debit_acc_id <> itc_reversal_credit_acc_id
+        )
+    ),
     fund_charges_interest BOOLEAN DEFAULT TRUE,
     gst_filing_cadence VARCHAR(20) DEFAULT 'monthly' CHECK (
         gst_filing_cadence IN ('monthly', 'qrmp')
@@ -2447,7 +2937,14 @@ CREATE TABLE legal_regime_profiles (
     state_code VARCHAR(2) NOT NULL,
     -- A scheme is state x constitution: the same state has different statutes for an apartment owners'
     -- association, a registered society and a co-operative housing society. GENERIC = no state rules loaded.
-    constitution VARCHAR(20) NOT NULL DEFAULT 'AOA' CHECK (constitution IN ('AOA', 'REG_SOCIETY', 'COOP', 'GENERIC')),
+    constitution VARCHAR(20) NOT NULL DEFAULT 'AOA' CHECK (
+        constitution IN (
+            'AOA',
+            'REG_SOCIETY',
+            'COOP',
+            'GENERIC'
+        )
+    ),
     name VARCHAR(120) NOT NULL,
     primary_law VARCHAR(255) NOT NULL,
     rules_version VARCHAR(100),
@@ -2548,8 +3045,12 @@ CREATE TABLE legal_instrument_catalog (
     regime_code VARCHAR(30) NOT NULL REFERENCES legal_regime_profiles (code) ON DELETE CASCADE,
     instrument_type VARCHAR(30) NOT NULL CHECK (
         instrument_type IN (
-            'Act', 'Rules', 'Bye-laws', 'Notification',
-            'Central Act', 'Central Rules'
+            'Act',
+            'Rules',
+            'Bye-laws',
+            'Notification',
+            'Central Act',
+            'Central Rules'
         )
     ),
     title VARCHAR(300) NOT NULL,
@@ -2560,26 +3061,49 @@ CREATE TABLE legal_instrument_catalog (
     source_reference TEXT NOT NULL,
     -- Verified public link to the instrument's text (NULL until someone has opened and checked it).
     -- The Setup Wizard's Legal Hierarchy table shows a link only when this is set.
-    source_url TEXT CHECK (source_url IS NULL OR source_url ~* '^https?://'),
+    source_url TEXT CHECK (
+        source_url IS NULL
+        OR source_url ~ * '^https?://'
+    ),
     display_order INT NOT NULL DEFAULT 100,
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (
-        status IN ('active', 'superseded', 'draft')
+        status IN (
+            'active',
+            'superseded',
+            'draft'
+        )
     ),
     last_verified_on DATE,
     -- Verification workflow (Plan v3 2.7): a row is 'verified' only with its source text link, notification number, date,
     -- verifier (Treasurer or Auditor) and the opinion that supports it. Anything else is 'unverified' and is labelled so;
     -- unverified rows never drive enforcement. Editing the substance of a verified row returns it to 'unverified'.
     notification_no VARCHAR(100),
-    verification VARCHAR(12) NOT NULL DEFAULT 'unverified' CHECK (verification IN ('unverified', 'verified')),
+    verification VARCHAR(12) NOT NULL DEFAULT 'unverified' CHECK (
+        verification IN ('unverified', 'verified')
+    ),
     verified_by INT REFERENCES users (id),
-    verifier_role VARCHAR(10) CHECK (verifier_role IN ('treasurer', 'auditor')),
+    verifier_role VARCHAR(10) CHECK (
+        verifier_role IN ('treasurer', 'auditor')
+    ),
     opinion_ref VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_legal_instrument UNIQUE (regime_code, title, enactment_year),
-    CONSTRAINT ck_instrument_verified_complete CHECK (verification <> 'verified' OR (
-        source_url IS NOT NULL AND notification_no IS NOT NULL AND last_verified_on IS NOT NULL
-        AND verified_by IS NOT NULL AND verifier_role IS NOT NULL AND NULLIF(BTRIM(opinion_ref), '') IS NOT NULL))
+    CONSTRAINT uq_legal_instrument UNIQUE (
+        regime_code,
+        title,
+        enactment_year
+    ),
+    CONSTRAINT ck_instrument_verified_complete CHECK (
+        verification <> 'verified'
+        OR (
+            source_url IS NOT NULL
+            AND notification_no IS NOT NULL
+            AND last_verified_on IS NOT NULL
+            AND verified_by IS NOT NULL
+            AND verifier_role IS NOT NULL
+            AND NULLIF(BTRIM (opinion_ref), '') IS NOT NULL
+        )
+    )
 );
 
 CREATE INDEX idx_legal_instrument_catalog_regime ON legal_instrument_catalog (regime_code);
@@ -2703,22 +3227,22 @@ CREATE TABLE alert_events (
 -- alert_events.state is a read-only materialized cache; this table is the source
 -- of truth (pending -> arrived/calling -> resolved/denied/expired).
 CREATE TABLE channel_event_transitions (
-    id              SERIAL PRIMARY KEY,
-    event_id        INT NOT NULL REFERENCES alert_events (id) ON DELETE CASCADE,
-    society_id      INT REFERENCES societies (id) ON DELETE CASCADE,
-    from_state      VARCHAR(30),
-    to_state        VARCHAR(30) NOT NULL,
-    actor_id        INT REFERENCES users (id),
+    id SERIAL PRIMARY KEY,
+    event_id INT NOT NULL REFERENCES alert_events (id) ON DELETE CASCADE,
+    society_id INT REFERENCES societies (id) ON DELETE CASCADE,
+    from_state VARCHAR(30),
+    to_state VARCHAR(30) NOT NULL,
+    actor_id INT REFERENCES users (id),
     permission_used VARCHAR(60),
-    comment         TEXT,
-    evidence        JSONB,
-    correlation_id  UUID,
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    comment TEXT,
+    evidence JSONB,
+    correlation_id UUID,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_cet_event
-    ON channel_event_transitions (event_id, created_at);
-CREATE INDEX idx_cet_society
-    ON channel_event_transitions (society_id, created_at);
+
+CREATE INDEX idx_cet_event ON channel_event_transitions (event_id, created_at);
+
+CREATE INDEX idx_cet_society ON channel_event_transitions (society_id, created_at);
 
 CREATE TABLE patrol_locations (
     id SERIAL PRIMARY KEY,
@@ -2821,8 +3345,8 @@ CREATE TABLE poll_ballots (
 -- per-choice running total, never stored beside an individual ballot, so a flat's percentage cannot be
 -- matched to its choice. Only fn_cast_vote writes here; only fn_declare_results reads it.
 CREATE TABLE poll_weight_tally (
-    poll_id    INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
-    choice     SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5),
+    poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
+    choice SMALLINT NOT NULL CHECK (choice BETWEEN 1 AND 5),
     weight_sum NUMERIC(10, 4) NOT NULL DEFAULT 0 CHECK (weight_sum >= 0),
     PRIMARY KEY (poll_id, choice)
 );
@@ -2831,9 +3355,9 @@ CREATE TABLE poll_weight_tally (
 -- size cannot move an open poll. A weight is a percentage of the whole (they sum to 100). It says nothing about
 -- how a flat voted, so it does not weaken the secret ballot; only the poll functions read it.
 CREATE TABLE poll_flat_weights (
-    poll_id      INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
+    poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
     apartment_id INT NOT NULL REFERENCES apartments (id),
-    weight       NUMERIC(10, 4) NOT NULL CHECK (weight >= 0),
+    weight NUMERIC(10, 4) NOT NULL CHECK (weight >= 0),
     PRIMARY KEY (poll_id, apartment_id)
 );
 
@@ -2848,36 +3372,41 @@ CREATE TABLE poll_flat_weights (
 -- narrow who could vote on an already-cast ballot.
 -- ════════════════════════════════════════════════════════════════════════
 CREATE TABLE poll_transitions (
-    id              SERIAL PRIMARY KEY,
-    poll_id         INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
-    society_id      INT REFERENCES societies (id) ON DELETE CASCADE,
-    from_state      VARCHAR(20),
-    to_state        VARCHAR(20) NOT NULL CHECK (
-        to_state IN ('created', 'opened', 'closed', 'results_declared')
+    id SERIAL PRIMARY KEY,
+    poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
+    society_id INT REFERENCES societies (id) ON DELETE CASCADE,
+    from_state VARCHAR(20),
+    to_state VARCHAR(20) NOT NULL CHECK (
+        to_state IN (
+            'created',
+            'opened',
+            'closed',
+            'results_declared'
+        )
     ),
-    actor_id        INT REFERENCES users (id),
+    actor_id INT REFERENCES users (id),
     permission_used VARCHAR(60),
-    comment         TEXT,
-    evidence        JSONB,
-    correlation_id  UUID,
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    comment TEXT,
+    evidence JSONB,
+    correlation_id UUID,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_poll_transitions_poll
-    ON poll_transitions (poll_id, created_at);
-CREATE INDEX idx_poll_transitions_society
-    ON poll_transitions (society_id, created_at);
+
+CREATE INDEX idx_poll_transitions_poll ON poll_transitions (poll_id, created_at);
+
+CREATE INDEX idx_poll_transitions_society ON poll_transitions (society_id, created_at);
 
 CREATE TABLE poll_eligibility_snapshot (
-    id          SERIAL PRIMARY KEY,
-    poll_id     INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
+    id SERIAL PRIMARY KEY,
+    poll_id INT NOT NULL REFERENCES polls (id) ON DELETE CASCADE,
     apartment_id INT NOT NULL REFERENCES apartments (id),
-    eligible    BOOLEAN NOT NULL DEFAULT FALSE,
-    reason      TEXT,
+    eligible BOOLEAN NOT NULL DEFAULT FALSE,
+    reason TEXT,
     captured_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (poll_id, apartment_id)
 );
-CREATE INDEX idx_poll_elig_poll
-    ON poll_eligibility_snapshot (poll_id, apartment_id);
+
+CREATE INDEX idx_poll_elig_poll ON poll_eligibility_snapshot (poll_id, apartment_id);
 
 -- SECTION 15: INDIAN CHS/RWA COMPLIANCE — TDS (Phase 4)
 -- ════════════════════════════════════════════════════════════════
@@ -2901,22 +3430,27 @@ CREATE TABLE tds_section_rates (
     section VARCHAR(10) NOT NULL,
     nature_of_income VARCHAR(255),
     discriminator VARCHAR(50),
-    rate NUMERIC(5, 2) NOT NULL,
+    rate NUMERIC(5, 2),
     rate_no_pan NUMERIC(5, 2),
     single_bill_threshold NUMERIC(12, 2) NOT NULL DEFAULT 30000,
     annual_aggregate_threshold NUMERIC(12, 2) NOT NULL DEFAULT 0,
     effective_from DATE NOT NULL DEFAULT '2024-04-01',
     effective_to DATE,
-    act_version VARCHAR(10) NOT NULL DEFAULT 'IT1961'
-        CHECK (act_version IN ('IT1961', 'IT2025')),
+    act_version VARCHAR(10) NOT NULL DEFAULT 'IT1961' CHECK (
+        act_version IN ('IT1961', 'IT2025')
+    ),
     section_2025 VARCHAR(50),
     -- ER Phase 2: TRUE only where the Act says "equal to or greater than"
     -- (194-IA); otherwise TDS applies only when the amount EXCEEDS the threshold.
     threshold_inclusive BOOLEAN NOT NULL DEFAULT FALSE,
     -- What single_bill_threshold is measured over (rent: per month).
-    threshold_basis VARCHAR(12) NOT NULL DEFAULT 'bill'
-        CONSTRAINT chk_tds_threshold_basis
-        CHECK (threshold_basis IN ('bill', 'month', 'transaction')),
+    threshold_basis VARCHAR(12) NOT NULL DEFAULT 'bill' CONSTRAINT chk_tds_threshold_basis CHECK (
+        threshold_basis IN (
+            'bill',
+            'month',
+            'transaction'
+        )
+    ),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_tds_section_rate UNIQUE (
         society_id,
@@ -2950,9 +3484,7 @@ CREATE TABLE tds_section_rates (
 -- Forward reference: accounts is declared later in this file, so this FK
 -- cannot be inline on societies.
 ALTER TABLE societies
-    ADD CONSTRAINT fk_primary_bank_account
-    FOREIGN KEY (id, primary_bank_account_id)
-    REFERENCES accounts (society_id, id);
+ADD CONSTRAINT fk_primary_bank_account FOREIGN KEY (id, primary_bank_account_id) REFERENCES accounts (society_id, id);
 
 -- societies.stepup_password_hash / secretary_email: stepup_password_hash holds
 -- Fernet ciphertext (reversible, so it can actually be used as an HMAC key; see
@@ -2982,7 +3514,6 @@ ALTER TABLE societies
 CREATE SEQUENCE seq_receipt_number;
 
 CREATE SEQUENCE seq_transaction_number;
-
 
 -- SECTION 2: INDEXES
 -- ════════════════════════════════════════════════════════════════
@@ -3014,7 +3545,12 @@ CREATE UNIQUE INDEX idx_assets_qr ON assets (qr_payload);
 
 -- One receivable per flat, per month, PER LEDGER HEAD. The index used to omit acc_id, so the Sinking Fund and
 -- Repair Fund lines (same flat, same month as Maintenance) hit ON CONFLICT DO NOTHING and were never billed.
-CREATE UNIQUE INDEX uq_receivable_entity_month ON receivables (entity_id, role, period_month, COALESCE(acc_id, 0));
+CREATE UNIQUE INDEX uq_receivable_entity_month ON receivables (
+    entity_id,
+    role,
+    period_month,
+    COALESCE(acc_id, 0)
+);
 
 CREATE INDEX idx_transactions_journal ON transactions (journal_id);
 
@@ -11066,29 +11602,52 @@ $$;
 
 -- The year's worksheet, kept for the auditor. A confirmed worksheet is a record and cannot be changed.
 CREATE TABLE gst_turnover_worksheets (
-    id               SERIAL PRIMARY KEY,
-    society_id       INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
-    financial_year   INT NOT NULL,
-    prepared_on      TIMESTAMP NOT NULL DEFAULT NOW(),
-    prepared_by      INT REFERENCES users (id),
-    taxable_value    NUMERIC(15,2) NOT NULL,
-    exempt_value     NUMERIC(15,2) NOT NULL,
-    unclassified_value NUMERIC(15,2) NOT NULL,
-    not_a_supply_value NUMERIC(15,2) NOT NULL,
-    tax_value        NUMERIC(15,2) NOT NULL,
-    lower_bound      NUMERIC(15,2) NOT NULL,
-    upper_bound      NUMERIC(15,2) NOT NULL,
-    threshold        NUMERIC(15,2) NOT NULL,
-    gate_state       VARCHAR(14) NOT NULL CHECK (gate_state IN ('above','below','indeterminate')),
-    lines            JSONB NOT NULL,
-    status           VARCHAR(10) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','confirmed')),
-    confirmed_by     INT REFERENCES users (id),
-    confirmed_on     TIMESTAMP,
-    confirmation_ref VARCHAR(255),           -- the CA's / advocate's reference
-    CONSTRAINT ck_gst_ws_confirmed CHECK (status = 'draft'
-        OR (confirmed_by IS NOT NULL AND confirmed_on IS NOT NULL AND LENGTH(BTRIM(COALESCE(confirmation_ref, ''))) >= 5))
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    financial_year INT NOT NULL,
+    prepared_on TIMESTAMP NOT NULL DEFAULT NOW(),
+    prepared_by INT REFERENCES users (id),
+    taxable_value NUMERIC(15, 2) NOT NULL,
+    exempt_value NUMERIC(15, 2) NOT NULL,
+    unclassified_value NUMERIC(15, 2) NOT NULL,
+    not_a_supply_value NUMERIC(15, 2) NOT NULL,
+    tax_value NUMERIC(15, 2) NOT NULL,
+    lower_bound NUMERIC(15, 2) NOT NULL,
+    upper_bound NUMERIC(15, 2) NOT NULL,
+    threshold NUMERIC(15, 2) NOT NULL,
+    gate_state VARCHAR(14) NOT NULL CHECK (
+        gate_state IN (
+            'above',
+            'below',
+            'indeterminate'
+        )
+    ),
+    lines JSONB NOT NULL,
+    status VARCHAR(10) NOT NULL DEFAULT 'draft' CHECK (
+        status IN ('draft', 'confirmed')
+    ),
+    confirmed_by INT REFERENCES users (id),
+    confirmed_on TIMESTAMP,
+    confirmation_ref VARCHAR(255), -- the CA's / advocate's reference
+    CONSTRAINT ck_gst_ws_confirmed CHECK (
+        status = 'draft'
+        OR (
+            confirmed_by IS NOT NULL
+            AND confirmed_on IS NOT NULL
+            AND LENGTH(
+                BTRIM (
+                    COALESCE(confirmation_ref, '')
+                )
+            ) >= 5
+        )
+    )
 );
-CREATE INDEX idx_gst_ws_society_fy ON gst_turnover_worksheets (society_id, financial_year, prepared_on DESC);
+
+CREATE INDEX idx_gst_ws_society_fy ON gst_turnover_worksheets (
+    society_id,
+    financial_year,
+    prepared_on DESC
+);
 
 CREATE OR REPLACE FUNCTION trg_gst_ws_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -11101,6 +11660,7 @@ BEGIN
     RETURN COALESCE(NEW, OLD);
 END;
 $$;
+
 CREATE TRIGGER trg_gst_ws_immutable BEFORE UPDATE OR DELETE ON gst_turnover_worksheets
     FOR EACH ROW EXECUTE FUNCTION trg_gst_ws_immutable();
 
@@ -13871,10 +14431,12 @@ CREATE TRIGGER trg_onboarding_guard_receipts
     BEFORE INSERT ON receipts
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_onboarding_guard();
+
 CREATE TRIGGER trg_onboarding_guard_expenses
     BEFORE INSERT ON expenses
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_onboarding_guard();
+
 CREATE TRIGGER trg_onboarding_guard_transactions
     BEFORE INSERT ON transactions
     FOR EACH ROW
@@ -14981,15 +15543,19 @@ WHERE
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE regime_rule_parameters (
-    regime_code      VARCHAR(30) NOT NULL,   -- deliberately no FK: loadable before seed.py creates the regime row
-    rule_key         VARCHAR(60) NOT NULL,
-    value            NUMERIC(14, 4),
-    value_text       TEXT,
-    unit             VARCHAR(20),
+    regime_code VARCHAR(30) NOT NULL, -- deliberately no FK: loadable before seed.py creates the regime row
+    rule_key VARCHAR(60) NOT NULL,
+    value NUMERIC(14, 4),
+    value_text TEXT,
+    unit VARCHAR(20),
     source_reference TEXT NOT NULL,
-    effective_from   DATE NOT NULL DEFAULT DATE '2011-11-16',
-    effective_to     DATE,
-    PRIMARY KEY (regime_code, rule_key, effective_from)
+    effective_from DATE NOT NULL DEFAULT DATE '2011-11-16',
+    effective_to DATE,
+    PRIMARY KEY (
+        regime_code,
+        rule_key,
+        effective_from
+    )
 );
 
 -- ── RULE PARAMETER DEFINITIONS ───────────────────────────────────────────────────
@@ -15014,11 +15580,14 @@ CREATE TABLE adviser_reference_documents (
     CONSTRAINT ck_adviser_doc_hash   CHECK (sha256 = encode(sha256(content), 'hex')),
     CONSTRAINT ck_adviser_doc_is_pdf CHECK (substring(content FROM 1 FOR 5) = '\x255044462d'::bytea)   -- "%PDF-"
 );
+
 CREATE INDEX idx_adviser_docs_society ON adviser_reference_documents (society_id);
+
 CREATE OR REPLACE FUNCTION trg_adviser_doc_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     RAISE EXCEPTION 'An adviser reference document is evidence and cannot be changed or deleted: upload a new one.' USING ERRCODE = 'restrict_violation';
 END $$;
+
 CREATE TRIGGER trg_adviser_doc_immutable BEFORE UPDATE OR DELETE ON adviser_reference_documents
     FOR EACH ROW EXECUTE FUNCTION trg_adviser_doc_immutable();
 
@@ -15070,8 +15639,19 @@ CREATE TABLE rule_parameter_defs (
     CONSTRAINT ck_rule_defs_statutory CHECK ((nature = 'statutory') = (base_source IN ('central', 'state_act_rules'))),
     CONSTRAINT ck_rule_defs_statutory_locked CHECK (nature <> 'statutory' OR (layers = '{}' AND NOT droppable))
 );
-CREATE UNIQUE INDEX uq_rule_defs_platform ON rule_parameter_defs (regime_code, rule_key) WHERE society_id IS NULL;
-CREATE UNIQUE INDEX uq_rule_defs_society  ON rule_parameter_defs (society_id, regime_code, rule_key, start_date) WHERE society_id IS NOT NULL;
+
+CREATE UNIQUE INDEX uq_rule_defs_platform ON rule_parameter_defs (regime_code, rule_key)
+WHERE
+    society_id IS NULL;
+
+CREATE UNIQUE INDEX uq_rule_defs_society ON rule_parameter_defs (
+    society_id,
+    regime_code,
+    rule_key,
+    start_date
+)
+WHERE
+    society_id IS NOT NULL;
 
 -- >>> GENERATED by scripts/build_scheme_sql.py from schemes/*.toml. Do not edit by hand.
 INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provision, clause_id, nature,
@@ -15136,65 +15716,529 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
  ('UP_AOA_2010', 'cash_receipt_limit', 'Cash receipt ceiling per person per day (INR)', 'Income-tax Act, 2025 (s.269ST of the Income-tax Act, 1961)', 's.186 (1961 Act: s.269ST)', NULL, 'statutory', 'central', 'num', 'INR', 1, 100000000, 1, 100000000, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_check_cash_receipt_limit']::TEXT[], 'provisional', NULL, FALSE, TRUE, NULL)
 ON CONFLICT DO NOTHING;
 
-INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference, effective_from) VALUES
- ('GENERIC', 'cash_limit_default_mode', NULL, 'block', NULL, 'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting', DATE '2000-01-01'),
- ('GENERIC', 'reserve_appropriation_pct', 25, NULL, '%', 'Engine policy: share of net surplus moved to the Reserve Fund at FY close. No state statute is loaded for this scheme; the society sets it by resolution', DATE '2000-01-01'),
- ('GENERIC', 'fund_collection_mode', NULL, 'on_bill', NULL, 'Engine policy: no state statute is loaded for this scheme, so a fund with a rate is added to the monthly bill (the behaviour before the regime parameter existed). Set fy_close or none by resolution, or load the state''s scheme pack.', DATE '2000-01-01'),
- ('GENERIC', 'fund_allocation_basis', NULL, 'per_sq_ft', NULL, 'Engine policy: per sq ft of apartment area, as before. A state with a prescribed basis (for example % of construction cost) should say so in its own scheme pack.', DATE '2000-01-01'),
- ('UP_AOA_2010', 's22_default_months', 6, NULL, 'months', 'UP Apartment Act 2010 s.22: service cut-off only after MORE than 6 months of default', DATE '2011-11-16'),
- ('UP_AOA_2010', 's22_notice_days', 7, NULL, 'days', 'UP Apartment Act 2010 s.22: 7 days notice to the defaulter', DATE '2011-11-16'),
- ('UP_AOA_2010', 's22_wait_months', 1, NULL, 'months', 'UP Apartment Act 2010 s.22: one-month wait after the certified copy is sent to the competent authority and the owner', DATE '2011-11-16'),
- ('UP_AOA_2010', 's22_appeal_days', 15, NULL, 'days', 'UP Apartment Act 2010 s.22: 15 days for the owner to appeal', DATE '2011-11-16'),
- ('UP_AOA_2010', 's20_recovery_months', 12, NULL, 'months', 'UP Apartment Act 2010 s.20(2): common expenses unpaid for more than 12 months may be recovered through the Competent Authority as arrears of land revenue', DATE '2011-11-16'),
- ('UP_AOA_2010', 'arrears_disqualify_days', 60, NULL, 'days', 'Model Bye-Laws 2011, bye-law 7: arrears of more than 60 days bar voting / standing for the Board', DATE '2011-11-16'),
- ('UP_AOA_2010', 'transfer_fee_pct', 0.5, NULL, '% of value', 'Model Bye-Laws 2011, bye-law 39: 1/2% of transfer value, payable by the transferor on a sale, to the association for the major-repair fund', DATE '2011-11-16'),
- ('UP_AOA_2010', 'nodues_deemed_days', 15, NULL, 'days', 'Model Bye-Laws 2011, bye-law 39: No Dues Certificate deemed granted if not refused within 15 days', DATE '2011-11-16'),
- ('UP_AOA_2010', 'cash_payment_cheque_threshold', 2500, NULL, 'INR', 'Model Bye-Laws 2011, financial provisions (bye-laws 46-52): payments above this by cheque (Secretary + one Board member). Pre-dates UPI/NEFT; this engine treats only mode=cash as the breach', DATE '2011-11-16'),
- ('UP_AOA_2010', 'petty_cash_limit', 20000, NULL, 'INR', 'Model Bye-Laws 2011, financial provisions (bye-laws 46-52): petty cash ceiling', DATE '2011-11-16'),
- ('UP_AOA_2010', 'statement_publish_due_month', 7, NULL, 'month', 'Model Bye-Laws 2011, bye-law 49: audited statement published by 31 July', DATE '2011-11-16'),
- ('UP_AOA_2010', 'statement_publish_due_day', 31, NULL, 'day', 'Model Bye-Laws 2011, bye-law 49', DATE '2011-11-16'),
- ('UP_AOA_2010', 'authority_copy_due_month', 8, NULL, 'month', 'Model Bye-Laws 2011, bye-law 49: copy to the competent authority by 15 August', DATE '2011-11-16'),
- ('UP_AOA_2010', 'authority_copy_due_day', 15, NULL, 'day', 'Model Bye-Laws 2011, bye-law 49', DATE '2011-11-16'),
- ('UP_AOA_2010', 'owner_summary_days', 15, NULL, 'days', 'Model Bye-Laws 2011, bye-law 49: summary to every owner within 15 days of publication', DATE '2011-11-16'),
- ('UP_AOA_2010', 'bye_law7_year_basis', NULL, 'financial_year', NULL, 'Bye-law 7 says "the year preceding the election". Whether that is the financial or the calendar year is contested (advocate commentary differs); default financial_year, overridable per call', DATE '2011-11-16'),
- ('UP_AOA_2010', 'cash_limit_default_mode', NULL, 'block', NULL, 'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting. Override per society in societies.cash_limit_mode', DATE '2011-11-16'),
- ('UP_AOA_2010', 'owner_loan_blocks_nodues', 1, NULL, '0/1', 'Engine policy (not statute): a loan outstanding from the association is a due to it, so the No Dues Certificate is not issued until it is recovered; the Board may instead record a refusal', DATE '2011-11-16'),
- ('UP_AOA_2010', 'owner_loan_counts_bye_law7', 0, NULL, '0/1', 'Engine policy (not statute): OFF by default - bye-law 7 speaks only of arrears of contributions for common expenses, so an overdue owner loan is not counted unless the society opts in on advice', DATE '2011-11-16'),
- ('UP_AOA_2010', 'owner_loan_counts_s22', 0, NULL, '0/1', 'Engine policy (not statute): off by default - s.22 concerns unpaid charges, so an overdue loan does not by itself justify cutting a service; enable only on advice', DATE '2011-11-16'),
- ('UP_AOA_2010', 'reserve_appropriation_pct', 25, NULL, '%', 'Engine policy (not statute): share of net surplus moved to the Reserve Fund at FY close. Neither the UP Apartment Act 2010 nor the 2011 Model Bye-Laws fix a percentage (common profits are only said to form the nucleus of the reserve funds); 25% follows the co-operative-society convention. Set it by General Body resolution', DATE '2011-11-16'),
- ('UP_AOA_2010', 'poll_quorum_pct', 30, NULL, '% of owners', 'Model Bye-Laws 2011, bye-law 9: the presence in person of 30 percent of owners is a quorum (a head-count of owners, not of votes)', DATE '2011-11-16'),
- ('UP_AOA_2010', 'poll_majority_pct', 51, NULL, '% of votes', 'Model Bye-Laws 2011, bye-law 2(e): ''majority'' of owners means owners holding 51 per cent of the votes; bye-law 8 weights each vote by the owner''s percentage in the Declaration (Act s.12(1)(f): percentage ''for all purposes, including voting'')', DATE '2011-11-16'),
- ('UP_AOA_2010', 'poll_majority_of', NULL, 'all_votes', NULL, 'Engine policy, not statute: bye-law 2(e) defines a majority as owners holding 51% of THE votes (read here as all eligible votes, so abstentions count against a motion), while bye-law 10 speaks of a majority of owners CASTING votes. The stricter reading is the default; choose votes_cast only on advice', DATE '2011-11-16'),
- ('UP_AOA_2010', 'owner_loan_resolution_mode', NULL, 'linked', NULL, 'Engine policy, not statute: bye-law 3(1)(f) allows a short-term loan to an owner ''with the consent of the apartment owners'' in an emergent necessity. linked = the loan must cite a passed Approve Owner Loan resolution of a General Body meeting with quorum; text = any resolution reference is accepted (the old behaviour)', DATE '2011-11-16'),
- ('UP_AOA_2010', 'owner_loan_max_term_days', 365, NULL, 'days', 'Engine policy, not statute: the bye-law says only ''short-term'' and fixes no number of days. Applied when owner_loan_resolution_mode = linked, where a repayment date is mandatory', DATE '2011-11-16'),
- ('UP_AOA_2010', 'entrance_fee', 1000, NULL, 'INR', 'Model Bye-Laws 2011, bye-law 4: entrance fee of ₹1,000 per owner on admission', DATE '2011-11-16'),
- ('UP_AOA_2010', 'share_face_value', 100, NULL, 'INR', 'Model Bye-Laws 2011, bye-law 5: one share per owner, face value set by General Body', DATE '2011-11-16'),
- ('UP_AOA_2010', 'cashbook_daily_signature', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 23(f): daily cashbook to be signed by the Secretary and one Board member', DATE '2011-11-16'),
- ('UP_AOA_2010', 'investment_allowed_types', NULL, 'coop_bank,trust_securities,approved_bank', NULL, 'Model Bye-Laws 2011, bye-law 45: investments only in co-operative banks, Trust Act securities, or banks approved by the Competent Authority', DATE '2011-11-16'),
- ('UP_AOA_2010', 'borrowing_ca_approval', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 44(d): borrowing requires Competent Authority approval', DATE '2011-11-16'),
- ('UP_AOA_2010', 'tenant_joint_liability', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(2): tenant is jointly liable with the owner for common expenses', DATE '2011-11-16'),
- ('UP_AOA_2010', 'board_election_voting_basis', NULL, 'undivided_interest', NULL, 'Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration (Act s.12(1)(f): percentage for all purposes including voting). Advisory polls may use one-apartment-one-vote.', DATE '2011-11-16'),
- ('UP_AOA_2010', 'depreciation_fund_pct', 5, NULL, '% or INR', 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the share of the yearly contribution', DATE '2011-11-16'),
- ('UP_AOA_2010', 'depreciation_fund_basis', NULL, 'pct_of_asset_value', NULL, 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the basis of the yearly contribution', DATE '2011-11-16'),
- ('UP_AOA_2010', 'depreciation_fund_rate', 2.0, NULL, 'INR per sq ft/flat', 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the rate when the basis is a fixed amount', DATE '2011-11-16'),
- ('UP_AOA_2010', 'investment_register', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 47: Board shall maintain a register of all investments', DATE '2011-11-16'),
- ('UP_AOA_2010', 'affiliation_register', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 48: association may affiliate with federation; register maintained', DATE '2011-11-16'),
- ('UP_AOA_2010', 'accounts_inspection_allowed', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 48: books of account open to inspection by any member at reasonable times', DATE '2011-11-16'),
- ('UP_AOA_2010', 'accounts_publication_enabled', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 50: annual accounts to be published and circulated to members', DATE '2011-11-16'),
- ('UP_AOA_2010', 'auditor_appointment_by_gbm', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 51: auditor appointed at each Annual General Body Meeting', DATE '2011-11-16'),
- ('UP_AOA_2010', 'auditor_remuneration_gbm', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 52: auditor remuneration fixed by General Body Meeting', DATE '2011-11-16'),
- ('UP_AOA_2010', 'mortgage_notice_required', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 53: owner must notify association of any mortgage/charge', DATE '2011-11-16'),
- ('UP_AOA_2010', 'unpaid_assessments_notice', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 54: association provides statement of unpaid assessments on transfer', DATE '2011-11-16'),
- ('UP_AOA_2010', 'act_prevails_over_byelaws', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 55: UP Apartment Act 2010 prevails over inconsistent bye-laws', DATE '2011-11-16'),
- ('UP_AOA_2010', 'seal_register_maintained', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 56: association shall have a common seal and maintain register of its use', DATE '2011-11-16'),
- ('UP_AOA_2010', 'ca_inspection', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 57: Competent Authority may inspect association records', DATE '2011-11-16'),
- ('UP_AOA_2010', 'bye_law_amendment_tracker', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 58: track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)', DATE '2011-11-16'),
- ('UP_AOA_2010', 'arrears_interest_pct', 1.75, NULL, '%/month', 'SUPERSEDED (Oct 2026): the interest engine now reads apt_charges_fines_basis.apt_interest_pct, the rate the admin records on Apartment Charges, which is the General Body resolved rate under bye-law 46(a). This row is kept for reference only and is no longer read by any function.', DATE '2011-11-16'),
- ('UP_AOA_2010', 'billing_basis_required', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(1): common expenses are charged by percentage of undivided interest; for a UP AOA society this is the statutory basis, not an optional toggle.', DATE '2011-11-16'),
- ('UP_AOA_2010', 'fund_collection_mode', NULL, 'fy_close', NULL, 'Engine default for UP, not a statutory rate. Bye-law 46 lists the ways funds MAY be raised (shares, contributions and donations, common profits forming the nucleus of the reserve funds, loans); bye-law 3(1)(d) sends rent from common areas to a reserve for major repairs. No fixed sinking-fund rate was found, so by default no fund is added to the monthly bill and the reserve is built from surplus at FY close. A General Body resolution to levy a fund switches that fund to on_bill. Provisional: have an advocate confirm against the full Act, Rules and bye-laws.', DATE '2011-11-16'),
- ('UP_AOA_2010', 'fund_allocation_basis', NULL, 'undivided_interest', NULL, 'Engine default: owners share common expenses by their undivided interest (Act s.18(1), as used for maintenance billing), so a fund is shared the same way. Applies when a fund is billed on_bill; at FY close the reserve is one collective pool (fy_close does not allocate to flats).', DATE '2011-11-16'),
- ('UP_AOA_2010', 'cash_receipt_limit', 200000, NULL, 'INR', 'Central law, not a society choice: receiving Rs 2,00,000 or more in cash from one person in a day, for one transaction, or for one event is prohibited; penalty equals the amount. The 1961-to-2025 section mapping (269ST -> 186) rests on secondary tax-publisher sources; the bare Act text has not been checked, so this stays provisional until the society''s CA confirms it. The engine tests the day''s total from one person; ''one event'' cannot be known to it.', DATE '2011-11-16')
-ON CONFLICT DO NOTHING;
+INSERT INTO
+    regime_rule_parameters (
+        regime_code,
+        rule_key,
+        value,
+        value_text,
+        unit,
+        source_reference,
+        effective_from
+    )
+VALUES (
+        'GENERIC',
+        'cash_limit_default_mode',
+        NULL,
+        'block',
+        NULL,
+        'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting',
+        DATE '2000-01-01'
+    ),
+    (
+        'GENERIC',
+        'reserve_appropriation_pct',
+        25,
+        NULL,
+        '%',
+        'Engine policy: share of net surplus moved to the Reserve Fund at FY close. No state statute is loaded for this scheme; the society sets it by resolution',
+        DATE '2000-01-01'
+    ),
+    (
+        'GENERIC',
+        'fund_collection_mode',
+        NULL,
+        'on_bill',
+        NULL,
+        'Engine policy: no state statute is loaded for this scheme, so a fund with a rate is added to the monthly bill (the behaviour before the regime parameter existed). Set fy_close or none by resolution, or load the state''s scheme pack.',
+        DATE '2000-01-01'
+    ),
+    (
+        'GENERIC',
+        'fund_allocation_basis',
+        NULL,
+        'per_sq_ft',
+        NULL,
+        'Engine policy: per sq ft of apartment area, as before. A state with a prescribed basis (for example % of construction cost) should say so in its own scheme pack.',
+        DATE '2000-01-01'
+    ),
+    (
+        'UP_AOA_2010',
+        's22_default_months',
+        6,
+        NULL,
+        'months',
+        'UP Apartment Act 2010 s.22: service cut-off only after MORE than 6 months of default',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        's22_notice_days',
+        7,
+        NULL,
+        'days',
+        'UP Apartment Act 2010 s.22: 7 days notice to the defaulter',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        's22_wait_months',
+        1,
+        NULL,
+        'months',
+        'UP Apartment Act 2010 s.22: one-month wait after the certified copy is sent to the competent authority and the owner',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        's22_appeal_days',
+        15,
+        NULL,
+        'days',
+        'UP Apartment Act 2010 s.22: 15 days for the owner to appeal',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        's20_recovery_months',
+        12,
+        NULL,
+        'months',
+        'UP Apartment Act 2010 s.20(2): common expenses unpaid for more than 12 months may be recovered through the Competent Authority as arrears of land revenue',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'arrears_disqualify_days',
+        60,
+        NULL,
+        'days',
+        'Model Bye-Laws 2011, bye-law 7: arrears of more than 60 days bar voting / standing for the Board',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'transfer_fee_pct',
+        0.5,
+        NULL,
+        '% of value',
+        'Model Bye-Laws 2011, bye-law 39: 1/2% of transfer value, payable by the transferor on a sale, to the association for the major-repair fund',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'nodues_deemed_days',
+        15,
+        NULL,
+        'days',
+        'Model Bye-Laws 2011, bye-law 39: No Dues Certificate deemed granted if not refused within 15 days',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'cash_payment_cheque_threshold',
+        2500,
+        NULL,
+        'INR',
+        'Model Bye-Laws 2011, financial provisions (bye-laws 46-52): payments above this by cheque (Secretary + one Board member). Pre-dates UPI/NEFT; this engine treats only mode=cash as the breach',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'petty_cash_limit',
+        20000,
+        NULL,
+        'INR',
+        'Model Bye-Laws 2011, financial provisions (bye-laws 46-52): petty cash ceiling',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'statement_publish_due_month',
+        7,
+        NULL,
+        'month',
+        'Model Bye-Laws 2011, bye-law 49: audited statement published by 31 July',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'statement_publish_due_day',
+        31,
+        NULL,
+        'day',
+        'Model Bye-Laws 2011, bye-law 49',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'authority_copy_due_month',
+        8,
+        NULL,
+        'month',
+        'Model Bye-Laws 2011, bye-law 49: copy to the competent authority by 15 August',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'authority_copy_due_day',
+        15,
+        NULL,
+        'day',
+        'Model Bye-Laws 2011, bye-law 49',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'owner_summary_days',
+        15,
+        NULL,
+        'days',
+        'Model Bye-Laws 2011, bye-law 49: summary to every owner within 15 days of publication',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'bye_law7_year_basis',
+        NULL,
+        'financial_year',
+        NULL,
+        'Bye-law 7 says "the year preceding the election". Whether that is the financial or the calendar year is contested (advocate commentary differs); default financial_year, overridable per call',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'cash_limit_default_mode',
+        NULL,
+        'block',
+        NULL,
+        'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting. Override per society in societies.cash_limit_mode',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'owner_loan_blocks_nodues',
+        1,
+        NULL,
+        '0/1',
+        'Engine policy (not statute): a loan outstanding from the association is a due to it, so the No Dues Certificate is not issued until it is recovered; the Board may instead record a refusal',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'owner_loan_counts_bye_law7',
+        0,
+        NULL,
+        '0/1',
+        'Engine policy (not statute): OFF by default - bye-law 7 speaks only of arrears of contributions for common expenses, so an overdue owner loan is not counted unless the society opts in on advice',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'owner_loan_counts_s22',
+        0,
+        NULL,
+        '0/1',
+        'Engine policy (not statute): off by default - s.22 concerns unpaid charges, so an overdue loan does not by itself justify cutting a service; enable only on advice',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'reserve_appropriation_pct',
+        25,
+        NULL,
+        '%',
+        'Engine policy (not statute): share of net surplus moved to the Reserve Fund at FY close. Neither the UP Apartment Act 2010 nor the 2011 Model Bye-Laws fix a percentage (common profits are only said to form the nucleus of the reserve funds); 25% follows the co-operative-society convention. Set it by General Body resolution',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'poll_quorum_pct',
+        30,
+        NULL,
+        '% of owners',
+        'Model Bye-Laws 2011, bye-law 9: the presence in person of 30 percent of owners is a quorum (a head-count of owners, not of votes)',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'poll_majority_pct',
+        51,
+        NULL,
+        '% of votes',
+        'Model Bye-Laws 2011, bye-law 2(e): ''majority'' of owners means owners holding 51 per cent of the votes; bye-law 8 weights each vote by the owner''s percentage in the Declaration (Act s.12(1)(f): percentage ''for all purposes, including voting'')',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'poll_majority_of',
+        NULL,
+        'all_votes',
+        NULL,
+        'Engine policy, not statute: bye-law 2(e) defines a majority as owners holding 51% of THE votes (read here as all eligible votes, so abstentions count against a motion), while bye-law 10 speaks of a majority of owners CASTING votes. The stricter reading is the default; choose votes_cast only on advice',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'owner_loan_resolution_mode',
+        NULL,
+        'linked',
+        NULL,
+        'Engine policy, not statute: bye-law 3(1)(f) allows a short-term loan to an owner ''with the consent of the apartment owners'' in an emergent necessity. linked = the loan must cite a passed Approve Owner Loan resolution of a General Body meeting with quorum; text = any resolution reference is accepted (the old behaviour)',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'owner_loan_max_term_days',
+        365,
+        NULL,
+        'days',
+        'Engine policy, not statute: the bye-law says only ''short-term'' and fixes no number of days. Applied when owner_loan_resolution_mode = linked, where a repayment date is mandatory',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'entrance_fee',
+        1000,
+        NULL,
+        'INR',
+        'Model Bye-Laws 2011, bye-law 4: entrance fee of ₹1,000 per owner on admission',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'share_face_value',
+        100,
+        NULL,
+        'INR',
+        'Model Bye-Laws 2011, bye-law 5: one share per owner, face value set by General Body',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'cashbook_daily_signature',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 23(f): daily cashbook to be signed by the Secretary and one Board member',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'investment_allowed_types',
+        NULL,
+        'coop_bank,trust_securities,approved_bank',
+        NULL,
+        'Model Bye-Laws 2011, bye-law 45: investments only in co-operative banks, Trust Act securities, or banks approved by the Competent Authority',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'borrowing_ca_approval',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 44(d): borrowing requires Competent Authority approval',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'tenant_joint_liability',
+        1,
+        NULL,
+        '0/1',
+        'UP Apartment Act 2010 s.18(2): tenant is jointly liable with the owner for common expenses',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'board_election_voting_basis',
+        NULL,
+        'undivided_interest',
+        NULL,
+        'Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration (Act s.12(1)(f): percentage for all purposes including voting). Advisory polls may use one-apartment-one-vote.',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'depreciation_fund_pct',
+        5,
+        NULL,
+        '% or INR',
+        'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the share of the yearly contribution',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'depreciation_fund_basis',
+        NULL,
+        'pct_of_asset_value',
+        NULL,
+        'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the basis of the yearly contribution',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'depreciation_fund_rate',
+        2.0,
+        NULL,
+        'INR per sq ft/flat',
+        'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the rate when the basis is a fixed amount',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'investment_register',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 47: Board shall maintain a register of all investments',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'affiliation_register',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 48: association may affiliate with federation; register maintained',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'accounts_inspection_allowed',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 48: books of account open to inspection by any member at reasonable times',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'accounts_publication_enabled',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 50: annual accounts to be published and circulated to members',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'auditor_appointment_by_gbm',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 51: auditor appointed at each Annual General Body Meeting',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'auditor_remuneration_gbm',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 52: auditor remuneration fixed by General Body Meeting',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'mortgage_notice_required',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 53: owner must notify association of any mortgage/charge',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'unpaid_assessments_notice',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 54: association provides statement of unpaid assessments on transfer',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'act_prevails_over_byelaws',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 55: UP Apartment Act 2010 prevails over inconsistent bye-laws',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'seal_register_maintained',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 56: association shall have a common seal and maintain register of its use',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'ca_inspection',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 57: Competent Authority may inspect association records',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'bye_law_amendment_tracker',
+        1,
+        NULL,
+        '0/1',
+        'Model Bye-Laws 2011, bye-law 58: track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'arrears_interest_pct',
+        1.75,
+        NULL,
+        '%/month',
+        'SUPERSEDED (Oct 2026): the interest engine now reads apt_charges_fines_basis.apt_interest_pct, the rate the admin records on Apartment Charges, which is the General Body resolved rate under bye-law 46(a). This row is kept for reference only and is no longer read by any function.',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'billing_basis_required',
+        1,
+        NULL,
+        '0/1',
+        'UP Apartment Act 2010 s.18(1): common expenses are charged by percentage of undivided interest; for a UP AOA society this is the statutory basis, not an optional toggle.',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'fund_collection_mode',
+        NULL,
+        'fy_close',
+        NULL,
+        'Engine default for UP, not a statutory rate. Bye-law 46 lists the ways funds MAY be raised (shares, contributions and donations, common profits forming the nucleus of the reserve funds, loans); bye-law 3(1)(d) sends rent from common areas to a reserve for major repairs. No fixed sinking-fund rate was found, so by default no fund is added to the monthly bill and the reserve is built from surplus at FY close. A General Body resolution to levy a fund switches that fund to on_bill. Provisional: have an advocate confirm against the full Act, Rules and bye-laws.',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'fund_allocation_basis',
+        NULL,
+        'undivided_interest',
+        NULL,
+        'Engine default: owners share common expenses by their undivided interest (Act s.18(1), as used for maintenance billing), so a fund is shared the same way. Applies when a fund is billed on_bill; at FY close the reserve is one collective pool (fy_close does not allocate to flats).',
+        DATE '2011-11-16'
+    ),
+    (
+        'UP_AOA_2010',
+        'cash_receipt_limit',
+        200000,
+        NULL,
+        'INR',
+        'Central law, not a society choice: receiving Rs 2,00,000 or more in cash from one person in a day, for one transaction, or for one event is prohibited; penalty equals the amount. The 1961-to-2025 section mapping (269ST -> 186) rests on secondary tax-publisher sources; the bare Act text has not been checked, so this stays provisional until the society''s CA confirms it. The engine tests the day''s total from one person; ''one event'' cannot be known to it.',
+        DATE '2011-11-16'
+    ) ON CONFLICT DO NOTHING;
 -- <<< END GENERATED
 
 -- ── LAYERED RULE RESOLVER ─────────────────────────────────────────────────────
@@ -15345,60 +16389,115 @@ $$;
 -- Statutory heads added for UP (live DBs; fresh installs get them from seed.py)
 -- and corrections to mappings that were wrong in the original seed.
 -- ───────────────────────────────────────────────────────────────────────────────
-INSERT INTO statutory_head_catalog
-    (regime_code, head_code, parent_head_code, statement_section, label, display_order,
-     is_statutory_required, source_reference, effective_from)
+INSERT INTO
+    statutory_head_catalog (
+        regime_code,
+        head_code,
+        parent_head_code,
+        statement_section,
+        label,
+        display_order,
+        is_statutory_required,
+        source_reference,
+        effective_from
+    )
 SELECT 'UP_AOA_2010', v.head_code, NULL, 'Liabilities', v.label, v.ord, v.req, v.src, DATE '2011-11-16'
-FROM (VALUES
-    ('MAJOR_REPAIR_FUND', 'Major Repair Fund (Transfer-Fee ½%)', 15, TRUE,
-     'Model Bye-Laws 2011, bye-law 39 (½% of transfer value held for major repairs)'),
-    ('SINKING_FUND', 'Sinking Fund (voluntary; no statutory rate in UP)', 25, FALSE,
-     'Not prescribed by the UP Apartment Act 2010 or the 2011 Model Bye-Laws; levied by general-body resolution')
-) AS v(head_code, label, ord, req, src)
-WHERE EXISTS (SELECT 1 FROM legal_regime_profiles WHERE code = 'UP_AOA_2010')
-ON CONFLICT (regime_code, head_code) DO NOTHING;
+FROM (
+        VALUES (
+                'MAJOR_REPAIR_FUND', 'Major Repair Fund (Transfer-Fee ½%)', 15, TRUE, 'Model Bye-Laws 2011, bye-law 39 (½% of transfer value held for major repairs)'
+            ), (
+                'SINKING_FUND', 'Sinking Fund (voluntary; no statutory rate in UP)', 25, FALSE, 'Not prescribed by the UP Apartment Act 2010 or the 2011 Model Bye-Laws; levied by general-body resolution'
+            )
+    ) AS v (
+        head_code, label, ord, req, src
+    )
+WHERE
+    EXISTS (
+        SELECT 1
+        FROM legal_regime_profiles
+        WHERE
+            code = 'UP_AOA_2010'
+    ) ON CONFLICT (regime_code, head_code) DO NOTHING;
 
 -- Sinking Fund (3210) was mapped to IFMS_CORPUS "per Sec 14(5)": wrong head. The
 -- builder's corpus handover (3230) is the s.14(5) interest-free maintenance security.
 UPDATE account_statutory_mappings
-   SET head_code = 'SINKING_FUND',
-       source_reference = 'Sinking Fund: voluntary fund, no statutory rate in UP (Act 2010 / Model Bye-Laws 2011)',
-       updated_at = NOW()
- WHERE regime_code = 'UP_AOA_2010' AND account_id = 3210 AND head_code = 'IFMS_CORPUS'
-   AND EXISTS (SELECT 1 FROM statutory_head_catalog WHERE regime_code = 'UP_AOA_2010' AND head_code = 'SINKING_FUND');
+SET
+    head_code = 'SINKING_FUND',
+    source_reference = 'Sinking Fund: voluntary fund, no statutory rate in UP (Act 2010 / Model Bye-Laws 2011)',
+    updated_at = NOW()
+WHERE
+    regime_code = 'UP_AOA_2010'
+    AND account_id = 3210
+    AND head_code = 'IFMS_CORPUS'
+    AND EXISTS (
+        SELECT 1
+        FROM statutory_head_catalog
+        WHERE
+            regime_code = 'UP_AOA_2010'
+            AND head_code = 'SINKING_FUND'
+    );
 
 UPDATE account_statutory_mappings
-   SET head_code = 'IFMS_CORPUS',
-       source_reference = 'Corpus Fund (builder handover) is the interest-free maintenance security under UP Apartment Act 2010 s.14(5)',
-       updated_at = NOW()
- WHERE regime_code = 'UP_AOA_2010' AND account_id = 3230 AND head_code = 'RESERVE_FUND';
+SET
+    head_code = 'IFMS_CORPUS',
+    source_reference = 'Corpus Fund (builder handover) is the interest-free maintenance security under UP Apartment Act 2010 s.14(5)',
+    updated_at = NOW()
+WHERE
+    regime_code = 'UP_AOA_2010'
+    AND account_id = 3230
+    AND head_code = 'RESERVE_FUND';
 
 UPDATE account_statutory_mappings
-   SET source_reference = regexp_replace(source_reference, 'Model Bye-Laws Ch\.VII', 'Model Bye-Laws 2011, bye-law 46'),
-       updated_at = NOW()
- WHERE regime_code = 'UP_AOA_2010' AND source_reference LIKE '%Ch.VII%';
+SET
+    source_reference = regexp_replace(
+        source_reference,
+        'Model Bye-Laws Ch\.VII',
+        'Model Bye-Laws 2011, bye-law 46'
+    ),
+    updated_at = NOW()
+WHERE
+    regime_code = 'UP_AOA_2010'
+    AND source_reference LIKE '%Ch.VII%';
 
-UPDATE statutory_head_catalog SET updated_at = NOW(), source_reference = CASE head_code
-    WHEN 'IFMS_CORPUS'            THEN 'UP Apartment Act 2010, Sec 14(5)'
-    WHEN 'RESERVE_FUND'           THEN 'Model Bye-Laws 2011, bye-laws 3(1)(d) and 46; Act Sec 14(8)(a)'
-    WHEN 'CAPITAL_ACCOUNT'        THEN 'Model Bye-Laws 2011, bye-laws 5 and 46 (share capital, ₹1,000 entrance fee)'
-    WHEN 'STAFF_BENEFITS_PAYABLE' THEN 'Model Bye-Laws 2011, bye-law 3(1)(h)'
-    WHEN 'COMMON_EXPENSES_PAYABLE' THEN 'UP Apartment Act 2010, Sec 18, 20; Model Bye-Laws 2011, bye-law 35'
-    WHEN 'SUNDRY_DEBTORS'         THEN 'UP Apartment Act 2010, Sec 18, 20; Model Bye-Laws 2011, bye-law 35'
-    WHEN 'REPAIR_MAINTENANCE_EXP' THEN 'Model Bye-Laws 2011, bye-law 3'
-    WHEN 'COMMON_PROFITS'         THEN 'UP Apartment Act 2010, Sec 14(8)(a), 18(1); Model Bye-Laws 2011, bye-law 3(1)(d)'
-    ELSE source_reference END
- WHERE regime_code = 'UP_AOA_2010'
-   AND head_code IN ('IFMS_CORPUS','RESERVE_FUND','CAPITAL_ACCOUNT','STAFF_BENEFITS_PAYABLE',
-                     'COMMON_EXPENSES_PAYABLE','SUNDRY_DEBTORS','REPAIR_MAINTENANCE_EXP','COMMON_PROFITS');
+UPDATE statutory_head_catalog
+SET
+    updated_at = NOW(),
+    source_reference = CASE head_code
+        WHEN 'IFMS_CORPUS' THEN 'UP Apartment Act 2010, Sec 14(5)'
+        WHEN 'RESERVE_FUND' THEN 'Model Bye-Laws 2011, bye-laws 3(1)(d) and 46; Act Sec 14(8)(a)'
+        WHEN 'CAPITAL_ACCOUNT' THEN 'Model Bye-Laws 2011, bye-laws 5 and 46 (share capital, ₹1,000 entrance fee)'
+        WHEN 'STAFF_BENEFITS_PAYABLE' THEN 'Model Bye-Laws 2011, bye-law 3(1)(h)'
+        WHEN 'COMMON_EXPENSES_PAYABLE' THEN 'UP Apartment Act 2010, Sec 18, 20; Model Bye-Laws 2011, bye-law 35'
+        WHEN 'SUNDRY_DEBTORS' THEN 'UP Apartment Act 2010, Sec 18, 20; Model Bye-Laws 2011, bye-law 35'
+        WHEN 'REPAIR_MAINTENANCE_EXP' THEN 'Model Bye-Laws 2011, bye-law 3'
+        WHEN 'COMMON_PROFITS' THEN 'UP Apartment Act 2010, Sec 14(8)(a), 18(1); Model Bye-Laws 2011, bye-law 3(1)(d)'
+        ELSE source_reference
+    END
+WHERE
+    regime_code = 'UP_AOA_2010'
+    AND head_code IN (
+        'IFMS_CORPUS',
+        'RESERVE_FUND',
+        'CAPITAL_ACCOUNT',
+        'STAFF_BENEFITS_PAYABLE',
+        'COMMON_EXPENSES_PAYABLE',
+        'SUNDRY_DEBTORS',
+        'REPAIR_MAINTENANCE_EXP',
+        'COMMON_PROFITS'
+    );
 
 UPDATE state_compliance_thresholds
-   SET notes = 'No sinking-fund / repair-fund percentage is prescribed by the UP Apartment Act 2010 or the 2011 Model Bye-Laws. '
-               || 'The rate is set by general-body resolution or the promoter agreement.',
-       updated_at = NOW()
- WHERE state = 'UP'
-   AND threshold_key IN ('sinking_fund_pct_construction_cost', 'repair_fund_pct_construction_cost')
-   AND notes LIKE '%Ch.VII%';
+SET
+    notes = 'No sinking-fund / repair-fund percentage is prescribed by the UP Apartment Act 2010 or the 2011 Model Bye-Laws. ' || 'The rate is set by general-body resolution or the promoter agreement.',
+    updated_at = NOW()
+WHERE
+    state = 'UP'
+    AND threshold_key IN (
+        'sinking_fund_pct_construction_cost',
+        'repair_fund_pct_construction_cost'
+    )
+    AND notes LIKE '%Ch.VII%';
 
 -- ───────────────────────────────────────────────────────────────────────────────
 -- 1. Undivided interest (Act s.5(2), s.12(1)(f), s.18(1)) — the Declaration's % per flat
@@ -15614,84 +16713,120 @@ CREATE TABLE decision_types (
 
 -- 2. meetings — GBM / EGM / MC records
 CREATE TABLE meetings (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    type                VARCHAR(10) NOT NULL CHECK (type IN ('GBM', 'EGM', 'MC')),
-    held_on             DATE NOT NULL,
-    quorum_met          BOOLEAN NOT NULL DEFAULT FALSE,
-    minutes_pdf         VARCHAR(255),
-    notice_date         DATE,
-    notice_sent_date    DATE,
-    agenda              TEXT,
-    venue               VARCHAR(255),
-    chaired_by          INT REFERENCES users (id) ON DELETE SET NULL,
-    adjourned_from      INT REFERENCES meetings (id) ON DELETE SET NULL,
-    minutes_signed_by   VARCHAR(255),
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    type VARCHAR(10) NOT NULL CHECK (type IN ('GBM', 'EGM', 'MC')),
+    held_on DATE NOT NULL,
+    quorum_met BOOLEAN NOT NULL DEFAULT FALSE,
+    minutes_pdf VARCHAR(255),
+    notice_date DATE,
+    notice_sent_date DATE,
+    agenda TEXT,
+    venue VARCHAR(255),
+    chaired_by INT REFERENCES users (id) ON DELETE SET NULL,
+    adjourned_from INT REFERENCES meetings (id) ON DELETE SET NULL,
+    minutes_signed_by VARCHAR(255),
     minutes_signed_date DATE,
-    requisition_ref     VARCHAR(255),
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+    requisition_ref VARCHAR(255),
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_meetings_society ON meetings (society_id, held_on DESC);
 
 -- 3. resolutions — Decisions linked to meetings and bye-law clauses
 CREATE TABLE resolutions (
-    id                  SERIAL PRIMARY KEY,
-    meeting_id          INT NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
-    clause_id           VARCHAR(30),
-    decision_type_id    INT NOT NULL REFERENCES decision_types (id),
-    body                TEXT NOT NULL,
-    majority_required   NUMERIC(5, 2) NOT NULL,           -- the threshold that applied when this was recorded
-    votes_for_pct       NUMERIC(5, 2) CHECK (votes_for_pct BETWEEN 0 AND 100),        -- share of ALL votes (by undivided interest) in favour
-    owners_present_pct  NUMERIC(5, 2) CHECK (owners_present_pct BETWEEN 0 AND 100),   -- share of owners present in person (quorum)
-    advocate_opinion_ref VARCHAR(255),                       -- reference to the written advocate's opinion, where the decision type needs one
-    passed              BOOLEAN NOT NULL DEFAULT FALSE,
-    passed_on           DATE,
-    text                TEXT,
-    resolution_type     VARCHAR(50),
-    reference_id        INT,
-    status              VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'passed', 'rejected')),
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    id SERIAL PRIMARY KEY,
+    meeting_id INT NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
+    clause_id VARCHAR(30),
+    decision_type_id INT NOT NULL REFERENCES decision_types (id),
+    body TEXT NOT NULL,
+    majority_required NUMERIC(5, 2) NOT NULL, -- the threshold that applied when this was recorded
+    votes_for_pct NUMERIC(5, 2) CHECK (
+        votes_for_pct BETWEEN 0 AND 100
+    ), -- share of ALL votes (by undivided interest) in favour
+    owners_present_pct NUMERIC(5, 2) CHECK (
+        owners_present_pct BETWEEN 0 AND 100
+    ), -- share of owners present in person (quorum)
+    advocate_opinion_ref VARCHAR(255), -- reference to the written advocate's opinion, where the decision type needs one
+    passed BOOLEAN NOT NULL DEFAULT FALSE,
+    passed_on DATE,
+    text TEXT,
+    resolution_type VARCHAR(50),
+    reference_id INT,
+    status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (
+        status IN ('draft', 'passed', 'rejected')
+    ),
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     -- V5.8: legacy resolutions imported from before the platform. Marked legacy so
     -- they are visible as evidence but never satisfy the engine's majority checks.
-    legacy              BOOLEAN NOT NULL DEFAULT FALSE,
-    minutes_file        VARCHAR(255),
-    minutes_hash        VARCHAR(64),
+    legacy BOOLEAN NOT NULL DEFAULT FALSE,
+    minutes_file VARCHAR(255),
+    minutes_hash VARCHAR(64),
     -- What the old minutes recorded. Evidence only: it never makes the resolution 'passed'.
-    legacy_outcome      VARCHAR(10)
-        CHECK (legacy_outcome IS NULL OR legacy_outcome IN ('passed', 'rejected', 'unknown')),
+    legacy_outcome VARCHAR(10) CHECK (
+        legacy_outcome IS NULL
+        OR legacy_outcome IN (
+            'passed',
+            'rejected',
+            'unknown'
+        )
+    ),
     -- G-01: `passed` and `status` can no longer disagree, and a passed
     -- resolution must have reached its majority. (Quorum lives on the
     -- meeting row; trg_resolutions_validity checks it.)
     CONSTRAINT ck_resolution_passed_consistency CHECK (
         (passed = (status = 'passed'))
-        AND (NOT passed OR (passed_on IS NOT NULL
-                            AND votes_for_pct IS NOT NULL
-                            AND votes_for_pct >= majority_required))),
+        AND (
+            NOT passed
+            OR (
+                passed_on IS NOT NULL
+                AND votes_for_pct IS NOT NULL
+                AND votes_for_pct >= majority_required
+            )
+        )
+    ),
     -- V5.8: a legacy resolution is EVIDENCE. It is never 'passed', so no majority check, document link or decision
     -- engine that tests resolutions.passed / status = 'passed' can ever use it.
-    CONSTRAINT ck_resolution_legacy_inert CHECK (NOT legacy OR (NOT passed AND status = 'draft' AND minutes_hash IS NOT NULL))
+    CONSTRAINT ck_resolution_legacy_inert CHECK (
+        NOT legacy
+        OR (
+            NOT passed
+            AND status = 'draft'
+            AND minutes_hash IS NOT NULL
+        )
+    )
 );
+
 CREATE INDEX idx_resolutions_meeting ON resolutions (meeting_id);
+
 CREATE INDEX idx_resolutions_clause ON resolutions (clause_id);
 
 -- 4. Investment Register (bye-law 47)
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE investment_register (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
     investment_date DATE NOT NULL,
-    institution     VARCHAR(100) NOT NULL,
-    institution_type VARCHAR(30) NOT NULL CHECK (institution_type IN ('coop_bank', 'trust_securities', 'approved_bank', 'other')),
-    amount          NUMERIC(14,2) NOT NULL CHECK (amount >= 0),
-    maturity_date   DATE,
-    rate_pct        NUMERIC(6,3),
-    purpose         VARCHAR(200),
-    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
-    created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    institution VARCHAR(100) NOT NULL,
+    institution_type VARCHAR(30) NOT NULL CHECK (
+        institution_type IN (
+            'coop_bank',
+            'trust_securities',
+            'approved_bank',
+            'other'
+        )
+    ),
+    amount NUMERIC(14, 2) NOT NULL CHECK (amount >= 0),
+    maturity_date DATE,
+    rate_pct NUMERIC(6, 3),
+    purpose VARCHAR(200),
+    resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_investment_register_society ON investment_register (society_id, investment_date);
 
 CREATE OR REPLACE FUNCTION fn_investment_register_check(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
@@ -15737,17 +16872,18 @@ END $$;
 -- ───────────────────────────────────────────────────────────────────────────────
 -- Model Bye-Law 48: Association may affiliate with a federation/apex body
 CREATE TABLE affiliation_register (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    federation_name     VARCHAR(150) NOT NULL,
-    affiliation_date    DATE NOT NULL,
-    affiliation_number  VARCHAR(50),
-    expiry_date         DATE,
-    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
-    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    federation_name VARCHAR(150) NOT NULL,
+    affiliation_date DATE NOT NULL,
+    affiliation_number VARCHAR(50),
+    expiry_date DATE,
+    resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_affiliation_register_society ON affiliation_register (society_id, is_active);
 
 CREATE OR REPLACE FUNCTION fn_affiliation_check(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
@@ -15783,15 +16919,16 @@ END $$;
 -- 5. Accounts Inspection (bye-law 48)
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE accounts_inspection_log (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    member_id       INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    apartment_id    INT REFERENCES apartments (id) ON DELETE SET NULL,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    member_id INT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    apartment_id INT REFERENCES apartments (id) ON DELETE SET NULL,
     inspection_date DATE NOT NULL,
-    records_viewed  VARCHAR(500),
-    created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    records_viewed VARCHAR(500),
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_accounts_inspection_log_society ON accounts_inspection_log (society_id, inspection_date);
 
 CREATE OR REPLACE FUNCTION fn_accounts_inspection_check(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
@@ -15820,16 +16957,17 @@ END $$;
 -- 5b. Publication of Accounts (bye-law 50)
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE accounts_publication (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    financial_year  INT NOT NULL,
-    published_on    DATE,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    financial_year INT NOT NULL,
+    published_on DATE,
     authority_copy_sent_on DATE,
     owner_summary_sent_on DATE,
-    published_by    INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    published_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_accounts_publication UNIQUE (society_id, financial_year)
 );
+
 CREATE INDEX idx_accounts_publication_society ON accounts_publication (society_id, financial_year);
 
 CREATE OR REPLACE FUNCTION fn_accounts_publication_check(p_society_id INT, p_fy INT)
@@ -15873,20 +17011,24 @@ END $$;
 -- 6. Auditor Appointment (bye-laws 51-52)
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE auditor_appointments (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    auditor_name        VARCHAR(100) NOT NULL,
-    auditor_firm        VARCHAR(100),
-    membership_number   VARCHAR(30),
-    appointment_date    DATE NOT NULL,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    auditor_name VARCHAR(100) NOT NULL,
+    auditor_firm VARCHAR(100),
+    membership_number VARCHAR(30),
+    appointment_date DATE NOT NULL,
     financial_year_from INT NOT NULL,
-    financial_year_to   INT NOT NULL,
-    remuneration        NUMERIC(12,2),
-    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+    financial_year_to INT NOT NULL,
+    remuneration NUMERIC(12, 2),
+    resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_auditor_appointments_society ON auditor_appointments (society_id, financial_year_from);
+
+CREATE INDEX idx_auditor_appointments_society ON auditor_appointments (
+    society_id,
+    financial_year_from
+);
 
 CREATE OR REPLACE FUNCTION fn_auditor_appointment_check(p_society_id INT, p_fy INT)
 RETURNS TABLE (appointed BOOLEAN, auditor_name VARCHAR, msg TEXT)
@@ -15949,17 +17091,18 @@ END $$;
 -- 7. Mortgage Notice Register (bye-law 53)
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE mortgage_notices (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    apartment_id    INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
-    mortgagee_name  VARCHAR(100) NOT NULL,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    mortgagee_name VARCHAR(100) NOT NULL,
     mortgagee_address VARCHAR(200),
-    loan_amount     NUMERIC(14,2),
-    mortgage_date   DATE NOT NULL,
+    loan_amount NUMERIC(14, 2),
+    mortgage_date DATE NOT NULL,
     notice_received_on DATE NOT NULL,
-    created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_mortgage_notices_society ON mortgage_notices (society_id, apartment_id);
 
 CREATE OR REPLACE FUNCTION fn_mortgage_notice_check(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
@@ -16049,17 +17192,18 @@ END $$;
 -- 9. Seal Register (bye-law 56)
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE seal_register (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    document_date   DATE NOT NULL,
-    document_type   VARCHAR(50) NOT NULL,
-    document_ref    VARCHAR(100),
-    purpose         VARCHAR(300),
-    authorized_by   VARCHAR(100) NOT NULL,
-    used_by         INT REFERENCES users (id),
-    created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    document_date DATE NOT NULL,
+    document_type VARCHAR(50) NOT NULL,
+    document_ref VARCHAR(100),
+    purpose VARCHAR(300),
+    authorized_by VARCHAR(100) NOT NULL,
+    used_by INT REFERENCES users (id),
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_seal_register_society ON seal_register (society_id, document_date);
 
 CREATE OR REPLACE FUNCTION fn_seal_register_check(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
@@ -16087,17 +17231,18 @@ END $$;
 -- 10. Competent Authority Inspection (bye-law 57)
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE ca_inspections (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    inspection_date     DATE NOT NULL,
-    ca_officer_name     VARCHAR(100),
-    ca_designation      VARCHAR(100),
-    findings            TEXT,
-    action_required     BOOLEAN DEFAULT FALSE,
-    action_taken        TEXT,
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    inspection_date DATE NOT NULL,
+    ca_officer_name VARCHAR(100),
+    ca_designation VARCHAR(100),
+    findings TEXT,
+    action_required BOOLEAN DEFAULT FALSE,
+    action_taken TEXT,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_ca_inspections_society ON ca_inspections (society_id, inspection_date);
 
 CREATE OR REPLACE FUNCTION fn_ca_inspection_check(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
@@ -16134,19 +17279,20 @@ END $$;
 -- 11. Bye-law Amendment Tracker (bye-law 58)
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE bye_law_amendments (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    amendment_date      DATE NOT NULL,
-    bye_law_number      VARCHAR(20) NOT NULL,
-    old_text            TEXT,
-    new_text            TEXT,
-    gbm_resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
-    ca_approval_ref     VARCHAR(100),
-    ca_approval_date    DATE,
-    effective_date      DATE,
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    amendment_date DATE NOT NULL,
+    bye_law_number VARCHAR(20) NOT NULL,
+    old_text TEXT,
+    new_text TEXT,
+    gbm_resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    ca_approval_ref VARCHAR(100),
+    ca_approval_date DATE,
+    effective_date DATE,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_bye_law_amendments_society ON bye_law_amendments (society_id, amendment_date);
 
 CREATE OR REPLACE FUNCTION fn_bye_law_amendment_log(p_society_id INT, p_as_of DATE DEFAULT CURRENT_DATE)
@@ -16198,28 +17344,31 @@ BEGIN
 END $$;
 
 CREATE TABLE apartment_transfers (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    apartment_id        INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
-    transfer_date       DATE NOT NULL,
-    transferor_name     VARCHAR(100),
-    transferee_name     VARCHAR(100),
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    transfer_date DATE NOT NULL,
+    transferor_name VARCHAR(100),
+    transferee_name VARCHAR(100),
     -- The model bye-law's ½% is payable by the transferor on a SALE. Gift / succession carry no fee.
-    transfer_type       VARCHAR(20) NOT NULL DEFAULT 'sale' CHECK (transfer_type IN ('sale', 'gift', 'succession')),
-    transfer_value      NUMERIC(14, 2) NOT NULL CHECK (transfer_value >= 0),
-    fee_pct             NUMERIC(6, 3) NOT NULL,
-    fee_amount          NUMERIC(12, 2) NOT NULL,
-    fee_receivable_id   INT REFERENCES receivables (id) ON DELETE SET NULL,
+    transfer_type VARCHAR(20) NOT NULL DEFAULT 'sale' CHECK (
+        transfer_type IN ('sale', 'gift', 'succession')
+    ),
+    transfer_value NUMERIC(14, 2) NOT NULL CHECK (transfer_value >= 0),
+    fee_pct NUMERIC(6, 3) NOT NULL,
+    fee_amount NUMERIC(12, 2) NOT NULL,
+    fee_receivable_id INT REFERENCES receivables (id) ON DELETE SET NULL,
     nodues_requested_on DATE,
-    nodues_refused_on   DATE,
-    nodues_issued_on    DATE,
+    nodues_refused_on DATE,
+    nodues_issued_on DATE,
     -- Act s.23(2): the Board's statement of unpaid common-expense assessment, frozen when issued.
-    statement_amount    NUMERIC(12, 2),
+    statement_amount NUMERIC(12, 2),
     statement_issued_on DATE,
     statement_issued_by INT REFERENCES users (id),
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_apartment_transfers_society ON apartment_transfers (society_id, apartment_id);
 
 CREATE OR REPLACE FUNCTION fn_record_apartment_transfer(
@@ -16413,27 +17562,40 @@ END $$;
 -- 4. Section 22 — procedure before cutting an essential service
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE service_cutoff_proceedings (
-    id                         SERIAL PRIMARY KEY,
-    society_id                 INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    apartment_id               INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
-    service_type               VARCHAR(40) NOT NULL,
-    arrears_amount             NUMERIC(12, 2),
-    default_since              DATE NOT NULL,
-    notice_served_on           DATE,
-    gb_resolution_on           DATE,
-    copy_sent_to_authority_on  DATE,
-    copy_sent_to_owner_on      DATE,
-    copy_received_by_owner_on  DATE,   -- the 15-day appeal runs from RECEIPT (s.22(2)); falls back to dispatch if blank
-    display_notice_on          DATE,
-    appeal_filed_on            DATE,
-    appeal_outcome             VARCHAR(20) CHECK (appeal_outcome IN ('pending', 'dismissed', 'allowed')),
-    cut_off_on                 DATE,
-    status                     VARCHAR(20) NOT NULL DEFAULT 'in_progress'
-                               CHECK (status IN ('in_progress', 'cut_off', 'withdrawn', 'restored')),
-    notes                      TEXT,
-    created_by                 INT REFERENCES users (id),
-    created_at                 TIMESTAMP NOT NULL DEFAULT NOW()
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    service_type VARCHAR(40) NOT NULL,
+    arrears_amount NUMERIC(12, 2),
+    default_since DATE NOT NULL,
+    notice_served_on DATE,
+    gb_resolution_on DATE,
+    copy_sent_to_authority_on DATE,
+    copy_sent_to_owner_on DATE,
+    copy_received_by_owner_on DATE, -- the 15-day appeal runs from RECEIPT (s.22(2)); falls back to dispatch if blank
+    display_notice_on DATE,
+    appeal_filed_on DATE,
+    appeal_outcome VARCHAR(20) CHECK (
+        appeal_outcome IN (
+            'pending',
+            'dismissed',
+            'allowed'
+        )
+    ),
+    cut_off_on DATE,
+    status VARCHAR(20) NOT NULL DEFAULT 'in_progress' CHECK (
+        status IN (
+            'in_progress',
+            'cut_off',
+            'withdrawn',
+            'restored'
+        )
+    ),
+    notes TEXT,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_service_cutoff_society ON service_cutoff_proceedings (society_id, apartment_id);
 
 -- Does NOT cut anything: returns whether the s.22 preconditions are satisfied as of
@@ -16526,15 +17688,20 @@ END $$;
 -- 5. Cash / cheque limits (bye-laws 46-52)
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE compliance_flags (
-    id           SERIAL PRIMARY KEY,
-    society_id   INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    rule_code    VARCHAR(40) NOT NULL,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    rule_code VARCHAR(40) NOT NULL,
     source_table VARCHAR(40) NOT NULL,
-    source_id    INT NOT NULL,
-    detail       TEXT,
-    flagged_at   TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_compliance_flag UNIQUE (source_table, source_id, rule_code)
+    source_id INT NOT NULL,
+    detail TEXT,
+    flagged_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_compliance_flag UNIQUE (
+        source_table,
+        source_id,
+        rule_code
+    )
 );
+
 CREATE INDEX idx_compliance_flags_society ON compliance_flags (society_id, rule_code);
 
 CREATE OR REPLACE FUNCTION fn_cash_limit_mode(p_society_id INT)
@@ -16569,27 +17736,31 @@ END $$;
 --    owner summaries within 15 days of publication). Indian FY (April-March).
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE aoa_statutory_filings (
-    id                       SERIAL PRIMARY KEY,
-    society_id               INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    fy_start_year            INT NOT NULL,
-    statements_published_on  DATE,
-    copy_to_authority_on     DATE,
-    owner_summaries_sent_on  DATE,
-    auditor_name             VARCHAR(150),
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    fy_start_year INT NOT NULL,
+    statements_published_on DATE,
+    copy_to_authority_on DATE,
+    owner_summaries_sent_on DATE,
+    auditor_name VARCHAR(150),
     -- Bye-law 49(3) publishes an AUDITED statement; bye-law 51 has the general meeting appoint the auditor.
     -- A statement cannot be recorded as published unless an auditor is named and signed it off on or before
     -- the publication date.
-    audit_signed_off_on      DATE,
-    owner_list_attached      BOOLEAN NOT NULL DEFAULT FALSE,
-    loanee_list_attached     BOOLEAN NOT NULL DEFAULT FALSE,
-    notes                    TEXT,
-    updated_by               INT REFERENCES users (id),
-    updated_at               TIMESTAMP NOT NULL DEFAULT NOW(),
+    audit_signed_off_on DATE,
+    owner_list_attached BOOLEAN NOT NULL DEFAULT FALSE,
+    loanee_list_attached BOOLEAN NOT NULL DEFAULT FALSE,
+    notes TEXT,
+    updated_by INT REFERENCES users (id),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_aoa_filing UNIQUE (society_id, fy_start_year),
     CONSTRAINT chk_aoa_published_is_audited CHECK (
         statements_published_on IS NULL
-        OR (COALESCE(btrim(auditor_name), '') <> '' AND audit_signed_off_on IS NOT NULL
-            AND audit_signed_off_on <= statements_published_on))
+        OR (
+            COALESCE(btrim (auditor_name), '') <> ''
+            AND audit_signed_off_on IS NOT NULL
+            AND audit_signed_off_on <= statements_published_on
+        )
+    )
 );
 
 CREATE OR REPLACE FUNCTION fn_statutory_calendar(p_society_id INT, p_asof DATE DEFAULT CURRENT_DATE, p_years INT DEFAULT 3)
@@ -16633,33 +17804,37 @@ END $$;
 -- 7. Owner list and loanee list (annexures to the bye-law 49 statement)
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE owner_loans (
-    id                SERIAL PRIMARY KEY,
-    society_id        INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    apartment_id      INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
-    loan_date         DATE NOT NULL,
-    principal         NUMERIC(12, 2) NOT NULL CHECK (principal > 0),
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    loan_date DATE NOT NULL,
+    principal NUMERIC(12, 2) NOT NULL CHECK (principal > 0),
     interest_rate_pct NUMERIC(5, 2) NOT NULL DEFAULT 0,
-    purpose           TEXT,
-    resolution_ref    VARCHAR(100),
+    purpose TEXT,
+    resolution_ref VARCHAR(100),
     -- Bye-law 3(1)(f): a loan needs "the consent of the apartment owners". resolution_id points at the passed
     -- Approve Owner Loan resolution that records it (FK added after the resolutions table, below);
     -- resolution_ref stays as free text for loans entered before this link existed.
-    resolution_id     INT REFERENCES resolutions (id) ON DELETE SET NULL,
-    repaid_amount     NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (repaid_amount >= 0),
+    resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    repaid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (repaid_amount >= 0),
     -- Bye-law 3(1)(f) lets the association lend to an owner. The register row
     -- alone is not a money movement: ledger_posted records whether the
     -- disbursal has actually been journalled (journal_id points at that
     -- journal), so a registered loan can never be mistaken for a posted one.
-    ledger_posted     BOOLEAN NOT NULL DEFAULT FALSE,
-    disbursal_mode    VARCHAR(20),
-    journal_id        INT,
+    ledger_posted BOOLEAN NOT NULL DEFAULT FALSE,
+    disbursal_mode VARCHAR(20),
+    journal_id INT,
     -- A due date is optional — an interest-free, open-ended loan has none.
     -- When present it cannot predate the loan itself.
-    due_date          DATE,
-    created_by        INT REFERENCES users (id),
-    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT owner_loans_due_after_loan CHECK (due_date IS NULL OR due_date >= loan_date)
-);   -- register only: this table does not post to the ledger
+    due_date DATE,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT owner_loans_due_after_loan CHECK (
+        due_date IS NULL
+        OR due_date >= loan_date
+    )
+);
+-- register only: this table does not post to the ledger
 
 CREATE OR REPLACE FUNCTION fn_aoa_owner_list(p_society_id INT)
 RETURNS TABLE (sr_no BIGINT, flat_number VARCHAR, owner_name VARCHAR, mobile VARCHAR,
@@ -16714,17 +17889,19 @@ $$;
 -- owner_loans.ledger_posted / disbursal_mode / journal_id are declared inline
 -- on the owner_loans CREATE TABLE earlier in this file.
 CREATE TABLE owner_loan_repayments (
-    id               SERIAL PRIMARY KEY,
-    loan_id          INT NOT NULL REFERENCES owner_loans (id) ON DELETE CASCADE,
-    society_id       INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    repay_date       DATE NOT NULL,
+    id SERIAL PRIMARY KEY,
+    loan_id INT NOT NULL REFERENCES owner_loans (id) ON DELETE CASCADE,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    repay_date DATE NOT NULL,
     principal_amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (principal_amount >= 0),
-    interest_amount  NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (interest_amount >= 0),
-    mode             VARCHAR(20) NOT NULL,
-    journal_id       INT,
-    created_by       INT REFERENCES users (id),
-    created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
-    CHECK (principal_amount + interest_amount > 0)
+    interest_amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (interest_amount >= 0),
+    mode VARCHAR(20) NOT NULL,
+    journal_id INT,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CHECK (
+        principal_amount + interest_amount > 0
+    )
 );
 
 CREATE OR REPLACE FUNCTION fn_ensure_owner_loan_accounts(p_society_id INT)
@@ -16974,21 +18151,29 @@ $$;
 -- Bye-law 7 itself governs Board elections, not polls: poll eligibility is engine policy.
 -- ═══════════════════════════════════════════════════════════════════════════════
 CREATE TABLE society_policy_settings (
-    id              BIGSERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    policy_key      VARCHAR(40) NOT NULL,
-    value_text      VARCHAR(40) NOT NULL,
-    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
-    effective_from  DATE NOT NULL DEFAULT CURRENT_DATE,
-    created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    id BIGSERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    policy_key VARCHAR(40) NOT NULL,
+    value_text VARCHAR(40) NOT NULL,
+    resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    effective_from DATE NOT NULL DEFAULT CURRENT_DATE,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 -- An earlier draft had UNIQUE (society_id, policy_key, effective_from): a provisional choice dated today then
 -- failed to insert beside an active row of the same date. One open (unresolved) choice per policy instead —
 -- enforced by the partial unique index below.
-CREATE UNIQUE INDEX uq_society_policy_provisional ON society_policy_settings (society_id, policy_key) WHERE resolution_id IS NULL;
-CREATE INDEX idx_society_policy_lookup ON society_policy_settings (society_id, policy_key, effective_from DESC, id DESC);
+CREATE UNIQUE INDEX uq_society_policy_provisional ON society_policy_settings (society_id, policy_key)
+WHERE
+    resolution_id IS NULL;
+
+CREATE INDEX idx_society_policy_lookup ON society_policy_settings (
+    society_id,
+    policy_key,
+    effective_from DESC,
+    id DESC
+);
 
 CREATE OR REPLACE FUNCTION fn_society_policy(p_society_id INT, p_key VARCHAR, p_on DATE DEFAULT CURRENT_DATE)
 RETURNS TEXT LANGUAGE sql STABLE AS $$
@@ -17147,21 +18332,22 @@ END $$;
 -- (a due to the association), charged once on first admission. The share capital
 -- entry is a register record; the physical share certificate is outside this engine.
 CREATE TABLE owner_admissions (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    apartment_id    INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
-    admission_date  DATE NOT NULL,
-    owner_name      VARCHAR(100),
-    entrance_fee    NUMERIC(10, 2),              -- NULL = not yet applied / collected
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    admission_date DATE NOT NULL,
+    owner_name VARCHAR(100),
+    entrance_fee NUMERIC(10, 2), -- NULL = not yet applied / collected
     entrance_fee_paid BOOLEAN NOT NULL DEFAULT FALSE,
-    share_count     INT DEFAULT 1,               -- one share per owner (bye-law 5)
+    share_count INT DEFAULT 1, -- one share per owner (bye-law 5)
     share_face_value NUMERIC(10, 2),
-    share_paid      BOOLEAN NOT NULL DEFAULT FALSE,
-    receivable_id   INT REFERENCES receivables (id) ON DELETE SET NULL,
-    created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    share_paid BOOLEAN NOT NULL DEFAULT FALSE,
+    receivable_id INT REFERENCES receivables (id) ON DELETE SET NULL,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_owner_admission_apartment UNIQUE (society_id, apartment_id)
 );
+
 CREATE INDEX idx_owner_admissions_society ON owner_admissions (society_id, apartment_id);
 
 CREATE OR REPLACE FUNCTION fn_entrance_fee_due(p_society_id INT, p_apartment_id INT)
@@ -17322,19 +18508,20 @@ $$;
 
 -- ── (3) Daily cashbook signature (bye-law 23(f)) ────────────────────────────────
 CREATE TABLE cashbook_signatures (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    day             DATE NOT NULL,
-    signed_by       VARCHAR(100),            -- name/title of the signer (Secretary + 1 Board member)
-    signed_at       TIMESTAMP,
-    notes           TEXT,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    day DATE NOT NULL,
+    signed_by VARCHAR(100), -- name/title of the signer (Secretary + 1 Board member)
+    signed_at TIMESTAMP,
+    notes TEXT,
     -- The closing cash actually counted when the book was signed (Job 5): the physical control that an all-cash
     -- voucher, which has no ledger leg, cannot give by arithmetic. Reconciled by fn_cashbook_reconciliation.
-    closing_cash_declared NUMERIC(15,2),
-    created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    closing_cash_declared NUMERIC(15, 2),
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_cashbook_day UNIQUE (society_id, day)
 );
+
 CREATE INDEX idx_cashbook_signatures_society ON cashbook_signatures (society_id, day);
 
 CREATE OR REPLACE FUNCTION fn_cashbook_signature_check(p_society_id INT, p_day DATE)
@@ -17386,18 +18573,23 @@ $$;
 -- approval. This is a gated check: the loan is recorded but flagged until the
 -- approval is attached.
 CREATE TABLE borrowing_approvals (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    loan_source     VARCHAR(50) NOT NULL,       -- e.g. 'housing_board', 'bank', 'member_loan'
-    principal       NUMERIC(14, 2) NOT NULL,
-    purpose         TEXT,
-    ca_approval_ref VARCHAR(100),              -- Competent Authority approval reference
-    ca_approved_on  DATE,
-    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
-    created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_borrowing_approval UNIQUE (society_id, loan_source, principal)
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    loan_source VARCHAR(50) NOT NULL, -- e.g. 'housing_board', 'bank', 'member_loan'
+    principal NUMERIC(14, 2) NOT NULL,
+    purpose TEXT,
+    ca_approval_ref VARCHAR(100), -- Competent Authority approval reference
+    ca_approved_on DATE,
+    resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_borrowing_approval UNIQUE (
+        society_id,
+        loan_source,
+        principal
+    )
 );
+
 CREATE INDEX idx_borrowing_approvals_society ON borrowing_approvals (society_id, ca_approved_on);
 
 CREATE OR REPLACE FUNCTION fn_borrowing_check(p_society_id INT, p_principal NUMERIC, p_loan_source TEXT)
@@ -17433,19 +18625,28 @@ $$;
 -- current tenant per apartment; receivables generated against the flat are
 -- flagged to show the tenant is also on the hook.
 CREATE TABLE tenants (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    apartment_id    INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
-    tenant_name     VARCHAR(100) NOT NULL,
-    tenant_mobile   VARCHAR(15),
-    tenancy_start   DATE NOT NULL,
-    tenancy_end     DATE,
-    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
-    created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_tenant_apartment UNIQUE (society_id, apartment_id, tenant_name)
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    tenant_name VARCHAR(100) NOT NULL,
+    tenant_mobile VARCHAR(15),
+    tenancy_start DATE NOT NULL,
+    tenancy_end DATE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_tenant_apartment UNIQUE (
+        society_id,
+        apartment_id,
+        tenant_name
+    )
 );
-CREATE INDEX idx_tenants_society_apartment ON tenants (society_id, apartment_id, is_active);
+
+CREATE INDEX idx_tenants_society_apartment ON tenants (
+    society_id,
+    apartment_id,
+    is_active
+);
 
 CREATE OR REPLACE FUNCTION fn_tenant_liability(p_society_id INT, p_apartment_id INT, p_asof DATE DEFAULT CURRENT_DATE)
 RETURNS TABLE (tenant_name VARCHAR, joint_liability BOOLEAN, message TEXT)
@@ -17487,8 +18688,6 @@ $$;
 -- Track EPF/ESIC challans for direct employees and manpower agency staff,
 -- with invoice-hold gate when challans are missing.
 
-
-
 -- ════════════════════════════════════════════════════════════════
 -- TENANT JOINT-LIABILITY LINKAGE — statutory linkage of an active tenant to a
 -- specific receivable (Act s.18(2)). This is the bookkeeper's trail for the rule
@@ -17508,49 +18707,71 @@ CREATE TABLE tenant_liability_links (
     -- prior-period links are retained as the historical record of what was billed under
     -- joint liability, so recoveries / statements can always point at a specific period.
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_tenant_liability_period UNIQUE (society_id, apartment_id, receivable_id)
+    CONSTRAINT uq_tenant_liability_period UNIQUE (
+        society_id,
+        apartment_id,
+        receivable_id
+    )
 );
 
-CREATE INDEX idx_tenant_liability_links_apartment
-    ON tenant_liability_links (society_id, apartment_id, liability_as_of);
-CREATE INDEX idx_tenant_liability_links_receivable
-    ON tenant_liability_links (receivable_id);
+CREATE INDEX idx_tenant_liability_links_apartment ON tenant_liability_links (
+    society_id,
+    apartment_id,
+    liability_as_of
+);
+
+CREATE INDEX idx_tenant_liability_links_receivable ON tenant_liability_links (receivable_id);
 
 CREATE TABLE labour_challans (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    challan_month       DATE NOT NULL,          -- first day of the month (e.g., '2025-01-01')
-    challan_type        VARCHAR(20) NOT NULL CHECK (challan_type IN ('EPF', 'ESIC', 'BOTH')),
-    entity_type         VARCHAR(20) NOT NULL CHECK (entity_type IN ('direct_employee', 'manpower_agency')),
-    entity_name         VARCHAR(100),           -- employee name or agency name
-    epf_challan_no      VARCHAR(50),
-    epf_challan_date    DATE,
-    epf_amount          NUMERIC(12,2),
-    esic_challan_no     VARCHAR(50),
-    esic_challan_date   DATE,
-    esic_amount         NUMERIC(12,2),
-    uploaded_by         INT REFERENCES users (id),
-    uploaded_at         TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_labour_challan UNIQUE (society_id, challan_month, challan_type, entity_type, entity_name)
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    challan_month DATE NOT NULL, -- first day of the month (e.g., '2025-01-01')
+    challan_type VARCHAR(20) NOT NULL CHECK (
+        challan_type IN ('EPF', 'ESIC', 'BOTH')
+    ),
+    entity_type VARCHAR(20) NOT NULL CHECK (
+        entity_type IN (
+            'direct_employee',
+            'manpower_agency'
+        )
+    ),
+    entity_name VARCHAR(100), -- employee name or agency name
+    epf_challan_no VARCHAR(50),
+    epf_challan_date DATE,
+    epf_amount NUMERIC(12, 2),
+    esic_challan_no VARCHAR(50),
+    esic_challan_date DATE,
+    esic_amount NUMERIC(12, 2),
+    uploaded_by INT REFERENCES users (id),
+    uploaded_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_labour_challan UNIQUE (
+        society_id,
+        challan_month,
+        challan_type,
+        entity_type,
+        entity_name
+    )
 );
+
 CREATE INDEX idx_labour_challans_society ON labour_challans (society_id, challan_month);
 
 -- Track manpower agencies and their compliance requirements
 CREATE TABLE manpower_agencies (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    agency_name         VARCHAR(100) NOT NULL,
-    service_type        VARCHAR(50) NOT NULL,   -- e.g., 'security', 'housekeeping', 'gardening'
-    contract_start      DATE NOT NULL,
-    contract_end        DATE,
-    pf_code             VARCHAR(30),
-    esic_code           VARCHAR(30),
-    contact_person      VARCHAR(100),
-    contact_mobile      VARCHAR(15),
-    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    agency_name VARCHAR(100) NOT NULL,
+    service_type VARCHAR(50) NOT NULL, -- e.g., 'security', 'housekeeping', 'gardening'
+    contract_start DATE NOT NULL,
+    contract_end DATE,
+    pf_code VARCHAR(30),
+    esic_code VARCHAR(30),
+    contact_person VARCHAR(100),
+    contact_mobile VARCHAR(15),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_manpower_agencies_society ON manpower_agencies (society_id, is_active);
 
 -- Compliance check: returns TRUE if all required challans for the month are uploaded
@@ -17700,30 +18921,36 @@ $$;
 -- one_apartment_one_vote (for advisory polls) and undivided_interest (for Board
 -- elections, budget approval, s.22 resolutions — statutory acts).
 CREATE TABLE board_candidates (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    apartment_id    INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
-    candidate_name  VARCHAR(100) NOT NULL,
-    position        VARCHAR(50),
-    vote_basis      VARCHAR(30) NOT NULL DEFAULT 'undivided_interest'
-                    CHECK (vote_basis IN ('undivided_interest', 'one_apartment_one_vote')),
-    votes_received  NUMERIC(12, 6) DEFAULT 0,
-    votes_weight    NUMERIC(9, 6) DEFAULT 0,     -- the weight of this candidate's vote (only for undivided_interest voting)
-    created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    candidate_name VARCHAR(100) NOT NULL,
+    position VARCHAR(50),
+    vote_basis VARCHAR(30) NOT NULL DEFAULT 'undivided_interest' CHECK (
+        vote_basis IN (
+            'undivided_interest',
+            'one_apartment_one_vote'
+        )
+    ),
+    votes_received NUMERIC(12, 6) DEFAULT 0,
+    votes_weight NUMERIC(9, 6) DEFAULT 0, -- the weight of this candidate's vote (only for undivided_interest voting)
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_board_candidates_society ON board_candidates (society_id, position);
 
 CREATE TABLE board_election_votes (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    candidate_id    INT NOT NULL REFERENCES board_candidates (id) ON DELETE CASCADE,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    candidate_id INT NOT NULL REFERENCES board_candidates (id) ON DELETE CASCADE,
     voter_apartment_id INT NOT NULL REFERENCES apartments (id),
-    vote_date       DATE NOT NULL,
-    vote_weight     NUMERIC(9, 6) NOT NULL DEFAULT 1,  -- 1 for one_apartment_one_vote, undivided_interest_pct for weighted
-    cast_by         INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    vote_date DATE NOT NULL,
+    vote_weight NUMERIC(9, 6) NOT NULL DEFAULT 1, -- 1 for one_apartment_one_vote, undivided_interest_pct for weighted
+    cast_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_board_votes_society ON board_election_votes (society_id, candidate_id);
 
 CREATE OR REPLACE FUNCTION fn_board_election_eligibility(p_society_id INT, p_election_date DATE, p_basis TEXT DEFAULT NULL)
@@ -17797,20 +19024,38 @@ $$;
 -- Idempotent: safe to re-run, safe to paste into Master Settings → Integrate to DB.
 -- ═══════════════════════════════════════════════════════════════════════════════
 CREATE TABLE regime_rule_audit (
-    id              BIGSERIAL PRIMARY KEY,
-    target_table    VARCHAR(40) NOT NULL CHECK (target_table IN
-                        ('regime_rule_parameters', 'legal_instrument_catalog', 'societies.cash_limit_mode', 'society_bye_laws', 'meetings', 'resolutions', 'society_policy_settings', 'society_rule_decisions')),
-    regime_code     VARCHAR(30),
-    society_id      INT,
-    rule_key        VARCHAR(300),
-    action          VARCHAR(20) NOT NULL CHECK (action IN ('new_version', 'update', 'set', 'confirm_provisional')),
-    old_value       JSONB,
-    new_value       JSONB,
-    reason          TEXT NOT NULL CHECK (length(btrim(reason)) >= 10),
-    changed_by      INT,
+    id BIGSERIAL PRIMARY KEY,
+    target_table VARCHAR(40) NOT NULL CHECK (
+        target_table IN (
+            'regime_rule_parameters',
+            'legal_instrument_catalog',
+            'societies.cash_limit_mode',
+            'society_bye_laws',
+            'meetings',
+            'resolutions',
+            'society_policy_settings',
+            'society_rule_decisions'
+        )
+    ),
+    regime_code VARCHAR(30),
+    society_id INT,
+    rule_key VARCHAR(300),
+    action VARCHAR(20) NOT NULL CHECK (
+        action IN (
+            'new_version',
+            'update',
+            'set',
+            'confirm_provisional'
+        )
+    ),
+    old_value JSONB,
+    new_value JSONB,
+    reason TEXT NOT NULL CHECK (length(btrim (reason)) >= 10),
+    changed_by INT,
     changed_by_role VARCHAR(20),
-    changed_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    changed_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_regime_rule_audit_changed_at ON regime_rule_audit (changed_at DESC);
 -- target_table's allowed-value CHECK is declared inline above; changing that
 -- list means re-provisioning from this file.
@@ -17883,7 +19128,7 @@ CREATE TRIGGER societies_sync_regime AFTER INSERT OR UPDATE OF state, constituti
     FOR EACH ROW EXECUTE FUNCTION trg_societies_sync_regime();
 
 -- One-off backfill for societies that already picked a state in the wizard.
-SELECT fn_sync_society_regime(id) FROM societies;
+SELECT fn_sync_society_regime (id) FROM societies;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- AOA BYE-LAWS ACCEPTANCE & GOVERNANCE LAYER
@@ -17892,15 +19137,28 @@ SELECT fn_sync_society_regime(id) FROM societies;
 
 -- 4. resolution_effects — Enactment queue (whitelisted handlers only)
 CREATE TABLE resolution_effects (
-    id                  SERIAL PRIMARY KEY,
-    resolution_id       INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
-    handler_name        VARCHAR(60) NOT NULL CHECK (handler_name IN ('set_regime_param', 'set_society_policy', 'set_board_param')),
-    payload_json        JSONB NOT NULL,
-    executed_at         TIMESTAMP,
-    status              VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'executed', 'failed')),
-    error_message       TEXT,
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+    id SERIAL PRIMARY KEY,
+    resolution_id INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
+    handler_name VARCHAR(60) NOT NULL CHECK (
+        handler_name IN (
+            'set_regime_param',
+            'set_society_policy',
+            'set_board_param'
+        )
+    ),
+    payload_json JSONB NOT NULL,
+    executed_at TIMESTAMP,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',
+            'executed',
+            'failed'
+        )
+    ),
+    error_message TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_resolution_effects_resolution ON resolution_effects (resolution_id);
 
 -- 5. society_bye_laws — Clause-level bye-law register (4-layer hierarchy)
@@ -17909,27 +19167,53 @@ CREATE INDEX idx_resolution_effects_resolution ON resolution_effects (resolution
 --    Layer 2: Society Policies — GBM resolution required; can tighten Layer 1, never loosen
 --    Layer 3: Board Decisions — MC resolution; operational parameters within policy bounds
 CREATE TABLE society_bye_laws (
-    id                  BIGSERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    clause_id           VARCHAR(30) NOT NULL,
-    layer               INT NOT NULL CHECK (layer IN (1, 2, 3)),
-    status              VARCHAR(25) NOT NULL CHECK (status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted', 'provisional')),
-    variation_text      TEXT,
+    id BIGSERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    clause_id VARCHAR(30) NOT NULL,
+    layer INT NOT NULL CHECK (layer IN (1, 2, 3)),
+    status VARCHAR(25) NOT NULL CHECK (
+        status IN (
+            'adopted_as_is',
+            'adopted_with_variation',
+            'not_adopted',
+            'provisional'
+        )
+    ),
+    variation_text TEXT,
     -- A provisional row remembers what the admin intends (adopt as-is / with
     -- variation / not adopted) until a passed resolution is linked; without
     -- this an 'adopt as-is' or 'not adopted' choice could not be held at all.
-    proposed_status     VARCHAR(25)
-        CHECK (proposed_status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted')),
-    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
-    effective_from      DATE NOT NULL DEFAULT CURRENT_DATE,
-    effective_to        DATE,
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at          TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (society_id, clause_id, layer, effective_from)
+    proposed_status VARCHAR(25) CHECK (
+        proposed_status IN (
+            'adopted_as_is',
+            'adopted_with_variation',
+            'not_adopted'
+        )
+    ),
+    resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    effective_from DATE NOT NULL DEFAULT CURRENT_DATE,
+    effective_to DATE,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (
+        society_id,
+        clause_id,
+        layer,
+        effective_from
+    )
 );
-CREATE INDEX idx_society_bye_laws_lookup ON society_bye_laws (society_id, clause_id, layer, effective_from DESC);
-CREATE INDEX idx_society_bye_laws_provisional ON society_bye_laws (society_id, status) WHERE status = 'provisional';
+
+CREATE INDEX idx_society_bye_laws_lookup ON society_bye_laws (
+    society_id,
+    clause_id,
+    layer,
+    effective_from DESC
+);
+
+CREATE INDEX idx_society_bye_laws_provisional ON society_bye_laws (society_id, status)
+WHERE
+    status = 'provisional';
 
 -- 5b. society_rule_decisions - the same four-layer model at PARAMETER level.
 --     society_bye_laws records "this clause is adopted / varied / not adopted" as free text; this table
@@ -17939,33 +19223,75 @@ CREATE INDEX idx_society_bye_laws_provisional ON society_bye_laws (society_id, s
 --     review_status: the society admin records the decision with the meeting minutes attached; Master
 --     spot-checks it. 'flagged' suspends it (fn_rule ignores it) until cleared.
 CREATE TABLE society_rule_decisions (
-    id              BIGSERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    rule_key        VARCHAR(30) NOT NULL,
-    layer           INT NOT NULL CHECK (layer IN (1, 2, 3)),
-    status          VARCHAR(25) NOT NULL CHECK (status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted', 'provisional')),
-    proposed_status VARCHAR(25) CHECK (proposed_status IN ('adopted_as_is', 'adopted_with_variation', 'not_adopted')),
-    value           NUMERIC(14, 4),
-    value_text      TEXT,
-    resolution_id   INT REFERENCES resolutions (id) ON DELETE SET NULL,
-    review_status   VARCHAR(10) NOT NULL DEFAULT 'unreviewed' CHECK (review_status IN ('unreviewed', 'confirmed', 'flagged')),
-    reviewed_by     INT REFERENCES users (id),
-    reviewed_on     TIMESTAMP,
-    review_note     TEXT,
-    effective_from  DATE NOT NULL DEFAULT CURRENT_DATE,
-    effective_to    DATE,
-    created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (society_id, rule_key, layer, effective_from),
+    id BIGSERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    rule_key VARCHAR(30) NOT NULL,
+    layer INT NOT NULL CHECK (layer IN (1, 2, 3)),
+    status VARCHAR(25) NOT NULL CHECK (
+        status IN (
+            'adopted_as_is',
+            'adopted_with_variation',
+            'not_adopted',
+            'provisional'
+        )
+    ),
+    proposed_status VARCHAR(25) CHECK (
+        proposed_status IN (
+            'adopted_as_is',
+            'adopted_with_variation',
+            'not_adopted'
+        )
+    ),
+    value NUMERIC(14, 4),
+    value_text TEXT,
+    resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    review_status VARCHAR(10) NOT NULL DEFAULT 'unreviewed' CHECK (
+        review_status IN (
+            'unreviewed',
+            'confirmed',
+            'flagged'
+        )
+    ),
+    reviewed_by INT REFERENCES users (id),
+    reviewed_on TIMESTAMP,
+    review_note TEXT,
+    effective_from DATE NOT NULL DEFAULT CURRENT_DATE,
+    effective_to DATE,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (
+        society_id,
+        rule_key,
+        layer,
+        effective_from
+    ),
     -- a variation carries exactly one of value / value_text; as-is and not-adopted carry neither
     CONSTRAINT ck_rule_decision_value CHECK (
-        CASE WHEN COALESCE(CASE WHEN status = 'provisional' THEN proposed_status ELSE status END, '') = 'adopted_with_variation'
-             THEN (value IS NOT NULL) <> (value_text IS NOT NULL)
-             ELSE value IS NULL AND value_text IS NULL END)
+        CASE
+            WHEN COALESCE(
+                CASE
+                    WHEN status = 'provisional' THEN proposed_status
+                    ELSE status
+                END,
+                ''
+            ) = 'adopted_with_variation' THEN (value IS NOT NULL) <> (value_text IS NOT NULL)
+            ELSE value IS NULL
+            AND value_text IS NULL
+        END
+    )
 );
-CREATE INDEX idx_society_rule_decisions_lookup ON society_rule_decisions (society_id, rule_key, layer, effective_from DESC);
-CREATE INDEX idx_society_rule_decisions_provisional ON society_rule_decisions (society_id) WHERE status = 'provisional';
+
+CREATE INDEX idx_society_rule_decisions_lookup ON society_rule_decisions (
+    society_id,
+    rule_key,
+    layer,
+    effective_from DESC
+);
+
+CREATE INDEX idx_society_rule_decisions_provisional ON society_rule_decisions (society_id)
+WHERE
+    status = 'provisional';
 
 -- ── LoA WORKFLOW: pending ratification tracking ──────────────────────────────────
 -- Layer 3 Board decisions (SET_BOARD_PARAM) are operational: ratified by a simple MC majority,
@@ -17974,29 +19300,38 @@ CREATE INDEX idx_society_rule_decisions_provisional ON society_rule_decisions (s
 -- applies it (the MC is a delegate acting within delegated powers), but it is flagged for
 -- the pending-ratification list and auto-expires if not ratified within the ratification window.
 CREATE TABLE loa_ratification (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    decision_id     BIGINT NOT NULL REFERENCES society_rule_decisions (id) ON DELETE CASCADE,
-    rule_key        VARCHAR(30) NOT NULL,
-    board_layer     INT NOT NULL CHECK (board_layer IN (1, 2, 3)),   -- the layer of the decision needing ratification
-    status          VARCHAR(25) NOT NULL CHECK (status IN ('pending', 'ratified', 'rejected', 'expired')) DEFAULT 'pending',
-    decision_effective DATE NOT NULL,                         -- when the Board decision took effect
-    ratify_by       DATE NOT NULL,                           -- deadline for GBM ratification
-    ratified_at     TIMESTAMP,
-    ratified_by     INT REFERENCES users (id),
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    decision_id BIGINT NOT NULL REFERENCES society_rule_decisions (id) ON DELETE CASCADE,
+    rule_key VARCHAR(30) NOT NULL,
+    board_layer INT NOT NULL CHECK (board_layer IN (1, 2, 3)), -- the layer of the decision needing ratification
+    status VARCHAR(25) NOT NULL CHECK (
+        status IN (
+            'pending',
+            'ratified',
+            'rejected',
+            'expired'
+        )
+    ) DEFAULT 'pending',
+    decision_effective DATE NOT NULL, -- when the Board decision took effect
+    ratify_by DATE NOT NULL, -- deadline for GBM ratification
+    ratified_at TIMESTAMP,
+    ratified_by INT REFERENCES users (id),
     ratified_resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
-    rejected_at     TIMESTAMP,
-    rejected_by     INT REFERENCES users (id),
+    rejected_at TIMESTAMP,
+    rejected_by INT REFERENCES users (id),
     rejected_resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
     rejection_reason TEXT,
     -- G-04: set when a rejected/expired decision's postings were reversed.
     reversal_journal_id INT,
-    reversal_note   TEXT,
-    created_by      INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+    reversal_note TEXT,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_loa_ratification_society ON loa_ratification (society_id, status, ratify_by);
+
 CREATE INDEX idx_loa_ratification_decision ON loa_ratification (decision_id);
 
 CREATE OR REPLACE FUNCTION fn_pending_ratification(p_society_id INT)
@@ -18109,44 +19444,151 @@ END $$;
 
 -- Auto-expire ratifications that miss the deadline (called by a scheduled job or on read).
 
-
-
-INSERT INTO decision_types (code, label, required_body, majority_pct, authority_layer, majority_basis,
-                            needs_advocate_opinion, verification, source_provision, description) VALUES
-    ('ADOPT_BYE_LAW',        'Adopt Model Bye-Law Clause',            'GBM', 66.67, 1, 'all_votes', FALSE, 'provisional',
+INSERT INTO
+    decision_types (
+        code,
+        label,
+        required_body,
+        majority_pct,
+        authority_layer,
+        majority_basis,
+        needs_advocate_opinion,
+        verification,
+        source_provision,
+        description
+    )
+VALUES (
+        'ADOPT_BYE_LAW',
+        'Adopt Model Bye-Law Clause',
+        'GBM',
+        66.67,
+        1,
+        'all_votes',
+        FALSE,
+        'provisional',
         'Model Bye-Laws 2011, bye-law 58 (as cited by the engine; gazette text not yet checked)',
-        'Adopt a Model Bye-Law 2011 clause as-is or with variation (2/3 of all votes)'),
-    ('VARY_BYE_LAW',         'Vary Adopted Bye-Law Clause',           'GBM', 66.67, 1, 'all_votes', FALSE, 'provisional',
+        'Adopt a Model Bye-Law 2011 clause as-is or with variation (2/3 of all votes)'
+    ),
+    (
+        'VARY_BYE_LAW',
+        'Vary Adopted Bye-Law Clause',
+        'GBM',
+        66.67,
+        1,
+        'all_votes',
+        FALSE,
+        'provisional',
         'Model Bye-Laws 2011, bye-law 58 (as cited by the engine; gazette text not yet checked)',
-        'Change variation text of an already-adopted clause (2/3 of all votes)'),
-    ('REJECT_BYE_LAW',       'Not Adopt Model Bye-Law Clause',        'GBM', 66.67, 1, 'all_votes', TRUE,  'provisional',
+        'Change variation text of an already-adopted clause (2/3 of all votes)'
+    ),
+    (
+        'REJECT_BYE_LAW',
+        'Not Adopt Model Bye-Law Clause',
+        'GBM',
+        66.67,
+        1,
+        'all_votes',
+        TRUE,
+        'provisional',
         'Engine reading: dropping a Model clause departs from the Model Bye-Laws, so it takes the same majority as a variation',
-        'Record that a Model Bye-Law clause is not adopted. Needs a written advocate''s opinion; never allowed for a clause the Act or Rules back'),
-    ('SET_SOCIETY_POLICY',   'Set Society Policy (Layer 2)',          'GBM', 66.67, 2, 'all_votes', FALSE, 'provisional',
+        'Record that a Model Bye-Law clause is not adopted. Needs a written advocate''s opinion; never allowed for a clause the Act or Rules back'
+    ),
+    (
+        'SET_SOCIETY_POLICY',
+        'Set Society Policy (Layer 2)',
+        'GBM',
+        66.67,
+        2,
+        'all_votes',
+        FALSE,
+        'provisional',
         'Engine policy: a policy that only applies an existing bye-law may need only an ordinary majority (bye-law 2(e)); 2/3 is the stricter reading pending the gazette text',
-        'Create or tighten a society policy within an adopted clause (2/3 of all votes; never loosens the Model Bye-Law)'),
-    ('SET_BOARD_PARAM',      'Set Board Parameter (Layer 3)',         'MC',  50.00, 3, 'committee', FALSE, 'provisional',
+        'Create or tighten a society policy within an adopted clause (2/3 of all votes; never loosens the Model Bye-Law)'
+    ),
+    (
+        'SET_BOARD_PARAM',
+        'Set Board Parameter (Layer 3)',
+        'MC',
+        50.00,
+        3,
+        'committee',
+        FALSE,
+        'provisional',
         'Committee decision; must be placed before the General Body for ratification (loa_ratification, bye-law 47(1) as cited by the engine)',
-        'Operational parameter set by the Managing Committee / working committee (simple majority; within policy bounds)'),
-    ('APPROVE_LOAN',         'Approve Owner Loan',                    'GBM', 66.67, 2, 'all_votes', FALSE, 'provisional',
+        'Operational parameter set by the Managing Committee / working committee (simple majority; within policy bounds)'
+    ),
+    (
+        'APPROVE_LOAN',
+        'Approve Owner Loan',
+        'GBM',
+        66.67,
+        2,
+        'all_votes',
+        FALSE,
+        'provisional',
         'Model Bye-Laws 2011, bye-law 3(1)(f) needs the consent of the apartment owners; the 2/3 figure is the engine''s stricter reading',
-        'General Body approval for lending to an owner (Bye-Law 3(1)(f))'),
-    ('APPROPRIATE_FUND',     'Appropriate Funds (Reserve/Sinking)',   'GBM', 66.67, 2, 'all_votes', FALSE, 'provisional',
+        'General Body approval for lending to an owner (Bye-Law 3(1)(f))'
+    ),
+    (
+        'APPROPRIATE_FUND',
+        'Appropriate Funds (Reserve/Sinking)',
+        'GBM',
+        66.67,
+        2,
+        'all_votes',
+        FALSE,
+        'provisional',
         'Model Bye-Laws 2011, bye-laws 46-52 (as cited by the engine; majority not checked)',
-        'General Body resolution for fund appropriation per Bye-Laws 46-52'),
-    ('SERVICE_CUTOFF',       'Authorize Service Cut-Off (s.22)',      'GBM', 66.67, 2, 'all_votes', FALSE, 'provisional',
+        'General Body resolution for fund appropriation per Bye-Laws 46-52'
+    ),
+    (
+        'SERVICE_CUTOFF',
+        'Authorize Service Cut-Off (s.22)',
+        'GBM',
+        66.67,
+        2,
+        'all_votes',
+        FALSE,
+        'provisional',
         'UP Apartment Act 2010 s.22; the Act''s text was not checked for a General Body majority, so 2/3 is the engine''s stricter reading',
-        'General Body resolution to cut essential service per UP Apartment Act s.22'),
-    ('AMEND_CASH_LIMIT',     'Change Cash-Limit Enforcement Mode',    'GBM', 51.00, 2, 'all_votes', FALSE, 'checked',
+        'General Body resolution to cut essential service per UP Apartment Act s.22'
+    ),
+    (
+        'AMEND_CASH_LIMIT',
+        'Change Cash-Limit Enforcement Mode',
+        'GBM',
+        51.00,
+        2,
+        'all_votes',
+        FALSE,
+        'checked',
         'Model Bye-Laws 2011, bye-law 2(e): a majority is owners holding 51 per cent of the votes',
-        'Override cash_limit_mode for this society (majority = 51% of all votes)'),
-    ('GENERAL_RESOLUTION',   'General Resolution',                    'GBM', 51.00, 2, 'all_votes', FALSE, 'checked',
+        'Override cash_limit_mode for this society (majority = 51% of all votes)'
+    ),
+    (
+        'GENERAL_RESOLUTION',
+        'General Resolution',
+        'GBM',
+        51.00,
+        2,
+        'all_votes',
+        FALSE,
+        'checked',
         'Model Bye-Laws 2011, bye-law 2(e): a majority is owners holding 51 per cent of the votes',
-        'Any other GBM resolution not covered above (majority = 51% of all votes)'),
-    ('RATIFY_VOTING_THRESHOLDS', 'Ratify Voting Thresholds and Quorum', 'GBM', 66.67, 1, 'all_votes', TRUE, 'provisional',
+        'Any other GBM resolution not covered above (majority = 51% of all votes)'
+    ),
+    (
+        'RATIFY_VOTING_THRESHOLDS',
+        'Ratify Voting Thresholds and Quorum',
+        'GBM',
+        66.67,
+        1,
+        'all_votes',
+        TRUE,
+        'provisional',
         'The majorities and quorum in this table are provisional until the society''s General Body ratifies them on a written advocate''s opinion',
-        'General Body ratifies the voting thresholds and quorum this software applies (provisional until recorded)')
-ON CONFLICT (code) DO NOTHING;
+        'General Body ratifies the voting thresholds and quorum this software applies (provisional until recorded)'
+    ) ON CONFLICT (code) DO NOTHING;
 
 -- The choices a society's adviser may pick from. 51 = bye-law 2(e) ordinary majority; 66.67 = two-thirds. These are
 -- the platform's offer, not legal advice: change them here if an advocate says another figure is possible.
@@ -18340,39 +19782,61 @@ END $$;
 --    named person with a login (user_id), who may be a family member. The five single-seat offices have at most one
 --    active holder; Working Committee members are many.
 CREATE TABLE committee_offices (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    apartment_id        INT NOT NULL REFERENCES apartments (id),
-    office_code         VARCHAR(30) NOT NULL CHECK (office_code IN
-                          ('president', 'vice_president', 'secretary', 'joint_secretary', 'treasurer',
-                           'working_committee_member')),
-    holder_name         VARCHAR(100) NOT NULL,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id),
+    office_code VARCHAR(30) NOT NULL CHECK (
+        office_code IN (
+            'president',
+            'vice_president',
+            'secretary',
+            'joint_secretary',
+            'treasurer',
+            'working_committee_member'
+        )
+    ),
+    holder_name VARCHAR(100) NOT NULL,
     -- Task 2.10: contact and signature for every post (prefilled from the flat's owner, editable).
-    email               VARCHAR(100),
-    phone               VARCHAR(20),
-    signature_image     VARCHAR(255),
+    email VARCHAR(100),
+    phone VARCHAR(20),
+    signature_image VARCHAR(255),
     -- V5: founding-committee election evidence (V5.3): minutes file + SHA-256,
     -- plus resolution_ref (already above). Null for non-founding seats.
-    evidence_file       VARCHAR(255),
-    evidence_hash       VARCHAR(64),
-    user_id             INT REFERENCES users (id),
-    term_start          DATE NOT NULL DEFAULT CURRENT_DATE,
-    term_end            DATE,
+    evidence_file VARCHAR(255),
+    evidence_hash VARCHAR(64),
+    user_id INT REFERENCES users (id),
+    term_start DATE NOT NULL DEFAULT CURRENT_DATE,
+    term_end DATE,
     elected_via_poll_id INT REFERENCES polls (id),
-    resolution_ref      VARCHAR(255),
-    status              VARCHAR(10) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ended')),
-    ended_at            TIMESTAMP,
-    ended_reason        TEXT,
-    appointed_by        INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    resolution_ref VARCHAR(255),
+    status VARCHAR(10) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ended')),
+    ended_at TIMESTAMP,
+    ended_reason TEXT,
+    appointed_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     -- >= : an office ended the day it began (a mistaken appointment undone at once) is a one-day term, not an error
-    CONSTRAINT committee_term_order CHECK (term_end IS NULL OR term_end >= term_start)
+    CONSTRAINT committee_term_order CHECK (
+        term_end IS NULL
+        OR term_end >= term_start
+    )
 );
+
 CREATE UNIQUE INDEX uq_committee_single_seat ON committee_offices (society_id, office_code)
-    WHERE status = 'active' AND office_code <> 'working_committee_member';
-CREATE UNIQUE INDEX uq_committee_flat_office ON committee_offices (society_id, apartment_id, office_code)
-    WHERE status = 'active';
-CREATE INDEX idx_committee_user ON committee_offices (society_id, user_id) WHERE status = 'active';
+WHERE
+    status = 'active'
+    AND office_code <> 'working_committee_member';
+
+CREATE UNIQUE INDEX uq_committee_flat_office ON committee_offices (
+    society_id,
+    apartment_id,
+    office_code
+)
+WHERE
+    status = 'active';
+
+CREATE INDEX idx_committee_user ON committee_offices (society_id, user_id)
+WHERE
+    status = 'active';
 
 -- 2. Spend policy. No row = the defaults below (resolution required, one signature), so nothing changes for a society
 --    until it sets a rule. Co-signing is by office-bearers, never by 'any admin'.
@@ -18388,11 +19852,11 @@ CREATE TABLE fund_spend_policy (
 
 -- 3. Signatures on a fund withdrawal. One per person per withdrawal.
 CREATE TABLE fund_utilization_signoffs (
-    id             SERIAL PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
     utilization_id INT NOT NULL REFERENCES fund_utilizations (id) ON DELETE CASCADE,
-    office_id      INT NOT NULL REFERENCES committee_offices (id),
-    user_id        INT NOT NULL REFERENCES users (id),
-    signed_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    office_id INT NOT NULL REFERENCES committee_offices (id),
+    user_id INT NOT NULL REFERENCES users (id),
+    signed_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_signoff_user UNIQUE (utilization_id, user_id)
 );
 
@@ -18831,39 +20295,41 @@ END $$;
 -- G-02  ATTENDANCE & VOTE REGISTERS (compute percentages, don't type them)
 -- ---------------------------------------------------------------------------
 CREATE TABLE meeting_attendance (
-    id                  SERIAL PRIMARY KEY,
-    meeting_id          INT NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
-    apartment_id        INT NOT NULL REFERENCES apartments (id) ON DELETE RESTRICT,
-    present_in_person   BOOLEAN NOT NULL DEFAULT FALSE,
-    proxy_holder        VARCHAR(255),
-    undivided_interest_pct NUMERIC(9,6),     -- same precision as apartments: rounded weights would not add up to 100
-    attended_on         TIMESTAMP NOT NULL DEFAULT NOW(),
+    id SERIAL PRIMARY KEY,
+    meeting_id INT NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE RESTRICT,
+    present_in_person BOOLEAN NOT NULL DEFAULT FALSE,
+    proxy_holder VARCHAR(255),
+    undivided_interest_pct NUMERIC(9, 6), -- same precision as apartments: rounded weights would not add up to 100
+    attended_on TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_meeting_att UNIQUE (meeting_id, apartment_id)
 );
 
 CREATE INDEX idx_meeting_att_meeting ON meeting_attendance (meeting_id);
+
 CREATE INDEX idx_meeting_att_apartment ON meeting_attendance (apartment_id);
 
-COMMENT ON TABLE meeting_attendance IS
-    'Attendance register for GBM/EGM/MC meetings. Percentages (owners_present_pct) '
-    'must be computed from this table, not self-attested.';
+COMMENT ON
+TABLE meeting_attendance IS 'Attendance register for GBM/EGM/MC meetings. Percentages (owners_present_pct) ' 'must be computed from this table, not self-attested.';
 
 CREATE TABLE resolution_votes (
-    id                  SERIAL PRIMARY KEY,
-    resolution_id       INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
-    apartment_id        INT NOT NULL REFERENCES apartments (id) ON DELETE RESTRICT,
-    vote                VARCHAR(10) NOT NULL CHECK (vote IN ('FOR','AGAINST','ABSTAIN')),
-    weight              NUMERIC(9,6),   -- same precision as apartments.undivided_interest_pct
-    voted_at            TIMESTAMP,
+    id SERIAL PRIMARY KEY,
+    resolution_id INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE RESTRICT,
+    vote VARCHAR(10) NOT NULL CHECK (
+        vote IN ('FOR', 'AGAINST', 'ABSTAIN')
+    ),
+    weight NUMERIC(9, 6), -- same precision as apartments.undivided_interest_pct
+    voted_at TIMESTAMP,
     CONSTRAINT uq_resolution_vote UNIQUE (resolution_id, apartment_id)
 );
 
 CREATE INDEX idx_resolution_votes_res ON resolution_votes (resolution_id);
+
 CREATE INDEX idx_resolution_votes_ap ON resolution_votes (apartment_id);
 
-COMMENT ON TABLE resolution_votes IS
-    'Vote register per apartment per resolution. Votes_for_pct must be computed '
-    'from these weighted votes, not self-attested.';
+COMMENT ON
+TABLE resolution_votes IS 'Vote register per apartment per resolution. Votes_for_pct must be computed ' 'from these weighted votes, not self-attested.';
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ER.md REMEDIATION LAYER — ledger integrity, period locks, governance, cash rules
@@ -18880,26 +20346,29 @@ COMMENT ON TABLE resolution_votes IS
 -- locks every FY up to and including n.
 
 CREATE TABLE fy_locks (
-    id             SERIAL PRIMARY KEY,
-    society_id     INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
-    locked_through SMALLINT NOT NULL CHECK (locked_through BETWEEN 2000 AND 2200),
-    locked_by      INT REFERENCES users (id),
-    resolution_id  INT REFERENCES resolutions (id),
-    notes          TEXT,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    locked_through SMALLINT NOT NULL CHECK (
+        locked_through BETWEEN 2000 AND 2200
+    ),
+    locked_by INT REFERENCES users (id),
+    resolution_id INT REFERENCES resolutions (id),
+    notes TEXT,
     -- The signed ledger anchor taken just before the lock (ledger_chain_anchors.id): the evidence of what the
     -- ledger held when the year was frozen. Not a foreign key because the anchors table is declared later;
     -- fn_lock_fy checks it belongs to the same society.
-    anchor_id      INT,
-    locked_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    anchor_id INT,
+    locked_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_fy_lock UNIQUE (society_id, locked_through)
 );
-CREATE INDEX idx_fy_locks_society
-    ON fy_locks (society_id, locked_through DESC);
 
-COMMENT ON TABLE fy_locks IS
-    'A-04: append-only period locks. A row means no ledger line may be dated in '
-    'that FY or any earlier one; correct a locked year with a reversal dated in '
-    'an open period. Rows cannot be updated or deleted (trg_fy_locks_append_only).';
+CREATE INDEX idx_fy_locks_society ON fy_locks (
+    society_id,
+    locked_through DESC
+);
+
+COMMENT ON
+TABLE fy_locks IS 'A-04: append-only period locks. A row means no ledger line may be dated in ' 'that FY or any earlier one; correct a locked year with a reversal dated in ' 'an open period. Rows cannot be updated or deleted (trg_fy_locks_append_only).';
 
 CREATE OR REPLACE FUNCTION trg_fy_locks_append_only() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -18915,7 +20384,6 @@ CREATE TRIGGER trg_fy_locks_append_only
     BEFORE UPDATE OR DELETE ON fy_locks
     FOR EACH ROW EXECUTE FUNCTION trg_fy_locks_append_only();
 
-
 -- FY start-year of a date (Indian FY: 1 April - 31 March).
 CREATE OR REPLACE FUNCTION fn_fy_of(p_date DATE) RETURNS INT
 LANGUAGE sql IMMUTABLE AS $$
@@ -18923,7 +20391,6 @@ LANGUAGE sql IMMUTABLE AS $$
                 THEN EXTRACT(YEAR FROM p_date)::INT
                 ELSE EXTRACT(YEAR FROM p_date)::INT - 1 END;
 $$;
-
 
 -- NULL when the date is open; otherwise a human-readable refusal.
 -- Read-only: everything the lock screen needs to say, and every reason the lock would be refused. The screen
@@ -18991,7 +20458,6 @@ BEGIN
 END;
 $$;
 
-
 -- Preventive: enforced in the database, so no posting function can forget it.
 CREATE OR REPLACE FUNCTION trg_transactions_fy_lock() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -19008,7 +20474,6 @@ $$;
 CREATE TRIGGER trg_transactions_fy_lock
     BEFORE INSERT ON transactions
     FOR EACH ROW EXECUTE FUNCTION trg_transactions_fy_lock();
-
 
 -- ---------------------------------------------------------------------------
 -- A-01  LEDGER STRUCTURE: reversal linkage, hash chain, constraints
@@ -19053,7 +20518,6 @@ $$;
 CREATE TRIGGER trg_transactions_ledger_chain
     BEFORE INSERT ON transactions
     FOR EACH ROW EXECUTE FUNCTION trg_transactions_ledger_chain();
-
 
 -- Rebuilds (or first-time backfills) the chain in id order. Not a routine
 -- operation: without p_force it only chains societies that have no chain yet,
@@ -19112,23 +20576,30 @@ $$;
 -- produces different hashes, which no longer match what was signed and filed, and the database owner
 -- cannot forge the signature. fn_verify_ledger_chain checks every anchor.
 CREATE TABLE ledger_chain_anchors (
-    id           SERIAL PRIMARY KEY,
-    society_id   INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
-    anchored_at  TIMESTAMP NOT NULL DEFAULT NOW(),
-    ledger_seq   BIGINT NOT NULL CHECK (ledger_seq >= 1),
-    head_hash    VARCHAR(64) NOT NULL,
-    row_count    BIGINT NOT NULL CHECK (row_count >= 1),
-    anchored_by  INT REFERENCES users (id),
-    method       VARCHAR(10) NOT NULL DEFAULT 'manual' CHECK (method IN ('manual', 'scheduled', 'fy_lock')),
-    signature    VARCHAR(64),       -- HMAC-SHA256 by the application; set once
-    sig_purpose  VARCHAR(20),       -- 'SIGNING_LEDGER' (NULL on an anchor signed before the vault existed)
-    sig_key_version INT,            -- society_signing_keys.version that made the signature
-    sig_algorithm   VARCHAR(20),    -- 'HMAC-SHA256'
-    signed_at    TIMESTAMP,         -- when the signature was made
-    legacy_signature BOOLEAN NOT NULL DEFAULT FALSE,   -- TRUE = signed with the retired platform LEDGER_ANCHOR_SECRET
-    external_ref TEXT,              -- where the signed certificate was filed (CA's letter, locker, ...); set once
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    anchored_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    ledger_seq BIGINT NOT NULL CHECK (ledger_seq >= 1),
+    head_hash VARCHAR(64) NOT NULL,
+    row_count BIGINT NOT NULL CHECK (row_count >= 1),
+    anchored_by INT REFERENCES users (id),
+    method VARCHAR(10) NOT NULL DEFAULT 'manual' CHECK (
+        method IN (
+            'manual',
+            'scheduled',
+            'fy_lock'
+        )
+    ),
+    signature VARCHAR(64), -- HMAC-SHA256 by the application; set once
+    sig_purpose VARCHAR(20), -- 'SIGNING_LEDGER' (NULL on an anchor signed before the vault existed)
+    sig_key_version INT, -- society_signing_keys.version that made the signature
+    sig_algorithm VARCHAR(20), -- 'HMAC-SHA256'
+    signed_at TIMESTAMP, -- when the signature was made
+    legacy_signature BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE = signed with the retired platform LEDGER_ANCHOR_SECRET
+    external_ref TEXT, -- where the signed certificate was filed (CA's letter, locker, ...); set once
     CONSTRAINT uq_anchor_society_seq UNIQUE (society_id, ledger_seq)
 );
+
 CREATE INDEX idx_anchor_society ON ledger_chain_anchors (society_id, ledger_seq DESC);
 
 -- Append-only. The only changes ever allowed are filling signature and external_ref once each.
@@ -19151,6 +20622,7 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER trg_anchor_immutable BEFORE UPDATE OR DELETE ON ledger_chain_anchors
     FOR EACH ROW EXECUTE FUNCTION trg_anchor_immutable();
 
@@ -19206,7 +20678,6 @@ LANGUAGE sql STABLE AS $$
     ORDER BY 1, 2 NULLS LAST, 3;
 $$;
 
-
 -- ---------------------------------------------------------------------------
 -- A-01  IMMUTABILITY of posted ledger lines
 -- ---------------------------------------------------------------------------
@@ -19241,7 +20712,6 @@ $$;
 CREATE TRIGGER trg_transactions_immutable
     BEFORE UPDATE OR DELETE ON transactions
     FOR EACH ROW EXECUTE FUNCTION trg_transactions_immutable();
-
 
 -- ---------------------------------------------------------------------------
 -- A-01  REVERSAL — the only way to correct a posted journal
@@ -19314,10 +20784,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION fn_post_reversal_journal(INT, INT, TEXT, INT, DATE) IS
-    'The ONLY authorised way to correct a posted ledger journal (A-01). Posts a '
-    'mirror-image journal dated p_reversal_date (default today, so it lands in an '
-    'open period), keeps each leg''s mode, and refuses a second reversal.';
+COMMENT ON FUNCTION fn_post_reversal_journal (INT, INT, TEXT, INT, DATE) IS 'The ONLY authorised way to correct a posted ledger journal (A-01). Posts a ' 'mirror-image journal dated p_reversal_date (default today, so it lands in an ' 'open period), keeps each leg''s mode, and refuses a second reversal.';
 
 -- Task 1.5: hold a disputed apartment bill. Returns the dispute id.
 CREATE OR REPLACE FUNCTION fn_raise_receivable_dispute(
@@ -19435,45 +20902,79 @@ BEGIN
 END $$;
 
 CREATE TABLE itc_reversal_register (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    kind                VARCHAR(7) NOT NULL CHECK (kind IN ('period', 'annual')),
-    financial_year      INT NOT NULL CHECK (financial_year BETWEEN 2017 AND 2200),     -- the year starting 1 April of this year
-    period_start        DATE,
-    period_end          DATE,
-    tax_head            VARCHAR(4) NOT NULL CHECK (tax_head IN ('cgst', 'sgst', 'igst')),
-    t_total             NUMERIC(16, 2) NOT NULL,
-    t1_non_business     NUMERIC(16, 2) NOT NULL,
-    t2_exempt_only      NUMERIC(16, 2) NOT NULL,
-    t3_blocked          NUMERIC(16, 2) NOT NULL,
-    t4_taxable_only     NUMERIC(16, 2) NOT NULL,
-    e_exempt_value      NUMERIC(16, 2) NOT NULL,
-    f_total_turnover    NUMERIC(16, 2) NOT NULL,
-    nonbusiness_pct     NUMERIC(5, 2) NOT NULL,
-    c1                  NUMERIC(16, 2) NOT NULL,
-    c2                  NUMERIC(16, 2) NOT NULL,
-    d1                  NUMERIC(16, 2) NOT NULL,
-    d2                  NUMERIC(16, 2) NOT NULL,
-    reversal            NUMERIC(16, 2) NOT NULL,
-    already_reversed    NUMERIC(16, 2) NOT NULL DEFAULT 0,    -- annual rows: what the posted period rows had reversed
-    net_amount          NUMERIC(16, 2) NOT NULL,              -- period: = reversal; annual: reversal - already_reversed
-    basis               TEXT NOT NULL CHECK (LENGTH(BTRIM(basis)) >= 5),
-    formula_status      VARCHAR(12) NOT NULL DEFAULT 'provisional' CHECK (formula_status IN ('provisional', 'confirmed')),
-    status              VARCHAR(8) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'posted', 'reversed')),
-    journal_id          INT,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    kind VARCHAR(7) NOT NULL CHECK (kind IN ('period', 'annual')),
+    financial_year INT NOT NULL CHECK (
+        financial_year BETWEEN 2017 AND 2200
+    ), -- the year starting 1 April of this year
+    period_start DATE,
+    period_end DATE,
+    tax_head VARCHAR(4) NOT NULL CHECK (
+        tax_head IN ('cgst', 'sgst', 'igst')
+    ),
+    t_total NUMERIC(16, 2) NOT NULL,
+    t1_non_business NUMERIC(16, 2) NOT NULL,
+    t2_exempt_only NUMERIC(16, 2) NOT NULL,
+    t3_blocked NUMERIC(16, 2) NOT NULL,
+    t4_taxable_only NUMERIC(16, 2) NOT NULL,
+    e_exempt_value NUMERIC(16, 2) NOT NULL,
+    f_total_turnover NUMERIC(16, 2) NOT NULL,
+    nonbusiness_pct NUMERIC(5, 2) NOT NULL,
+    c1 NUMERIC(16, 2) NOT NULL,
+    c2 NUMERIC(16, 2) NOT NULL,
+    d1 NUMERIC(16, 2) NOT NULL,
+    d2 NUMERIC(16, 2) NOT NULL,
+    reversal NUMERIC(16, 2) NOT NULL,
+    already_reversed NUMERIC(16, 2) NOT NULL DEFAULT 0, -- annual rows: what the posted period rows had reversed
+    net_amount NUMERIC(16, 2) NOT NULL, -- period: = reversal; annual: reversal - already_reversed
+    basis TEXT NOT NULL CHECK (LENGTH(BTRIM (basis)) >= 5),
+    formula_status VARCHAR(12) NOT NULL DEFAULT 'provisional' CHECK (
+        formula_status IN ('provisional', 'confirmed')
+    ),
+    status VARCHAR(8) NOT NULL DEFAULT 'draft' CHECK (
+        status IN ('draft', 'posted', 'reversed')
+    ),
+    journal_id INT,
     reversal_journal_id INT,
-    created_by          INT REFERENCES users (id),
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
-    posted_by           INT REFERENCES users (id),
-    posted_on           DATE,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    posted_by INT REFERENCES users (id),
+    posted_on DATE,
     CONSTRAINT ck_itc_period_dates CHECK (
-        (kind = 'annual' AND period_start IS NULL AND period_end IS NULL)
-        OR (kind = 'period' AND period_start IS NOT NULL AND period_end >= period_start
-            AND period_start >= make_date(financial_year, 4, 1) AND period_end <= make_date(financial_year + 1, 3, 31)))
+        (
+            kind = 'annual'
+            AND period_start IS NULL
+            AND period_end IS NULL
+        )
+        OR (
+            kind = 'period'
+            AND period_start IS NOT NULL
+            AND period_end >= period_start
+            AND period_start >= make_date (financial_year, 4, 1)
+            AND period_end <= make_date (financial_year + 1, 3, 31)
+        )
+    )
 );
-CREATE UNIQUE INDEX uq_itc_register_live ON itc_reversal_register
-    (society_id, kind, financial_year, COALESCE(period_start, DATE '1900-01-01'), tax_head) WHERE status <> 'reversed';
-CREATE INDEX idx_itc_register_society ON itc_reversal_register (society_id, financial_year, tax_head);
+
+CREATE UNIQUE INDEX uq_itc_register_live ON itc_reversal_register (
+    society_id,
+    kind,
+    financial_year,
+    COALESCE(
+        period_start,
+        DATE '1900-01-01'
+    ),
+    tax_head
+)
+WHERE
+    status <> 'reversed';
+
+CREATE INDEX idx_itc_register_society ON itc_reversal_register (
+    society_id,
+    financial_year,
+    tax_head
+);
 
 CREATE OR REPLACE FUNCTION fn_trg_itc_register_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
@@ -19501,6 +21002,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_itc_register_guard BEFORE UPDATE OR DELETE ON itc_reversal_register
     FOR EACH ROW EXECUTE FUNCTION fn_trg_itc_register_guard();
 
@@ -19591,7 +21093,6 @@ BEGIN
     DELETE FROM itc_reversal_register WHERE id = p_register_id AND society_id = p_society_id AND status = 'draft';
     IF NOT FOUND THEN RAISE EXCEPTION 'Only a draft of this society can be discarded.'; END IF;
 END $$;
-
 
 -- ---------------------------------------------------------------------------
 -- A-02 (completed)  All-cash vouchers: no Cash-in-Hand leg, so what do they balance against?
@@ -19745,6 +21246,7 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER trg_cashbook_count_flag AFTER INSERT OR UPDATE OF closing_cash_declared ON cashbook_signatures
     FOR EACH ROW EXECUTE FUNCTION trg_cashbook_count_flag();
 
@@ -19786,7 +21288,6 @@ LANGUAGE sql STABLE AS $$
     HAVING fn_journal_balance_problem(t.society_id, t.journal_id) IS NOT NULL
      ORDER BY 1, 2;
 $$;
-
 
 -- ---------------------------------------------------------------------------
 -- A-04  fn_lock_fy — the supported way to close a year
@@ -19832,7 +21333,6 @@ BEGIN
     RETURN v_id;
 END;
 $$;
-
 
 -- ---------------------------------------------------------------------------
 -- A-01  SOURCE DOCUMENTS: receipts and expenses
@@ -19896,7 +21396,6 @@ CREATE TRIGGER trg_receipts_source_guard
 CREATE TRIGGER trg_expenses_source_guard
     BEFORE UPDATE OR DELETE ON expenses
     FOR EACH ROW EXECUTE FUNCTION trg_source_doc_guard();
-
 
 -- ---------------------------------------------------------------------------
 -- C-01  Cash-receipt limit -- Income-tax Act 2025 s.186 (s.269ST of the 1961 Act)
@@ -20269,6 +21768,7 @@ $$;
 
 CREATE TRIGGER trg_resolution_votes_freeze BEFORE INSERT OR UPDATE OR DELETE ON resolution_votes
     FOR EACH ROW EXECUTE FUNCTION trg_register_freeze();
+
 CREATE TRIGGER trg_meeting_attendance_freeze BEFORE INSERT OR UPDATE OR DELETE ON meeting_attendance
     FOR EACH ROW EXECUTE FUNCTION trg_register_freeze();
 
@@ -20373,13 +21873,21 @@ BEGIN
     RAISE EXCEPTION '% is a protected record and cannot be truncated', TG_TABLE_NAME;
 END;
 $$;
+
 CREATE TRIGGER trg_transactions_no_truncate      BEFORE TRUNCATE ON transactions            FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+
 CREATE TRIGGER trg_audit_events_no_truncate      BEFORE TRUNCATE ON audit_events            FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+
 CREATE TRIGGER trg_regime_audit_no_truncate      BEFORE TRUNCATE ON regime_rule_audit       FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+
 CREATE TRIGGER trg_fy_locks_no_truncate          BEFORE TRUNCATE ON fy_locks                FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+
 CREATE TRIGGER trg_anchors_no_truncate           BEFORE TRUNCATE ON ledger_chain_anchors    FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+
 CREATE TRIGGER trg_gst_ws_no_truncate            BEFORE TRUNCATE ON gst_turnover_worksheets FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+
 CREATE TRIGGER trg_receivable_disputes_no_truncate BEFORE TRUNCATE ON receivable_disputes FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
+
 CREATE TRIGGER trg_itc_register_no_truncate BEFORE TRUNCATE ON itc_reversal_register FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
 
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -20425,26 +21933,38 @@ CREATE TABLE society_decision_types (
     CONSTRAINT ck_sdt_approval_by CHECK (approval_by <@ ARRAY['secretary', 'treasurer'] AND cardinality(approval_by) = 2),
     CONSTRAINT uq_sdt_society_code_start UNIQUE (society_id, decision_code, start_date)
 );
+
 CREATE INDEX idx_sdt_society ON society_decision_types (society_id, decision_code);
 
 CREATE TABLE society_decision_approvals (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
-    subject_kind        VARCHAR(8) NOT NULL CHECK (subject_kind IN ('decision', 'rule')),
-    subject_id          INT NOT NULL,                    -- society_decision_types.id or rule_parameter_defs.id
-    role                VARCHAR(10) NOT NULL CHECK (role IN ('secretary', 'treasurer')),
-    user_id             INT NOT NULL REFERENCES users (id),
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    subject_kind VARCHAR(8) NOT NULL CHECK (
+        subject_kind IN ('decision', 'rule')
+    ),
+    subject_id INT NOT NULL, -- society_decision_types.id or rule_parameter_defs.id
+    role VARCHAR(10) NOT NULL CHECK (
+        role IN ('secretary', 'treasurer')
+    ),
+    user_id INT NOT NULL REFERENCES users (id),
     committee_office_id INT NOT NULL REFERENCES committee_offices (id),
-    item_hash           CHAR(64) NOT NULL,               -- SHA-256 of exactly what was approved; any edit voids the approval
-    signed_at           TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_sda_one_per_role UNIQUE (subject_kind, subject_id, role, item_hash)
+    item_hash CHAR(64) NOT NULL, -- SHA-256 of exactly what was approved; any edit voids the approval
+    signed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_sda_one_per_role UNIQUE (
+        subject_kind,
+        subject_id,
+        role,
+        item_hash
+    )
 );
+
 CREATE INDEX idx_sda_subject ON society_decision_approvals (subject_kind, subject_id);
 
 CREATE OR REPLACE FUNCTION trg_sda_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     RAISE EXCEPTION 'An approval is a record of who signed what and when; it cannot be changed or deleted.' USING ERRCODE = 'restrict_violation';
 END $$;
+
 CREATE TRIGGER trg_sda_immutable BEFORE UPDATE OR DELETE ON society_decision_approvals
     FOR EACH ROW EXECUTE FUNCTION trg_sda_immutable();
 
@@ -20521,6 +22041,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_society_decision_guard BEFORE INSERT OR UPDATE OR DELETE ON society_decision_types
     FOR EACH ROW EXECUTE FUNCTION trg_society_decision_guard();
 
@@ -20558,6 +22079,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_society_rule_guard BEFORE INSERT OR UPDATE OR DELETE ON rule_parameter_defs
     FOR EACH ROW EXECUTE FUNCTION trg_society_rule_guard();
 
@@ -20744,9 +22266,9 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_resolutions_decision_guard BEFORE INSERT ON resolutions
     FOR EACH ROW EXECUTE FUNCTION trg_resolutions_decision_guard();
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SECTION: SIGNING-KEY VAULT (Gold-Standard Plan v3, task 1.2)
@@ -20764,23 +22286,39 @@ DO $$ BEGIN
 END $$;
 
 CREATE TABLE society_signing_keys (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
-    purpose         VARCHAR(20) NOT NULL CHECK (purpose IN ('SIGNING_QR', 'SIGNING_NOC', 'SIGNING_AGREEMENT', 'SIGNING_LEDGER')),
-    version         INT NOT NULL CHECK (version >= 1),
-    key_id          VARCHAR(32) NOT NULL UNIQUE,            -- random, NOT derived from the key
-    wrapped_key     TEXT NOT NULL,                          -- Fernet token of the 32 key bytes
-    algorithm       VARCHAR(20) NOT NULL DEFAULT 'HMAC-SHA256',
-    status          VARCHAR(10) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'retired', 'revoked')),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by      INT REFERENCES users (id),
-    retired_at      TIMESTAMP,
-    revoked_at      TIMESTAMP,
-    compromise_date TIMESTAMP,                              -- signatures made at or after this are untrusted
-    revoke_reason   TEXT,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE RESTRICT,
+    purpose VARCHAR(20) NOT NULL CHECK (
+        purpose IN (
+            'SIGNING_QR',
+            'SIGNING_NOC',
+            'SIGNING_AGREEMENT',
+            'SIGNING_LEDGER'
+        )
+    ),
+    version INT NOT NULL CHECK (version >= 1),
+    key_id VARCHAR(32) NOT NULL UNIQUE, -- random, NOT derived from the key
+    wrapped_key TEXT NOT NULL, -- Fernet token of the 32 key bytes
+    algorithm VARCHAR(20) NOT NULL DEFAULT 'HMAC-SHA256',
+    status VARCHAR(10) NOT NULL DEFAULT 'active' CHECK (
+        status IN (
+            'active',
+            'retired',
+            'revoked'
+        )
+    ),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by INT REFERENCES users (id),
+    retired_at TIMESTAMP,
+    revoked_at TIMESTAMP,
+    compromise_date TIMESTAMP, -- signatures made at or after this are untrusted
+    revoke_reason TEXT,
     UNIQUE (society_id, purpose, version)
 );
-CREATE UNIQUE INDEX uq_signing_key_one_active ON society_signing_keys (society_id, purpose) WHERE status = 'active';
+
+CREATE UNIQUE INDEX uq_signing_key_one_active ON society_signing_keys (society_id, purpose)
+WHERE
+    status = 'active';
 
 -- Never deleted. The wrapped key never changes except through the rotation tool's login (a member of
 -- estatehub_keyrotator, which a superuser implicitly is). Status moves only active -> retired/revoked, retired -> revoked.
@@ -20806,32 +22344,35 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER trg_signing_key_guard BEFORE UPDATE OR DELETE ON society_signing_keys
     FOR EACH ROW EXECUTE FUNCTION trg_signing_key_guard();
 
 -- One row: lets the app notice a wrong SECRET_VAULT_KEY at start-up, and lets the rotation tool refuse a wrong
 -- SECRET_MASTER_KEY. It holds a salted verifier of the master key, never the key.
 CREATE TABLE platform_vault_meta (
-    id               INT PRIMARY KEY CHECK (id = 1),
-    master_salt      TEXT NOT NULL,
-    master_verifier  TEXT NOT NULL,
+    id INT PRIMARY KEY CHECK (id = 1),
+    master_salt TEXT NOT NULL,
+    master_verifier TEXT NOT NULL,
     vault_fingerprint VARCHAR(64) NOT NULL,
-    vault_version    INT NOT NULL DEFAULT 1,
-    updated_at       TIMESTAMP NOT NULL DEFAULT NOW()
+    vault_version INT NOT NULL DEFAULT 1,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 -- Scheduled-job log (task 1.4).
 CREATE TABLE job_runs (
-    id          BIGSERIAL PRIMARY KEY,
-    job_name    VARCHAR(40) NOT NULL,
-    started_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    id BIGSERIAL PRIMARY KEY,
+    job_name VARCHAR(40) NOT NULL,
+    started_at TIMESTAMP NOT NULL DEFAULT NOW(),
     finished_at TIMESTAMP,
-    status      VARCHAR(10) NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'ok', 'failed')),
-    detail      JSONB,
-    error       TEXT
+    status VARCHAR(10) NOT NULL DEFAULT 'running' CHECK (
+        status IN ('running', 'ok', 'failed')
+    ),
+    detail JSONB,
+    error TEXT
 );
-CREATE INDEX idx_job_runs_name_time ON job_runs (job_name, started_at DESC);
 
+CREATE INDEX idx_job_runs_name_time ON job_runs (job_name, started_at DESC);
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Task 1.10: Managing Committee decisions are tallied from a committee register, not typed
@@ -20841,12 +22382,19 @@ CREATE INDEX idx_job_runs_name_time ON job_runs (job_name, started_at DESC);
 -- 'committee'). Committee quorum is "more than half of the serving committee present" [Verify with your advocate:
 -- the bye-laws' own committee quorum figure replaces this once confirmed].
 CREATE TABLE committee_votes (
-    id                  SERIAL PRIMARY KEY,
-    resolution_id       INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
+    id SERIAL PRIMARY KEY,
+    resolution_id INT NOT NULL REFERENCES resolutions (id) ON DELETE CASCADE,
     committee_office_id INT NOT NULL REFERENCES committee_offices (id),
-    person_key          TEXT NOT NULL,
-    vote                VARCHAR(8) NOT NULL CHECK (vote IN ('FOR', 'AGAINST', 'ABSTAIN', 'PRESENT')),
-    voted_at            TIMESTAMP NOT NULL DEFAULT NOW(),
+    person_key TEXT NOT NULL,
+    vote VARCHAR(8) NOT NULL CHECK (
+        vote IN (
+            'FOR',
+            'AGAINST',
+            'ABSTAIN',
+            'PRESENT'
+        )
+    ),
+    voted_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (resolution_id, person_key)
 );
 
@@ -20943,9 +22491,9 @@ BEGIN
     END IF;
     RETURN COALESCE(NEW, OLD);
 END $$;
+
 CREATE TRIGGER trg_committee_votes_freeze BEFORE INSERT OR UPDATE OR DELETE ON committee_votes
     FOR EACH ROW EXECUTE FUNCTION trg_committee_votes_freeze();
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Task 1.8: Sec 44AB tax-audit flag, effective-dated thresholds
@@ -20955,20 +22503,39 @@ CREATE TRIGGER trg_committee_votes_freeze BEFORE INSERT OR UPDATE OR DELETE ON c
 -- NOT confirmed. Whether a mutual association's receipts count as "turnover" at all is also a CA question. The
 -- flag is a warning to ask, never a finding. The Income-tax Act 2025 renumbers the section; verify before use.
 CREATE TABLE tax_audit_thresholds (
-    id             SERIAL PRIMARY KEY,
-    threshold_key  VARCHAR(40) NOT NULL,
-    amount         NUMERIC(15,2) NOT NULL CHECK (amount > 0),
+    id SERIAL PRIMARY KEY,
+    threshold_key VARCHAR(40) NOT NULL,
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
     effective_from DATE NOT NULL,
-    effective_to   DATE,
-    section_1961   VARCHAR(20) NOT NULL DEFAULT '44AB',
-    section_2025   VARCHAR(20),
-    status         VARCHAR(12) NOT NULL DEFAULT 'provisional' CHECK (status IN ('provisional', 'confirmed')),
-    note           TEXT,
+    effective_to DATE,
+    section_1961 VARCHAR(20) NOT NULL DEFAULT '44AB',
+    section_2025 VARCHAR(20),
+    status VARCHAR(12) NOT NULL DEFAULT 'provisional' CHECK (
+        status IN ('provisional', 'confirmed')
+    ),
+    note TEXT,
     UNIQUE (threshold_key, effective_from)
 );
-INSERT INTO tax_audit_thresholds (threshold_key, amount, effective_from, note) VALUES
-    ('business_turnover',          10000000.00,  DATE '2000-04-01', 'Rs 1 crore. [Verify] provisional until the CA confirms.'),
-    ('business_turnover_low_cash', 100000000.00, DATE '2020-04-01', 'Rs 10 crore where cash receipts and cash payments are each 5% or less. [Verify] provisional.');
+
+INSERT INTO
+    tax_audit_thresholds (
+        threshold_key,
+        amount,
+        effective_from,
+        note
+    )
+VALUES (
+        'business_turnover',
+        10000000.00,
+        DATE '2000-04-01',
+        'Rs 1 crore. [Verify] provisional until the CA confirms.'
+    ),
+    (
+        'business_turnover_low_cash',
+        100000000.00,
+        DATE '2020-04-01',
+        'Rs 10 crore where cash receipts and cash payments are each 5% or less. [Verify] provisional.'
+    );
 
 -- The flag for one financial year (fy = starting year, e.g. 2026 = FY 2026-27): receipts from the Income & Expenditure
 -- statement against the threshold in force on the year's last day. 'warn' from 80% of the limit; 'flag' at or above it.
@@ -20985,7 +22552,6 @@ BEGIN
         (CASE WHEN v_inc >= v_thr THEN 'flag' WHEN v_inc >= v_thr * 0.8 THEN 'warn' ELSE 'ok' END)::VARCHAR, v_status,
         'Ask your CA whether s.44AB tax audit applies. Provisional threshold; mutual receipts may not count as turnover.'::TEXT;
 END $$;
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Phase 2 (tasks 2.1, 2.2, 2.10-2.12): office-bearer records, signatures and sealed records
@@ -21021,53 +22587,104 @@ CREATE TABLE signer_policy (
 
 -- One row per confirmation (sign / approve / decline). item_hash = SHA-256 of the exact item text at that moment.
 CREATE TABLE document_signatures (
-    id                  BIGSERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    subject_kind        VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'adviser_appointment', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
-    subject_id          INT NOT NULL,
-    action              VARCHAR(8) NOT NULL DEFAULT 'sign' CHECK (action IN ('sign', 'approve', 'decline')),
-    user_id             INT NOT NULL REFERENCES users (id),
-    office_code         VARCHAR(30) NOT NULL,
+    id BIGSERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    subject_kind VARCHAR(20) NOT NULL CHECK (
+        subject_kind IN (
+            'noc',
+            'agreement',
+            'adviser_appointment',
+            'resolution',
+            'minutes',
+            'poll',
+            'expense',
+            'fund_withdrawal'
+        )
+    ),
+    subject_id INT NOT NULL,
+    action VARCHAR(8) NOT NULL DEFAULT 'sign' CHECK (
+        action IN ('sign', 'approve', 'decline')
+    ),
+    user_id INT NOT NULL REFERENCES users (id),
+    office_code VARCHAR(30) NOT NULL,
     committee_office_id INT REFERENCES committee_offices (id),
-    item_hash           VARCHAR(64) NOT NULL,
+    item_hash VARCHAR(64) NOT NULL,
     -- V5.6b: how this signature was made; evidence_ref points at the vendor
     -- callback record / paper scan / DSC certificate as applicable.
-    method              VARCHAR(20) NOT NULL DEFAULT 'password'
-        CHECK (method IN ('password', 'aadhaar_eSign', 'dsc', 'paper')),
-    evidence_ref        VARCHAR(255),
-    reason              TEXT,
-    signed_at           TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT ck_decline_has_reason CHECK (action <> 'decline' OR LENGTH(BTRIM(COALESCE(reason, ''))) >= 10)
+    method VARCHAR(20) NOT NULL DEFAULT 'password' CHECK (
+        method IN (
+            'password',
+            'aadhaar_eSign',
+            'dsc',
+            'paper'
+        )
+    ),
+    evidence_ref VARCHAR(255),
+    reason TEXT,
+    signed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_decline_has_reason CHECK (
+        action <> 'decline'
+        OR LENGTH(BTRIM (COALESCE(reason, ''))) >= 10
+    )
 );
 -- One confirmation per person per item version.
-CREATE UNIQUE INDEX uq_doc_signature_person ON document_signatures (subject_kind, subject_id, item_hash, user_id)
-    WHERE action IN ('sign', 'approve');
+CREATE UNIQUE INDEX uq_doc_signature_person ON document_signatures (
+    subject_kind,
+    subject_id,
+    item_hash,
+    user_id
+)
+WHERE
+    action IN ('sign', 'approve');
+
 CREATE INDEX idx_doc_signatures_subject ON document_signatures (subject_kind, subject_id);
 
 -- Append-only.
 CREATE OR REPLACE FUNCTION trg_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION '% is append-only', TG_TABLE_NAME; END $$;
+
 CREATE TRIGGER trg_document_signatures_append_only BEFORE UPDATE OR DELETE ON document_signatures
     FOR EACH ROW EXECUTE FUNCTION trg_append_only();
 
 -- The seal: made once all required signatures are in, signed with the society's key.
 CREATE TABLE signed_records (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    subject_kind    VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'adviser_appointment', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
-    subject_id      INT NOT NULL,
-    purpose         VARCHAR(20) NOT NULL,
-    item_hash       VARCHAR(64) NOT NULL,
-    signature       VARCHAR(64) NOT NULL,
-    key_version     INT NOT NULL,
-    key_id          VARCHAR(32) NOT NULL,
-    algorithm       VARCHAR(20) NOT NULL,
-    signed_at       TIMESTAMP NOT NULL DEFAULT NOW(),
-    signers         JSONB NOT NULL,                      -- [{user_id, office, at}] : names and offices only
-    status          VARCHAR(12) NOT NULL DEFAULT 'valid' CHECK (status IN ('valid', 'superseded', 'revoked')),
-    revoked_reason  TEXT
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    subject_kind VARCHAR(20) NOT NULL CHECK (
+        subject_kind IN (
+            'noc',
+            'agreement',
+            'adviser_appointment',
+            'resolution',
+            'minutes',
+            'poll',
+            'expense',
+            'fund_withdrawal'
+        )
+    ),
+    subject_id INT NOT NULL,
+    purpose VARCHAR(20) NOT NULL,
+    item_hash VARCHAR(64) NOT NULL,
+    signature VARCHAR(64) NOT NULL,
+    key_version INT NOT NULL,
+    key_id VARCHAR(32) NOT NULL,
+    algorithm VARCHAR(20) NOT NULL,
+    signed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    signers JSONB NOT NULL, -- [{user_id, office, at}] : names and offices only
+    status VARCHAR(12) NOT NULL DEFAULT 'valid' CHECK (
+        status IN (
+            'valid',
+            'superseded',
+            'revoked'
+        )
+    ),
+    revoked_reason TEXT
 );
-CREATE UNIQUE INDEX uq_signed_record_current ON signed_records (subject_kind, subject_id) WHERE status = 'valid';
+
+CREATE UNIQUE INDEX uq_signed_record_current ON signed_records (subject_kind, subject_id)
+WHERE
+    status = 'valid';
+
 CREATE OR REPLACE FUNCTION trg_signed_record_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'signed_records is never deleted'; END IF;
@@ -21082,6 +22699,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_signed_record_guard BEFORE UPDATE OR DELETE ON signed_records
     FOR EACH ROW EXECUTE FUNCTION trg_signed_record_guard();
 
@@ -21104,16 +22722,22 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_nocs_sealed BEFORE UPDATE OR DELETE ON nocs
     FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('noc', 'body_text,apartment_id,certificate_no,issued_date,valid_until');
+
 CREATE TRIGGER trg_agreements_sealed BEFORE UPDATE OR DELETE ON society_agreements
     FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('agreement', 'body_text,society_name,society_address,registration_number');
+
 CREATE TRIGGER trg_meetings_sealed BEFORE UPDATE OR DELETE ON meetings
     FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('minutes', 'held_on,agenda,type,venue,minutes_pdf');
+
 CREATE TRIGGER trg_polls_sealed BEFORE UPDATE OR DELETE ON polls
     FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('poll', 'title,choice_1,choice_2,choice_3,choice_4,choice_5,majority_pct,quorum_pct,vote_basis');
+
 CREATE TRIGGER trg_resolutions_sealed BEFORE UPDATE OR DELETE ON resolutions
     FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('resolution', 'body,clause_id,majority_required,votes_for_pct,owners_present_pct,passed_on,status');
+
 CREATE TRIGGER trg_fund_utilizations_sealed BEFORE UPDATE OR DELETE ON fund_utilizations
     FOR EACH ROW EXECUTE FUNCTION trg_block_edit_when_sealed('fund_withdrawal', 'fund_acc_id,expense_acc_id,amount,mode,particulars,approval_ref,approval_date');
 
@@ -21123,15 +22747,29 @@ CREATE TRIGGER trg_fund_utilizations_sealed BEFORE UPDATE OR DELETE ON fund_util
 -- has signed it. The rule is enforced here, on signed_records, so no code path can seal around it. A document that
 -- names no resolution is unaffected.
 CREATE TABLE document_resolution_links (
-    id            SERIAL PRIMARY KEY,
-    society_id    INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    subject_kind  VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'adviser_appointment', 'minutes', 'expense', 'fund_withdrawal')),
-    subject_id    INT NOT NULL,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    subject_kind VARCHAR(20) NOT NULL CHECK (
+        subject_kind IN (
+            'noc',
+            'agreement',
+            'adviser_appointment',
+            'minutes',
+            'expense',
+            'fund_withdrawal'
+        )
+    ),
+    subject_id INT NOT NULL,
     resolution_id INT NOT NULL REFERENCES resolutions (id) ON DELETE RESTRICT,
-    linked_by     INT REFERENCES users (id),
-    linked_at     TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (society_id, subject_kind, subject_id)
+    linked_by INT REFERENCES users (id),
+    linked_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (
+        society_id,
+        subject_kind,
+        subject_id
+    )
 );
+
 CREATE INDEX idx_doc_resolution_links_resolution ON document_resolution_links (resolution_id);
 
 -- The link may only name a PASSED resolution of the same society, and is fixed once the document is sealed.
@@ -21150,69 +22788,109 @@ BEGIN
     IF v_status <> 'passed' THEN RAISE EXCEPTION 'Only a passed resolution can authorise a document.'; END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_document_resolution_link_guard BEFORE INSERT OR UPDATE OR DELETE ON document_resolution_links
     FOR EACH ROW EXECUTE FUNCTION trg_document_resolution_link_guard();
 
 -- V5.6b: eSign requests to the reference vendor (Leegality). One row per signer per document.
 CREATE TABLE esign_requests (
-    id                SERIAL PRIMARY KEY,
-    society_id        INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    subject_kind      VARCHAR(20) NOT NULL CHECK (subject_kind IN ('agreement', 'adviser_appointment', 'noc', 'resolution', 'minutes', 'expense', 'fund_withdrawal')),
-    subject_id        INT NOT NULL,
-    vendor_request_id VARCHAR(100) UNIQUE,   -- the vendor's request id (idempotency key)
-    vendor            VARCHAR(40) NOT NULL DEFAULT 'leegality',
-    signer_name       VARCHAR(100) NOT NULL,
-    signer_email      VARCHAR(100),
-    signer_mobile     VARCHAR(20),
-    method            VARCHAR(20) NOT NULL   -- aadhaar_eSign | dsc | paper
-        CHECK (method IN ('aadhaar_eSign', 'dsc', 'paper')),
-    status            VARCHAR(20) NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'sent', 'completed', 'failed', 'expired')),
-    callback_hash     VARCHAR(64),           -- expected SHA-256 of the signed document for callback verification
-    evidence_ref      VARCHAR(255),          -- signed PDF / paper scan reference stored by the vendor or locally
-    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
-    completed_at      TIMESTAMP,
-    error             TEXT,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    subject_kind VARCHAR(20) NOT NULL CHECK (
+        subject_kind IN (
+            'agreement',
+            'adviser_appointment',
+            'noc',
+            'resolution',
+            'minutes',
+            'expense',
+            'fund_withdrawal'
+        )
+    ),
+    subject_id INT NOT NULL,
+    vendor_request_id VARCHAR(100) UNIQUE, -- the vendor's request id (idempotency key)
+    vendor VARCHAR(40) NOT NULL DEFAULT 'leegality',
+    signer_name VARCHAR(100) NOT NULL,
+    signer_email VARCHAR(100),
+    signer_mobile VARCHAR(20),
+    method VARCHAR(20) NOT NULL -- aadhaar_eSign | dsc | paper
+    CHECK (
+        method IN (
+            'aadhaar_eSign',
+            'dsc',
+            'paper'
+        )
+    ),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (
+        status IN (
+            'pending',
+            'sent',
+            'completed',
+            'failed',
+            'expired'
+        )
+    ),
+    callback_hash VARCHAR(64), -- expected SHA-256 of the signed document for callback verification
+    evidence_ref VARCHAR(255), -- signed PDF / paper scan reference stored by the vendor or locally
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMP,
+    error TEXT,
     -- V5.6b: which login the request is for, so a completed request can only back that person's own signature.
-    signer_user_id    INT REFERENCES users (id)
+    signer_user_id INT REFERENCES users (id)
 );
+
 CREATE INDEX idx_esign_requests_subject ON esign_requests (subject_kind, subject_id);
+
 CREATE INDEX idx_esign_requests_vendor_id ON esign_requests (vendor_request_id);
-CREATE INDEX idx_esign_requests_signer ON esign_requests (signer_user_id, subject_kind, subject_id);
+
+CREATE INDEX idx_esign_requests_signer ON esign_requests (
+    signer_user_id,
+    subject_kind,
+    subject_id
+);
 
 -- V5.9: Adviser appointment record (Auditor, CA, Advocate). Appointed by a resolution
 -- and signed by the President, Secretary and Treasurer (adviser_appointment signing
 -- kind). Access ends automatically on the term's last day; revocation takes effect at
 -- once and is logged.
 CREATE TABLE adviser_appointments (
-    id                SERIAL PRIMARY KEY,
-    society_id        INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    kind              VARCHAR(20) NOT NULL CHECK (kind IN ('auditor', 'ca', 'advocate')),
-    name              VARCHAR(100) NOT NULL,
-    firm              VARCHAR(100),
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    kind VARCHAR(20) NOT NULL CHECK (
+        kind IN ('auditor', 'ca', 'advocate')
+    ),
+    name VARCHAR(100) NOT NULL,
+    firm VARCHAR(100),
     membership_number VARCHAR(50),
-    scope             TEXT,
-    term_start        DATE NOT NULL,
-    term_end          DATE NOT NULL,
-    resolution_id     INT NOT NULL REFERENCES resolutions (id),
+    scope TEXT,
+    term_start DATE NOT NULL,
+    term_end DATE NOT NULL,
+    resolution_id INT NOT NULL REFERENCES resolutions (id),
     independence_declared BOOLEAN NOT NULL DEFAULT FALSE,
-    login_user_id     INT REFERENCES users (id),   -- the adviser's login, created under role 'adviser'
-    active            BOOLEAN NOT NULL DEFAULT TRUE,
-    revoked_at        TIMESTAMP,
-    revoked_reason    TEXT,
-    revoked_by        INT REFERENCES users (id),
-    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at        TIMESTAMP NOT NULL DEFAULT NOW()
+    login_user_id INT REFERENCES users (id), -- the adviser's login, created under role 'adviser'
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    revoked_at TIMESTAMP,
+    revoked_reason TEXT,
+    revoked_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_adviser_appointments_society ON adviser_appointments (society_id);
-CREATE INDEX idx_adviser_appointments_login ON adviser_appointments (login_user_id) WHERE active;
+
+CREATE INDEX idx_adviser_appointments_login ON adviser_appointments (login_user_id)
+WHERE
+    active;
+
 CREATE INDEX idx_adviser_appointments_term ON adviser_appointments (term_end);
+
 CREATE OR REPLACE FUNCTION fn_trg_adviser_appointments_updated_at() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
     NEW.updated_at := NOW();
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER trg_adviser_appointments_updated_at
     BEFORE UPDATE ON adviser_appointments
     FOR EACH ROW
@@ -21232,7 +22910,9 @@ CREATE TABLE export_log (
     owner_names_masked BOOLEAN NOT NULL DEFAULT FALSE,
     created_at    TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE INDEX idx_export_log_society ON export_log (society_id, created_at DESC);
+
 CREATE INDEX idx_export_log_user ON export_log (exported_by, created_at DESC);
 
 -- ════════════════════════════════════════════════════════════════════════════════
@@ -21245,83 +22925,153 @@ CREATE INDEX idx_export_log_user ON export_log (exported_by, created_at DESC);
 -- Versioned privacy notice per society, shown before the password change completes
 -- at first login (stage 5).
 CREATE TABLE privacy_notices (
-    id            SERIAL PRIMARY KEY,
-    society_id    INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    version       INT NOT NULL,
-    title         VARCHAR(200) NOT NULL,
-    body_text     TEXT NOT NULL,                       -- plain language, lists data & purpose, contact, how to withdraw/complain
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    version INT NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    body_text TEXT NOT NULL, -- plain language, lists data & purpose, contact, how to withdraw/complain
     effective_from DATE NOT NULL,
-    effective_to   DATE,
-    is_current    BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at    TIMESTAMP NOT NULL DEFAULT NOW()
+    effective_to DATE,
+    is_current BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
 CREATE UNIQUE INDEX uq_privacy_notice_version ON privacy_notices (society_id, version);
-CREATE INDEX idx_privacy_notices_society ON privacy_notices (society_id, effective_from DESC);
+
+CREATE INDEX idx_privacy_notices_society ON privacy_notices (
+    society_id,
+    effective_from DESC
+);
 
 -- Consent records: person, purpose, notice version, time, withdrawn time.
 CREATE TABLE consent_records (
-    id                BIGSERIAL PRIMARY KEY,
-    society_id        INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    person_key        VARCHAR(100) NOT NULL,        -- flat owner / tenant / vendor / guard identifier
-    person_role       VARCHAR(20) NOT NULL CHECK (person_role IN ('owner','family','tenant','visitor','vendor','security','staff','admin','adviser')),
-    purpose           VARCHAR(60) NOT NULL,         -- e.g. dues, gate_pass, visitor_log, billing, marketing
-    notice_version    INT NOT NULL,
-    consented_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    withdrawn_at      TIMESTAMP,
-    lawful_basis      VARCHAR(30) NOT NULL DEFAULT 'consent' CHECK (lawful_basis IN ('consent','legitimate_use','vital_interest','legal_obligation')),
-    created_by        INT REFERENCES users (id),
-    user_id           INT REFERENCES users (id) ON DELETE SET NULL    -- the login that gave it, when there is one
+    id BIGSERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    person_key VARCHAR(100) NOT NULL, -- flat owner / tenant / vendor / guard identifier
+    person_role VARCHAR(20) NOT NULL CHECK (
+        person_role IN (
+            'owner',
+            'family',
+            'tenant',
+            'visitor',
+            'vendor',
+            'security',
+            'staff',
+            'admin',
+            'adviser'
+        )
+    ),
+    purpose VARCHAR(60) NOT NULL, -- e.g. dues, gate_pass, visitor_log, billing, marketing
+    notice_version INT NOT NULL,
+    consented_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    withdrawn_at TIMESTAMP,
+    lawful_basis VARCHAR(30) NOT NULL DEFAULT 'consent' CHECK (
+        lawful_basis IN (
+            'consent',
+            'legitimate_use',
+            'vital_interest',
+            'legal_obligation'
+        )
+    ),
+    created_by INT REFERENCES users (id),
+    user_id INT REFERENCES users (id) ON DELETE SET NULL -- the login that gave it, when there is one
 );
-CREATE INDEX idx_consent_records_person ON consent_records (society_id, person_key, purpose);
-CREATE INDEX idx_consent_records_user ON consent_records (society_id, user_id, purpose) WHERE user_id IS NOT NULL;
-CREATE INDEX idx_consent_records_withdrawn ON consent_records (withdrawn_at) WHERE withdrawn_at IS NOT NULL;
+
+CREATE INDEX idx_consent_records_person ON consent_records (
+    society_id,
+    person_key,
+    purpose
+);
+
+CREATE INDEX idx_consent_records_user ON consent_records (society_id, user_id, purpose)
+WHERE
+    user_id IS NOT NULL;
+
+CREATE INDEX idx_consent_records_withdrawn ON consent_records (withdrawn_at)
+WHERE
+    withdrawn_at IS NOT NULL;
 
 -- Rights register: access, correction, erasure, grievance, nominee requests.
 CREATE TABLE rights_requests (
-    id              BIGSERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    requester_key   VARCHAR(100) NOT NULL,
-    request_type    VARCHAR(20) NOT NULL CHECK (request_type IN ('access','correction','erasure','grievance','nominee')),
-    subject         TEXT NOT NULL,
-    due_date        DATE NOT NULL,                    -- DPDP timeline for response
-    outcome         VARCHAR(30) CHECK (outcome IS NULL OR outcome IN ('granted','partial','rejected','pending')),
-    outcome_note    TEXT,
-    responded_at    TIMESTAMP,
-    responded_by    INT REFERENCES users (id),
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    requester_user_id INT REFERENCES users (id) ON DELETE SET NULL,   -- the login that raised it
-    apartment_id    INT REFERENCES apartments (id) ON DELETE SET NULL, -- the flat whose profile an erasure would blank
-    erasure_notice_at TIMESTAMP,                      -- when the member was told, before anything is deleted
-    erased_at       TIMESTAMP,
-    CONSTRAINT ck_rights_outcome_has_response CHECK (outcome IS NULL OR outcome = 'pending' OR responded_at IS NOT NULL)
+    id BIGSERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    requester_key VARCHAR(100) NOT NULL,
+    request_type VARCHAR(20) NOT NULL CHECK (
+        request_type IN (
+            'access',
+            'correction',
+            'erasure',
+            'grievance',
+            'nominee'
+        )
+    ),
+    subject TEXT NOT NULL,
+    due_date DATE NOT NULL, -- DPDP timeline for response
+    outcome VARCHAR(30) CHECK (
+        outcome IS NULL
+        OR outcome IN (
+            'granted',
+            'partial',
+            'rejected',
+            'pending'
+        )
+    ),
+    outcome_note TEXT,
+    responded_at TIMESTAMP,
+    responded_by INT REFERENCES users (id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    requester_user_id INT REFERENCES users (id) ON DELETE SET NULL, -- the login that raised it
+    apartment_id INT REFERENCES apartments (id) ON DELETE SET NULL, -- the flat whose profile an erasure would blank
+    erasure_notice_at TIMESTAMP, -- when the member was told, before anything is deleted
+    erased_at TIMESTAMP,
+    CONSTRAINT ck_rights_outcome_has_response CHECK (
+        outcome IS NULL
+        OR outcome = 'pending'
+        OR responded_at IS NOT NULL
+    )
 );
+
 CREATE INDEX idx_rights_requests_society ON rights_requests (society_id, created_at DESC);
-CREATE INDEX idx_rights_requests_due ON rights_requests (due_date) WHERE outcome IS NULL;
+
+CREATE INDEX idx_rights_requests_due ON rights_requests (due_date)
+WHERE
+    outcome IS NULL;
 
 -- Breach register: breach intimation to the Board and affected people.
 CREATE TABLE breach_register (
-    id              BIGSERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    occurred_at     TIMESTAMP NOT NULL,
-    discovered_at   TIMESTAMP NOT NULL DEFAULT NOW(),
-    description     TEXT NOT NULL,
+    id BIGSERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    occurred_at TIMESTAMP NOT NULL,
+    discovered_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    description TEXT NOT NULL,
     affected_persons INT NOT NULL DEFAULT 0,
     intimation_sent BOOLEAN NOT NULL DEFAULT FALSE,
-    intimation_at   TIMESTAMP,
-    status          VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open','investigating','remediated','closed')),
-    created_by      INT REFERENCES users (id)
+    intimation_at TIMESTAMP,
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (
+        status IN (
+            'open',
+            'investigating',
+            'remediated',
+            'closed'
+        )
+    ),
+    created_by INT REFERENCES users (id)
 );
-CREATE INDEX idx_breach_register_society ON breach_register (society_id, discovered_at DESC);
+
+CREATE INDEX idx_breach_register_society ON breach_register (
+    society_id,
+    discovered_at DESC
+);
 
 -- Retention rules per record class, with holds for disputes and audits.
 CREATE TABLE retention_rules (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    record_class    VARCHAR(60) NOT NULL,            -- e.g. consent_records, export_log, breach_register
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    record_class VARCHAR(60) NOT NULL, -- e.g. consent_records, export_log, breach_register
     default_retention_years INT NOT NULL DEFAULT 5 CHECK (default_retention_years >= 0),
     hold_for_disputes BOOLEAN NOT NULL DEFAULT TRUE,
-    hold_for_audits   BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    hold_for_audits BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (society_id, record_class)
 );
 
@@ -21330,18 +23080,18 @@ CREATE TABLE retention_rules (
 -- unreviewed, dpdp_pending_legal_review(society_id) returns True and the admin
 -- sees the 'pending legal review' flag.
 CREATE TABLE dpdp_legal_review (
-    id          SERIAL PRIMARY KEY,
-    society_id  INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    item_key    VARCHAR(40) NOT NULL,               -- one of dpdp_service.REVIEW_ITEMS
-    detail      TEXT,                               -- what the advocate is being asked to confirm
-    reviewed    BOOLEAN NOT NULL DEFAULT FALSE,
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    item_key VARCHAR(40) NOT NULL, -- one of dpdp_service.REVIEW_ITEMS
+    detail TEXT, -- what the advocate is being asked to confirm
+    reviewed BOOLEAN NOT NULL DEFAULT FALSE,
     reviewed_at TIMESTAMP,
     reviewed_by INT REFERENCES users (id),
-    created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (society_id, item_key)
 );
-CREATE INDEX idx_dpdp_legal_review_society ON dpdp_legal_review (society_id, reviewed);
 
+CREATE INDEX idx_dpdp_legal_review_society ON dpdp_legal_review (society_id, reviewed);
 
 -- ═════════════════════════════════════════════════════════════════════════════
 
@@ -21438,7 +23188,6 @@ BEGIN
     RETURN COALESCE(v_ok, FALSE);
 END $$;
 
-
 -- The resolution that still blocks this document: NULL when it names none, or when that resolution is sealed.
 CREATE OR REPLACE FUNCTION fn_document_resolution_block(p_society_id INT, p_kind TEXT, p_subject_id INT) RETURNS INT
 LANGUAGE sql STABLE AS $$
@@ -21459,22 +23208,23 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_signed_record_needs_resolution BEFORE INSERT ON signed_records
     FOR EACH ROW EXECUTE FUNCTION trg_signed_record_needs_resolution();
+
 CREATE TRIGGER trg_document_resolution_links_no_truncate BEFORE TRUNCATE ON document_resolution_links
     FOR EACH STATEMENT EXECUTE FUNCTION trg_no_truncate();
-
 
 -- ── Phase 2.5: approval ladder for expenses (bye-law 49: Rs 20,000) ─────────────────────────────────────────────
 -- Up to `threshold` one administrator verifies as before. Above it the expense needs `min_signers` DIFFERENT serving
 -- office-bearers (document_signatures, kind 'expense') and a Managing Committee resolution reference.
 CREATE TABLE expense_approval_policy (
-    society_id          INT PRIMARY KEY REFERENCES societies (id) ON DELETE CASCADE,
-    threshold           NUMERIC(14, 2) NOT NULL DEFAULT 20000 CHECK (threshold >= 0),
-    min_signers         INT NOT NULL DEFAULT 2 CHECK (min_signers BETWEEN 1 AND 5),
-    require_resolution  BOOLEAN NOT NULL DEFAULT TRUE,
-    updated_by          INT REFERENCES users (id),
-    updated_at          TIMESTAMP NOT NULL DEFAULT NOW()
+    society_id INT PRIMARY KEY REFERENCES societies (id) ON DELETE CASCADE,
+    threshold NUMERIC(14, 2) NOT NULL DEFAULT 20000 CHECK (threshold >= 0),
+    min_signers INT NOT NULL DEFAULT 2 CHECK (min_signers BETWEEN 1 AND 5),
+    require_resolution BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_by INT REFERENCES users (id),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 -- ── Phase 2.4: ratification of irregular items, with automatic reversal ─────────────────────────────────────────
@@ -21501,9 +23251,13 @@ CREATE TABLE ratification_items (
     reversal_note       TEXT,                    -- why a reversal could not be posted, if it could not
     CONSTRAINT ck_ratification_deadline CHECK (ratify_by >= raised_at::date)
 );
+
 CREATE INDEX idx_ratification_items_open ON ratification_items (society_id, status, ratify_by);
+
 CREATE UNIQUE INDEX uq_ratification_items_source ON ratification_items (kind, source_table, source_id)
-    WHERE source_table IS NOT NULL AND status IN ('pending', 'ratified');
+WHERE
+    source_table IS NOT NULL
+    AND status IN ('pending', 'ratified');
 
 -- Reverse every journal the item's source document posted. One failure never blocks the rest, and is recorded.
 CREATE OR REPLACE FUNCTION fn_reverse_ratification_item(p_item_id INT, p_reason TEXT, p_user INT DEFAULT NULL)
@@ -21590,41 +23344,75 @@ END $$;
 -- Which rule, at which layer, under which decision and authority, produced a posting. An auditor traces any posting
 -- to its rule and authority from here (and exports it).
 CREATE TABLE rule_applications (
-    id                  SERIAL PRIMARY KEY,
-    society_id          INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    source_table        VARCHAR(50) NOT NULL,
-    source_id           INT NOT NULL,
-    journal_id          INT,
-    rule_key            VARCHAR(100) NOT NULL,
-    layer               INT CHECK (layer IN (1, 2, 3)),
-    decision            TEXT NOT NULL,
-    resolution_id       INT REFERENCES resolutions (id) ON DELETE SET NULL,
-    resolution_ref      VARCHAR(255),
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    source_table VARCHAR(50) NOT NULL,
+    source_id INT NOT NULL,
+    journal_id INT,
+    rule_key VARCHAR(100) NOT NULL,
+    layer INT CHECK (layer IN (1, 2, 3)),
+    decision TEXT NOT NULL,
+    resolution_id INT REFERENCES resolutions (id) ON DELETE SET NULL,
+    resolution_ref VARCHAR(255),
     advocate_opinion_ref VARCHAR(255),
-    effective_from      DATE NOT NULL DEFAULT CURRENT_DATE,
-    effective_to        DATE,
-    applied_by          INT REFERENCES users (id),
-    applied_at          TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT ck_rule_application_dates CHECK (effective_to IS NULL OR effective_to >= effective_from)
+    effective_from DATE NOT NULL DEFAULT CURRENT_DATE,
+    effective_to DATE,
+    applied_by INT REFERENCES users (id),
+    applied_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_rule_application_dates CHECK (
+        effective_to IS NULL
+        OR effective_to >= effective_from
+    )
 );
-CREATE INDEX idx_rule_applications_source ON rule_applications (society_id, source_table, source_id);
+
+CREATE INDEX idx_rule_applications_source ON rule_applications (
+    society_id,
+    source_table,
+    source_id
+);
+
 CREATE INDEX idx_rule_applications_rule ON rule_applications (society_id, rule_key);
 
 CREATE OR REPLACE FUNCTION trg_rule_applications_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     RAISE EXCEPTION 'The rule-application register is append-only; record a new application instead.';
 END $$;
+
 CREATE TRIGGER trg_rule_applications_append_only BEFORE UPDATE OR DELETE ON rule_applications
     FOR EACH ROW EXECUTE FUNCTION trg_rule_applications_append_only();
 
 CREATE OR REPLACE VIEW v_rule_application_register AS
-SELECT ra.id, ra.society_id, ra.applied_at, ra.source_table, ra.source_id, ra.journal_id, ra.rule_key, ra.layer,
-       ra.decision, ra.resolution_id, COALESCE(ra.resolution_ref, r.body) AS resolution_ref, ra.advocate_opinion_ref,
-       ra.effective_from, ra.effective_to,
-       (SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.entry_side = 'Dr'), 0) FROM transactions t
-         WHERE t.society_id = ra.society_id AND ra.journal_id IS NOT NULL AND t.journal_id = ra.journal_id) AS journal_debits
-  FROM rule_applications ra LEFT JOIN resolutions r ON r.id = ra.resolution_id;
-
+SELECT
+    ra.id,
+    ra.society_id,
+    ra.applied_at,
+    ra.source_table,
+    ra.source_id,
+    ra.journal_id,
+    ra.rule_key,
+    ra.layer,
+    ra.decision,
+    ra.resolution_id,
+    COALESCE(ra.resolution_ref, r.body) AS resolution_ref,
+    ra.advocate_opinion_ref,
+    ra.effective_from,
+    ra.effective_to,
+    (
+        SELECT COALESCE(
+                SUM(t.amount) FILTER (
+                    WHERE
+                        t.entry_side = 'Dr'
+                ), 0
+            )
+        FROM transactions t
+        WHERE
+            t.society_id = ra.society_id
+            AND ra.journal_id IS NOT NULL
+            AND t.journal_id = ra.journal_id
+    ) AS journal_debits
+FROM
+    rule_applications ra
+    LEFT JOIN resolutions r ON r.id = ra.resolution_id;
 
 -- ── Phase 2.7: editing what a verified instrument says sends it back to 'unverified' ────────────────────────────
 CREATE OR REPLACE FUNCTION trg_instrument_unverify() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -21638,6 +23426,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_legal_instrument_unverify BEFORE UPDATE ON legal_instrument_catalog
     FOR EACH ROW EXECUTE FUNCTION trg_instrument_unverify();
 
@@ -21662,22 +23451,34 @@ END $$;
 -- Generated from the data, signed with the society's SIGNING_LEDGER key. The stored text is what was signed; the public
 -- page recomputes its hash and checks the signature, and shows only minimal fields.
 CREATE TABLE compliance_certificates (
-    id              SERIAL PRIMARY KEY,
-    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    fy              VARCHAR(9) NOT NULL,                 -- e.g. 2026-27
-    generated_at    TIMESTAMP NOT NULL DEFAULT NOW(),
-    generated_by    INT REFERENCES users (id),
-    body_text       TEXT NOT NULL,                       -- canonical JSON of every check; this exact text is signed
-    item_hash       CHAR(64) NOT NULL,
-    overall         VARCHAR(10) NOT NULL CHECK (overall IN ('pass', 'exceptions', 'fail')),
-    signature       TEXT NOT NULL,
-    key_version     INT NOT NULL,
-    key_id          TEXT NOT NULL,
-    algorithm       VARCHAR(30) NOT NULL,
-    status          VARCHAR(12) NOT NULL DEFAULT 'valid' CHECK (status IN ('valid', 'superseded', 'revoked')),
-    revoked_reason  TEXT
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    fy VARCHAR(9) NOT NULL, -- e.g. 2026-27
+    generated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    generated_by INT REFERENCES users (id),
+    body_text TEXT NOT NULL, -- canonical JSON of every check; this exact text is signed
+    item_hash CHAR(64) NOT NULL,
+    overall VARCHAR(10) NOT NULL CHECK (
+        overall IN ('pass', 'exceptions', 'fail')
+    ),
+    signature TEXT NOT NULL,
+    key_version INT NOT NULL,
+    key_id TEXT NOT NULL,
+    algorithm VARCHAR(30) NOT NULL,
+    status VARCHAR(12) NOT NULL DEFAULT 'valid' CHECK (
+        status IN (
+            'valid',
+            'superseded',
+            'revoked'
+        )
+    ),
+    revoked_reason TEXT
 );
-CREATE UNIQUE INDEX uq_compliance_certificate_current ON compliance_certificates (society_id, fy) WHERE status = 'valid';
+
+CREATE UNIQUE INDEX uq_compliance_certificate_current ON compliance_certificates (society_id, fy)
+WHERE
+    status = 'valid';
+
 CREATE OR REPLACE FUNCTION trg_compliance_certificate_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'A compliance certificate cannot be deleted; revoke it instead.'; END IF;
@@ -21688,9 +23489,9 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_compliance_certificate_guard BEFORE UPDATE OR DELETE ON compliance_certificates
     FOR EACH ROW EXECUTE FUNCTION trg_compliance_certificate_guard();
-
 
 -- ── Phase 2.8: undivided interest filled after enrolment; per-flat tally ────────────────────────────────────────
 -- Figures typed from the Declaration are authoritative ('declaration') and are never overwritten. Until someone types
@@ -21705,6 +23506,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_apartment_uip_basis AFTER INSERT OR UPDATE OF undivided_interest_pct ON apartments
     FOR EACH ROW EXECUTE FUNCTION trg_apartment_uip_basis();
 
@@ -21745,25 +23547,36 @@ $$;
 -- Each run of a check is kept with its date and the society's SIGNING_LEDGER signature over the exact result text.
 -- Rows are append-only: a later run is a new row, never an edit.
 CREATE TABLE audit_check_runs (
-    id            SERIAL PRIMARY KEY,
-    society_id    INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    batch_id      UUID NOT NULL,                      -- the checks run together by one click share a batch
-    check_key     VARCHAR(30) NOT NULL,
-    run_at        TIMESTAMP NOT NULL DEFAULT NOW(),
-    run_by        INT REFERENCES users (id),
-    status        VARCHAR(10) NOT NULL CHECK (status IN ('pass', 'finding', 'info', 'error', 'skipped')),
-    result_text   TEXT NOT NULL,                      -- canonical JSON that was signed
-    item_hash     CHAR(64) NOT NULL,
-    signature     TEXT NOT NULL,
-    key_version   INT NOT NULL,
-    key_id        TEXT NOT NULL,
-    algorithm     VARCHAR(30) NOT NULL
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    batch_id UUID NOT NULL, -- the checks run together by one click share a batch
+    check_key VARCHAR(30) NOT NULL,
+    run_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    run_by INT REFERENCES users (id),
+    status VARCHAR(10) NOT NULL CHECK (
+        status IN (
+            'pass',
+            'finding',
+            'info',
+            'error',
+            'skipped'
+        )
+    ),
+    result_text TEXT NOT NULL, -- canonical JSON that was signed
+    item_hash CHAR(64) NOT NULL,
+    signature TEXT NOT NULL,
+    key_version INT NOT NULL,
+    key_id TEXT NOT NULL,
+    algorithm VARCHAR(30) NOT NULL
 );
+
 CREATE INDEX idx_audit_check_runs_society ON audit_check_runs (society_id, run_at DESC);
+
 CREATE OR REPLACE FUNCTION trg_audit_check_runs_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     RAISE EXCEPTION 'Stored audit check results are append-only; run the check again instead.';
 END $$;
+
 CREATE TRIGGER trg_audit_check_runs_append_only BEFORE UPDATE OR DELETE ON audit_check_runs
     FOR EACH ROW EXECUTE FUNCTION trg_audit_check_runs_append_only();
 
@@ -21835,8 +23648,9 @@ END $$;
 -- journal gets one voucher number from its society's own gapless sequence; all legs of the journal share it.
 CREATE TABLE society_voucher_seq (
     society_id INT PRIMARY KEY REFERENCES societies (id) ON DELETE CASCADE,
-    last_no    INT NOT NULL DEFAULT 0
+    last_no INT NOT NULL DEFAULT 0
 );
+
 CREATE INDEX idx_transactions_voucher ON transactions (society_id, voucher_no);
 
 CREATE OR REPLACE FUNCTION trg_transactions_source_voucher() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -21858,9 +23672,9 @@ BEGIN
     NEW.voucher_no := v_no;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_transactions_a_source_voucher BEFORE INSERT ON transactions
     FOR EACH ROW EXECUTE FUNCTION trg_transactions_source_voucher();
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Phase 5 (Plan v4): independent assurance - tasks 5.1 to 5.4
@@ -21879,71 +23693,125 @@ CREATE TRIGGER trg_transactions_a_source_voucher BEFORE INSERT ON transactions
 -- whether an opinion or a report is any good. A stored reference is evidence for a human to check, not a verdict.
 
 CREATE TABLE assurance_engagements (
-    id                    SERIAL PRIMARY KEY,
-    task                  VARCHAR(3) NOT NULL CHECK (task IN ('5.1', '5.2', '5.3')),
-    title                 VARCHAR(200) NOT NULL,
-    scope                 TEXT NOT NULL CHECK (LENGTH(TRIM(scope)) >= 20),
-    reviewed_commit       VARCHAR(40),
-    reviewer_name         VARCHAR(120),
-    reviewer_firm         VARCHAR(160),
-    reviewer_credential   VARCHAR(120),         -- e.g. ICAI membership no.; Bar enrolment no.; testing-body empanelment
-    independence_declared BOOLEAN NOT NULL DEFAULT FALSE,   -- reviewer states they did not build or operate this system
-    status                VARCHAR(16) NOT NULL DEFAULT 'planned'
-                          CHECK (status IN ('planned', 'in_progress', 'report_received', 'closed', 'withdrawn')),
-    engaged_on            DATE,
-    report_received_on    DATE,
-    report_ref            VARCHAR(100),
-    report_sha256         CHAR(64),
-    retest_passed_on      DATE,                 -- 5.3 only
-    closed_on             DATE,
-    closed_by             INT REFERENCES users (id) ON DELETE SET NULL,
-    note                  TEXT,
-    created_at            TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT ck_assurance_retest_only_53 CHECK (retest_passed_on IS NULL OR task = '5.3'),
-    CONSTRAINT ck_assurance_hash_shape CHECK (report_sha256 IS NULL OR report_sha256 ~ '^[0-9a-f]{64}$')
+    id SERIAL PRIMARY KEY,
+    task VARCHAR(3) NOT NULL CHECK (task IN ('5.1', '5.2', '5.3')),
+    title VARCHAR(200) NOT NULL,
+    scope TEXT NOT NULL CHECK (LENGTH(TRIM(scope)) >= 20),
+    reviewed_commit VARCHAR(40),
+    reviewer_name VARCHAR(120),
+    reviewer_firm VARCHAR(160),
+    reviewer_credential VARCHAR(120), -- e.g. ICAI membership no.; Bar enrolment no.; testing-body empanelment
+    independence_declared BOOLEAN NOT NULL DEFAULT FALSE, -- reviewer states they did not build or operate this system
+    status VARCHAR(16) NOT NULL DEFAULT 'planned' CHECK (
+        status IN (
+            'planned',
+            'in_progress',
+            'report_received',
+            'closed',
+            'withdrawn'
+        )
+    ),
+    engaged_on DATE,
+    report_received_on DATE,
+    report_ref VARCHAR(100),
+    report_sha256 CHAR(64),
+    retest_passed_on DATE, -- 5.3 only
+    closed_on DATE,
+    closed_by INT REFERENCES users (id) ON DELETE SET NULL,
+    note TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_assurance_retest_only_53 CHECK (
+        retest_passed_on IS NULL
+        OR task = '5.3'
+    ),
+    CONSTRAINT ck_assurance_hash_shape CHECK (
+        report_sha256 IS NULL
+        OR report_sha256 ~ '^[0-9a-f]{64}$'
+    )
 );
+
 CREATE INDEX idx_assurance_engagements_task ON assurance_engagements (task, status);
 
 CREATE TABLE assurance_findings (
-    id              SERIAL PRIMARY KEY,
-    engagement_id   INT NOT NULL REFERENCES assurance_engagements (id) ON DELETE RESTRICT,
-    ref             VARCHAR(30) NOT NULL,       -- the reviewer's own number for the finding
-    severity        VARCHAR(8) NOT NULL CHECK (severity IN ('critical', 'high', 'medium', 'low', 'info')),
-    title           VARCHAR(200) NOT NULL,
-    detail          TEXT,
-    status          VARCHAR(8) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed', 'accepted')),
-    closure_ref     VARCHAR(200),               -- commit, change or evidence that fixed it
-    closed_on       DATE,
-    accepted_ref    VARCHAR(100),               -- reference of the written acceptance (5.1 only)
-    accepted_by     VARCHAR(120),
-    accepted_on     DATE,
-    retest_result   VARCHAR(4) CHECK (retest_result IN ('pass', 'fail')),
-    retested_on     DATE,
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    id SERIAL PRIMARY KEY,
+    engagement_id INT NOT NULL REFERENCES assurance_engagements (id) ON DELETE RESTRICT,
+    ref VARCHAR(30) NOT NULL, -- the reviewer's own number for the finding
+    severity VARCHAR(8) NOT NULL CHECK (
+        severity IN (
+            'critical',
+            'high',
+            'medium',
+            'low',
+            'info'
+        )
+    ),
+    title VARCHAR(200) NOT NULL,
+    detail TEXT,
+    status VARCHAR(8) NOT NULL DEFAULT 'open' CHECK (
+        status IN ('open', 'closed', 'accepted')
+    ),
+    closure_ref VARCHAR(200), -- commit, change or evidence that fixed it
+    closed_on DATE,
+    accepted_ref VARCHAR(100), -- reference of the written acceptance (5.1 only)
+    accepted_by VARCHAR(120),
+    accepted_on DATE,
+    retest_result VARCHAR(4) CHECK (
+        retest_result IN ('pass', 'fail')
+    ),
+    retested_on DATE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     UNIQUE (engagement_id, ref)
 );
 
 -- One stored opinion per rule-pack row or bye-law decision type. conclusion = 'disputes' is stored (it is evidence)
 -- but does NOT count as covering the rule.
 CREATE TABLE rule_opinion_references (
-    id               SERIAL PRIMARY KEY,
-    subject_kind     VARCHAR(13) NOT NULL CHECK (subject_kind IN ('rule', 'decision_type')),
-    regime_code      VARCHAR(30),                -- rule rows only
-    subject_key      VARCHAR(40) NOT NULL,       -- rule_parameter_defs.rule_key or decision_types.code
-    adviser_kind     VARCHAR(10) NOT NULL CHECK (adviser_kind IN ('Advocate', 'CA')),
-    adviser_name     VARCHAR(120) NOT NULL,
-    opinion_ref      VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(opinion_ref)) >= 5),
-    opinion_date     DATE NOT NULL CHECK (opinion_date <= CURRENT_DATE),
-    document_sha256  CHAR(64) NOT NULL CHECK (document_sha256 ~ '^[0-9a-f]{64}$'),
-    conclusion       VARCHAR(20) NOT NULL CHECK (conclusion IN ('confirms', 'confirms_with_change', 'disputes')),
-    covers           TEXT NOT NULL CHECK (LENGTH(TRIM(covers)) >= 10),   -- what the opinion says about THIS rule
-    recorded_by      INT REFERENCES users (id) ON DELETE SET NULL,
-    recorded_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    status           VARCHAR(10) NOT NULL DEFAULT 'current' CHECK (status IN ('current', 'superseded', 'withdrawn')),
-    CONSTRAINT ck_rule_opinion_regime CHECK ((subject_kind = 'rule') = (regime_code IS NOT NULL))
+    id SERIAL PRIMARY KEY,
+    subject_kind VARCHAR(13) NOT NULL CHECK (
+        subject_kind IN ('rule', 'decision_type')
+    ),
+    regime_code VARCHAR(30), -- rule rows only
+    subject_key VARCHAR(40) NOT NULL, -- rule_parameter_defs.rule_key or decision_types.code
+    adviser_kind VARCHAR(10) NOT NULL CHECK (
+        adviser_kind IN ('Advocate', 'CA')
+    ),
+    adviser_name VARCHAR(120) NOT NULL,
+    opinion_ref VARCHAR(100) NOT NULL CHECK (
+        LENGTH(TRIM(opinion_ref)) >= 5
+    ),
+    opinion_date DATE NOT NULL CHECK (opinion_date <= CURRENT_DATE),
+    document_sha256 CHAR(64) NOT NULL CHECK (
+        document_sha256 ~ '^[0-9a-f]{64}$'
+    ),
+    conclusion VARCHAR(20) NOT NULL CHECK (
+        conclusion IN (
+            'confirms',
+            'confirms_with_change',
+            'disputes'
+        )
+    ),
+    covers TEXT NOT NULL CHECK (LENGTH(TRIM(covers)) >= 10), -- what the opinion says about THIS rule
+    recorded_by INT REFERENCES users (id) ON DELETE SET NULL,
+    recorded_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    status VARCHAR(10) NOT NULL DEFAULT 'current' CHECK (
+        status IN (
+            'current',
+            'superseded',
+            'withdrawn'
+        )
+    ),
+    CONSTRAINT ck_rule_opinion_regime CHECK (
+        (subject_kind = 'rule') = (regime_code IS NOT NULL)
+    )
 );
-CREATE UNIQUE INDEX uq_rule_opinion_current
-    ON rule_opinion_references (subject_kind, COALESCE(regime_code, ''), subject_key) WHERE status = 'current';
+
+CREATE UNIQUE INDEX uq_rule_opinion_current ON rule_opinion_references (
+    subject_kind,
+    COALESCE(regime_code, ''),
+    subject_key
+)
+WHERE
+    status = 'current';
 
 CREATE TABLE release_verifications (
     id                  SERIAL PRIMARY KEY,
@@ -21959,7 +23827,12 @@ CREATE TABLE release_verifications (
     recorded_at         TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT ck_release_rules_touched CHECK (outcome <> 'rules_updated' OR cardinality(rules_touched) > 0)
 );
-CREATE INDEX idx_release_verifications_tag ON release_verifications (release_tag, item, checked_on DESC);
+
+CREATE INDEX idx_release_verifications_tag ON release_verifications (
+    release_tag,
+    item,
+    checked_on DESC
+);
 
 -- ── guards ─────────────────────────────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION fn_rule_covered(p_kind TEXT, p_regime TEXT, p_key TEXT) RETURNS BOOLEAN
@@ -22025,6 +23898,7 @@ BEGIN
     IF OLD.status <> 'current' AND NEW.status = 'current' THEN RAISE EXCEPTION 'A superseded or withdrawn opinion cannot be made current again.'; END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_rule_opinion_guard BEFORE INSERT OR UPDATE OR DELETE ON rule_opinion_references
     FOR EACH ROW EXECUTE FUNCTION trg_rule_opinion_guard();
 
@@ -22058,6 +23932,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_assurance_finding_guard BEFORE INSERT OR UPDATE OR DELETE ON assurance_findings
     FOR EACH ROW EXECUTE FUNCTION trg_assurance_finding_guard();
 
@@ -22116,6 +23991,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_assurance_engagement_guard BEFORE INSERT OR UPDATE OR DELETE ON assurance_engagements
     FOR EACH ROW EXECUTE FUNCTION trg_assurance_engagement_guard();
 
@@ -22127,21 +24003,49 @@ BEGIN
             jsonb_build_object('outcome', NEW.outcome, 'checked_on', NEW.checked_on, 'adviser_opinion_ref', NEW.adviser_opinion_ref), 'app');
     RETURN NEW;
 END $$;
+
 CREATE TRIGGER trg_release_verification_guard BEFORE INSERT OR UPDATE OR DELETE ON release_verifications
     FOR EACH ROW EXECUTE FUNCTION trg_release_verification_guard();
 
 -- ── status and gates ───────────────────────────────────────────────────────────────────────────────────────────
 -- One row per independent task. 5.2 is judged live: a rule added after the engagement closed, with no opinion, un-satisfies it.
 CREATE OR REPLACE VIEW v_assurance_status AS
-SELECT t.task,
-       CASE t.task WHEN '5.1' THEN 'External CA review of the books engine and statements'
-                   WHEN '5.2' THEN 'Advocate review of rule packs and bye-law figures'
-                   ELSE 'Penetration test (key vault and verification pages in scope)' END AS label,
-       (e.id IS NOT NULL AND (t.task <> '5.2' OR NOT EXISTS (SELECT 1 FROM v_rule_assurance WHERE NOT covered))) AS satisfied,
-       e.id AS engagement_id, e.reviewer_name, e.reviewed_commit, e.report_ref, e.closed_on
-  FROM (VALUES ('5.1'), ('5.2'), ('5.3')) AS t (task)
-  LEFT JOIN LATERAL (SELECT * FROM assurance_engagements x WHERE x.task = t.task AND x.status = 'closed'
-                      ORDER BY x.closed_on DESC, x.id DESC LIMIT 1) e ON TRUE;
+SELECT
+    t.task,
+    CASE t.task
+        WHEN '5.1' THEN 'External CA review of the books engine and statements'
+        WHEN '5.2' THEN 'Advocate review of rule packs and bye-law figures'
+        ELSE 'Penetration test (key vault and verification pages in scope)'
+    END AS label,
+    (
+        e.id IS NOT NULL
+        AND (
+            t.task <> '5.2'
+            OR NOT EXISTS (
+                SELECT 1
+                FROM v_rule_assurance
+                WHERE
+                    NOT covered
+            )
+        )
+    ) AS satisfied,
+    e.id AS engagement_id,
+    e.reviewer_name,
+    e.reviewed_commit,
+    e.report_ref,
+    e.closed_on
+FROM (
+        VALUES ('5.1'), ('5.2'), ('5.3')
+    ) AS t (task)
+    LEFT JOIN LATERAL (
+        SELECT *
+        FROM assurance_engagements x
+        WHERE
+            x.task = t.task
+            AND x.status = 'closed'
+        ORDER BY x.closed_on DESC, x.id DESC
+        LIMIT 1
+    ) e ON TRUE;
 
 -- "Audit-grade" may be said only after 5.1 to 5.3 are all satisfied. 5.4 is a per-release check, not a one-off.
 CREATE OR REPLACE FUNCTION fn_audit_grade_claim_allowed() RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
@@ -22192,71 +24096,168 @@ $$;
 -- ═════════════════════════════════════════════════════════════════════════════════════════
 
 -- societies: phase, signing mode, step-up custody flags
-ALTER TABLE societies ADD COLUMN onboarding_phase TEXT
-  CHECK (onboarding_phase IN ('enrollment','adoption','advisers','complete'));
-ALTER TABLE societies ADD COLUMN signing_mode TEXT NOT NULL DEFAULT 'password'
-  CHECK (signing_mode IN ('password','esign','paper'));
-ALTER TABLE societies ADD COLUMN stepup_review_required BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE societies ADD COLUMN stepup_initial BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE societies
+ADD COLUMN onboarding_phase TEXT CHECK (
+    onboarding_phase IN (
+        'enrollment',
+        'adoption',
+        'advisers',
+        'complete'
+    )
+);
+
+ALTER TABLE societies
+ADD COLUMN signing_mode TEXT NOT NULL DEFAULT 'password' CHECK (
+    signing_mode IN ('password', 'esign', 'paper')
+);
+
+ALTER TABLE societies
+ADD COLUMN stepup_review_required BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE societies
+ADD COLUMN stepup_initial BOOLEAN NOT NULL DEFAULT TRUE;
+
 ALTER TABLE societies ADD COLUMN stepup_changed_at TIMESTAMPTZ;
 
 -- step-up password change (3 signatures: President, Secretary, Treasurer)
 CREATE TABLE stepup_change_requests (
-  id SERIAL PRIMARY KEY,
-  society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-  requested_by INT NOT NULL REFERENCES users(id),
-  new_hash TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','applied','declined','cancelled')),
-  master_assist_ref TEXT, master_assist_sha256 TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), decided_at TIMESTAMPTZ
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    requested_by INT NOT NULL REFERENCES users (id),
+    new_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (
+        status IN (
+            'open',
+            'applied',
+            'declined',
+            'cancelled'
+        )
+    ),
+    master_assist_ref TEXT,
+    master_assist_sha256 TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    decided_at TIMESTAMPTZ
 );
-CREATE UNIQUE INDEX uq_stepup_open ON stepup_change_requests(society_id) WHERE status = 'open';
+
+CREATE UNIQUE INDEX uq_stepup_open ON stepup_change_requests (society_id)
+WHERE
+    status = 'open';
 
 -- evidence (bank statement, cash count, audited report, review letter, paper signature)
 CREATE TABLE onboarding_evidence (
-  id SERIAL PRIMARY KEY,
-  society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-  purpose TEXT NOT NULL CHECK (purpose IN ('bank_statement','cash_count','audited_report','review_letter','paper_signature')),
-  acc_id INT, filename TEXT NOT NULL, stored_name TEXT NOT NULL,
-  sha256 CHAR(64) NOT NULL, size_bytes INT NOT NULL, meta JSONB NOT NULL DEFAULT '{}',
-  uploaded_by INT REFERENCES users(id), uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    purpose TEXT NOT NULL CHECK (
+        purpose IN (
+            'bank_statement',
+            'cash_count',
+            'audited_report',
+            'review_letter',
+            'paper_signature'
+        )
+    ),
+    acc_id INT,
+    filename TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    sha256 CHAR(64) NOT NULL,
+    size_bytes INT NOT NULL,
+    meta JSONB NOT NULL DEFAULT '{}',
+    uploaded_by INT REFERENCES users (id),
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX ix_onb_evidence_soc ON onboarding_evidence(society_id, purpose);
+
+CREATE INDEX ix_onb_evidence_soc ON onboarding_evidence (society_id, purpose);
 
 -- opening receivables by flat (pending_link until the flat is enrolled)
 CREATE TABLE opening_receivables_pending (
-  id SERIAL PRIMARY KEY,
-  society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-  flat_number TEXT NOT NULL, amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
-  overdue_days INT, remarks TEXT,
-  status TEXT NOT NULL DEFAULT 'pending_link' CHECK (status IN ('pending_link','linked','void_requested')),
-  apartment_id INT, receivable_id INT, void_reason TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), linked_at TIMESTAMPTZ,
-  UNIQUE (society_id, flat_number)
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    flat_number TEXT NOT NULL,
+    amount NUMERIC(14, 2) NOT NULL CHECK (amount > 0),
+    overdue_days INT,
+    remarks TEXT,
+    status TEXT NOT NULL DEFAULT 'pending_link' CHECK (
+        status IN (
+            'pending_link',
+            'linked',
+            'void_requested'
+        )
+    ),
+    apartment_id INT,
+    receivable_id INT,
+    void_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    linked_at TIMESTAMPTZ,
+    UNIQUE (society_id, flat_number)
 );
 
 -- onboarding jobs (DB-backed signing/activation job with progress)
 CREATE TABLE onboarding_jobs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','done','failed')),
-  step INT NOT NULL DEFAULT 0, steps_total INT NOT NULL DEFAULT 7, message TEXT, error TEXT, result JSONB,
-  created_by INT REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (
+        status IN (
+            'queued',
+            'running',
+            'done',
+            'failed'
+        )
+    ),
+    step INT NOT NULL DEFAULT 0,
+    steps_total INT NOT NULL DEFAULT 7,
+    message TEXT,
+    error TEXT,
+    result JSONB,
+    created_by INT REFERENCES users (id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ
 );
 
 -- onboarding events (agreement_signed etc.)
 CREATE TABLE onboarding_events (
-  id SERIAL PRIMARY KEY, society_id INT NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
-  event TEXT NOT NULL, payload JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    event TEXT NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- law catalog: applies_when + topic columns
-ALTER TABLE legal_instrument_catalog ADD COLUMN applies_when TEXT NOT NULL DEFAULT 'always'
-  CHECK (applies_when IN ('always','central_it_tan','central_tds','central_gst','central_rera','has_employees','has_security_agency','info'));
+ALTER TABLE legal_instrument_catalog
+ADD COLUMN applies_when TEXT NOT NULL DEFAULT 'always' CHECK (
+    applies_when IN (
+        'always',
+        'central_it_tan',
+        'central_tds',
+        'central_gst',
+        'central_rera',
+        'has_employees',
+        'has_security_agency',
+        'info'
+    )
+);
+
 ALTER TABLE legal_instrument_catalog ADD COLUMN topic VARCHAR(40);
 
 -- pseudo-regime CENTRAL (central laws applying to every society)
-INSERT INTO legal_regime_profiles (code, state_code, constitution, name, primary_law, effective_from, source_reference)
-  VALUES ('CENTRAL','IN','GENERIC','Central laws applying to every society','Various Central Acts', DATE '1860-01-01',
-          'Central Acts that bind every society whatever its state: Income-tax Act, CGST Act, RERA, labour laws')
-  ON CONFLICT (code) DO NOTHING;
+INSERT INTO
+    legal_regime_profiles (
+        code,
+        state_code,
+        constitution,
+        name,
+        primary_law,
+        effective_from,
+        source_reference
+    )
+VALUES (
+        'CENTRAL',
+        'IN',
+        'GENERIC',
+        'Central laws applying to every society',
+        'Various Central Acts',
+        DATE '1860-01-01',
+        'Central Acts that bind every society whatever its state: Income-tax Act, CGST Act, RERA, labour laws'
+    ) ON CONFLICT (code) DO NOTHING;
