@@ -563,10 +563,10 @@ def cash_limit_form(p: str, current_mode=None) -> html.Div:
     )
 
 
-def catalog_edit_form() -> html.Div:
-    """Master-only: edit a legal_instrument_catalog entry. Ids stay mrl-cat-* (master callbacks)."""
+def catalog_edit_form(regime_code: str = REGIME) -> html.Div:
+    """Master-only: edit a legal_instrument_catalog entry for `regime_code`. Ids stay mrl-cat-* (master callbacks)."""
     try:
-        instruments = rra.list_instruments(REGIME)
+        instruments = rra.list_instruments(regime_code)
     except Exception:
         instruments = []
     inst_opts = [{"label": f"[{i['instrument_type']}] {i['title']} ({i['enactment_year'] or 'n/a'})", "value": i["id"]}

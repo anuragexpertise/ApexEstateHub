@@ -437,6 +437,142 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
     ], className="portal-page")
 
 
+def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = False) -> html.Div:
+    """
+    Master Portal → 'RWA Compliance- INDIA' tab.
+
+    Mirrors 'RWA Compliance (UP)' but lists the Central Acts / Central Rules (statutory laws)
+    that apply to every Indian RWA / Apartment Owners' Association, gathered into
+    legal_instrument_catalog (regime CENTRAL). Central instruments carry an `applies_when`
+    condition (e.g. central_rera, central_gst, central_it_tan, has_employees, has_security_agency,
+    always, info) so each society sees which central laws actually bind it.
+
+    role / embedded: only role == 'master' gets 'Edit a catalog entry'; its callbacks are
+    master-only on the server regardless of what is rendered.
+    """
+    from database.db_manager import db
+    from app.dash_apps.pages.master_rules_page import catalog_edit_form
+    from app.dash_apps.pages.governance_guide import render_governance_guide
+
+    try:
+        rows = db._execute(
+            """SELECT instrument_type, title, enactment_year, issuing_authority,
+                      applicability, key_provisions, source_reference, status, last_verified_on
+               FROM legal_instrument_catalog
+               WHERE regime_code = 'CENTRAL'
+                 AND instrument_type IN ('Central Act', 'Central Rules')
+               ORDER BY display_order""",
+            (), fetch_all=True,
+        ) or []
+    except Exception:
+        rows = None  # table not integrated yet — show setup instructions instead
+
+    def _title():
+        return None if embedded else _page_title(
+            "fa-gavel", c, "RWA Compliance- INDIA",
+            "Central Acts & Rules (statutory laws) applying to every Indian RWA / Apartment Owners' Association")
+
+    if rows is None and role != "master":
+        return html.Div([_title(), dbc.Alert("The legal instrument catalog has not been set up yet. "
+                                             "Please contact the platform administrator.", color="warning"),
+                         render_governance_guide()],
+                        className="portal-page")
+
+    if rows is None:
+        return html.Div([
+            _title(),
+            dbc.Alert([
+                html.H6([html.I(className="fas fa-database me-2"), "Not integrated yet"],
+                        className="alert-heading", style={"fontWeight": "700"}),
+                html.P("legal_instrument_catalog doesn't exist on this database yet. Push it live with no "
+                       "deploy needed:", style={"fontSize": "13px", "marginBottom": "8px"}),
+                html.Ol([
+                    html.Li("Master Portal → Settings → KPI Inspector tab.", style={"fontSize": "13px"}),
+                    html.Li("Paste the CREATE TABLE statement below into \"SQL Query (editable)\".",
+                            style={"fontSize": "13px"}),
+                    html.Li([html.Code("Integrate to DB"), " — creates the table (safe to re-run, uses "
+                             "CREATE TABLE IF NOT EXISTS)."], style={"fontSize": "13px"}),
+                    html.Li(["Then seed the rows: run ", html.Code("python database/seed.py"),
+                             " once against this database (calls seed_legal_instrument_catalog(), idempotent "
+                             "on regime+title+year), or paste individual ",
+                             html.Code("INSERT INTO legal_instrument_catalog ..."),
+                             " statements from ", html.Code("database/seed.py"),
+                             "'s LEGAL_INSTRUMENTS_CENTRAL list into the same box and Integrate to DB again."],
+                            style={"fontSize": "13px"}),
+                ], style={"marginBottom": "8px", "paddingLeft": "20px"}),
+            ], color="warning", className="mb-3 shadow-sm"),
+            dbc.Textarea(value=_RWA_COMPLIANCE_UP_DDL, readOnly=True, rows=20,
+                         style={"fontSize": "11px", "fontFamily": "monospace", "backgroundColor": "#f5f7fa",
+                                "border": "1px solid #cdd5df", "borderRadius": "8px", "color": "#2c3e50"}),
+        ], className="portal-page")
+
+    groups: dict[str, list] = {}
+    for r in rows:
+        groups.setdefault(r["instrument_type"], []).append(r)
+
+    sections = []
+    for itype, items in groups.items():
+        sections.append(html.H6(
+            [dbc.Badge(itype, color=_TYPE_BADGE_COLOR.get(itype, "light"), className="me-2"),
+             f"{len(items)} instrument{'s' if len(items) != 1 else ''}"],
+            style={"marginTop": "18px", "marginBottom": "8px", "fontWeight": "700", "color": "#15304f"},
+        ))
+        rows_html = []
+        for r in items:
+            year = f" ({r['enactment_year']})" if r.get("enactment_year") else ""
+            applies = r.get("applicability") or "—"
+            rows_html.append(html.Tr([
+                html.Td([html.Strong(r["title"] + year, style={"fontSize": "12px"}),
+                         html.Br(),
+                         html.Small(r.get("issuing_authority") or "", className="text-muted")],
+                        style={"maxWidth": "260px"}),
+                html.Td(html.Small(applies, style={"fontSize": "11px", "maxWidth": "220px"})),
+                html.Td(html.Small(r["key_provisions"]), style={"fontSize": "11px", "maxWidth": "380px"}),
+                html.Td(dbc.Badge(r["status"], color="success" if r["status"] == "active" else "secondary",
+                                  pill=True), style={"fontSize": "10px"}),
+                html.Td(html.Small(r.get("source_reference") or "—", className="text-muted"),
+                        style={"fontSize": "10px", "maxWidth": "220px"}),
+            ]))
+        sections.append(dbc.Table([
+            html.Thead(html.Tr([
+                html.Th("Instrument", style={"fontSize": "11px"}),
+                html.Th("Applicability", style={"fontSize": "11px"}),
+                html.Th("Key Provisions", style={"fontSize": "11px"}),
+                html.Th("Status", style={"fontSize": "11px"}),
+                html.Th("Source", style={"fontSize": "11px"}),
+            ])),
+            html.Tbody(rows_html),
+        ], bordered=True, hover=True, responsive=True, size="sm", style={"fontSize": "12px"}))
+
+    last_verified = max((r.get("last_verified_on") for r in rows if r.get("last_verified_on")), default=None)
+
+    if role == "master":
+        footer = [
+            html.Small(
+                "To add a new instrument, add it to LEGAL_INSTRUMENTS_CENTRAL in database/seed.py and re-run the seed. "
+                "Raw INSERT/UPDATE on this table through Integrate to DB is blocked.", className="text-muted"),
+            # 'Edit a catalog entry' — master only. Its save callback also writes mrl-toast / mrl-body, so both
+            # must exist on this page (mrl-body is a hidden sink; the rules tables live on the AOA Rule Editor).
+            html.Div(id="mrl-toast", className="mt-3"),
+            html.Div(id="mrl-body", style={"display": "none"}),
+            catalog_edit_form(regime_code="CENTRAL"),
+        ]
+    else:
+        footer = [html.Small("Informational. Changes to this catalog are made by the platform administrator.",
+                             className="text-muted")]
+
+    return html.Div([
+        _title(),
+        _sec_hdr(f"{len(rows)} central statutory instruments — CENTRAL regime",
+                 f"last verified {last_verified}" if last_verified else "verification date not recorded",
+                 "fa-scroll"),
+        html.Div(sections),
+        render_governance_guide(),
+        html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
+        *footer,
+    ], className="portal-page")
+
+
 def _governance_summary(role: str, sid):
     from app.dash_apps.pages.governance_settings import render_governance_summary
     return render_governance_summary(role, sid)
@@ -464,6 +600,9 @@ def master_portal_page(active_tab="dashboard", sid=None) -> html.Div:
     if active_tab == "onboarding":
         from app.dash_apps.pages.onboarding_page import master_queue
         return master_queue()
+
+    if active_tab == "rwa-compliance-india":
+        return _rwa_compliance_india_page(c)
 
     if active_tab == "rwa-compliance-up":
         return _rwa_compliance_up_page(c)
