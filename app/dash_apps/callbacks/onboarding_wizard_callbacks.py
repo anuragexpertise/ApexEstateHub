@@ -378,15 +378,32 @@ def register_onboarding_wizard_callbacks(app):
         Input("onb-bf-add-rec", "n_clicks"),
         Input({"type": "onb-bf-remove-rec", "index": ALL}, "n_clicks"),
         State("onb-receivables-json", "data"),
+        # Capture live input values so typed-but-not-yet-stored edits survive an Add / Remove
+        State({"type": "onb-bf-recv-flat", "index": ALL}, "value"),
+        State({"type": "onb-bf-recv-amt", "index": ALL}, "value"),
+        State({"type": "onb-bf-recv-days", "index": ALL}, "value"),
+        State({"type": "onb-bf-recv-remarks", "index": ALL}, "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def bf_recv_add_remove(add_clicks, remove_clicks, rows):
+    def bf_recv_add_remove(add_clicks, remove_clicks, rows, flats, amts, days, remarks):
         s = _session()
         if not s:
             return no_update, no_update
         trig = ctx.triggered_id
         rows = list(rows or [])
+        # Merge current live input values into rows (typed edits that manual_edit may not have flushed yet)
+        if flats is not None:
+            n = min(len(rows), len(flats))
+            for i in range(n):
+                if flats[i] not in (None, ""):
+                    rows[i]["flat_number"] = flats[i]
+                if amts is not None and i < len(amts) and amts[i] not in (None, ""):
+                    rows[i]["amount"] = str(amts[i])
+                if days is not None and i < len(days) and days[i] not in (None, ""):
+                    rows[i]["overdue_days"] = days[i]
+                if remarks is not None and i < len(remarks) and remarks[i] not in (None, ""):
+                    rows[i]["remarks"] = remarks[i]
         if trig == "onb-bf-add-rec":
             rows.append({"flat_number": "", "amount": "", "overdue_days": "", "remarks": ""})
             return rows, ""
@@ -396,6 +413,45 @@ def register_onboarding_wizard_callbacks(app):
                 rows.pop(idx)
             return rows, ""
         return no_update, no_update
+
+    # ── item 10: receivables manual edit (persist typed values back to the store) ────
+    @app.callback(
+        Output("onb-receivables-json", "data", allow_duplicate=True),
+        Output("onb-bf-recv-feedback", "children", allow_duplicate=True),
+        Input({"type": "onb-bf-recv-flat", "index": ALL}, "value"),
+        Input({"type": "onb-bf-recv-amt", "index": ALL}, "value"),
+        Input({"type": "onb-bf-recv-days", "index": ALL}, "value"),
+        Input({"type": "onb-bf-recv-remarks", "index": ALL}, "value"),
+        State("onb-receivables-json", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def bf_recv_manual_edit(flats, amts, days, remarks, rows):
+        s = _session()
+        if not s:
+            return no_update, no_update
+        trig = ctx.triggered_id
+        if not isinstance(trig, dict):
+            return no_update, no_update
+        idx = int(trig.get("index", -1))
+        rows = list(rows or [])
+        if not (0 <= idx < len(rows)):
+            return no_update, no_update
+        field_map = {
+            "onb-bf-recv-flat": ("flat_number", flats),
+            "onb-bf-recv-amt": ("amount", amts),
+            "onb-bf-recv-days": ("overdue_days", days),
+            "onb-bf-recv-remarks": ("remarks", remarks),
+        }
+        entry = field_map.get(trig["type"])
+        if not entry:
+            return no_update, no_update
+        field, values = entry
+        val = values[idx] if values is not None and 0 <= idx < len(values) else None
+        if rows[idx].get(field) == val:
+            return no_update, no_update
+        rows[idx][field] = val
+        return rows, ""
 
     @app.callback(
         Output("onb-receivables-table", "children"),
