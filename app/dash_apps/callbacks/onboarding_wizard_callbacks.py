@@ -1100,7 +1100,7 @@ def _register_xlsx_callbacks(app):
     def bf_apply(n, pending, amts):
         if not n or not pending:
             return no_update, no_update, no_update, no_update
-        ids = [d["id"]["acc_id"] for d in (ctx.states_list[2] or [])]
+        ids = [d["id"]["acc_id"] for d in (ctx.states_list[0] or [])]
         rows = pending.get("rows") or {}
         a_out, r_out = [], []
         for aid in ids:
