@@ -27,6 +27,8 @@ from decimal import Decimal, InvalidOperation
 
 from database.db_manager import db
 
+from app.services import pending_receivables as pr
+
 from app.dash_apps.pages.wizard_registry import DEPENDS, SKIPPED_WHEN
 
 log = logging.getLogger(__name__)
@@ -95,7 +97,14 @@ def seated_officers(society_id: int) -> dict:
                          AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE)""",
                    (society_id, list(CORE_OFFICES))):
         out[r["office_code"]] = dict(r)
+        out[r["office_code"]]["complete"] = _officer_complete(out[r["office_code"]])
     return out
+
+
+def _officer_complete(v: dict | None) -> bool:
+    """One definition of a complete office-bearer, shared by the committee gate and the Review rows."""
+    v = v or {}
+    return all(bool(v.get(k)) for k in ("holder_name", "email", "phone", "signature_image"))
 
 
 def signature_path(society_id: int, stored: str | None) -> str | None:
@@ -378,12 +387,13 @@ def _save_declaration(society_id: int, d: dict, actor_id: int) -> None:
 from app.dash_apps.pages.wizard_registry import DEPENDS, SKIPPED_WHEN
 
 
-def save_step(society_id: int, actor_id: int, step_key: str, values: dict) -> dict:
+def save_step(society_id: int, actor_id: int, step_key: str, values: dict, cleared=()) -> dict:
     """Validate only `step_key`, merge its values into draft[step_key], persist.
 
     Returns {"ok": bool, "errors": [str], "status": "done"|"todo"|"error"}.
     Never touches the ledger. Values that are None are ignored so a not-rendered
-    step can never wipe the draft. When saved values change, dependents (§2.2)
+    step can never wipe the draft; fields the caller names in `cleared` (the admin emptied
+    the box) are removed from the draft instead. When saved values change, dependents (§2.2)
     are marked needs_review; TDS/GST flip to skipped when their central flag is
     off.
     """
@@ -412,12 +422,18 @@ def save_step(society_id: int, actor_id: int, step_key: str, values: dict) -> di
         if v is not None and step_values.get(k) != v:
             step_values[k] = v
             changed = True
+    for k in (cleared or ()):
+        if k in step_values:
+            del step_values[k]
+            changed = True
     draft[step_key] = step_values
     if step_key == "apartment":
         for k in ("apt_cost", "apt_budget", "apt_rate", "apt_amt", "apt_billing_basis",
                   "apt_due_day", "apt_interest"):
             if step_values.get(k) is not None:
                 draft.setdefault("funds", {})[k] = step_values[k]
+            elif k in (cleared or ()):
+                draft.setdefault("funds", {}).pop(k, None)
     if step_key == "society_details":
         for k in ("logo", "bg"):
             if step_values.get(k):
@@ -557,15 +573,11 @@ def validate_step(step_key: str, draft: dict, society_id: int) -> list[str]:
         cr = sum((money(r.get("bf_amount")) for r in rows if r.get("side") == "Cr"), Decimal(0))
         if rows and dr != cr:
             errors.append(f"Brought Forward does not balance: Dr {dr} vs Cr {cr}.")
-        # Receivables tie-out: sum of receivables vs Sundry Debtors accounts entered above.
+        # Pending receivables by apartment: row rules (flat, amount, days, duplicates) and the tie-out to the
+        # Sundry Debtors accounts entered above - the same rules the grid shows live (pending_receivables).
         recs = step.get("receivables") or []
-        rec_total = sum((money(r.get("amount")) for r in recs if r.get("amount") not in (None, "")), Decimal(0))
-        sdr_total = Decimal(0)
-        for r in rows:
-            if r.get("side") == "Dr" and r.get("tab") in ("SDr", "SDrCash", "SDrDig"):
-                sdr_total += money(r.get("bf_amount"))
-        if recs and rec_total != sdr_total:
-            errors.append(f"Pending receivables (₹{rec_total}) do not tie to Sundry Debtors accounts (₹{sdr_total}).")
+        if recs:
+            errors.extend(pr.validation_errors(recs, pr.sdr_total(rows), known_flats=known_flat_numbers(society_id)))
 
     return errors
 
@@ -612,14 +624,7 @@ def finalize_draft(society_id: int, actor_id: int, admin_password: str) -> str:
 
 def _committee_complete(society_id: int) -> bool:
     officers = seated_officers(society_id)
-    return all(
-        bool(officers.get(o))
-        and bool(officers[o].get("holder_name"))
-        and bool(officers[o].get("email"))
-        and bool(officers[o].get("phone"))
-        and bool(officers[o].get("signature_image"))
-        for o in CORE_OFFICES
-    )
+    return all(_officer_complete(officers.get(o)) for o in CORE_OFFICES)
 
 
 def _audit(society_id: int, actor_id: int, action: str, resource_type: str, resource_id: int | None,
@@ -703,16 +708,22 @@ def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
         pass
 
     tds_rows = []
+    saved_tds = tds.get("rows") or []
     for item in _tds_wizard_rows():
-        row = next((r for r in (tds.get("rows") or []) if r.get("section") == item[0] and r.get("discriminator") == item[1]), {})
+        # The wizard saves "no discriminator" as "" while the catalogue holds None: compare them normalised, or
+        # every undiscriminated section (e.g. 192) is never matched.
+        row = next((r for r in saved_tds
+                    if r.get("section") == item[0] and (r.get("discriminator") or None) == (item[1] or None)), {})
+        rate = _num_or_none(row.get("rate"))          # None = not entered; stored as NULL ("pending CA confirmation")
         twin = _it2025_twin(item[0], item[1])
+        # The wizard stores nature / single_bill / annual_aggregate; accept the long names too.
         pair = {
             "section": item[0], "discriminator": item[1],
-            "nature_of_income": row.get("nature_of_income"),
-            "rate": _num_or_none(row.get("rate")),
+            "nature_of_income": row.get("nature_of_income") or row.get("nature"),
+            "rate": rate,
             "rate_no_pan": _num_or_none(row.get("rate_no_pan")),
-            "single_bill_threshold": _num_or_none(row.get("single_bill_threshold")),
-            "annual_aggregate_threshold": _num_or_none(row.get("annual_aggregate_threshold")),
+            "single_bill_threshold": _num_or_none(row.get("single_bill_threshold", row.get("single_bill"))),
+            "annual_aggregate_threshold": _num_or_none(row.get("annual_aggregate_threshold", row.get("annual_aggregate"))),
         }
         if twin is not None:
             pair["it2025"] = twin
@@ -831,52 +842,26 @@ def get_receivables(society_id: int) -> list[dict]:
     return bf.get("receivables") or []
 
 
+def known_flat_numbers(society_id: int) -> list[str]:
+    """Flat numbers already registered for the society (office-bearers' flats, enrolled apartments)."""
+    try:
+        return [r["flat_number"] for r in _rows("SELECT flat_number FROM apartments WHERE society_id=%s", (society_id,))
+                if r.get("flat_number")]
+    except Exception:                                                      # noqa: BLE001 - validation must not 500
+        return []
+
+
 def save_receivables(society_id: int, actor_id: int, rows: list[dict]) -> dict:
-    """Validate and save receivables rows into draft.brought_forward.receivables."""
+    """Validate and save receivables rows into draft.brought_forward.receivables (nothing is saved when any
+    row is invalid, so a half-valid list never reaches Annex C)."""
+    clean, errors = pr.clean_rows(rows, known_flat_numbers(society_id))
+    if errors:
+        return {"ok": False, "errors": errors, "total": str(pr.total(clean))}
     d = declaration(society_id) or {}
-    draft = d.setdefault("draft", {})
-    bf = draft.setdefault("brought_forward", {})
-    errors: list[str] = []
-    seen: set[str] = set()
-    clean: list[dict] = []
-    total = Decimal(0)
-    for idx, r in enumerate(rows or [], start=1):
-        flat = (r.get("flat_number") or "").strip()
-        if not flat:
-            errors.append(f"Row {idx}: flat number is required.")
-            continue
-        if flat in seen:
-            errors.append(f"Row {idx}: duplicate flat number {flat}.")
-            continue
-        seen.add(flat)
-        try:
-            amt = money(r.get("amount"))
-            if amt <= 0:
-                raise ValueError
-        except (ValueError, ArithmeticError):
-            errors.append(f"Row {idx}: amount must be a number > 0.")
-            continue
-        days = r.get("overdue_days")
-        if days in (None, ""):
-            days = None
-        else:
-            try:
-                days = int(days)
-                if days < 0:
-                    raise ValueError
-            except (ValueError, TypeError):
-                errors.append(f"Row {idx}: days overdue must be an integer >= 0.")
-                continue
-        clean.append({"flat_number": flat, "amount": str(amt), "overdue_days": days,
-                      "remarks": (r.get("remarks") or "")[:200]})
-        total += amt
-    bf["receivables"] = clean
-    steps = d.setdefault("steps", {})
-    steps["brought_forward"] = {"status": "done" if not errors else "todo",
-                                "saved_at": date.today().isoformat()}
+    d.setdefault("draft", {}).setdefault("brought_forward", {})["receivables"] = clean
     db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s",
                 (json.dumps(d), society_id))
-    return {"ok": not errors, "errors": errors, "total": str(total)}
+    return {"ok": True, "errors": [], "total": str(pr.total(clean))}
 
 
 def link_opening_receivable(society_id: int, apartment_id: int, flat_number: str) -> int | None:
@@ -1418,9 +1403,10 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
     draft_bf = ((decl.get("draft") or {}).get("brought_forward")) or {}
     recon = draft_bf.get("reconciliation") or {}
     # Arrears come from the Brought Forward step's receivables table; the old typed-inputs form is only a fallback.
-    arrears = [{"flat_number": r.get("flat_number"), "amount": str(money(r.get("amount"))), "overdue_days": r.get("overdue_days")}
-               for r in (draft_bf.get("receivables") or [])] or (inputs.get("arrears_by_flat") or [])
-    if isinstance(arrears, str):
+    _arrears, _ = pr.clean_rows(draft_bf.get("receivables") or [], known_flat_numbers(society_id))
+    arrears = [{"flat_number": r["flat_number"], "amount": r["amount"], "overdue_days": r["overdue_days"],
+                "remarks": r["remarks"] or None} for r in _arrears] or (inputs.get("arrears_by_flat") or [])
+    if isinstance(arrears, str):                 # the legacy typed-inputs fallback may be stored as a JSON string
         import json as _j
         try:
             arrears = _j.loads(arrears)
@@ -1660,7 +1646,11 @@ def appoint_adviser(actor_id: int, society_id: int, kind: str, name: str, firm: 
     name = (name or "").strip()
     if not name:
         raise OnboardingError("The adviser's name is required.")
-    res = _row("SELECT id, status, society_id FROM resolutions WHERE id=%s", (resolution_id,))
+    if resolution_id is None:
+        raise OnboardingError("The appointment needs a passed resolution: enter its number.")
+    # resolutions has no society_id of its own; it belongs to a society through its meeting.
+    res = _row("SELECT r.id, r.status, m.society_id FROM resolutions r JOIN meetings m ON m.id = r.meeting_id WHERE r.id=%s",
+               (resolution_id,))
     if not res or res["society_id"] != society_id:
         raise OnboardingError("That resolution does not belong to this society.")
     if res["status"] != "passed":
@@ -1983,7 +1973,8 @@ def mark_enrollment_complete(society_id: int, actor_id: int, enrol_later_reason:
         raise OnboardingError("Enrollment is not the current stage.")
     blockers = enrollment_blockers(society_id)
     if blockers:
-        raise OnboardingError(" ".join(blockers) + " Enrol them, or record why they do not exist.")
+        raise OnboardingError(" ".join(blockers) + " Enrol those flats from the Enrolled tab (bulk enrolment is there too) "
+                              "before marking enrollment complete.")
     others = _row("""SELECT COUNT(*) AS n FROM users u
                       WHERE u.society_id=%s AND u.role='apartment'
                         AND NOT EXISTS (SELECT 1 FROM committee_offices co WHERE co.society_id=u.society_id AND co.user_id=u.id

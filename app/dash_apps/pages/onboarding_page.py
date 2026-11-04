@@ -471,7 +471,7 @@ def signing_panel(society_id: int, user_id: int | None, role: str | None = None)
 
 # ── stage 7: advisers (V5.9) ────────────────────────────────────────────────
 def _adviser_badge(active: bool) -> dbc.Badge:
-    return dbc.Badge("Active" if active else "Revoked", color="success" if active else "danger", size="sm")
+    return dbc.Badge("Active" if active else "Revoked", color="success" if active else "danger", style={"fontSize": "11px"})
 
 
 def advisers_section(society_id: int, role: str | None, user_id: int | None) -> list:

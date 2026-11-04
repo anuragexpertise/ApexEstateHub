@@ -31,6 +31,7 @@ DEFAULT_POLICY = {
     "noc":             dict(eligible=["secretary"], required=["secretary"], min=1),
     "agreement":       dict(eligible=["president", "secretary", "treasurer", "platform"], required=["president", "secretary", "treasurer", "platform"], min=4),
     "stepup_change":   dict(eligible=["president", "secretary", "treasurer"], required=["president", "secretary", "treasurer"], min=3),
+    "adviser_appointment": dict(eligible=["president", "secretary", "treasurer"], required=["president", "secretary", "treasurer"], min=3),
     "resolution":      dict(eligible=["president", "vice_president", "secretary", "joint_secretary", "chair"], required=["secretary", "chair"], min=2),
     "minutes":         dict(eligible=["president", "vice_president", "secretary", "joint_secretary", "chair"], required=["secretary", "chair"], min=2),
     "poll":            dict(eligible=["secretary", "president"], required=[], min=1),

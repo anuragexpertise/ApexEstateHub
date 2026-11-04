@@ -193,7 +193,7 @@ def _derive_nonce(secret, seed_extra: str) -> int:
     """
     if not secret:
         raise RuntimeError(
-            "This society's SIGNING_SECRET must be configured (complete "
+            "This society's step-up password must be configured (complete "
             "the Setup Wizard) to revoke/reissue a QR code."
         )
     digest = hmac.new(secret.encode(), seed_extra.encode(), hashlib.sha256).hexdigest()

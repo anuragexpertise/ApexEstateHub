@@ -19,7 +19,7 @@ MIN_SIGNING_SECRET_LENGTH = 8
 
 PASSWORD_RULE_TEXT = f"Password must be at least {MIN_PASSWORD_LENGTH} characters long."
 SIGNING_SECRET_RULE_TEXT = (
-    f"SIGNING_SECRET must be at least {MIN_SIGNING_SECRET_LENGTH} characters with "
+    f"The step-up password must be at least {MIN_SIGNING_SECRET_LENGTH} characters with "
     "an uppercase letter, a lowercase letter, a digit and a special character."
 )
 

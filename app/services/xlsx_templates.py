@@ -113,37 +113,6 @@ def build_bf_template(rows: list[dict], fy: int | None = None) -> bytes:
     return buf.getvalue()
 
 
-def build_receivables_template(rows: list[dict]) -> bytes:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Receivables"
-    headers = ["flat_number", "amount", "overdue_days", "remarks"]
-    ws.append(headers)
-    for c in range(1, len(headers) + 1):
-        ws.cell(row=1, column=c).font = Font(bold=True)
-    for r, item in enumerate(rows or [], start=2):
-        ws.cell(row=r, column=1, value=item.get("flat_number") or "")
-        ws.cell(row=r, column=2, value=item.get("amount") or "")
-        ws.cell(row=r, column=3, value=item.get("overdue_days") or "")
-        ws.cell(row=r, column=4, value=item.get("remarks") or "")
-    dv_amt = DataValidation(type="decimal", operator="greaterThan", formula1="0", allow_blank=True)
-    dv_amt.add("B2:B500")
-    ws.add_data_validation(dv_amt)
-    dv_days = DataValidation(type="whole", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
-    dv_days.add("C2:C500")
-    ws.add_data_validation(dv_days)
-    ws.freeze_panes = "A2"
-
-    wi = wb.create_sheet("Instructions")
-    wi.append(["Notes"])
-    wi.append(["flat_number required; amount must be > 0."])
-    wi.append(["days overdue >= 0 (blank allowed)."])
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
-
-
 def parse_upload(contents: str, filename: str, sheet: str, required: list[str], max_rows: int = 500,
                  max_bytes: int = 1_048_576) -> ParseResult:
     # Basic guards
