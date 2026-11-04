@@ -369,7 +369,7 @@ Relevant suites include `test_accounting_integrity_live`, `test_scenario_b_recei
 20. [🚩 Open Design Subtleties & Flagged Caveats](#20--open-design-subtleties--flagged-caveats)
 21. [🧹 Legacy Code Cleanup Status](#21--legacy-code-cleanup-status)
 22. [Deployment & Utility Notes](#22-deployment--utility-notes)
-23. [Table of Workflows](#23-table-of-workflows)
+23. [Workflows](#23-workflows)
 
 ---
 
@@ -2274,9 +2274,217 @@ If VS Code shows missing import warnings on Flask/Dash components, it is usually
 
 Or press `Ctrl+Shift+P` → **Python: Select Interpreter** and select your active virtual environment.
 
-## 23. Table of Workflows
+## 23. Workflows
 
-### Overview
+This section lists, role by role, the workflows the code implements. It was written by reading the code at commit `a3ef730` (4 Nov 2026), not by running the app. Where a screen could not be traced to a rule, it says so.
+
+- **§23.1** explains what "role" means in this codebase (it means three different things).
+- **§23.2** lists the workflows of each of the 17 roles.
+- **§23.3** keeps the earlier screen-by-screen tables (KPI → list → profile) for the five portals.
+- **§23.4** shows the hand-offs between roles (who prepares, who approves, who signs).
+- **§23.5** lists mismatches found while mapping.
+
+Status marks: ✅ built · 🟡 partly built or provisional · ⛔ exists in code but cannot be used today.
+
+### 23.1 Roles, logins and seats
+
+"Role" means three different things here. Keeping them apart explains most of the tables below.
+
+1. **Login role** (`users.role`): `admin`, `apartment`, `vendor`, `security`, `accountant`, `supervisor`, `staff`, `auditor`, `adviser`. `master` is derived (an admin with no society and `is_master_admin`) and is never stored. Defined in `app/security/roles.py`.
+2. **Resident type** (`users.user_type`, only on `apartment` logins): `owner`, `family`, `tenant`, `visitor`.
+3. **Office-bearer seat** (`committee_offices` plus `user_role_assignments`): President, Vice President, Secretary, Joint Secretary, Treasurer, Working Committee Member. A seat belongs to a **flat** and is held through that flat's **owner login**. It adds powers to that login; it is not a separate login. Defined in `app/services/committee_service.py`; powers in `app/security/authorization.py`.
+
+| Role | What it is in the code | Lands on | Created by |
+|---|---|---|---|
+| **Master** | Derived: admin login with no society and `is_master_admin`. Platform operator; has no access to any society's data | `/dashboard/master-societies` | Platform operator |
+| **Admin** | `users.role = admin`, with a society | `/dashboard/admin-portal` | Master, at registration |
+| **President, Secretary, Treasurer, Committee** | Seats. They grant `society_president`, `society_secretary`, `treasurer` or `committee_member` while the seat is held (Vice President, Joint Secretary and Working Committee Member all grant `committee_member`) | Owner portal; committee tabs under Settings → Society governance | Admin appoints a flat's owner login; powers end when the seat ends |
+| **Owner, Family, Tenant, Visitor** | `users.role = apartment` with `user_type` set and `linked_id` = the flat | `/dashboard/owner-portal` | Admin or bulk enrolment. An owner adds household logins; a family member or tenant can add `visitor` logins only; a visitor adds none (`_save_apartment_user`) |
+| **Vendor** | `users.role = vendor`, linked to a vendor record | `/dashboard/vendor-portal` | Admin enrolment |
+| **Security** | `users.role = security`, linked to a guard record | `/dashboard/pass-evaluation` | Admin enrolment |
+| **Accountant, Supervisor, Staff, Auditor** | Team logins: a `role` only, no flat, vendor or guard record | `/dashboard/accountant-portal`, `supervisor-portal`, `staff-portal`, `auditor-portal` | Admin → Team Logins (`team_service.py`); first sign-in forces a new password |
+| **CA** | No login role of its own. Either (a) an **accountant** login, because `authorization.py` states the society's CA logs in as an accountant, or (b) an **adviser** login of kind `ca`: read-only and term-bound. An Auditor can also be an adviser (kind `auditor`); an Advocate is the third kind | (a) accountant portal; (b) `/dashboard/adviser-portal` | (a) Admin; (b) Admin, on a passed resolution, sealed by the President, Secretary and Treasurer |
+
+### 23.2 Workflows by role
+
+Each table has the same three columns as §23.3. Code references are to the file that holds the rule.
+
+#### Master (platform operator)
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Register a society** ✅ | Societies tab → society list → New → Create Society form (society details, its admin login, registration evidence) | Starts a tenant in state `registered`, stage 1 of 7 (`society_service.create_society_checked`, `onboarding_service.STAGES`) |
+| **Platform signature and activation** ✅ | Onboarding tab → queue of societies waiting for the platform (`master_queue`) → sign the Agreement with own password (paper or e-sign) → the fourth signature triggers activation | The platform signs last. The opening position is posted only at activation (`master_queue`, `fn_activate_society`) |
+| **Manage societies and plans** ✅ | Societies tab → KPI → society list → society profile → Edit / Compliance settings | See §23.3, Master portal |
+| **Maintain statutory rule data** ✅ | RWA Compliance (India / UP) tabs → AOA Rule Editor → edit a catalogue entry or change a rule value | Rules are data, corrected without a redeploy; every change is written to `regime_rule_audit`. Capability `platform.rules.manage` (§9) |
+| **Inspect the platform** ✅ | Settings → KPI, List and Form inspectors (view SQL, test, export, audit); Tests tab | Capability `platform.sql.inspect`; every run is audited. Master is denied every society-data capability (`authorization.py`) |
+| **Keys and scheduled jobs** ✅ | Holds `SECRET_MASTER_KEY` outside `.env` and the database; runs `scripts/rotate_vault_key.py` to change `SECRET_VAULT_KEY`; gets an alert when a scheduled job (`anchors`, `patrol`, `ratification`, `watchdog`) fails or is late | Operator-only key custody (see "Who signs what", Keys and Scheduled jobs) |
+
+#### Admin (society administrator)
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Complete society setup** ✅ | Onboarding Hub → Setup Wizard saves a draft (nothing posted) → finalize with the admin password → Annexes A, B, C are built → seal the annexes and the Agreement with the admin password → wait for the President, Secretary and Treasurer, then the platform | Draft first, post at activation (`onboarding_service.py`, `onboarding_page.py`) |
+| **Seat and change the Managing Committee** ✅ | Founding: Onboarding Hub → enrol the office-bearer's flat and login with election evidence (resolution reference, minutes file, SHA-256) → when President, Secretary and Treasurer are seated the society moves to `committee seated`. Later: Governance → Managing Committee → Appoint / Edit / End office (a reason of at least 5 characters) | A flat in arrears cannot hold office (bye-law 7). Changing a core office raises a 7-day "replace the step-up password" notice. Powers are granted and revoked with the seat. Admin of the same society only (`committee_service.py`) |
+| **Enrol residents, vendors and guards** ✅ | Enrolled tab → single record, or bulk CSV (`user_type`; `adult_confirmed` required for non-owners) → preview → commit | Capability `enrollment.commit`; each person gets a privacy notice (`bulk_enroll_callbacks.py`) |
+| **Issue team logins** ✅ | Team Logins → choose Accountant, Supervisor, Staff or Auditor → name, email, temporary password → later disable, enable or reset the password | New login must change its password at first sign-in; you cannot disable your own login; every change is audited (`team_service.py`) |
+| **Appoint advisers** ✅ | Onboarding stage 7 → choose Auditor, CA or Advocate → pick a passed resolution, term dates, optional login → President, Secretary and Treasurer sign → revoke with a reason when needed | The login works only while the appointment is in force (`appoint_adviser`, `adviser_access.py`) |
+| **Verify money** ✅ | Pending receipts and expenses → Verify (dues are settled first-in-first-out) → posted. Expenses up to the approval threshold (default ₹20,000, bye-law 49) are verified by the Admin; above it see §23.4 | Verification is refused until the signature rule is met (`expense_approval.gate`). Bank reconcile, Fund Management and the UP AOA Compliance card are in §23.3 |
+| **Record governance** ✅ | Governance → Meetings & Resolutions → record meeting → record resolution. Society By-laws → provisional choice, activated by a matching passed resolution. Rules → decision on a non-statute rule; cash-limit mode | Statute figures are Master-only. Order matters: choice first, then resolution (`governance_settings.py`) |
+| **Run society operations** ✅ | Concerns (invite, assign, accept, close), Polls (create, declare results, close), Events and tickets, Channels, Assets, NOCs, gate passes, QR revoke and reissue with the step-up password | The Admin creates polls but cannot vote: only an `apartment` login votes |
+| **Read statutory registers** ✅ | Registers tab → tenants, owner loans, flat transfers, admissions, filings, flags | Read-only (`drilldown/curated.py`) |
+
+#### President
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Chair meetings, sign resolutions and minutes** ✅ | Governance → Meetings & Resolutions → Signatures → confirm with own password | Default: the Secretary and the chair sign; a sealed resolution cannot be edited (`document_signing.DEFAULT_POLICY`) |
+| **Approve spending** ✅ | Pending expense → Approve / Decline panel; pending fund withdrawals in the Managing Committee tab → Approve / Decline | Capability `finance.payment.approve`; never prepares a payment; nobody signs a payment to their own flat |
+| **Sign the Agreement and step-up changes** ✅ | Onboarding signing panel; step-up password change needs the President, Secretary and Treasurer | `agreement` and `stepup_change` signing kinds |
+| **Declare a poll result** ✅ | Poll → Sign panel → declare (Secretary or President) | The signed record holds the tally only, never voter identity |
+| **Sign an adviser's appointment** ✅ | Appointment awaiting signatures → confirm with own password | The adviser cannot act until sealed (`adviser_access.in_force`) |
+| **Run concerns, polls, events and channels** 🟡 | Capabilities `concern.triage`, `concern.assign`, `poll.manage`, `channel.manage`, `event.manage` are granted | The Owner-portal screens that use them were not traced (§23.5, item 5) |
+
+#### Secretary
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Sign a NOC** ✅ | Admin prepares the NOC (no-dues check) → NOC card → Sign panel → Secretary confirms → the signature image prints | Required signer; anyone can verify a printed NOC at `/verify/noc/<id>` |
+| **Sign resolutions and minutes** ✅ | Governance → Meetings & Resolutions → Signatures | Required signer with the chair |
+| **Declare a poll result** ✅ | As for the President | Eligible signer |
+| **Approve adviser decisions** ✅ | Governance → Adviser Decisions → fill in the adviser's reference and PDF (Admin, Secretary or Treasurer) → Approve | The Secretary and the Treasurer, two different people, must each approve; until then the decision is provisional and dependent actions are blocked (`adviser_decisions.py`) |
+| **Approve spending** ✅ | Same panel as the President | Eligible signer by default |
+| **Confirm TDS and GST rates, only when no Treasurer is seated** ✅ | Governance → TDS & GST Rates | Fallback only; checked against `committee_offices` (`tax_rate_service.py`) |
+| **Sign the ledger anchor certificate** 🟡 | Print the certificate → Secretary and Treasurer sign the paper → file it with the CA | In-app officer signatures are not built yet; the application's own signature is |
+
+The Secretary holds `roles.manage` and `enrollment.commit`, but the committee and team-login services still require the society Admin (`_require_writer`).
+
+#### Treasurer
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Lock a financial year** ✅ | FY Closing card → preview of blockers → written reason (at least 10 characters) and acknowledgement that it is permanent → ledger chain anchored and signed → lock | Capability `finance.period.close`, held by the Treasurer alone. Irreversible (`fy_lock_service.py`) |
+| **Approve spending** ✅ | Approve / Decline on pending expenses and fund withdrawals | `finance.payment.approve`; maker-checker applies |
+| **Confirm TDS and GST rates** ✅ | Governance → TDS & GST Rates → edit → confirm | Any edit returns the figures to "pending" until confirmed again |
+| **Classify GST accounts** ✅ | Governance → GST Accounts (with the CA) | Advice reference required for all but taxable |
+| **Approve adviser decisions** ✅ | As for the Secretary | Two different approvers |
+| **Verify a statute catalogue row** ✅ | Statute catalogue → mark verified with source link, notification number, date and opinion reference | Only the Treasurer or an Auditor; editing a verified row sends it back to unverified |
+| **Ratify irregular items** ✅ | Ratification register → spend before approval, emergency spend, arrears write-off, interest waiver | Stand for 90 days; if rejected or expired the postings are reversed (`ratification_service.py`). The Admin or any serving office-bearer may act |
+| **Reverse and reconcile** 🟡 | Capabilities `finance.reverse` and `finance.reconcile` are granted, not on one's own items | The reversal and reconcile screens documented today are the Admin's (§23.3) |
+
+#### Committee (Vice President, Joint Secretary, Working Committee Member)
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Triage and assign concerns** 🟡 | Capabilities `concern.triage` and `concern.assign` | Screen path not traced (§23.5, item 5) |
+| **Sign resolutions and minutes** ✅ | Vice President and Joint Secretary are eligible signers by default; Working Committee Members are not | Per society, `signer_policy` can change who is eligible |
+| **Approve spending** 🟡 | Default eligible signers are the Secretary, Treasurer and President; a society may widen the list | Needs at least the configured number of different serving office-bearers (adjustable 1 to 5) |
+| **Sit in the Managing Committee register** ✅ | Managing Committee resolution tallies are derived from the committee register | The flat keeps its own vote as an apartment, cast through the Owner portal |
+
+#### Owners
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **See and pay dues** ✅ | Financials → pending and overdue dues, My Transactions → own apartment profile → Pay Now → a **pending** payment → Admin confirms (whole or selected bills) or rejects with a reason → receipt | Not final until the Admin confirms (`fn_confirm_apartment_self_payment`). Needs `finance.self.view`, held by owners and vendors only |
+| **Vote in polls** ✅ | Polls → open poll → vote | One vote per apartment, secret ballot, weighted by undivided interest when the poll says so; quorum 30 %, majority 51 % of eligible votes; admins cannot vote |
+| **Raise and follow concerns** ✅ | Concerns → New → track; invite, assign or close only your own (§4.6) | Close only after every assignee has resolved |
+| **Answer gate alerts** ✅ | Channels / gate-alerts panel → Approve or Deny | Only a login linked to that flat can answer; Security cannot (`respond_to_alert`) |
+| **Pre-register an expected visitor** ⛔ | API `/api/owner/presumed-visitors` | No screen calls it, and the file does not import `current_user` (§23.5, item 1) |
+| **Subscribe to alert channels** ✅ | Channels → profile → Subscribe | School bus, taxi and visitor channels |
+| **Manage the household** ✅ | Members → New → family, tenant or visitor login | `_save_apartment_user` |
+| **Buy event tickets, print own receipts** ✅ | Events → Buy Tickets; Bills Paid → Print | See §23.3 |
+| **Hold an office** ✅ | If the flat's owner login is seated, Settings shows the Society governance tabs and the signing panels | Tabs such as TDS & GST Rates appear only to those entitled |
+
+#### Family
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Household member** ✅ | Dashboard, Members, Channels, Events, Concerns, Settings. Raise concerns, subscribe to channels, buy event tickets, add `visitor` logins | Polls tab is hidden and `poll.vote` is owner-only |
+| **View bills** 🟡 | The Financials and Bills Paid tabs stay visible | `finance.self.view` is owner-only, so own-ledger and pay-dues are denied (§23.5, item 2) |
+
+#### Tenant
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Tenant member** ✅ | Dashboard, Members, Channels, Events, Concerns, Settings. Raise concerns, subscribe to channels, add `visitor` logins | Financials and Bills Paid tabs are hidden and money lists return nothing; Polls hidden |
+| **Tenancy on record** 🟡 | Admin → Registers → Tenants (read-only) | Tenant liability for common expenses (s.18(2)) is not yet built |
+
+#### Visitor
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Visitor login** ✅ | Read-only portal: Financials, Concerns and Polls hidden; no member creation | Capability set is `resident.self.view` only |
+| **Walk-in at the gate** ✅ | Security → walk-in form (name, mobile, purpose, flat, vehicle) → visitor row `pending` and the gate notice is logged → push alert to the flat's owner → Approve (`entered`) or Deny (`denied`) | Two-actor rule: the guard cannot approve (`alert_service.py`) |
+| **QR visitor pass** ✅ | Security scans a `VIS` pass → pre-approved passes enter at once; pending passes wait for the owner | §11 |
+| **Presumed visitor** 🟡 | Security → Channels → presumed visitors → Notify owner / Call | Rows come from `visitors`; the owner-side creation route is broken (§23.5, item 1) |
+
+#### Vendors
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Respond to concerns** ✅ | Concerns → invited → Bid (revisable until assigned) or Decline (only while unbid) → Admin assigns → Resolved | §4.6; `concern_bid_callbacks.py` |
+| **Gate pass** ✅ | Passes → Buy Pass → Gate Pass QR (`VND`, versioned) | Admin can revoke and reissue (§11) |
+| **Money** ✅ | Financials → own receipts and charge rules. Payments to vendors go through expense approval and TDS section rules | `database/tds_compliance.py`; §10 |
+| **Events and profile** ✅ | Events → Buy Tickets; Settings → edit own profile | `vendor.self.update` |
+
+#### Security
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Gate duty** ✅ | Pass Eval → Entry IN / Exit OUT → camera scan → PASS writes a `gate_access` row, FAIL shows the reason | §11 |
+| **Walk-in visitors and gate alerts** ✅ | Walk-in form → alert the owner → second press escalates to a call; presumed visitors → Notify / Call | Cannot answer its own alert |
+| **Patrol** ✅ | Scan a patrol tag (`PTL`) | Guard within 50 m by GPS; travel speed over 25 km/h rejected; a valid scan completes the task |
+| **Attendance** ✅ | Attendance → Clock In / Clock Out with the 60-second time QR (`ATD`) | Time-boxed against replay |
+| **Collect cash** ✅ | Receipts → create receipt → `pending` | Admin verifies (§10, Path 2) |
+| **Resolve assigned concerns** ✅ | Concerns → Resolved | Only after the Admin has assigned and accepted it |
+| **Emergency** ✅ | Emergency button → society-wide event; Call Admin | |
+
+#### Staff
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Daily read-only view** ✅ | Staff Dashboard → Concerns, Events (and alert channels) | The capability set is empty. No write workflow exists yet; each will get its own capability when built (`authorization.py`) |
+
+#### Supervisor
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Set the shift roster** ✅ | Gate & Security → shift roster → New / Edit | The only thing a supervisor writes (`security_roster`) |
+| **Watch the gate** ✅ | Gate logs, visitors, patrol locations, who is on duty | View only |
+| **Watch the society** ✅ | Concerns, Events, Alert Channels; Users (security, vendors, apartments) | View only. No finance entity is listed |
+
+#### Accountant
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Prepare receipts** ✅ | Receipts → New → saved for verification | You prepare; the Treasurer or Admin verifies |
+| **Prepare expenses** ✅ | Expenses → New → pending approval (§23.4) | Cannot approve or verify |
+| **Cashbook entries** ✅ | Cashbook → New | Maker-checker: not on own items |
+| **Read dues and reports** ✅ | Dues (receivables, payables), ledger, accounts, Financials (FY closing report and the six statements) | Read-only |
+| **TDS and GST rates** ✅ | TDS & GST tab → edit → confirm | Same capability as the CA and Treasurer (`finance.taxrates.manage`) |
+
+#### Auditor
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Run the verification checks** ✅ | Verify → run one check or Run all → each result stored with its date and signed | Ten checks: ledger hash chain, journal balance, tie-out, cash vouchers, cash book vs counted cash, receipt chains, tamper guards, resolution tally, legal instruments, signed anchors (`audit_runs.CHECKS`) |
+| **Browse the books** ✅ | Books, Receipts, Expenses, Financials | May open any record; changes nothing |
+| **Verify a statute catalogue row** ✅ | As for the Treasurer | Treasurer or Auditor only |
+| **Appointed as adviser** ✅ | Adviser portal → appointment, resolutions, Agreement, ledger CSV with owner names hidden | Term-bound; each download is logged and watermarked (`adviser_access.py`) |
+
+#### CA
+
+| Name of Workflow | Sequence of Interaction | Goal and guard |
+|---|---|---|
+| **Confirm TDS and GST rates** ✅ | Accountant login → TDS & GST tab → edit → confirm | Figures typed in the Setup Wizard stay provisional until the CA confirms (`societies.ca_rates_confirmed_at`) |
+| **Classify GST accounts** ✅ | Governance → GST Accounts → taxable, exempt, not a supply or GST payable | Advice reference required for all but taxable; shows the turnover gate |
+| **Confirm the Rule 42 ITC reversal** 🟡 | Admin records the CA's name, reference, date and the two journal accounts → drafts can then be posted | Provisional until the CA's worked example is added (§ Phase 1 leftovers, 1.7) |
+| **Prepare entries** ✅ | Same as the Accountant | |
+| **Give advice on record** ✅ | Governance → Adviser Decisions → reference and PDF filed by the Admin, Secretary or Treasurer on the CA's behalf | Secretary and Treasurer approve |
+| **Read as adviser (kind `ca`)** ✅ | Adviser portal | Same reach as an Auditor adviser; an Advocate cannot read the ledger |
+| **Receive the anchor certificate** 🟡 | The Secretary and Treasurer sign the printed certificate and file it with the CA | In-app officer signatures not built yet |
+
+### 23.3 Portal screen flows (KPI → list → profile)
 
 The following tables map every user-reachable workflow in the application, organized by Portal → Tab → KPI/Quick-link → Drill Target, with the goal of each workflow. 
 
@@ -2347,6 +2555,28 @@ The following tables map every user-reachable workflow in the application, organ
 | **Security → Concerns** | Sidebar: Concerns → 2 KPIs (`kpi_concerns_assigned`, `kpi_concerns_resolved`) → `list_concerns` → `profile_concern` → Resolved (read-only until assigned by an admin, and until an admin has **accepted** the concern; security are never invited and never bid) | View and resolve assigned concerns |
 | **Security → Users** | Sidebar: Users → 3 KPIs (`kpi_security_total`, `kpi_security_on_duty`, `kpi_security_off_duty`) → `list_security` → `profile_security` | View fellow security staff duty roster |
 | **Security → Settings** | Sidebar: Settings → 1 KPI (`kpi_time_qr`) → Attendance QR | View/manage own profile, attendance QR |
+
+### 23.4 Hand-offs between roles
+
+| Chain | Steps in order | Guard |
+|---|---|---|
+| **Society goes live** | Master registers → Admin seats the founding President, Secretary and Treasurer with election evidence → Admin completes the Setup Wizard draft → Admin seals the annexes and Agreement → President, Secretary and Treasurer sign → Master signs → activation | Nothing is posted before the last signature (`onboarding_service.py`) |
+| **Spending money** | Accountant prepares the expense (pending) → up to ₹20,000 the Admin verifies → above it (or when the same payee's bills within 30 days add up above it) a Managing Committee resolution reference plus at least 2 different serving office-bearers approve with their own passwords → verified and posted → Auditor can check it later | Nobody approves their own item or a payment to their own flat; the limit and the number of signers are adjustable (`expense_approval.py`) |
+| **Collecting money** | Owner uses Pay Now, or Security creates a receipt, or the Accountant prepares one → pending → Admin (or Treasurer) confirms or rejects → receipt | Dues are settled first-in-first-out (§10) |
+| **Year-end** | Accountant prepares → Auditor runs and stores the checks → CA reviews → Treasurer locks the year (the ledger is anchored and signed first) → Secretary and Treasurer sign the anchor certificate and file it with the CA | A lock cannot be undone (`fy_lock_service.py`) |
+| **Appointing an adviser** | Admin records a passed resolution and creates the read-only login → President, Secretary and Treasurer sign → adviser works within the term → access ends on the last day | Checked at sign-in and on every callback (`adviser_access.py`) |
+| **A concern** | Owner raises → Admin invites vendors or assigns → Vendor bids (revisable) → Admin assigns → Vendor or Security resolves → raiser or Admin closes | Close only after every assignee has resolved (§4.6) |
+| **A visitor at the gate** | Security records a walk-in or scans a `VIS` pass → the flat's owner approves or denies → status `entered` or `denied` | The guard cannot approve (`alert_service.py`) |
+| **A rule changes** | Master changes a statute figure → Admin records the society's decision and resolution for a non-statute rule → Secretary and Treasurer approve the adviser's reference → dependent actions unblock | Provisional until both approve (`adviser_decisions.py`) |
+
+### 23.5 Mismatches found while mapping
+
+1. **Owner pre-registration of visitors cannot run.** `app/routes/presumed_visitor.py` uses `current_user` without importing it, and no screen calls the route. Security's presumed-visitor list reads existing `visitors` rows and is not affected.
+2. **Family and bills.** The matrix in §4.3 says a family member can view bills. In the code, `finance.self.view` is held by owners and vendors only, while the sidebar and drill-down blank the money tabs for tenants and visitors only. Decide which is intended. Also, the gate-alert callback checks only `role = apartment` before calling `respond_to_alert`; whether the service narrows it to owners was not traced.
+3. **Supervisor.** Holds `concern.triage` and `gate.visitor.process`, but its concern and visitor screens are view-only.
+4. **Secretary.** Holds `roles.manage` and `enrollment.commit`, while the committee and team-login services accept only the society Admin.
+5. **Office-bearer powers.** `authorization.py` grants the President, Secretary and Committee concern, poll, channel and event capabilities, and the Treasurer reverse and reconcile. The screens confirmed for them are the signing panels, the governance tabs, the FY lock and the tax-rate screens. The Owner-portal concern, poll and event screens were not traced to these capabilities.
+6. **§4 tab lists.** The tab lists in §4.2 to §4.5 are older than `ROLE_CONFIG` in `app/dash_apps/app_shell.py`. §23 follows `ROLE_CONFIG`.
 
 ---
 
