@@ -24,8 +24,7 @@ from app.services import onboarding_service as ob
 from app.services.onboarding_service import money
 from app.services import regime_rules_admin as rra
 from app.dash_apps.pages.wizard_registry import draft_key as _draft_key, status_of as _status_of
-from app.services.xlsx_templates import (build_receivables_template, build_tds_template, build_bf_template,
-                                         parse_upload)
+from app.services.xlsx_templates import build_tds_template, build_bf_template, parse_upload
 from app.utils.fiscal import fy_start_date as _fy_start_date
 
 P = op.P
@@ -58,6 +57,13 @@ def _decode(contents):
         return base64.b64decode(contents.split(",", 1)[1])
     except Exception:                                                      # noqa: BLE001
         return None
+
+
+def _states_pattern_list():
+    """The matched components of the callback's single ALL-pattern State (a list), whatever its position.
+    ctx.states_list holds one entry per State: a dict for a plain State, a list for a pattern State. Indexing it by a
+    fixed position broke whenever a plain State (filename, pending data) sat before the pattern."""
+    return next((item for item in ctx.states_list if isinstance(item, list)), [])
 
 
 def _gather(states_list):
@@ -126,8 +132,29 @@ def _uploaded(form, field):
     return val if isinstance(val, str) and val.strip() and not val.startswith("data:") else None
 
 
+# Scalar fields that always render with a non-None default (see setup_wizard.render_category_content). For these,
+# a value of None can only mean the admin cleared the box, so it must clear the saved value instead of being
+# ignored. Fields that render empty (value=None) are deliberately not listed: for them None is ambiguous.
+_CLEARABLE = {
+    "apartment": ("apt_cost", "apt_budget", "apt_rate", "apt_amt", "apt_due_day"),
+    "vendor": ("vendor_1day", "vendor_7day", "vendor_1mth"),
+    "brought_forward": ("fy",),
+}
+
+
+def _cleared_step_keys(step_key, form):
+    """Draft keys of `step_key` the admin has emptied (number input cleared -> None)."""
+    raw = _raw_step_values(step_key, form)
+    return [k for k in _CLEARABLE.get(step_key, ()) if k in raw and raw[k] is None]
+
+
 def _to_step_values(step_key, form):
     """Map live form values -> draft fields for one step, keyed by DRAFT key (wizard_registry.STEP_KEYS)."""
+    return {k: val for k, val in _raw_step_values(step_key, form).items() if val is not None}
+
+
+def _raw_step_values(step_key, form):
+    """Like _to_step_values but keeping None, so a cleared field can be told apart from a missing step."""
     v = {}
     if step_key == "society_details":
         v = {"address": form.get("sw-society-address"), "email": form.get("sw-society-email"),
@@ -164,7 +191,7 @@ def _to_step_values(step_key, form):
         v = {"fy": form.get("sw-bf-fy"), "rows": _bf_rows(form),
              "receivables": form.get("onb-receivables-json"),
              "reconciliation": form.get("onb-reconciliation-json")}
-    return {k: val for k, val in v.items() if val is not None}
+    return v
 
 
 def _rail_item_classes(statuses, current):
@@ -259,10 +286,10 @@ def register_onboarding_wizard_callbacks(app):
         State("sw-apt-cost", "value"), State("sw-apt-budget", "value"), State("sw-apt-rate", "value"),
         State("sw-apt-amt", "value"), State("sw-apt-billing-basis", "value"), State("sw-apt-due", "value"),
         State("sw-apt-interest", "value"), State("sw-apt-sinking", "value"), State("sw-apt-repair", "value"),
-        State("sw-society-tan", "value"), State("sw-tds-effective-date", "value"),
+        State("sw-society-tan", "value"), State("sw-tds-effective-date", "date"),   # DatePickerSingle holds `date`, not `value`
         State("sw-society-gstin", "value"), State("sw-cgst", "value"), State("sw-sgst", "value"),
         State("sw-ven-1day", "value"), State("sw-ven-7day", "value"), State("sw-ven-1mth", "value"),
-        State("sw-calc-start-date", "value"), State("sw-bf-fy", "value"),
+        State("sw-calc-start-date", "date"), State("sw-bf-fy", "value"),
         State("sw-qr-secret-confirm", "value"),
         State("sw-central-employees", "value"), State("sw-central-security-agency", "value"),
         State("onb-receivables-json", "data"), State("onb-reconciliation-json", "data"),
@@ -322,7 +349,8 @@ def register_onboarding_wizard_callbacks(app):
         step_key = _draft_key(CATEGORIES[leaving]) if 0 <= leaving < NCAT else None
         if step_key in (None, "review"):
             return _nav_outputs(n, ob.step_statuses(sid))
-        res = ob.save_step(sid, uid, step_key, _to_step_values(step_key, form))
+        res = ob.save_step(sid, uid, step_key, _to_step_values(step_key, form),
+                           cleared=_cleared_step_keys(step_key, form))
         if not res["ok"] and n > leaving:
             # Next / forward jump: stay on the failing step and show the errors.
             # Previous / backward jump saves silently; the status simply stays "todo" (§4.2.2).
@@ -374,6 +402,7 @@ def register_onboarding_wizard_callbacks(app):
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
         Output("onb-finalize-modal", "is_open", allow_duplicate=True),
+        Output("onb-finalize-error", "children", allow_duplicate=True),
         Input("onb-finalize-confirm", "n_clicks"),
         State("onb-finalize-password", "value"),
         prevent_initial_call=True,
@@ -382,224 +411,135 @@ def register_onboarding_wizard_callbacks(app):
     def wizard_finalize(n_clicks, password):
         s = _session()
         if not n_clicks or not s or s[2] != "admin" or not s[0]:
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update
         sid, uid, role = s
         try:
             msg = ob.finalize_draft(sid, uid, password or "")
         except ob.OnboardingError as exc:
-            return _alert(str(exc), False), no_update, no_update, False
+            # Keep the modal open and say why inline, so a mistyped password is a retry, not a restart.
+            return _alert(str(exc), False), no_update, no_update, no_update, str(exc)
         body, mk = op.hub_body(role, sid, uid), op.marker(sid)
-        return _alert(msg), body, mk, False
+        return _alert(msg), body, mk, False, ""
 
-    # ── item 10: receivables add / remove / render / tie-out ────────────────────
+    # ── item 10: pending receivables by apartment — manual grid + bulk upload ────────────────────
+    # An editable DataTable owns the rows while the admin works, so typing, pasting from Excel and deleting
+    # rows never re-render (and never steal focus from) the table. onb-receivables-json is only a derived
+    # copy that wizard_nav reads on Next; all rules live in app.services.pending_receivables and are shared
+    # with the step validator and Annex C, so the grid, the upload and the saved data cannot disagree.
     @app.callback(
-        Output("onb-receivables-json", "data", allow_duplicate=True),
-        Output("onb-bf-recv-feedback", "children", allow_duplicate=True),
+        Output("onb-recv-grid", "data"),
+        Output("onb-bf-recv-feedback", "children"),
         Input("onb-bf-add-rec", "n_clicks"),
-        Input({"type": "onb-bf-remove-rec", "index": ALL}, "n_clicks"),
-        State("onb-receivables-json", "data"),
-        # Capture live input values so typed-but-not-yet-stored edits survive an Add / Remove
-        State({"type": "onb-bf-recv-flat", "index": ALL}, "value"),
-        State({"type": "onb-bf-recv-amt", "index": ALL}, "value"),
-        State({"type": "onb-bf-recv-days", "index": ALL}, "value"),
-        State({"type": "onb-bf-recv-remarks", "index": ALL}, "value"),
+        Input("onb-bf-recv-upload", "contents"),
+        Input("onb-recv-clear", "submit_n_clicks"),
+        State("onb-bf-recv-upload", "filename"),
+        State("onb-recv-mode", "value"),
+        State("onb-recv-grid", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def bf_recv_add_remove(add_clicks, remove_clicks, rows, flats, amts, days, remarks):
-        s = _session()
-        if not s:
-            return no_update, no_update
+    def bf_recv_grid_update(add_clicks, contents, clear_clicks, filename, mode, rows):
+        import base64
+        from app.services import pending_receivables as pr
         trig = ctx.triggered_id
-        rows = list(rows or [])
-        # Merge current live input values into rows (typed edits that manual_edit may not have flushed yet)
-        if flats is not None:
-            n = min(len(rows), len(flats))
-            for i in range(n):
-                if flats[i] not in (None, ""):
-                    rows[i]["flat_number"] = flats[i]
-                if amts is not None and i < len(amts) and amts[i] not in (None, ""):
-                    rows[i]["amount"] = str(amts[i])
-                if days is not None and i < len(days) and days[i] not in (None, ""):
-                    rows[i]["overdue_days"] = days[i]
-                if remarks is not None and i < len(remarks) and remarks[i] not in (None, ""):
-                    rows[i]["remarks"] = remarks[i]
+        rows = rows or []
         if trig == "onb-bf-add-rec":
-            rows.append({"flat_number": "", "amount": "", "overdue_days": "", "remarks": ""})
-            return rows, ""
-        if isinstance(trig, dict) and trig.get("type") == "onb-bf-remove-rec":
-            idx = int(trig.get("index", -1))
-            if 0 <= idx < len(rows):
-                rows.pop(idx)
-            return rows, ""
-        return no_update, no_update
-
-    # ── item 10: receivables manual edit (persist typed values back to the store) ────
-    @app.callback(
-        Output("onb-receivables-json", "data", allow_duplicate=True),
-        Output("onb-bf-recv-feedback", "children", allow_duplicate=True),
-        Input({"type": "onb-bf-recv-flat", "index": ALL}, "value"),
-        Input({"type": "onb-bf-recv-amt", "index": ALL}, "value"),
-        Input({"type": "onb-bf-recv-days", "index": ALL}, "value"),
-        Input({"type": "onb-bf-recv-remarks", "index": ALL}, "value"),
-        State("onb-receivables-json", "data"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def bf_recv_manual_edit(flats, amts, days, remarks, rows):
+            return rows + [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}], no_update
+        if trig == "onb-recv-clear":
+            return [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}], \
+                   _alert("All rows cleared. Nothing is saved until you click Next.", ok=True)
+        if trig != "onb-bf-recv-upload" or not contents:
+            return no_update, no_update
         s = _session()
-        if not s:
-            return no_update, no_update
-        trig = ctx.triggered_id
-        if not isinstance(trig, dict):
-            return no_update, no_update
-        idx = int(trig.get("index", -1))
-        rows = list(rows or [])
-        if not (0 <= idx < len(rows)):
-            return no_update, no_update
-        field_map = {
-            "onb-bf-recv-flat": ("flat_number", flats),
-            "onb-bf-recv-amt": ("amount", amts),
-            "onb-bf-recv-days": ("overdue_days", days),
-            "onb-bf-recv-remarks": ("remarks", remarks),
-        }
-        entry = field_map.get(trig["type"])
-        if not entry:
-            return no_update, no_update
-        field, values = entry
-        val = values[idx] if values is not None and 0 <= idx < len(values) else None
-        if rows[idx].get(field) == val:
-            return no_update, no_update
-        rows[idx][field] = val
-        return rows, ""
+        known = ob.known_flat_numbers(s[0]) if s and s[0] else []
+        try:
+            data = base64.b64decode(contents.split(",", 1)[1])
+        except Exception:                                                  # noqa: BLE001
+            return no_update, _alert("Could not read the uploaded file.", ok=False)
+        try:
+            incoming, errors, info = pr.parse_upload(data, filename or "", known)
+        except pr.UploadError as exc:
+            return no_update, _alert(str(exc), ok=False)
+        if errors:
+            # All-or-nothing: importing only the valid rows would silently drop arrears and break the tie-out.
+            shown = errors[:10]
+            more = len(errors) - len(shown)
+            return no_update, dbc.Alert([html.Strong(f"Nothing was imported — {len(errors)} problem(s) in {filename}:"),
+                                         html.Ul([html.Li(e) for e in shown], className="mb-1"),
+                                         html.Div(f"…and {more} more." if more > 0 else ""),
+                                         html.Div("Fix the file and upload it again.", className="small")],
+                                        color="danger", className="py-2 mt-2", style={"fontSize": "12.5px"}, dismissable=True)
+        if not incoming:
+            return no_update, _alert("The file has a header but no receivable rows.", ok=False)
+        merged, added, updated = pr.merge(rows, incoming, "replace" if mode == "replace" else "add")
+        msg = (f"Imported {len(incoming)} row(s) from {filename}: " +
+               ("replaced the existing list." if mode == "replace" else f"{added} added, {updated} updated.") +
+               f" Total ₹{pr.total(merged):,.2f}. Nothing is saved until you click Next.")
+        return merged, _alert(msg, ok=True)
 
     @app.callback(
-        Output("onb-receivables-table", "children"),
+        Output("onb-receivables-json", "data"),
         Output("onb-bf-tieout", "children"),
-        Input("onb-receivables-json", "data"),
-        prevent_initial_call=True,
+        Input("onb-recv-grid", "data"),
+        Input({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
     )
     @require_session
-    def bf_recv_render(rows):
+    def bf_recv_sync(rows, amts):
+        from app.services import pending_receivables as pr
         s = _session()
-        if not s:
-            return no_update, no_update
-        sid, uid, role = s
-        rows_out = []
-        rec_total = Decimal(0)
-        for i, r in enumerate(rows or []):
-            amt = money(r.get("amount")) if r.get("amount") not in (None, "") else Decimal(0)
-            rec_total += amt
-            rows_out.append(html.Div([
-                dbc.Input(id={"type": "onb-bf-recv-flat", "index": i}, value=r.get("flat_number") or "", placeholder="Flat no.", size="sm"),
-                dbc.Input(id={"type": "onb-bf-recv-amt", "index": i}, type="number",
-                          value=float(r.get("amount")) if r.get("amount") not in (None, "") else None,
-                          step=0.01, min=0, size="sm"),
-                dbc.Input(id={"type": "onb-bf-recv-days", "index": i}, type="number",
-                          value=r.get("overdue_days") if r.get("overdue_days") not in (None, "") else None,
-                          min=0, size="sm"),
-                dbc.Input(id={"type": "onb-bf-recv-remarks", "index": i}, value=r.get("remarks") or "", placeholder="Remarks", size="sm"),
-                dbc.Button("×", id={"type": "onb-bf-remove-rec", "index": i}, color="danger", size="sm", outline=True),
-            ], className="sw-bf-row", style={"display": "flex", "gap": "6px", "alignItems": "center", "marginBottom": "4px"}))
-        # Tie-out vs Sundry Debtors accounts (from the draft, source of truth).
-        draft = ob.load_draft(sid)
-        bf_rows = (draft.get("brought_forward") or {}).get("rows") or []
-        sdr_total = Decimal(0)
-        for r in bf_rows:
-            if r.get("side") == "Dr" and r.get("tab") in ("SDr", "SDrCash", "SDrDig"):
-                sdr_total += money(r.get("bf_amount"))
-        diff = rec_total - sdr_total
-        color = "#17976e" if diff == 0 else "#c0392b"
-        tieout = html.Div([
-            html.Span(f"Receivables total: ₹{rec_total}   |   Sundry Debtors: ₹{sdr_total}   |   ", style={"fontSize": "12px"}),
-            html.Span(f"Difference: ₹{diff}", style={"color": color, "fontSize": "12px", "fontWeight": "700"}),
-        ])
-        header = html.Div([
-            html.Strong("Flat no."), html.Strong("Value receivable (₹)"), html.Strong("Days overdue"),
-            html.Strong("Remarks"), html.Strong(""),
-        ], className="sw-bf-row", style={"display": "flex", "gap": "6px", "alignItems": "center", "fontSize": "11px", "color": "#556", "marginBottom": "4px"})
-        return html.Div([header] + rows_out), tieout
+        sid = s[0] if s else None
+        known = ob.known_flat_numbers(sid) if sid else []
+        clean, errors = pr.clean_rows(rows or [], known)
+        # Sundry Debtors total from the Brought Forward amounts currently ON SCREEN (not the saved draft).
+        sdr = Decimal(0)
+        try:
+            # The society's own accounts rows do not exist until Finalize, so read the same seed chart the form lists.
+            from database.seed import ACCOUNTS
+            meta = {a[0]: a for a in ACCOUNTS}                          # id, name, tab (a[2]), ..., side (a[5])
+            ids = [it["id"]["acc_id"] for it in (ctx.inputs_list[1] or [])]
+            for acc_id, v in zip(ids, amts or []):
+                a = meta.get(acc_id)
+                if a and (a[5] or "Dr") == "Dr" and a[2] in ob.RECEIVABLE_TABS and v not in (None, ""):
+                    sdr += Decimal(str(v))
+        except Exception:                                                  # noqa: BLE001 - never break typing
+            pass
+        # What Next saves: the cleaned rows when everything is valid; otherwise every non-blank typed row, so the
+        # step validator reports the same problems the admin sees here (a duplicate must not vanish silently).
+        typed = [r for r in (rows or []) if r and any(r.get(k) not in (None, "") for k in pr.FIELDS)]
+        stored = typed if errors else clean
+        rt, _sdr, diff = pr.tie_out(clean, sdr)
+        lines = []
+        if clean or errors:
+            lines.append(html.Div(f"{len(clean)} apartment(s) · receivables ₹{rt:,.2f} · Sundry Debtors ₹{sdr:,.2f}"))
+            if errors:
+                lines.append(html.Div([html.Div(e) for e in errors[:8]] +
+                                      ([html.Div(f"…and {len(errors) - 8} more.")] if len(errors) > 8 else []),
+                                      className="text-danger fw-normal"))
+            elif diff == 0:
+                lines.append(html.Div("✓ Ties to Sundry Debtors.", className="text-success"))
+            else:
+                lines.append(html.Div(f"✗ Difference ₹{abs(diff):,.2f} — receivables are "
+                                      f"{'more' if diff > 0 else 'less'} than Sundry Debtors.", className="text-danger"))
+        elif sdr:
+            lines.append(html.Div(f"Sundry Debtors ₹{sdr:,.2f} entered above; no apartment-wise receivables yet.",
+                                  className="text-warning"))
+        return stored, lines
 
-    # ── item 10: receivables template download ───────────────────────────────────
     @app.callback(
         Output("onb-bf-recv-download", "data"),
         Input("onb-bf-recv-template", "n_clicks"),
-        State("onb-receivables-json", "data"),
+        State("onb-recv-grid", "data"),
         prevent_initial_call=True,
     )
     @require_session
     def bf_recv_download(n, rows):
         if not n:
             return no_update
-        tmpl_rows = [{"flat_number": r.get("flat_number") or "", "amount": r.get("amount") or "",
-                      "overdue_days": r.get("overdue_days") or "", "remarks": r.get("remarks") or ""}
-                     for r in (rows or [])]
-        data = build_receivables_template(tmpl_rows)
-        return dcc.send_bytes(data, "receivables_template.xlsx")
-
-    # ── item 10: receivables upload preview / apply ──────────────────────────────
-    @app.callback(
-        Output("onb-bf-recv-feedback", "children", allow_duplicate=True),
-        Output("onb-receivables-json", "data", allow_duplicate=True),
-        Input("onb-bf-recv-upload", "contents"),
-        State("onb-bf-recv-upload", "filename"),
-        State("onb-receivables-json", "data"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def bf_recv_upload(contents, filename, rows):
-        if not contents:
-            return no_update, no_update
-        import base64
-        raw = base64.b64decode(contents.split(",", 1)[1])
-        import io
-        import pandas as pd
-        try:
-            df = pd.read_excel(io.BytesIO(raw), sheet_name="Receivables", engine="openpyxl", dtype=str)
-        except Exception as exc:
-            return dbc.Alert(f"Could not read Receivables sheet: {exc}", color="danger",
-                             className="py-2", style={"fontSize": "12px"}), no_update
-        required = ["flat_number", "amount"]
-        lower = {str(c).strip().lower(): c for c in df.columns}
-        missing = [r for r in required if r.lower() not in lower]
-        if missing:
-            return dbc.Alert(f"Missing column(s): {', '.join(missing)}", color="danger",
-                             className="py-2", style={"fontSize": "12px"}), no_update
-        new_rows = []
-        errors = []
-        for excel_row in range(2, len(df) + 2):
-            flat = str(df.iloc[excel_row - 2][lower["flat_number"]]).strip()
-            amt = str(df.iloc[excel_row - 2][lower["amount"]]).strip()
-            days = str(df.iloc[excel_row - 2].get(lower.get("overdue_days", "overdue_days"), "")).strip()
-            remarks = str(df.iloc[excel_row - 2].get(lower.get("remarks", "remarks"), "")).strip()
-            if not flat and not amt:
-                continue
-            if not flat:
-                errors.append(f"Row {excel_row}: flat number required.")
-                continue
-            try:
-                a = money(amt)
-                if a <= 0:
-                    raise ValueError
-            except (ValueError, ArithmeticError):
-                errors.append(f"Row {excel_row}: amount must be > 0.")
-                continue
-            d = None
-            if days:
-                try:
-                    d = int(days)
-                    if d < 0:
-                        raise ValueError
-                except ValueError:
-                    errors.append(f"Row {excel_row}: days overdue must be >= 0.")
-                    continue
-            new_rows.append({"flat_number": flat, "amount": str(a), "overdue_days": d, "remarks": remarks})
-        if errors:
-            return dbc.Alert("; ".join(errors), color="danger", className="py-2", style={"fontSize": "12px"}), no_update
-        merged = list(rows or [])
-        merged.extend(new_rows)
-        return dbc.Alert(f"Uploaded {len(new_rows)} receivable row(s). Review them below, then click Next to save.",
-                         color="success", className="py-2", style={"fontSize": "12px"}), merged
+        from app.services import pending_receivables as pr
+        s = _session()
+        known = ob.known_flat_numbers(s[0]) if s and s[0] else []
+        clean, _ = pr.clean_rows(rows or [], known)
+        return dcc.send_bytes(pr.build_template(clean, known), "pending_receivables_template.xlsx")
 
     # ── item 11: reconciliation cards (driven by the live Brought Forward amounts) ────────────
     @app.callback(
@@ -742,7 +682,9 @@ def register_onboarding_wizard_callbacks(app):
             return no_update
         clause_id = trig.get("clause")
         idx = None
-        for i, item in enumerate((ctx.states_list[0] or []) if len(ctx.states_list) > 0 else []):
+        # These callbacks declare only Inputs, so the matched components are in ctx.inputs_list (states_list is empty).
+        _matched = (ctx.inputs_list[0] or []) if len(ctx.inputs_list) > 0 else []
+        for i, item in enumerate(_matched):
             iid = item.get("id")
             if isinstance(iid, dict) and iid.get("clause") == clause_id:
                 idx = i
@@ -753,7 +695,7 @@ def register_onboarding_wizard_callbacks(app):
             ok, msg = rra.record_wizard_adoption(uid, role, sid, sid, clause_id, choice, variation)
         except Exception as exc:                                      # noqa: BLE001
             ok, msg = False, str(exc)
-        msgs = [no_update] * len((ctx.states_list[0] or []))
+        msgs = [no_update] * len(_matched)
         if idx is not None and idx < len(msgs):
             msgs[idx] = html.Small(msg, className="text-" + ("success" if ok else "danger"))
         return msgs
@@ -776,7 +718,9 @@ def register_onboarding_wizard_callbacks(app):
             return no_update
         key = trig.get("key")
         idx = None
-        for i, item in enumerate((ctx.states_list[0] or []) if len(ctx.states_list) > 0 else []):
+        # Input-only callback: the matched components are in ctx.inputs_list (states_list is empty).
+        _matched = (ctx.inputs_list[0] or []) if len(ctx.inputs_list) > 0 else []
+        for i, item in enumerate(_matched):
             iid = item.get("id")
             if isinstance(iid, dict) and iid.get("key") == key:
                 idx = i
@@ -786,7 +730,7 @@ def register_onboarding_wizard_callbacks(app):
             ok, msg = rra.record_wizard_policy(uid, role, sid, sid, key, value or "")
         except Exception as exc:                                      # noqa: BLE001
             ok, msg = False, str(exc)
-        msgs = [no_update] * len((ctx.states_list[0] or []))
+        msgs = [no_update] * len(_matched)
         if idx is not None and idx < len(msgs):
             msgs[idx] = html.Small(msg, className="text-" + ("success" if ok else "danger"))
         return msgs
@@ -1040,7 +984,7 @@ def _register_xlsx_callbacks(app):
     def bf_upload(contents, filename, amts):
         if not contents:
             return no_update, no_update, no_update
-        ids = {d["id"]["acc_id"] for d in (ctx.states_list[0] or [])}
+        ids = {d["id"]["acc_id"] for d in _states_pattern_list()}
         meta = _acc_meta()
         res = parse_upload(contents, filename, "Brought Forward", ["account_id"])
         errors = list(res.errors)
@@ -1100,7 +1044,7 @@ def _register_xlsx_callbacks(app):
     def bf_apply(n, pending, amts):
         if not n or not pending:
             return no_update, no_update, no_update, no_update
-        ids = [d["id"]["acc_id"] for d in (ctx.states_list[0] or [])]
+        ids = [d["id"]["acc_id"] for d in _states_pattern_list()]
         rows = pending.get("rows") or {}
         a_out, r_out = [], []
         for aid in ids:

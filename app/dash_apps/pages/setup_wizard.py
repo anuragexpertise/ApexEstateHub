@@ -1,7 +1,7 @@
 import logging
 import os
 
-from dash import html, dcc, Input, Output, State, ALL, callback, no_update
+from dash import html, dcc, dash_table, Input, Output, State, ALL, callback, no_update
 from app.utils.fiscal import fy_start_date, fy_start_year
 import dash_bootstrap_components as dbc
 from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
@@ -1314,25 +1314,43 @@ def _committee_review_rows(society_id):
     return rows
 
 
+def _saved_receivables(society_id):
+    """Receivable rows already saved in the draft, so revisiting the step shows them (and Next does not wipe them)."""
+    try:
+        from app.services import onboarding_service as _ob
+        d = _ob.declaration(society_id) if society_id else None
+        rows = (((d or {}).get("draft") or {}).get("brought_forward") or {}).get("receivables") or []
+        out = []
+        for r in rows:
+            try:
+                amt = float(Decimal(str(r.get("amount"))))
+            except Exception:                                              # noqa: BLE001
+                amt = r.get("amount")
+            out.append({"flat_number": r.get("flat_number") or "", "amount": amt,
+                        "overdue_days": r.get("overdue_days"), "remarks": r.get("remarks") or ""})
+        return out
+    except Exception:                                                      # noqa: BLE001
+        return []
+
+
 def _receivables_review_rows(bf):
-    rows = bf.get("receivables") or []
-    if not rows:
+    from app.services import pending_receivables as pr
+    raw = bf.get("receivables") or []
+    if not raw:
         return [("Pending receivables", "None entered.")]
-    items = []
-    total = Decimal(0)
-    for r in rows:
-        amt = money(r.get("amount"))
-        total += amt
-        items.append(html.Tr([html.Td(r.get("flat_number") or "—", style={"fontSize": "12px"}),
-                              html.Td(f"₹{amt}", style={"fontSize": "12px"}),
-                              html.Td(str(r.get("overdue_days") or "—"), style={"fontSize": "12px"}),
-                              html.Td(r.get("remarks") or "", style={"fontSize": "12px"})]))
-    items.append(html.Tr([html.Td(html.Strong("Total"), style={"fontSize": "12px"}),
-                          html.Td(html.Strong(f"₹{total}"), style={"fontSize": "12px"}),
+    clean, errors = pr.clean_rows(raw)              # same rules as the grid; a bad amount must not crash Review
+    cell = {"fontSize": "12px"}
+    items = [html.Tr([html.Td(r["flat_number"], style=cell), html.Td(f"₹{Decimal(r['amount']):,.2f}", style=cell),
+                      html.Td("—" if r["overdue_days"] is None else str(r["overdue_days"]), style=cell),   # 0 days is a value
+                      html.Td(r["remarks"], style=cell)]) for r in clean]
+    items.append(html.Tr([html.Td(html.Strong("Total"), style=cell), html.Td(html.Strong(f"₹{pr.total(clean):,.2f}"), style=cell),
                           html.Td(""), html.Td("")], style={"borderTop": "1px solid #999"}))
     header = html.Tr([html.Th("Flat no.", style={"fontSize": "11px"}), html.Th("Value receivable (₹)", style={"fontSize": "11px"}),
                       html.Th("Days overdue", style={"fontSize": "11px"}), html.Th("Remarks", style={"fontSize": "11px"})])
-    return [("Pending receivables", dbc.Table([html.Thead(header), html.Tbody(items)], bordered=False, size="sm"))]
+    out = [("Pending receivables", dbc.Table([html.Thead(header), html.Tbody(items)], bordered=False, size="sm"))]
+    if errors:
+        out.append(("Receivable problems", html.Ul([html.Li(e) for e in errors], className="text-danger mb-0")))
+    return out
 
 
 def _saved_reconciliation(society_id):
@@ -2017,19 +2035,38 @@ def render_category_content(category, society_id=None, state=None, constitution=
             # ── item 10: pending receivables by apartment ─────────────────────────
             html.Hr(),
             html.H6("Pending receivables by apartment", className="mt-4 mb-2 text-primary"),
-            html.P("Enter each flat's opening dues (arrears carried from Annex C). The total must tie to the Sundry Debtors "
-                   "accounts entered above (SDr / SDrCash / SDrDig).", className="text-muted small mb-2"),
-            dcc.Store(id="onb-receivables-json", data=[]),
-            html.Div(id="onb-receivables-table", className="sw-hscroll", style={"marginBottom": "8px"}),
+            html.P("Opening dues carried forward, one row per flat. Type or paste rows into the grid below, or upload an "
+                   "Excel/CSV file. The total must tie to the Sundry Debtors accounts entered above (SDr / SDrCash / SDrDig).",
+                   className="text-muted small mb-2"),
+            dcc.Store(id="onb-receivables-json", data=_saved_receivables(society_id)),
+            dash_table.DataTable(
+                id="onb-recv-grid",
+                columns=[{"id": "flat_number", "name": "Flat no.", "type": "text"},
+                         {"id": "amount", "name": "Value receivable (₹)", "type": "numeric"},
+                         {"id": "overdue_days", "name": "Days overdue", "type": "numeric"},
+                         {"id": "remarks", "name": "Remarks", "type": "text"}],
+                data=_saved_receivables(society_id) or [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}],
+                editable=True, row_deletable=True, page_size=25, sort_action="native",
+                style_table={"overflowX": "auto"},
+                style_cell={"fontSize": "12.5px", "padding": "4px 8px", "textAlign": "left", "minWidth": "90px"},
+                style_header={"fontWeight": "700"},
+                style_cell_conditional=[{"if": {"column_id": "remarks"}, "minWidth": "220px"}],
+            ),
             dbc.Row([
-                dbc.Col(dbc.Button("+ Add row", id="onb-bf-add-rec", color="secondary", size="sm", outline=True, n_clicks=0), md=3),
-                dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Download template (xlsx)"],
-                                   id="onb-bf-recv-template", color="secondary", size="sm", outline=True, n_clicks=0), md=3),
-                dbc.Col(dcc.Upload(id="onb-bf-recv-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload xlsx"],
+                dbc.Col(dbc.Button("+ Add row", id="onb-bf-add-rec", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Template (xlsx)"],
+                                   id="onb-bf-recv-template", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(dcc.Upload(id="onb-bf-recv-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload xlsx / csv"],
                                                color="secondary", size="sm", outline=True, n_clicks=0),
-                                   multiple=False, accept=".xlsx"), md=3),
-                dbc.Col(dcc.Download(id="onb-bf-recv-download"), md=3),
-            ], className="g-2"),
+                                   multiple=False, accept=".xlsx,.csv"), md="auto"),
+                dbc.Col(dcc.RadioItems(id="onb-recv-mode", value="add", inline=True,
+                                       options=[{"label": " Add to / update existing rows", "value": "add"},
+                                                {"label": " Replace all rows", "value": "replace"}],
+                                       inputStyle={"marginLeft": "10px"}, labelStyle={"fontSize": "12px", "marginRight": "6px"}), md="auto"),
+                dbc.Col(dcc.ConfirmDialogProvider(children=dbc.Button("Clear all", color="danger", size="sm", outline=True, n_clicks=0),
+                                                  id="onb-recv-clear", message="Remove every receivable row from the grid?"), md="auto"),
+                dbc.Col(dcc.Download(id="onb-bf-recv-download"), md="auto"),
+            ], className="g-2 mt-1 align-items-center"),
             html.Div(id="onb-bf-recv-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
             html.Div(id="onb-bf-tieout", className="mb-3", style={"fontSize": "12px", "fontWeight": "700"}),
 

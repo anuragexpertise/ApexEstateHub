@@ -3063,7 +3063,7 @@ CREATE TABLE legal_instrument_catalog (
     -- The Setup Wizard's Legal Hierarchy table shows a link only when this is set.
     source_url TEXT CHECK (
         source_url IS NULL
-        OR source_url ~ * '^https?://'
+        OR source_url ~* '^https?://'
     ),
     display_order INT NOT NULL DEFAULT 100,
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (
@@ -20310,7 +20310,7 @@ CREATE INDEX idx_meeting_att_meeting ON meeting_attendance (meeting_id);
 CREATE INDEX idx_meeting_att_apartment ON meeting_attendance (apartment_id);
 
 COMMENT ON
-TABLE meeting_attendance IS 'Attendance register for GBM/EGM/MC meetings. Percentages (owners_present_pct) ' 'must be computed from this table, not self-attested.';
+TABLE meeting_attendance IS 'Attendance register for GBM/EGM/MC meetings. Percentages (owners_present_pct) must be computed from this table, not self-attested.';
 
 CREATE TABLE resolution_votes (
     id SERIAL PRIMARY KEY,
@@ -20329,7 +20329,7 @@ CREATE INDEX idx_resolution_votes_res ON resolution_votes (resolution_id);
 CREATE INDEX idx_resolution_votes_ap ON resolution_votes (apartment_id);
 
 COMMENT ON
-TABLE resolution_votes IS 'Vote register per apartment per resolution. Votes_for_pct must be computed ' 'from these weighted votes, not self-attested.';
+TABLE resolution_votes IS 'Vote register per apartment per resolution. Votes_for_pct must be computed from these weighted votes, not self-attested.';
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ER.md REMEDIATION LAYER — ledger integrity, period locks, governance, cash rules
@@ -20368,7 +20368,7 @@ CREATE INDEX idx_fy_locks_society ON fy_locks (
 );
 
 COMMENT ON
-TABLE fy_locks IS 'A-04: append-only period locks. A row means no ledger line may be dated in ' 'that FY or any earlier one; correct a locked year with a reversal dated in ' 'an open period. Rows cannot be updated or deleted (trg_fy_locks_append_only).';
+TABLE fy_locks IS 'A-04: append-only period locks. A row means no ledger line may be dated in that FY or any earlier one; correct a locked year with a reversal dated in an open period. Rows cannot be updated or deleted (trg_fy_locks_append_only).';
 
 CREATE OR REPLACE FUNCTION trg_fy_locks_append_only() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -20784,7 +20784,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION fn_post_reversal_journal (INT, INT, TEXT, INT, DATE) IS 'The ONLY authorised way to correct a posted ledger journal (A-01). Posts a ' 'mirror-image journal dated p_reversal_date (default today, so it lands in an ' 'open period), keeps each leg''s mode, and refuses a second reversal.';
+COMMENT ON FUNCTION fn_post_reversal_journal (INT, INT, TEXT, INT, DATE) IS 'The ONLY authorised way to correct a posted ledger journal (A-01). Posts a mirror-image journal dated p_reversal_date (default today, so it lands in an open period), keeps each leg''s mode, and refuses a second reversal.';
 
 -- Task 1.5: hold a disputed apartment bill. Returns the dispute id.
 CREATE OR REPLACE FUNCTION fn_raise_receivable_dispute(
