@@ -19,7 +19,8 @@ SCHEMA = (Path(__file__).resolve().parent.parent / "database" / "estatehub.sql")
 
 # ── hermetic ──────────────────────────────────────────────────────────────────────────────────────────────────
 def test_every_office_the_database_allows_has_a_label_and_a_role():
-    check = re.search(r"office_code\s+VARCHAR\(30\) NOT NULL CHECK \(office_code IN\s*\((.*?)\)\)", SCHEMA, re.S).group(1)
+    # Whitespace-tolerant: the schema file may be laid out on one line or one value per line.
+    check = re.search(r"office_code\s+VARCHAR\(30\)\s+NOT\s+NULL\s+CHECK\s*\(\s*office_code\s+IN\s*\((.*?)\)", SCHEMA, re.S).group(1)
     codes = set(re.findall(r"'([a-z_]+)'", check))
     assert codes == set(cs.OFFICE_LABEL) == set(cs.OFFICE_ROLE)
 

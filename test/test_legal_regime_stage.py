@@ -178,9 +178,10 @@ def test_no_researched_pack_shows_central_laws_only(_env):
     assert next(r for r in _table(rows) if r[0] == "L0 State Acts")[2] == "In-active"
 
 
-def test_no_state_chosen_uses_central_laws_only(_env):
+def test_no_state_chosen_falls_back_to_the_default_state(_env):
+    # _picked_state_constitution: "State defaults to DEFAULT_STATE when unset" (a society part-way through the wizard).
     _rows(state=None)
-    assert _env["regime"] == "GENERIC"
+    assert _env["regime"] == "UP_AOA_2010"
 
 
 # ── Your Legal Regime card ─────────────────────────────────────────────────────────────────────────────
@@ -191,9 +192,10 @@ def test_card_shows_state_constitution_and_regime():
     assert "Society Details step" in txt
 
 
-def test_card_without_a_state_asks_for_one():
+def test_card_without_a_state_shows_the_default_state():
     txt = _text(w.legal_regime_live(None, None, "AOA"))
-    assert "not chosen" in txt and "Choose a State on the Society Details step" in txt
+    assert "Uttar Pradesh" in txt and "UP_AOA_2010" in txt
+    assert "Choose a State on the Society Details step" not in txt
 
 
 def test_card_for_a_state_without_a_pack_warns_central_only():

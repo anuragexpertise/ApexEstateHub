@@ -125,7 +125,22 @@ CREATE TABLE societies (
     -- signer_policy demands it) must be signed by the eSign adapter (aadhaar_eSign /
     -- dsc / paper) instead of a password confirmation. Default No (FALSE).
 ,
-    esign_required BOOLEAN NOT NULL DEFAULT FALSE
+    esign_required BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Onboarding review (Society Onboarding 15 items): phase, signing mode, step-up custody flags
+    onboarding_phase TEXT CHECK (
+        onboarding_phase IN (
+            'enrollment',
+            'adoption',
+            'advisers',
+            'complete'
+        )
+    ),
+    signing_mode TEXT NOT NULL DEFAULT 'password' CHECK (
+        signing_mode IN ('password', 'esign', 'paper')
+    ),
+    stepup_review_required BOOLEAN NOT NULL DEFAULT FALSE,
+    stepup_initial BOOLEAN NOT NULL DEFAULT TRUE,
+    stepup_changed_at TIMESTAMPTZ
 );
 
 -- V5.4: two-phase Setup Wizard drafts. The wizard submits a draft here and posts
@@ -3088,6 +3103,20 @@ CREATE TABLE legal_instrument_catalog (
     opinion_ref VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    -- law catalog: applies_when + topic columns
+    applies_when TEXT NOT NULL DEFAULT 'always' CHECK (
+        applies_when IN (
+            'always',
+            'central_it_tan',
+            'central_tds',
+            'central_gst',
+            'central_rera',
+            'has_employees',
+            'has_security_agency',
+            'info'
+        )
+    ),
+    topic VARCHAR(40),
     CONSTRAINT uq_legal_instrument UNIQUE (
         regime_code,
         title,
@@ -15716,529 +15745,65 @@ INSERT INTO rule_parameter_defs (regime_code, rule_key, label, instrument, provi
  ('UP_AOA_2010', 'cash_receipt_limit', 'Cash receipt ceiling per person per day (INR)', 'Income-tax Act, 2025 (s.269ST of the Income-tax Act, 1961)', 's.186 (1961 Act: s.269ST)', NULL, 'statutory', 'central', 'num', 'INR', 1, 100000000, 1, 100000000, ARRAY[]::TEXT[], ARRAY[]::INT[], 'none', FALSE, 'gated', ARRAY['fn_check_cash_receipt_limit']::TEXT[], 'provisional', NULL, FALSE, TRUE, NULL)
 ON CONFLICT DO NOTHING;
 
-INSERT INTO
-    regime_rule_parameters (
-        regime_code,
-        rule_key,
-        value,
-        value_text,
-        unit,
-        source_reference,
-        effective_from
-    )
-VALUES (
-        'GENERIC',
-        'cash_limit_default_mode',
-        NULL,
-        'block',
-        NULL,
-        'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting',
-        DATE '2000-01-01'
-    ),
-    (
-        'GENERIC',
-        'reserve_appropriation_pct',
-        25,
-        NULL,
-        '%',
-        'Engine policy: share of net surplus moved to the Reserve Fund at FY close. No state statute is loaded for this scheme; the society sets it by resolution',
-        DATE '2000-01-01'
-    ),
-    (
-        'GENERIC',
-        'fund_collection_mode',
-        NULL,
-        'on_bill',
-        NULL,
-        'Engine policy: no state statute is loaded for this scheme, so a fund with a rate is added to the monthly bill (the behaviour before the regime parameter existed). Set fy_close or none by resolution, or load the state''s scheme pack.',
-        DATE '2000-01-01'
-    ),
-    (
-        'GENERIC',
-        'fund_allocation_basis',
-        NULL,
-        'per_sq_ft',
-        NULL,
-        'Engine policy: per sq ft of apartment area, as before. A state with a prescribed basis (for example % of construction cost) should say so in its own scheme pack.',
-        DATE '2000-01-01'
-    ),
-    (
-        'UP_AOA_2010',
-        's22_default_months',
-        6,
-        NULL,
-        'months',
-        'UP Apartment Act 2010 s.22: service cut-off only after MORE than 6 months of default',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        's22_notice_days',
-        7,
-        NULL,
-        'days',
-        'UP Apartment Act 2010 s.22: 7 days notice to the defaulter',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        's22_wait_months',
-        1,
-        NULL,
-        'months',
-        'UP Apartment Act 2010 s.22: one-month wait after the certified copy is sent to the competent authority and the owner',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        's22_appeal_days',
-        15,
-        NULL,
-        'days',
-        'UP Apartment Act 2010 s.22: 15 days for the owner to appeal',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        's20_recovery_months',
-        12,
-        NULL,
-        'months',
-        'UP Apartment Act 2010 s.20(2): common expenses unpaid for more than 12 months may be recovered through the Competent Authority as arrears of land revenue',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'arrears_disqualify_days',
-        60,
-        NULL,
-        'days',
-        'Model Bye-Laws 2011, bye-law 7: arrears of more than 60 days bar voting / standing for the Board',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'transfer_fee_pct',
-        0.5,
-        NULL,
-        '% of value',
-        'Model Bye-Laws 2011, bye-law 39: 1/2% of transfer value, payable by the transferor on a sale, to the association for the major-repair fund',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'nodues_deemed_days',
-        15,
-        NULL,
-        'days',
-        'Model Bye-Laws 2011, bye-law 39: No Dues Certificate deemed granted if not refused within 15 days',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'cash_payment_cheque_threshold',
-        2500,
-        NULL,
-        'INR',
-        'Model Bye-Laws 2011, financial provisions (bye-laws 46-52): payments above this by cheque (Secretary + one Board member). Pre-dates UPI/NEFT; this engine treats only mode=cash as the breach',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'petty_cash_limit',
-        20000,
-        NULL,
-        'INR',
-        'Model Bye-Laws 2011, financial provisions (bye-laws 46-52): petty cash ceiling',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'statement_publish_due_month',
-        7,
-        NULL,
-        'month',
-        'Model Bye-Laws 2011, bye-law 49: audited statement published by 31 July',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'statement_publish_due_day',
-        31,
-        NULL,
-        'day',
-        'Model Bye-Laws 2011, bye-law 49',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'authority_copy_due_month',
-        8,
-        NULL,
-        'month',
-        'Model Bye-Laws 2011, bye-law 49: copy to the competent authority by 15 August',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'authority_copy_due_day',
-        15,
-        NULL,
-        'day',
-        'Model Bye-Laws 2011, bye-law 49',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'owner_summary_days',
-        15,
-        NULL,
-        'days',
-        'Model Bye-Laws 2011, bye-law 49: summary to every owner within 15 days of publication',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'bye_law7_year_basis',
-        NULL,
-        'financial_year',
-        NULL,
-        'Bye-law 7 says "the year preceding the election". Whether that is the financial or the calendar year is contested (advocate commentary differs); default financial_year, overridable per call',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'cash_limit_default_mode',
-        NULL,
-        'block',
-        NULL,
-        'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting. Override per society in societies.cash_limit_mode',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'owner_loan_blocks_nodues',
-        1,
-        NULL,
-        '0/1',
-        'Engine policy (not statute): a loan outstanding from the association is a due to it, so the No Dues Certificate is not issued until it is recovered; the Board may instead record a refusal',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'owner_loan_counts_bye_law7',
-        0,
-        NULL,
-        '0/1',
-        'Engine policy (not statute): OFF by default - bye-law 7 speaks only of arrears of contributions for common expenses, so an overdue owner loan is not counted unless the society opts in on advice',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'owner_loan_counts_s22',
-        0,
-        NULL,
-        '0/1',
-        'Engine policy (not statute): off by default - s.22 concerns unpaid charges, so an overdue loan does not by itself justify cutting a service; enable only on advice',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'reserve_appropriation_pct',
-        25,
-        NULL,
-        '%',
-        'Engine policy (not statute): share of net surplus moved to the Reserve Fund at FY close. Neither the UP Apartment Act 2010 nor the 2011 Model Bye-Laws fix a percentage (common profits are only said to form the nucleus of the reserve funds); 25% follows the co-operative-society convention. Set it by General Body resolution',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'poll_quorum_pct',
-        30,
-        NULL,
-        '% of owners',
-        'Model Bye-Laws 2011, bye-law 9: the presence in person of 30 percent of owners is a quorum (a head-count of owners, not of votes)',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'poll_majority_pct',
-        51,
-        NULL,
-        '% of votes',
-        'Model Bye-Laws 2011, bye-law 2(e): ''majority'' of owners means owners holding 51 per cent of the votes; bye-law 8 weights each vote by the owner''s percentage in the Declaration (Act s.12(1)(f): percentage ''for all purposes, including voting'')',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'poll_majority_of',
-        NULL,
-        'all_votes',
-        NULL,
-        'Engine policy, not statute: bye-law 2(e) defines a majority as owners holding 51% of THE votes (read here as all eligible votes, so abstentions count against a motion), while bye-law 10 speaks of a majority of owners CASTING votes. The stricter reading is the default; choose votes_cast only on advice',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'owner_loan_resolution_mode',
-        NULL,
-        'linked',
-        NULL,
-        'Engine policy, not statute: bye-law 3(1)(f) allows a short-term loan to an owner ''with the consent of the apartment owners'' in an emergent necessity. linked = the loan must cite a passed Approve Owner Loan resolution of a General Body meeting with quorum; text = any resolution reference is accepted (the old behaviour)',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'owner_loan_max_term_days',
-        365,
-        NULL,
-        'days',
-        'Engine policy, not statute: the bye-law says only ''short-term'' and fixes no number of days. Applied when owner_loan_resolution_mode = linked, where a repayment date is mandatory',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'entrance_fee',
-        1000,
-        NULL,
-        'INR',
-        'Model Bye-Laws 2011, bye-law 4: entrance fee of ₹1,000 per owner on admission',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'share_face_value',
-        100,
-        NULL,
-        'INR',
-        'Model Bye-Laws 2011, bye-law 5: one share per owner, face value set by General Body',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'cashbook_daily_signature',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 23(f): daily cashbook to be signed by the Secretary and one Board member',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'investment_allowed_types',
-        NULL,
-        'coop_bank,trust_securities,approved_bank',
-        NULL,
-        'Model Bye-Laws 2011, bye-law 45: investments only in co-operative banks, Trust Act securities, or banks approved by the Competent Authority',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'borrowing_ca_approval',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 44(d): borrowing requires Competent Authority approval',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'tenant_joint_liability',
-        1,
-        NULL,
-        '0/1',
-        'UP Apartment Act 2010 s.18(2): tenant is jointly liable with the owner for common expenses',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'board_election_voting_basis',
-        NULL,
-        'undivided_interest',
-        NULL,
-        'Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration (Act s.12(1)(f): percentage for all purposes including voting). Advisory polls may use one-apartment-one-vote.',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'depreciation_fund_pct',
-        5,
-        NULL,
-        '% or INR',
-        'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the share of the yearly contribution',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'depreciation_fund_basis',
-        NULL,
-        'pct_of_asset_value',
-        NULL,
-        'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the basis of the yearly contribution',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'depreciation_fund_rate',
-        2.0,
-        NULL,
-        'INR per sq ft/flat',
-        'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the rate when the basis is a fixed amount',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'investment_register',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 47: Board shall maintain a register of all investments',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'affiliation_register',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 48: association may affiliate with federation; register maintained',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'accounts_inspection_allowed',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 48: books of account open to inspection by any member at reasonable times',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'accounts_publication_enabled',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 50: annual accounts to be published and circulated to members',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'auditor_appointment_by_gbm',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 51: auditor appointed at each Annual General Body Meeting',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'auditor_remuneration_gbm',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 52: auditor remuneration fixed by General Body Meeting',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'mortgage_notice_required',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 53: owner must notify association of any mortgage/charge',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'unpaid_assessments_notice',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 54: association provides statement of unpaid assessments on transfer',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'act_prevails_over_byelaws',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 55: UP Apartment Act 2010 prevails over inconsistent bye-laws',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'seal_register_maintained',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 56: association shall have a common seal and maintain register of its use',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'ca_inspection',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 57: Competent Authority may inspect association records',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'bye_law_amendment_tracker',
-        1,
-        NULL,
-        '0/1',
-        'Model Bye-Laws 2011, bye-law 58: track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'arrears_interest_pct',
-        1.75,
-        NULL,
-        '%/month',
-        'SUPERSEDED (Oct 2026): the interest engine now reads apt_charges_fines_basis.apt_interest_pct, the rate the admin records on Apartment Charges, which is the General Body resolved rate under bye-law 46(a). This row is kept for reference only and is no longer read by any function.',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'billing_basis_required',
-        1,
-        NULL,
-        '0/1',
-        'UP Apartment Act 2010 s.18(1): common expenses are charged by percentage of undivided interest; for a UP AOA society this is the statutory basis, not an optional toggle.',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'fund_collection_mode',
-        NULL,
-        'fy_close',
-        NULL,
-        'Engine default for UP, not a statutory rate. Bye-law 46 lists the ways funds MAY be raised (shares, contributions and donations, common profits forming the nucleus of the reserve funds, loans); bye-law 3(1)(d) sends rent from common areas to a reserve for major repairs. No fixed sinking-fund rate was found, so by default no fund is added to the monthly bill and the reserve is built from surplus at FY close. A General Body resolution to levy a fund switches that fund to on_bill. Provisional: have an advocate confirm against the full Act, Rules and bye-laws.',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'fund_allocation_basis',
-        NULL,
-        'undivided_interest',
-        NULL,
-        'Engine default: owners share common expenses by their undivided interest (Act s.18(1), as used for maintenance billing), so a fund is shared the same way. Applies when a fund is billed on_bill; at FY close the reserve is one collective pool (fy_close does not allocate to flats).',
-        DATE '2011-11-16'
-    ),
-    (
-        'UP_AOA_2010',
-        'cash_receipt_limit',
-        200000,
-        NULL,
-        'INR',
-        'Central law, not a society choice: receiving Rs 2,00,000 or more in cash from one person in a day, for one transaction, or for one event is prohibited; penalty equals the amount. The 1961-to-2025 section mapping (269ST -> 186) rests on secondary tax-publisher sources; the bare Act text has not been checked, so this stays provisional until the society''s CA confirms it. The engine tests the day''s total from one person; ''one event'' cannot be known to it.',
-        DATE '2011-11-16'
-    ) ON CONFLICT DO NOTHING;
+INSERT INTO regime_rule_parameters (regime_code, rule_key, value, value_text, unit, source_reference, effective_from) VALUES
+ ('GENERIC', 'cash_limit_default_mode', NULL, 'block', NULL, 'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting', DATE '2000-01-01'),
+ ('GENERIC', 'reserve_appropriation_pct', 25, NULL, '%', 'Engine policy: share of net surplus moved to the Reserve Fund at FY close. No state statute is loaded for this scheme; the society sets it by resolution', DATE '2000-01-01'),
+ ('GENERIC', 'fund_collection_mode', NULL, 'on_bill', NULL, 'Engine policy: no state statute is loaded for this scheme, so a fund with a rate is added to the monthly bill (the behaviour before the regime parameter existed). Set fy_close or none by resolution, or load the state''s scheme pack.', DATE '2000-01-01'),
+ ('GENERIC', 'fund_allocation_basis', NULL, 'per_sq_ft', NULL, 'Engine policy: per sq ft of apartment area, as before. A state with a prescribed basis (for example % of construction cost) should say so in its own scheme pack.', DATE '2000-01-01'),
+ ('UP_AOA_2010', 's22_default_months', 6, NULL, 'months', 'UP Apartment Act 2010 s.22: service cut-off only after MORE than 6 months of default', DATE '2011-11-16'),
+ ('UP_AOA_2010', 's22_notice_days', 7, NULL, 'days', 'UP Apartment Act 2010 s.22: 7 days notice to the defaulter', DATE '2011-11-16'),
+ ('UP_AOA_2010', 's22_wait_months', 1, NULL, 'months', 'UP Apartment Act 2010 s.22: one-month wait after the certified copy is sent to the competent authority and the owner', DATE '2011-11-16'),
+ ('UP_AOA_2010', 's22_appeal_days', 15, NULL, 'days', 'UP Apartment Act 2010 s.22: 15 days for the owner to appeal', DATE '2011-11-16'),
+ ('UP_AOA_2010', 's20_recovery_months', 12, NULL, 'months', 'UP Apartment Act 2010 s.20(2): common expenses unpaid for more than 12 months may be recovered through the Competent Authority as arrears of land revenue', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'arrears_disqualify_days', 60, NULL, 'days', 'Model Bye-Laws 2011, bye-law 7: arrears of more than 60 days bar voting / standing for the Board', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'transfer_fee_pct', 0.5, NULL, '% of value', 'Model Bye-Laws 2011, bye-law 39: 1/2% of transfer value, payable by the transferor on a sale, to the association for the major-repair fund', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'nodues_deemed_days', 15, NULL, 'days', 'Model Bye-Laws 2011, bye-law 39: No Dues Certificate deemed granted if not refused within 15 days', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'cash_payment_cheque_threshold', 2500, NULL, 'INR', 'Model Bye-Laws 2011, financial provisions (bye-laws 46-52): payments above this by cheque (Secretary + one Board member). Pre-dates UPI/NEFT; this engine treats only mode=cash as the breach', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'petty_cash_limit', 20000, NULL, 'INR', 'Model Bye-Laws 2011, financial provisions (bye-laws 46-52): petty cash ceiling', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'statement_publish_due_month', 7, NULL, 'month', 'Model Bye-Laws 2011, bye-law 49: audited statement published by 31 July', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'statement_publish_due_day', 31, NULL, 'day', 'Model Bye-Laws 2011, bye-law 49', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'authority_copy_due_month', 8, NULL, 'month', 'Model Bye-Laws 2011, bye-law 49: copy to the competent authority by 15 August', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'authority_copy_due_day', 15, NULL, 'day', 'Model Bye-Laws 2011, bye-law 49', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'owner_summary_days', 15, NULL, 'days', 'Model Bye-Laws 2011, bye-law 49: summary to every owner within 15 days of publication', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'bye_law7_year_basis', NULL, 'financial_year', NULL, 'Bye-law 7 says "the year preceding the election". Whether that is the financial or the calendar year is contested (advocate commentary differs); default financial_year, overridable per call', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'cash_limit_default_mode', NULL, 'block', NULL, 'Engine policy, not statute: warn = record a compliance flag; block = refuse the posting. Override per society in societies.cash_limit_mode', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'owner_loan_blocks_nodues', 1, NULL, '0/1', 'Engine policy (not statute): a loan outstanding from the association is a due to it, so the No Dues Certificate is not issued until it is recovered; the Board may instead record a refusal', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'owner_loan_counts_bye_law7', 0, NULL, '0/1', 'Engine policy (not statute): OFF by default - bye-law 7 speaks only of arrears of contributions for common expenses, so an overdue owner loan is not counted unless the society opts in on advice', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'owner_loan_counts_s22', 0, NULL, '0/1', 'Engine policy (not statute): off by default - s.22 concerns unpaid charges, so an overdue loan does not by itself justify cutting a service; enable only on advice', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'reserve_appropriation_pct', 25, NULL, '%', 'Engine policy (not statute): share of net surplus moved to the Reserve Fund at FY close. Neither the UP Apartment Act 2010 nor the 2011 Model Bye-Laws fix a percentage (common profits are only said to form the nucleus of the reserve funds); 25% follows the co-operative-society convention. Set it by General Body resolution', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'poll_quorum_pct', 30, NULL, '% of owners', 'Model Bye-Laws 2011, bye-law 9: the presence in person of 30 percent of owners is a quorum (a head-count of owners, not of votes)', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'poll_majority_pct', 51, NULL, '% of votes', 'Model Bye-Laws 2011, bye-law 2(e): ''majority'' of owners means owners holding 51 per cent of the votes; bye-law 8 weights each vote by the owner''s percentage in the Declaration (Act s.12(1)(f): percentage ''for all purposes, including voting'')', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'poll_majority_of', NULL, 'all_votes', NULL, 'Engine policy, not statute: bye-law 2(e) defines a majority as owners holding 51% of THE votes (read here as all eligible votes, so abstentions count against a motion), while bye-law 10 speaks of a majority of owners CASTING votes. The stricter reading is the default; choose votes_cast only on advice', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'owner_loan_resolution_mode', NULL, 'linked', NULL, 'Engine policy, not statute: bye-law 3(1)(f) allows a short-term loan to an owner ''with the consent of the apartment owners'' in an emergent necessity. linked = the loan must cite a passed Approve Owner Loan resolution of a General Body meeting with quorum; text = any resolution reference is accepted (the old behaviour)', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'owner_loan_max_term_days', 365, NULL, 'days', 'Engine policy, not statute: the bye-law says only ''short-term'' and fixes no number of days. Applied when owner_loan_resolution_mode = linked, where a repayment date is mandatory', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'entrance_fee', 1000, NULL, 'INR', 'Model Bye-Laws 2011, bye-law 4: entrance fee of ₹1,000 per owner on admission', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'share_face_value', 100, NULL, 'INR', 'Model Bye-Laws 2011, bye-law 5: one share per owner, face value set by General Body', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'cashbook_daily_signature', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 23(f): daily cashbook to be signed by the Secretary and one Board member', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'investment_allowed_types', NULL, 'coop_bank,trust_securities,approved_bank', NULL, 'Model Bye-Laws 2011, bye-law 45: investments only in co-operative banks, Trust Act securities, or banks approved by the Competent Authority', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'borrowing_ca_approval', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 44(d): borrowing requires Competent Authority approval', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'tenant_joint_liability', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(2): tenant is jointly liable with the owner for common expenses', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'board_election_voting_basis', NULL, 'undivided_interest', NULL, 'Model Bye-Laws 2011, bye-law 8: voting by percentage in Declaration (Act s.12(1)(f): percentage for all purposes including voting). Advisory polls may use one-apartment-one-vote.', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'depreciation_fund_pct', 5, NULL, '% or INR', 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the share of the yearly contribution', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'depreciation_fund_basis', NULL, 'pct_of_asset_value', NULL, 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the basis of the yearly contribution', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'depreciation_fund_rate', 2.0, NULL, 'INR per sq ft/flat', 'Not in the Act, the Rules or the Model Bye-Laws 2011 (bye-law 46(d) is about raising loans; 46(c) makes common profits the nucleus of the reserve funds). A society may keep a depreciation fund by General Body resolution; its rate and basis are its own, and the default shown is an engine default, not a legal figure. This parameter is the rate when the basis is a fixed amount', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'investment_register', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 47: Board shall maintain a register of all investments', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'affiliation_register', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 48: association may affiliate with federation; register maintained', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'accounts_inspection_allowed', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 48: books of account open to inspection by any member at reasonable times', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'accounts_publication_enabled', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 50: annual accounts to be published and circulated to members', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'auditor_appointment_by_gbm', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 51: auditor appointed at each Annual General Body Meeting', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'auditor_remuneration_gbm', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 52: auditor remuneration fixed by General Body Meeting', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'mortgage_notice_required', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 53: owner must notify association of any mortgage/charge', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'unpaid_assessments_notice', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 54: association provides statement of unpaid assessments on transfer', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'act_prevails_over_byelaws', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 55: UP Apartment Act 2010 prevails over inconsistent bye-laws', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'seal_register_maintained', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 56: association shall have a common seal and maintain register of its use', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'ca_inspection', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 57: Competent Authority may inspect association records', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'bye_law_amendment_tracker', 1, NULL, '0/1', 'Model Bye-Laws 2011, bye-law 58: track all amendments to society bye-laws with GBM resolution references (2/3 majority + CA approval)', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'arrears_interest_pct', 1.75, NULL, '%/month', 'SUPERSEDED (Oct 2026): the interest engine now reads apt_charges_fines_basis.apt_interest_pct, the rate the admin records on Apartment Charges, which is the General Body resolved rate under bye-law 46(a). This row is kept for reference only and is no longer read by any function.', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'billing_basis_required', 1, NULL, '0/1', 'UP Apartment Act 2010 s.18(1): common expenses are charged by percentage of undivided interest; for a UP AOA society this is the statutory basis, not an optional toggle.', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'fund_collection_mode', NULL, 'fy_close', NULL, 'Engine default for UP, not a statutory rate. Bye-law 46 lists the ways funds MAY be raised (shares, contributions and donations, common profits forming the nucleus of the reserve funds, loans); bye-law 3(1)(d) sends rent from common areas to a reserve for major repairs. No fixed sinking-fund rate was found, so by default no fund is added to the monthly bill and the reserve is built from surplus at FY close. A General Body resolution to levy a fund switches that fund to on_bill. Provisional: have an advocate confirm against the full Act, Rules and bye-laws.', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'fund_allocation_basis', NULL, 'undivided_interest', NULL, 'Engine default: owners share common expenses by their undivided interest (Act s.18(1), as used for maintenance billing), so a fund is shared the same way. Applies when a fund is billed on_bill; at FY close the reserve is one collective pool (fy_close does not allocate to flats).', DATE '2011-11-16'),
+ ('UP_AOA_2010', 'cash_receipt_limit', 200000, NULL, 'INR', 'Central law, not a society choice: receiving Rs 2,00,000 or more in cash from one person in a day, for one transaction, or for one event is prohibited; penalty equals the amount. The 1961-to-2025 section mapping (269ST -> 186) rests on secondary tax-publisher sources; the bare Act text has not been checked, so this stays provisional until the society''s CA confirms it. The engine tests the day''s total from one person; ''one event'' cannot be known to it.', DATE '2011-11-16')
+ON CONFLICT DO NOTHING;
 -- <<< END GENERATED
 
 -- ── LAYERED RULE RESOLVER ─────────────────────────────────────────────────────
@@ -24095,29 +23660,7 @@ $$;
 -- Onboarding review (Society Onboarding 15 items)
 -- ═════════════════════════════════════════════════════════════════════════════════════════
 
--- societies: phase, signing mode, step-up custody flags
-ALTER TABLE societies
-ADD COLUMN onboarding_phase TEXT CHECK (
-    onboarding_phase IN (
-        'enrollment',
-        'adoption',
-        'advisers',
-        'complete'
-    )
-);
-
-ALTER TABLE societies
-ADD COLUMN signing_mode TEXT NOT NULL DEFAULT 'password' CHECK (
-    signing_mode IN ('password', 'esign', 'paper')
-);
-
-ALTER TABLE societies
-ADD COLUMN stepup_review_required BOOLEAN NOT NULL DEFAULT FALSE;
-
-ALTER TABLE societies
-ADD COLUMN stepup_initial BOOLEAN NOT NULL DEFAULT TRUE;
-
-ALTER TABLE societies ADD COLUMN stepup_changed_at TIMESTAMPTZ;
+-- societies: phase, signing mode and step-up custody flags are declared inline in CREATE TABLE societies.
 
 -- step-up password change (3 signatures: President, Secretary, Treasurer)
 CREATE TABLE stepup_change_requests (
@@ -24224,22 +23767,7 @@ CREATE TABLE onboarding_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- law catalog: applies_when + topic columns
-ALTER TABLE legal_instrument_catalog
-ADD COLUMN applies_when TEXT NOT NULL DEFAULT 'always' CHECK (
-    applies_when IN (
-        'always',
-        'central_it_tan',
-        'central_tds',
-        'central_gst',
-        'central_rera',
-        'has_employees',
-        'has_security_agency',
-        'info'
-    )
-);
-
-ALTER TABLE legal_instrument_catalog ADD COLUMN topic VARCHAR(40);
+-- law catalog: applies_when + topic are declared inline in CREATE TABLE legal_instrument_catalog.
 
 -- pseudo-regime CENTRAL (central laws applying to every society)
 INSERT INTO

@@ -382,24 +382,30 @@ def respond_to_alert(alert_event_id: int, owner_user_id: int, action: str):
         # check silently no-op'd: any apartment owner could approve/deny
         # any other apartment's visitor alert. Fall back to resolving
         # ownership via visitors.apartment_id when channel_id is absent.
+        #
+        # The flat has several `apartment` logins (owner, family, tenant, visitor) that all share linked_id, so the
+        # caller is checked directly: an apartment login of THIS society linked to THIS flat. (Joining users and
+        # comparing with one fetched row picked an arbitrary login of the flat and could refuse its real owner.)
+        # No resolvable flat means no one can prove ownership, so the response is refused rather than let through.
         if event.get("channel_id"):
-            record = db._execute("""
-                SELECT ac.apartment_id, u.id as owner_user_id
-                  FROM alert_channels ac
-                  LEFT JOIN users u ON u.linked_id = ac.apartment_id AND u.role = 'apartment'
-                 WHERE ac.id = %s
-            """, (event["channel_id"],), fetch_one=True)
+            record = db._execute(
+                "SELECT apartment_id FROM alert_channels WHERE id = %s",
+                (event["channel_id"],), fetch_one=True)
         elif event.get("visitor_id"):
-            record = db._execute("""
-                SELECT v.apartment_id, u.id as owner_user_id
-                  FROM visitors v
-                  LEFT JOIN users u ON u.linked_id = v.apartment_id AND u.role = 'apartment'
-                 WHERE v.id = %s
-            """, (event["visitor_id"],), fetch_one=True)
+            record = db._execute(
+                "SELECT apartment_id FROM visitors WHERE id = %s",
+                (event["visitor_id"],), fetch_one=True)
         else:
             record = None
 
-        if record and record.get("owner_user_id") != owner_user_id:
+        flat_id = (record or {}).get("apartment_id")
+        if not flat_id:
+            return False, "This alert is not linked to a flat, so it cannot be answered here"
+        caller = db._execute("""
+            SELECT 1 AS ok FROM users
+             WHERE id = %s AND role = 'apartment' AND linked_id = %s AND society_id = %s
+        """, (owner_user_id, flat_id, event["society_id"]), fetch_one=True)
+        if not caller:
             return False, "Only the apartment owner can respond to this alert"
 
         # An answer is final, and an alert that has run out of time can no longer let anyone in. The UPDATE itself
@@ -780,7 +786,6 @@ def get_presumed_visitors(society_id: int):
                    a.flat_number, a.mobile as owner_phone, a.owner_name as owner_name
               FROM visitors v
               LEFT JOIN apartments a ON a.id = v.apartment_id
-              LEFT JOIN users u ON u.linked_id = a.id AND u.role = 'apartment'
              WHERE v.society_id = %s
                AND v.visit_date = CURRENT_DATE
                AND v.status = 'pending'

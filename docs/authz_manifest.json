@@ -540,6 +540,12 @@
       "classification": "exempt",
       "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
     },
+    "callback:master_rules_callbacks.py::civ_tick_all": {
+      "classification": "legacy-gated"
+    },
+    "callback:master_rules_callbacks.py::civ_verify": {
+      "classification": "legacy-gated"
+    },
     "callback:master_rules_callbacks.py::prefill_catalog": {
       "classification": "action",
       "actions": [
@@ -638,7 +644,14 @@
       "classification": "exempt",
       "reason": "Session-guarded read-only refresh of the caller's OWN society's onboarding state (society from the server session); writes nothing."
     },
+    "callback:onboarding_callbacks.py::onb_poll_toggle": {
+      "classification": "exempt",
+      "reason": "Session-guarded UI toggle: returns only the poller's disabled flag, derived from the caller's own society state in the server session; reads and writes no society data."
+    },
     "callback:onboarding_callbacks.py::onb_prepare": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_print_agreement": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_seal": {
@@ -668,16 +681,13 @@
     "callback:onboarding_wizard_callbacks.py::bf_reconciliation_update": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_wizard_callbacks.py::bf_recv_add_remove": {
-      "classification": "legacy-gated"
-    },
     "callback:onboarding_wizard_callbacks.py::bf_recv_download": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_wizard_callbacks.py::bf_recv_render": {
+    "callback:onboarding_wizard_callbacks.py::bf_recv_grid_update": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_wizard_callbacks.py::bf_recv_upload": {
+    "callback:onboarding_wizard_callbacks.py::bf_recv_sync": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::bf_template": {
@@ -685,6 +695,10 @@
     },
     "callback:onboarding_wizard_callbacks.py::bf_upload": {
       "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::clear_admin_passwords": {
+      "classification": "exempt",
+      "reason": "Session-guarded UI reset: blanks two step-up password inputs in the browser when the Administrator step opens; touches no stored data."
     },
     "callback:onboarding_wizard_callbacks.py::legal_regime_refresh": {
       "classification": "legacy-gated"
