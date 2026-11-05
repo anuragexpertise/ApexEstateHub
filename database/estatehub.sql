@@ -3083,7 +3083,7 @@ CREATE TABLE legal_instrument_catalog (
     ),
     verified_by INT REFERENCES users (id),
     verifier_role VARCHAR(10) CHECK (
-        verifier_role IN ('treasurer', 'auditor')
+        verifier_role IN ('treasurer', 'auditor', 'master')
     ),
     opinion_ref VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -23435,7 +23435,7 @@ CREATE OR REPLACE FUNCTION fn_verify_instrument(
     p_instrument_id INT, p_user INT, p_role TEXT, p_notification_no TEXT, p_source_url TEXT, p_opinion_ref TEXT, p_verified_on DATE
 ) RETURNS TEXT LANGUAGE plpgsql AS $$
 BEGIN
-    IF p_role NOT IN ('treasurer', 'auditor') THEN RAISE EXCEPTION 'Only the Treasurer or an Auditor can verify an instrument.'; END IF;
+    IF p_role NOT IN ('treasurer', 'auditor', 'master') THEN RAISE EXCEPTION 'Only the Treasurer, an Auditor or the platform master can verify an instrument.'; END IF;
     IF NULLIF(BTRIM(p_opinion_ref), '') IS NULL THEN RAISE EXCEPTION 'An opinion reference is required to verify.'; END IF;
     IF NULLIF(BTRIM(p_notification_no), '') IS NULL THEN RAISE EXCEPTION 'The notification number is required.'; END IF;
     IF p_source_url IS NULL OR p_source_url !~* '^https?://' THEN RAISE EXCEPTION 'A link to the source text is required.'; END IF;

@@ -7,7 +7,7 @@ server-side Flask-Login session (never the browser's auth-store), the work is do
 app.services.regime_rules_admin, and the body is re-rendered only after a successful save.
 """
 import dash_bootstrap_components as dbc
-from dash import Input, Output, State, no_update
+from dash import ALL, Input, Output, State, ctx, no_update
 
 from app.dash_apps.pages.master_rules_page import REGIME, render_rules_sections
 from app.security.audit_context import get_current_user_id, get_current_user_role
@@ -82,6 +82,35 @@ def register_master_rules_callbacks(app):
         ver = row.get("last_verified_on")
         return row["status"], ver.isoformat() if ver else None, row.get("applicability") or "", \
             row["key_provisions"], row.get("source_reference") or ""
+
+    # ── RWA Compliance- INDIA: master verifies Central instruments in bulk ────────────────────────────────
+    @app.callback(Output({"type": "civ-sel", "id": ALL}, "value"), Input("civ-all", "n_clicks"), prevent_initial_call=True)
+    @require_session
+    def civ_tick_all(n):
+        if not n or get_current_user_role() != "master":
+            return no_update
+        outs = ctx.outputs_list
+        outs = outs[0] if outs and isinstance(outs[0], list) else outs    # one entry per matched checkbox, however Dash nests it
+        return [True] * len(outs)
+
+    @app.callback(Output("civ-msg", "children"), Input("civ-verify", "n_clicks"),
+                  State("civ-opinion", "value"), State("civ-date", "value"),
+                  State({"type": "civ-sel", "id": ALL}, "value"), State({"type": "civ-notif", "id": ALL}, "value"),
+                  State({"type": "civ-url", "id": ALL}, "value"), prevent_initial_call=True)
+    @require_session
+    def civ_verify(n, opinion, on, sel, notif, url):
+        if not n:
+            return no_update
+        if get_current_user_role() != "master":
+            return _alert("Master role required.", "danger")
+        ids = [it["id"]["id"] for it in (ctx.states_list[2] or [])]
+        items = [{"id": i, "notification_no": a, "source_url": b} for i, t, a, b in zip(ids, sel or [], notif or [], url or []) if t]
+        from app.services import document_signing as ds, instrument_verification as iv
+        try:
+            done = iv.verify_many_as_master(get_current_user_id(), items, opinion, on)
+        except ds.SigningRefused as exc:
+            return _alert(str(exc), "danger")
+        return _alert(f"{done} instrument(s) marked verified. Reload the tab to see the new status.", "success")
 
     @app.callback(_TOAST, _BODY, Input("mrl-cat-save", "n_clicks"),
                   State("mrl-cat-id", "value"), State("mrl-cat-status", "value"), State("mrl-cat-app", "value"),
