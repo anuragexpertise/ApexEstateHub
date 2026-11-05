@@ -421,7 +421,7 @@ def register_onboarding_callbacks(app):
                 msg = "The demo vendor completed your eSign."
             else:
                 if method == "paper":
-                    return no_update, _alert("A paper counterpart needs no request: paste the scan's SHA-256 and confirm with your password.", False), no_update
+                    return no_update, _alert("A paper counterpart needs no request: upload the signed scan, then confirm with your password.", False), no_update
                 es.create_request(sid, "agreement", ag["id"], u.get("name") or "Signer", u.get("email"), None,
                                   method or "aadhaar_eSign", ds.sha256(text), uid, signer_user_id=uid)
                 msg = "eSign request started. Finish it with the vendor."
