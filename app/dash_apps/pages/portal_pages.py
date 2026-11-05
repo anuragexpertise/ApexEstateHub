@@ -13,6 +13,7 @@ v3 additions:
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import dash_bootstrap_components as dbc
 from dash import dcc, html
@@ -456,8 +457,9 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
 
     try:
         rows = db._execute(
-            """SELECT instrument_type, title, enactment_year, issuing_authority,
-                      applicability, key_provisions, source_reference, status, last_verified_on
+            """SELECT id, instrument_type, title, enactment_year, issuing_authority,
+                      applicability, key_provisions, source_reference, status, last_verified_on,
+                      verification, source_url, notification_no, verifier_role
                FROM legal_instrument_catalog
                WHERE regime_code = 'CENTRAL'
                  AND instrument_type IN ('Central Act', 'Central Rules')
@@ -521,7 +523,14 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
         for r in items:
             year = f" ({r['enactment_year']})" if r.get("enactment_year") else ""
             applies = r.get("applicability") or "—"
-            rows_html.append(html.Tr([
+            verified = r.get("verification") == "verified"
+            if verified:
+                v_cell = [dbc.Badge("Verified", color="success", pill=True),
+                          html.Br(), html.Small(f"{r.get('last_verified_on') or ''} · {r.get('verifier_role') or ''}", className="text-muted"),
+                          html.Br(), html.A(html.Small(r.get("notification_no") or "source"), href=r.get("source_url"), target="_blank", rel="noopener")]
+            else:
+                v_cell = [dbc.Badge("Unverified", color="secondary", pill=True)]
+            cells = [
                 html.Td([html.Strong(r["title"] + year, style={"fontSize": "12px"}),
                          html.Br(),
                          html.Small(r.get("issuing_authority") or "", className="text-muted")],
@@ -532,7 +541,20 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
                                   pill=True), style={"fontSize": "10px"}),
                 html.Td(html.Small(r.get("source_reference") or "—", className="text-muted"),
                         style={"fontSize": "10px", "maxWidth": "220px"}),
-            ]))
+                html.Td(v_cell, style={"fontSize": "10px", "minWidth": "110px"}),
+            ]
+            if role == "master":      # master only: tick it, give its notification number and source link
+                if verified:
+                    cells.append(html.Td(html.Small("—", className="text-muted")))
+                else:
+                    cells.append(html.Td([
+                        dbc.Checkbox(id={"type": "civ-sel", "id": r["id"]}, value=False, label="Verify"),
+                        dbc.Input(id={"type": "civ-notif", "id": r["id"]}, placeholder="Notification no.", size="sm", className="mt-1",
+                                  style={"fontSize": "11px"}),
+                        dbc.Input(id={"type": "civ-url", "id": r["id"]}, placeholder="https:// source text", size="sm", className="mt-1",
+                                  style={"fontSize": "11px"}),
+                    ], style={"minWidth": "200px"}))
+            rows_html.append(html.Tr(cells))
         sections.append(dbc.Table([
             html.Thead(html.Tr([
                 html.Th("Instrument", style={"fontSize": "11px"}),
@@ -540,9 +562,29 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
                 html.Th("Key Provisions", style={"fontSize": "11px"}),
                 html.Th("Status", style={"fontSize": "11px"}),
                 html.Th("Source", style={"fontSize": "11px"}),
+                html.Th("Verification", style={"fontSize": "11px"}),
+                *([html.Th("Verify (master)", style={"fontSize": "11px"})] if role == "master" else []),
             ])),
             html.Tbody(rows_html),
         ], bordered=True, hover=True, responsive=True, size="sm", style={"fontSize": "12px"}))
+
+    n_unverified = sum(1 for r in rows if r.get("verification") != "verified")
+    verify_panel = html.Div()
+    if role == "master" and n_unverified:
+        verify_panel = dbc.Card(dbc.CardBody([
+            html.H6(f"Verify Central instruments ({n_unverified} unverified)", style={"fontSize": "14px"}),
+            html.P("Tick the instruments you have checked, enter each one's notification number and the https:// link to its text, "
+                   "then give one opinion reference (advocate or CA) and the date that covers them all. All or nothing: if any ticked "
+                   "row is incomplete, nothing is verified. Editing a verified entry later sends it back to unverified.",
+                   style={"fontSize": "12px", "color": "#777"}),
+            dbc.Row([
+                dbc.Col(dbc.Input(id="civ-opinion", placeholder="Opinion reference (advocate or CA)", size="sm"), md=5),
+                dbc.Col(dbc.Input(id="civ-date", type="date", size="sm", value=date.today().isoformat(), max=date.today().isoformat()), md=3),
+                dbc.Col([dbc.Button("Tick all unverified", id="civ-all", color="secondary", outline=True, size="sm", n_clicks=0, className="me-2"),
+                         dbc.Button("Verify ticked", id="civ-verify", color="primary", size="sm", n_clicks=0)], md=4),
+            ], className="g-2"),
+            html.Div(id="civ-msg", style={"fontSize": "12px", "marginTop": "8px"}),
+        ]), className="mt-3 mb-2", style={"borderRadius": "10px"})
 
     last_verified = max((r.get("last_verified_on") for r in rows if r.get("last_verified_on")), default=None)
 
@@ -566,6 +608,7 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
         _sec_hdr(f"{len(rows)} central statutory instruments — CENTRAL regime",
                  f"last verified {last_verified}" if last_verified else "verification date not recorded",
                  "fa-scroll"),
+        verify_panel,
         html.Div(sections),
         render_governance_guide(),
         html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
