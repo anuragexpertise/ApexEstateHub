@@ -89,6 +89,9 @@ def authorize(actor_id, permission, society_id, **ctx) -> tuple[bool, str]:
     return policy.can_do(actor_id, permission, society_id=society_id, **ctx)
 
 
+_CONCERN_PERMISSION: dict = {}
+
+
 def concern_permission(action: str) -> str | None:
     return _CONCERN_PERMISSION.get(action)
 

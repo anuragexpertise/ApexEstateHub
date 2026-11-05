@@ -2302,7 +2302,7 @@ def register_drilldown_callbacks(app):
         if "edit" in card_id and _actor_role not in ("admin", "master"):
             _own_pk = None
             if entity_singular == "apartment":
-                _own_pk = get_current_apartment_id()
+                _own_pk = get_current_linked_id()
             elif entity_singular in ("vendor", "security"):
                 _own_pk = get_current_user_id()
             if _own_pk is not None:

@@ -2907,7 +2907,8 @@ def render_form_card(card_id: str, title: str, icon: str,
                      prefill: dict | None = None,
                      color: str = "#17976e",
                      society_id: int | None = None,
-                     role: str | None = None) -> html.Div:
+                     role: str | None = None,
+                     auth_data: dict | None = None) -> html.Div:
     from app.dash_apps.drilldown.registry import to_plural
     prefill = dict(prefill or {})
     if not prefill.get("id"):
@@ -3091,7 +3092,7 @@ def render_form_card(card_id: str, title: str, icon: str,
             
             # Filter user_type options for apartment_users based on logged in user's role
             if entity == "apartment_users" and fid == "user_type" and role == "apartment":
-                caller_type = auth_data.get("user_type")
+                caller_type = (auth_data or {}).get("user_type")
                 if caller_type in ("family", "tenant"):
                     opts = [o for o in opts if o["value"] == "visitor"]
                 elif caller_type == "visitor":
@@ -8523,7 +8524,6 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
         )
 
     return html.Div([
-        create_channel_card if is_admin else None,
         html.H5("Gate Entry Pass Status (Yellow = Pending | Green = PASS | Red = Denied)",
                 style={"fontWeight": "700", "marginBottom": "14px"}),
         dbc.Row(kpi_cards) if kpi_cards else html.Div("No active gate entries evaluating.", className="text-muted mb-4"),
