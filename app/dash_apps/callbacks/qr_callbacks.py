@@ -1101,7 +1101,7 @@ def register_qr_callbacks(app):
         from app.services.qr_service import validate_qr_code
         society_id = get_current_society_id()
         scanning_user_id = get_current_user_id()
-        result = validate_qr_code(qr_data.strip(), society_id, scanning_user_id, mode=mode)
+        result = validate_qr_code(qr_data.strip(), society_id, scanning_user_id, mode="lookup")
         user = result.get("user") or {}
         role = user.get("role")
         passed = result.get("status") == "PASS"
