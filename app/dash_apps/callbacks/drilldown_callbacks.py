@@ -2302,6 +2302,8 @@ def register_drilldown_callbacks(app):
         if "edit" in card_id and _actor_role not in ("admin", "master"):
             _own_pk = None
             if entity_singular == "apartment":
+                # linked_id is apartments.id for an apartment-role login —
+                # the same server-side value the ownership gates above trust.
                 _own_pk = get_current_linked_id()
             elif entity_singular in ("vendor", "security"):
                 _own_pk = get_current_user_id()
@@ -3832,6 +3834,7 @@ def _render_card(
             color=meta.get("profile_color", "#1d74d8"),
             society_id=filters.get("society_id"),
             role=get_current_user_role(),
+            auth_data=auth,
         )
 
     return _empty_state(f"No content for: {card_id}")

@@ -55,10 +55,19 @@ def label(purpose: str, society_id: int) -> bytes:
 
 
 def _audit(d, society_id, actor_id, action, purpose, version, extra=None):
+    from app.security.pii_masking import redact_for_audit
+    import json
+    # Redact any PII strings in the extra dict before storing in audit_events
+    safe_extra = {}
+    for k, v in ((extra or {}).items()):
+        if isinstance(v, str):
+            safe_extra[k] = redact_for_audit(v, k)
+        else:
+            safe_extra[k] = v
     d._execute(
         "INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source) "
         "VALUES (%s, %s, %s, 'society_signing_key', %s, %s::jsonb, 'app')",
-        (society_id, actor_id, action, f"{purpose}:v{version}", json.dumps({"purpose": purpose, "version": version, **(extra or {})})))
+        (society_id, actor_id, action, f"{purpose}:v{version}", json.dumps({"purpose": purpose, "version": version, **(safe_extra or {})})))
 
 
 def _insert_key(d, society_id, purpose, version, actor_id):

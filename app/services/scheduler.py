@@ -47,6 +47,21 @@ def poll_scheduler_loop():
         expire_polls_job()
         time.sleep(1)
 
+
+def retention_sweep_loop():
+    logger.info("Retention sweep loop started.")
+    while True:
+        try:
+            results = sweep_all_societies()
+            for key, result in results.items():
+                log.info(
+                    "Retention sweep %s.%s: %d rows too old, %d eligible for purge",
+                    key[0], key[1], len(result.too_old), result.total_eligible,
+                )
+        except Exception:
+            logger.exception("retention sweep job failed")
+        time.sleep(86400)  # run once per day
+
 def poll_redis_listener_loop():
     if not redis_sync or not _REDIS_URL:
         return
@@ -130,7 +145,10 @@ def _run_poll_expiry():
 def init_scheduler():
     t1 = threading.Thread(target=poll_scheduler_loop, daemon=True, name="poll-scheduler")
     t1.start()
-    
-    t2 = threading.Thread(target=poll_redis_listener_loop, daemon=True, name="poll-redis-listener")
+
+    t2 = threading.Thread(target=retention_sweep_loop, daemon=True, name="retention-sweep")
     t2.start()
+
+    t3 = threading.Thread(target=poll_redis_listener_loop, daemon=True, name="poll-redis-listener")
+    t3.start()
     logger.info("Event-driven poll scheduler initialized.")

@@ -187,7 +187,20 @@ def create_app(config_name: str | None = None) -> Flask:
     from flask import send_from_directory
 
     @app.route("/assets/<path:filename>")
+    @login_required
     def serve_asset(filename):
+        # G1: Only serve assets belonging to the user's own society
+        # Assets are stored under app/assets/<society_id>/...\n        # Extract the society_id from the filename path prefix
+        # The filename may contain a society_id directory prefix
+        asset_path = Path(str(assets_path)) / filename
+        # Parse society_id from the path
+        parts = str(asset_path).split('/')
+        if len(parts) > 1 and parts[1].isdigit():
+            file_society_id = int(parts[1])
+            # Get current user's society_id
+            if not hasattr(current_user, 'society_id') or current_user.society_id != file_society_id:
+                if current_user.role != 'master':
+                    abort(403)
         return send_from_directory(str(assets_path), filename)
 
     @app.route("/print_doc/<doc_type>")

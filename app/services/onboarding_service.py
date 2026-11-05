@@ -629,10 +629,18 @@ def _committee_complete(society_id: int) -> bool:
 
 def _audit(society_id: int, actor_id: int, action: str, resource_type: str, resource_id: int | None,
            extra: dict) -> None:
+    from app.security.pii_masking import redact_for_audit
     import json as _json
+    # Redact any PII values in the extra dict before storing in audit_events
+    safe_extra = {}
+    for k, v in (extra or {}).items():
+        if isinstance(v, str):
+            safe_extra[k] = redact_for_audit(v, k)
+        else:
+            safe_extra[k] = v
     db._execute("INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source) "
                 "VALUES (%s,%s,%s,%s,%s,%s::jsonb,'app')",
-                (society_id, actor_id, action, resource_type, str(resource_id or 0), _json.dumps(extra or {})))
+                (society_id, actor_id, action, resource_type, str(resource_id or 0), _json.dumps(safe_extra or {})))
 
 
 # Public alias used by the UI and validators (§4.4.6).

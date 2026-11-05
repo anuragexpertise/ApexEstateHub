@@ -492,7 +492,8 @@ def _handle_visitor_scan(result, now_s, qr_payload, mode, society_id,
     vis_name = user.get("visitor_name") or user.get("name", "Visitor")
     flat = user.get("flat_number", "") or ""
     status_val = user.get("status", "")
-    owner_phone = user.get("owner_phone") or ""
+    owner_phone = user.get("owner_phone")
+    masked_owner_phone = mask_mobile(owner_phone) if owner_phone else ""
     is_pass = result.get("status") == "PASS"
     is_pending = result.get("status") == "PENDING_CONFIRMATION"
 
@@ -511,7 +512,7 @@ def _handle_visitor_scan(result, now_s, qr_payload, mode, society_id,
         call_btn = None
         if owner_phone:
             call_btn = html.A(
-                [html.I(className="fas fa-phone me-1"), owner_phone],
+                [html.I(className="fas fa-phone me-1"), masked_owner_phone],
                 href=f"tel:{owner_phone}",
                 className="btn btn-sm btn-outline-danger mt-2",
                 style={"borderRadius": "8px", "fontSize": "11px"},
@@ -1101,7 +1102,9 @@ def register_qr_callbacks(app):
         from app.services.qr_service import validate_qr_code
         society_id = get_current_society_id()
         scanning_user_id = get_current_user_id()
-        result = validate_qr_code(qr_data.strip(), society_id, scanning_user_id, mode="lookup")
+        # Manual lookup has no entry/exit toggle — fall back to
+        # validate_qr_code's default mode ("entry").
+        result = validate_qr_code(qr_data.strip(), society_id, scanning_user_id)
         user = result.get("user") or {}
         role = user.get("role")
         passed = result.get("status") == "PASS"
