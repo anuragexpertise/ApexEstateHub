@@ -1,0 +1,222 @@
+diff --git a/app/__init__.py b/app/__init__.py
+index 24b8f5f..bdfac80 100644
+--- a/app/__init__.py
++++ b/app/__init__.py
+@@ -187,7 +187,20 @@ def create_app(config_name: str | None = None) -> Flask:
+     from flask import send_from_directory
+ 
+     @app.route("/assets/<path:filename>")
++    @login_required
+     def serve_asset(filename):
++        # G1: Only serve assets belonging to the user's own society
++        # Assets are stored under app/assets/<society_id>/...\n        # Extract the society_id from the filename path prefix
++        # The filename may contain a society_id directory prefix
++        asset_path = Path(str(assets_path)) / filename
++        # Parse society_id from the path
++        parts = str(asset_path).split('/')
++        if len(parts) > 1 and parts[1].isdigit():
++            file_society_id = int(parts[1])
++            # Get current user's society_id
++            if not hasattr(current_user, 'society_id') or current_user.society_id != file_society_id:
++                if current_user.role != 'master':
++                    abort(403)
+         return send_from_directory(str(assets_path), filename)
+ 
+     @app.route("/print_doc/<doc_type>")
+diff --git a/app/dash_apps/callbacks/drilldown_callbacks.py b/app/dash_apps/callbacks/drilldown_callbacks.py
+index 0cc8b4c..8f408c1 100644
+--- a/app/dash_apps/callbacks/drilldown_callbacks.py
++++ b/app/dash_apps/callbacks/drilldown_callbacks.py
+@@ -2302,7 +2302,9 @@ def register_drilldown_callbacks(app):
+         if "edit" in card_id and _actor_role not in ("admin", "master"):
+             _own_pk = None
+             if entity_singular == "apartment":
+-                _own_pk = get_current_apartment_id()
++                # linked_id is apartments.id for an apartment-role login —
++                # the same server-side value the ownership gates above trust.
++                _own_pk = get_current_linked_id()
+             elif entity_singular in ("vendor", "security"):
+                 _own_pk = get_current_user_id()
+             if _own_pk is not None:
+@@ -3832,6 +3834,7 @@ def _render_card(
+             color=meta.get("profile_color", "#1d74d8"),
+             society_id=filters.get("society_id"),
+             role=get_current_user_role(),
++            auth_data=auth,
+         )
+ 
+     return _empty_state(f"No content for: {card_id}")
+diff --git a/app/dash_apps/callbacks/qr_callbacks.py b/app/dash_apps/callbacks/qr_callbacks.py
+index 85ac9e5..98449d3 100644
+--- a/app/dash_apps/callbacks/qr_callbacks.py
++++ b/app/dash_apps/callbacks/qr_callbacks.py
+@@ -492,7 +492,8 @@ def _handle_visitor_scan(result, now_s, qr_payload, mode, society_id,
+     vis_name = user.get("visitor_name") or user.get("name", "Visitor")
+     flat = user.get("flat_number", "") or ""
+     status_val = user.get("status", "")
+-    owner_phone = user.get("owner_phone") or ""
++    owner_phone = user.get("owner_phone")
++    masked_owner_phone = mask_mobile(owner_phone) if owner_phone else ""
+     is_pass = result.get("status") == "PASS"
+     is_pending = result.get("status") == "PENDING_CONFIRMATION"
+ 
+@@ -511,7 +512,7 @@ def _handle_visitor_scan(result, now_s, qr_payload, mode, society_id,
+         call_btn = None
+         if owner_phone:
+             call_btn = html.A(
+-                [html.I(className="fas fa-phone me-1"), owner_phone],
++                [html.I(className="fas fa-phone me-1"), masked_owner_phone],
+                 href=f"tel:{owner_phone}",
+                 className="btn btn-sm btn-outline-danger mt-2",
+                 style={"borderRadius": "8px", "fontSize": "11px"},
+@@ -1101,7 +1102,9 @@ def register_qr_callbacks(app):
+         from app.services.qr_service import validate_qr_code
+         society_id = get_current_society_id()
+         scanning_user_id = get_current_user_id()
+-        result = validate_qr_code(qr_data.strip(), society_id, scanning_user_id, mode=mode)
++        # Manual lookup has no entry/exit toggle — fall back to
++        # validate_qr_code's default mode ("entry").
++        result = validate_qr_code(qr_data.strip(), society_id, scanning_user_id)
+         user = result.get("user") or {}
+         role = user.get("role")
+         passed = result.get("status") == "PASS"
+diff --git a/app/dash_apps/drilldown/renderers.py b/app/dash_apps/drilldown/renderers.py
+index 308d49f..7281ac3 100644
+--- a/app/dash_apps/drilldown/renderers.py
++++ b/app/dash_apps/drilldown/renderers.py
+@@ -2907,7 +2907,8 @@ def render_form_card(card_id: str, title: str, icon: str,
+                      prefill: dict | None = None,
+                      color: str = "#17976e",
+                      society_id: int | None = None,
+-                     role: str | None = None) -> html.Div:
++                     role: str | None = None,
++                     auth_data: dict | None = None) -> html.Div:
+     from app.dash_apps.drilldown.registry import to_plural
+     prefill = dict(prefill or {})
+     if not prefill.get("id"):
+@@ -3091,7 +3092,7 @@ def render_form_card(card_id: str, title: str, icon: str,
+             
+             # Filter user_type options for apartment_users based on logged in user's role
+             if entity == "apartment_users" and fid == "user_type" and role == "apartment":
+-                caller_type = auth_data.get("user_type")
++                caller_type = (auth_data or {}).get("user_type")
+                 if caller_type in ("family", "tenant"):
+                     opts = [o for o in opts if o["value"] == "visitor"]
+                 elif caller_type == "visitor":
+@@ -6367,7 +6368,6 @@ def render_member_ledger_card(
+ 
+     return html.Div([
+         header,
+-        mutuality_kpi,
+         html.Div(body, style={"padding": "16px"}),
+     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
+               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
+@@ -8523,7 +8523,6 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
+         )
+ 
+     return html.Div([
+-        create_channel_card if is_admin else None,
+         html.H5("Gate Entry Pass Status (Yellow = Pending | Green = PASS | Red = Denied)",
+                 style={"fontWeight": "700", "marginBottom": "14px"}),
+         dbc.Row(kpi_cards) if kpi_cards else html.Div("No active gate entries evaluating.", className="text-muted mb-4"),
+diff --git a/app/routes/presumed_visitor.py b/app/routes/presumed_visitor.py
+index fa95e36..067a896 100644
+--- a/app/routes/presumed_visitor.py
++++ b/app/routes/presumed_visitor.py
+@@ -9,7 +9,7 @@ is needed there.
+ """
+ 
+ from flask import Blueprint, request, jsonify
+-from flask_login import login_required
++from flask_login import current_user, login_required
+ import logging
+ 
+ from app.services.alert_service import create_walk_in_visitor, get_presumed_visitors
+diff --git a/app/services/onboarding_service.py b/app/services/onboarding_service.py
+index 51c72e1..13385f3 100644
+--- a/app/services/onboarding_service.py
++++ b/app/services/onboarding_service.py
+@@ -629,10 +629,18 @@ def _committee_complete(society_id: int) -> bool:
+ 
+ def _audit(society_id: int, actor_id: int, action: str, resource_type: str, resource_id: int | None,
+            extra: dict) -> None:
++    from app.security.pii_masking import redact_for_audit
+     import json as _json
++    # Redact any PII values in the extra dict before storing in audit_events
++    safe_extra = {}
++    for k, v in (extra or {}).items():
++        if isinstance(v, str):
++            safe_extra[k] = redact_for_audit(v, k)
++        else:
++            safe_extra[k] = v
+     db._execute("INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source) "
+                 "VALUES (%s,%s,%s,%s,%s,%s::jsonb,'app')",
+-                (society_id, actor_id, action, resource_type, str(resource_id or 0), _json.dumps(extra or {})))
++                (society_id, actor_id, action, resource_type, str(resource_id or 0), _json.dumps(safe_extra or {})))
+ 
+ 
+ # Public alias used by the UI and validators (§4.4.6).
+diff --git a/app/services/scheduler.py b/app/services/scheduler.py
+index f17a86c..90a9293 100644
+--- a/app/services/scheduler.py
++++ b/app/services/scheduler.py
+@@ -47,6 +47,21 @@ def poll_scheduler_loop():
+         expire_polls_job()
+         time.sleep(1)
+ 
++
++def retention_sweep_loop():
++    logger.info("Retention sweep loop started.")
++    while True:
++        try:
++            results = sweep_all_societies()
++            for key, result in results.items():
++                log.info(
++                    "Retention sweep %s.%s: %d rows too old, %d eligible for purge",
++                    key[0], key[1], len(result.too_old), result.total_eligible,
++                )
++        except Exception:
++            logger.exception("retention sweep job failed")
++        time.sleep(86400)  # run once per day
++
+ def poll_redis_listener_loop():
+     if not redis_sync or not _REDIS_URL:
+         return
+@@ -130,7 +145,10 @@ def _run_poll_expiry():
+ def init_scheduler():
+     t1 = threading.Thread(target=poll_scheduler_loop, daemon=True, name="poll-scheduler")
+     t1.start()
+-    
+-    t2 = threading.Thread(target=poll_redis_listener_loop, daemon=True, name="poll-redis-listener")
++
++    t2 = threading.Thread(target=retention_sweep_loop, daemon=True, name="retention-sweep")
+     t2.start()
++
++    t3 = threading.Thread(target=poll_redis_listener_loop, daemon=True, name="poll-redis-listener")
++    t3.start()
+     logger.info("Event-driven poll scheduler initialized.")
+diff --git a/app/services/signing_service.py b/app/services/signing_service.py
+index c01990a..1b560a5 100644
+--- a/app/services/signing_service.py
++++ b/app/services/signing_service.py
+@@ -55,10 +55,19 @@ def label(purpose: str, society_id: int) -> bytes:
+ 
+ 
+ def _audit(d, society_id, actor_id, action, purpose, version, extra=None):
++    from app.security.pii_masking import redact_for_audit
++    import json
++    # Redact any PII strings in the extra dict before storing in audit_events
++    safe_extra = {}
++    for k, v in ((extra or {}).items()):
++        if isinstance(v, str):
++            safe_extra[k] = redact_for_audit(v, k)
++        else:
++            safe_extra[k] = v
+     d._execute(
+         "INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source) "
+         "VALUES (%s, %s, %s, 'society_signing_key', %s, %s::jsonb, 'app')",
+-        (society_id, actor_id, action, f"{purpose}:v{version}", json.dumps({"purpose": purpose, "version": version, **(extra or {})})))
++        (society_id, actor_id, action, f"{purpose}:v{version}", json.dumps({"purpose": purpose, "version": version, **(safe_extra or {})})))
+ 
+ 
+ def _insert_key(d, society_id, purpose, version, actor_id):

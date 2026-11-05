@@ -9,7 +9,7 @@ is needed there.
 """
 
 from flask import Blueprint, request, jsonify
-from flask_login import login_required
+from flask_login import current_user, login_required
 import logging
 
 from app.services.alert_service import create_walk_in_visitor, get_presumed_visitors
