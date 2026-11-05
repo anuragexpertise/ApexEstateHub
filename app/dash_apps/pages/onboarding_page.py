@@ -466,7 +466,12 @@ def signing_panel(society_id: int, user_id: int | None, role: str | None = None)
         html.Details([html.Summary("Read the Agreement text", style={"fontSize": "12.5px", "cursor": "pointer"}),
                       html.Pre(ag["body_text"], style={"whiteSpace": "pre-wrap", "fontSize": "11.5px", "maxHeight": "320px", "overflow": "auto",
                                                        "background": "#fff", "border": "1px solid #e1e7ef", "padding": "8px"})]),
-        html.Ul(rows, style={"padding": "0", "margin": "8px 0"}), control, esign_row], style=_CARD)
+        html.Ul(rows, style={"padding": "0", "margin": "8px 0"}),
+        html.Div([dbc.Button([html.I(className="fas fa-print me-2"), "Print the Agreement with all its annexes"], id=f"{P}-print",
+                             color="secondary", outline=True, size="sm", n_clicks=0),
+                  html.Small(" For a paper copy each signer signs by hand and scans back (Paper method). Opens a print-ready page.", style=_MUTED),
+                  dcc.Download(id=f"{P}-print-dl")], style={"margin": "6px 0"}),
+        control, esign_row], style=_CARD)
 
 
 # ── stage 7: advisers (V5.9) ────────────────────────────────────────────────
