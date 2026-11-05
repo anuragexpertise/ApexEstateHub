@@ -393,6 +393,23 @@ def register_onboarding_callbacks(app):
         return body, _alert("Signed." + (" The Agreement is sealed." if st.get("sealed") else "")), mk
 
     @app.callback(
+        Output(f"{P}-print-dl", "data"),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Input(f"{P}-print", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_print_agreement(n):
+        s = _session()
+        if not n or not s or not s[0]:
+            return no_update, no_update
+        try:
+            name, page = ob.agreement_print_html(s[0])
+        except ob.OnboardingError as exc:
+            return no_update, _alert(str(exc), False)
+        return dcc.send_string(page, name, type="text/html"), no_update
+
+    @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),

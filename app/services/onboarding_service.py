@@ -1857,6 +1857,139 @@ def write_agreement(society_id: int) -> dict:
     return {**ag, "body_text": text}
 
 
+_IMG_MIME = {".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+
+def _assets_root():
+    from pathlib import Path
+    try:
+        from app.dash_apps.callbacks.drilldown_callbacks import ASSETS_ROOT
+        return Path(ASSETS_ROOT).resolve()
+    except Exception:                                                  # noqa: BLE001
+        return (Path(__file__).resolve().parent.parent / "assets").resolve()
+
+
+def _image_data_uri(rel: str | None) -> str | None:
+    """A stored image under the assets folder as a data: URI, so the printed file needs no server. None when it is missing,
+    not an image, or points outside the assets folder."""
+    import base64
+    from pathlib import Path
+    rel = (rel or "").strip().lstrip("/")
+    if rel.startswith("assets/"):
+        rel = rel[len("assets/"):]
+    mime = _IMG_MIME.get(Path(rel).suffix.lower())
+    if not rel or not mime:
+        return None
+    root = _assets_root()
+    try:
+        f = (root / rel).resolve()
+        if root not in f.parents or not f.is_file():
+            return None
+        return f"data:{mime};base64," + base64.b64encode(f.read_bytes()).decode()
+    except OSError:
+        return None
+
+
+def _print_value(v, society_id: int | None = None, evidence: dict | None = None) -> str:
+    """Render any JSON annex value as plain, printable HTML (tables for dicts / lists of dicts). Every image the annex refers to
+    (a stored image path, or the SHA-256 of an attached image scan) is embedded in place."""
+    from html import escape
+    from pathlib import Path
+    evidence = evidence or {}
+    if v is None or v == "":
+        return "&mdash;"
+    if isinstance(v, bool):
+        return "Yes" if v else "No"
+    if isinstance(v, dict):
+        rows = "".join(f"<tr><th>{escape(str(k).replace('_', ' ').capitalize())}</th><td>{_print_value(x, society_id, evidence)}</td></tr>"
+                       for k, x in v.items())
+        return f"<table class='kv'>{rows}</table>" if rows else "&mdash;"
+    if isinstance(v, list):
+        if not v:
+            return "&mdash;"
+        if all(isinstance(x, dict) for x in v):
+            cols = list(dict.fromkeys(k for x in v for k in x))
+            head = "".join(f"<th>{escape(str(c).replace('_', ' ').capitalize())}</th>" for c in cols)
+            body = "".join("<tr>" + "".join(f"<td>{_print_value(x.get(c), society_id, evidence)}</td>" for c in cols) + "</tr>" for x in v)
+            return f"<table class='grid'><tr>{head}</tr>{body}</table>"
+        return "<ul>" + "".join(f"<li>{_print_value(x, society_id, evidence)}</li>" for x in v) + "</ul>"
+    txt = str(v)
+    if Path(txt).suffix.lower() in _IMG_MIME:                          # a stored image path (e.g. a signature image)
+        uri = _image_data_uri(signature_path(society_id, txt) if society_id and "/" not in txt else txt)
+        return (f"<img class='embed' src='{uri}' alt='image'>" if uri else f"{escape(txt)} <em>(image file not found)</em>")
+    ev = evidence.get(txt.lower()) if len(txt) == 64 else None          # the SHA-256 of an attached scan
+    if ev:
+        is_img = Path(ev["stored_name"]).suffix.lower() in _IMG_MIME
+        uri = _image_data_uri(f"{society_id}/evidence/{ev['stored_name']}") if is_img else None
+        fname = escape(str(ev.get("filename") or "scan"))
+        return (f"<code>{escape(txt)}</code><br><img class='embed scan' src='{uri}' alt='{fname}'>" if uri else
+                f"<code>{escape(txt)}</code><br><em>{fname} (a PDF or unreadable scan: kept on file, identified by this SHA-256)</em>")
+    return escape(txt)
+
+
+def agreement_print_html(society_id: int) -> tuple[str, str]:
+    """The Agreement text and every sealed annex (A-D) in full, as one self-contained printable HTML file, for paper signing.
+    All images the annexes refer to are embedded, and the four parties' signature block is repeated in the footer of every printed
+    page. Returns (file name, html). Refused until the Agreement is issued, so a paper copy always matches what the system holds."""
+    from html import escape
+    ag = _row("SELECT agreement_no, body_text FROM society_agreements WHERE society_id=%s", (society_id,))
+    sealed = {r["annex_code"]: r for r in _rows(
+        "SELECT annex_code, content, content_hash FROM onboarding_annexes WHERE society_id=%s AND status='sealed'", (society_id,))}
+    if not ag or not ag.get("body_text") or set(sealed) != set(ANNEX_CODES):
+        raise OnboardingError("The Agreement is issued for printing once annexes A, B, C and D are sealed.")
+    titles = {"A": "Annex A: legal regime and bye-laws", "B": "Annex B: review of the setup",
+              "C": "Annex C: opening financial position", "D": "Annex D: data-protection and custody schedule"}
+    soc = _row("SELECT name FROM societies WHERE id=%s", (society_id,)) or {}
+    officers = seated_officers(society_id)
+    try:
+        evidence = {str(r["sha256"]).lower(): r for r in (_rows(
+            "SELECT sha256, stored_name, filename FROM onboarding_evidence WHERE society_id=%s", (society_id,)) or [])}
+    except Exception:                                                  # noqa: BLE001 - scans are an extra; never block the print
+        evidence = {}
+
+    # Footer: all four parties on every printed page (recorded signature image where one is on record; the operator has none).
+    cells = []
+    for o in CORE_OFFICES:
+        v = officers.get(o) or {}
+        uri = _image_data_uri(signature_path(society_id, v.get("signature_image")))
+        sigbox = ("<img src='" + uri + "' alt='signature'>") if uri else "<div class='blank'></div>"
+        cells.append(f"<td>{sigbox}<div class='who'>{escape(OFFICE_LABEL[o])}<br>{escape(str(v.get('holder_name') or ''))}</div></td>")
+    cells.append("<td><div class='blank'></div><div class='who'>For the Operator<br>authorised signatory</div></td>")
+    footer = f"<tfoot><tr><td><table class='foot'><tr>{''.join(cells)}</tr></table></td></tr></tfoot>"
+
+    def page(inner: str, cls: str = "") -> str:
+        # one table per section: the browser repeats its <tfoot> at the bottom of every printed page of that section
+        return f"<table class='wrap {cls}'><tbody><tr><td class='body'>{inner}</td></tr></tbody>{footer}</table>"
+
+    parts = [page(f"<h1>Agreement</h1><pre>{escape(ag['body_text'])}</pre>")]
+    for code in ANNEX_CODES:
+        r = sealed[code]
+        content = r["content"] if isinstance(r["content"], dict) else json.loads(r["content"])
+        parts.append(page(f"<h1>{titles[code]}</h1><p class='hash'>SHA-256 {escape(str(r['content_hash']))}</p>"
+                          f"{_print_value(content, society_id, evidence)}", "brk"))
+    sig = "".join(
+        f"<tr><td>{escape(OFFICE_LABEL[o])}<br><small>{escape(str((officers.get(o) or {}).get('holder_name') or ''))}</small></td>"
+        "<td class='line'></td><td class='line'></td></tr>" for o in CORE_OFFICES)
+    sig += "<tr><td>For the Operator<br><small>authorised signatory</small></td><td class='line'></td><td class='line'></td></tr>"
+    parts.append(page("<h1>Paper counterpart: signatures</h1>"
+                      "<p>Each signer signs and dates this page by hand. Scan it and upload the scan in EstateHub, then confirm with your login password.</p>"
+                      f"<table class='sig'><tr><th>Signer</th><th>Signature</th><th>Date</th></tr>{sig}</table>", "brk"))
+    css = ("@page{size:A4;margin:12mm}body{font:12pt/1.4 Georgia,serif;margin:0}h1{font-size:15pt;border-bottom:1px solid #000;padding-bottom:3px}"
+           "pre{white-space:pre-wrap;font:inherit}table.wrap{width:100%;border-collapse:collapse;border:0}table.wrap.brk{page-break-before:always}"
+           "table.wrap>tbody>tr>td.body,table.wrap>tfoot>tr>td{border:0;padding:0}table.wrap>tfoot{display:table-footer-group}"
+           "table{border-collapse:collapse;width:100%;margin:6px 0}th,td{border:1px solid #666;padding:4px 6px;vertical-align:top;text-align:left;font-size:10.5pt}"
+           "table table{margin:0}th{background:#eee;width:28%}table.grid th{width:auto}.hash{font:9pt monospace;word-break:break-all}"
+           "img.embed{max-width:220px;max-height:110px;border:1px solid #bbb}img.scan{max-width:100%;max-height:150mm}"
+           "table.foot{margin-top:8px}table.foot td{width:25%;text-align:center;font-size:8.5pt;padding:2px 4px;border:1px solid #666;page-break-inside:avoid}"
+           "table.foot img{max-width:100%;max-height:34px}.blank{height:34px}.who{font-size:8pt}"
+           "td.line{height:42px}.sig td,.sig th{width:auto}@media print{.noprint{display:none}}")
+    doc = (f"<!doctype html><html><head><meta charset='utf-8'><title>Agreement - {escape(str(soc.get('name') or ''))}</title>"
+           f"<style>{css}</style></head><body><p class='noprint'>Use your browser's Print command (Ctrl+P) if the print dialog does not open.</p>"
+           + "".join(parts) + "<script>window.addEventListener('load',function(){setTimeout(function(){window.print()},600)})</script></body></html>")
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", str(ag.get("agreement_no") or "agreement")).strip("_") or "agreement"
+    return f"Agreement_{safe}_with_annexes.html", doc
+
+
 def assert_ready_to_sign(society_id: int) -> None:
     """The gate on signing the Agreement: committee seated, annexes sealed and inside the text, operator identified."""
     if state_of(society_id) != "setup draft":
