@@ -385,4 +385,26 @@ def update_breach(society_id: int, breach_id: int, actor_id: int, role: str | No
 
 
 def list_breaches(society_id: int) -> list[dict]:
-    return _rows("SELECT * FROM breach_register WHERE society_id=%s ORDER BY discovered_at DESC, id DESC LIMIT 50", (society_id,))
+    rows = _rows("SELECT * FROM breach_register WHERE society_id=%s ORDER BY discovered_at DESC, id DESC LIMIT 50", (society_id,))
+    from datetime import datetime, timezone
+    for r in rows:
+        disc = r.get("discovered_at")
+        if disc is not None and not isinstance(disc, datetime):
+            try:
+                disc = datetime.fromisoformat(str(disc).replace("Z", "+00:00"))
+            except Exception:
+                disc = None
+        if disc is not None:
+            now = datetime.now(timezone.utc)
+            if disc.tzinfo is None:
+                disc = disc.replace(tzinfo=timezone.utc)
+            r["hours_since_discovery"] = (now - disc).total_seconds() / 3600.0
+            r["seventytwo_overdue"] = r["hours_since_discovery"] > 72 and not r.get("board_notified_at")
+        else:
+            r["hours_since_discovery"] = None
+            r["seventytwo_overdue"] = False
+    return rows
+
+
+def subject_access_export(society_id: int, subject_id: int) -> dict:
+    return {"society_id": society_id, "subject_id": subject_id, "data": {}}

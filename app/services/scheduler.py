@@ -1,6 +1,11 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 import logging
 from database.db_manager import db
+try:
+    from app.services.retention_engine import sweep_all_societies
+except Exception:
+    def sweep_all_societies():
+        return {}
 import app.services.push_service as PushService
 from app.services.redis_broker import redis_sync, _REDIS_URL
 import threading

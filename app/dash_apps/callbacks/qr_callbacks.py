@@ -7,6 +7,7 @@ import base64
 from datetime import datetime
 
 from app.security.guards import require_session
+from app.security.pii_masking import mask_mobile
 from app.security.audit_context import (
     get_current_user_id, get_current_user_role,
     get_current_society_id, get_current_linked_id,
