@@ -59,3 +59,16 @@ def test_arrears_mismatch_blocks(monkeypatch):
     _accounts(monkeypatch)
     _, ctl = ob._annex_c(1, _decl({}, [{"flat_number": "A-1", "amount": "400"}]))
     assert not ctl["arrears_tie"]["passed"]
+
+
+def test_draft_rows_override_stale_legacy_bf(monkeypatch):
+    """Brought Forward re-applied in the wizard (draft) must reach Annex C even if an old top-level `bf` snapshot exists."""
+    _accounts(monkeypatch)
+    d = _decl({}, [])                                        # legacy bf: bank 1000, debtors 500, corpus 1500
+    d["draft"]["brought_forward"]["rows"] = [{"acc_id": 1, "bf_amount": "2000"}, {"acc_id": 3, "bf_amount": "2000"}]
+    content, ctl = ob._annex_c(1, d)
+    assert Decimal(content["total_debits"]) == 2000 and Decimal(content["total_credits"]) == 2000 and ctl["balanced"]["passed"]
+    assert Decimal(content["bank_and_deposit_balances"]) == 2000
+    d["draft"]["brought_forward"]["rows"] = []               # an explicitly empty draft is not replaced by the legacy snapshot
+    content, ctl = ob._annex_c(1, d)
+    assert Decimal(content["total_debits"]) == 0 and not ctl["balanced"]["passed"]

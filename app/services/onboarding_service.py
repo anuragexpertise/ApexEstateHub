@@ -1376,9 +1376,12 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
     decl = decl or {}
     bf = decl.get("bf") or {}
     draft_bf = ((decl.get("draft") or {}).get("brought_forward")) or {}
-    # Brought-forward rows live in the draft; fall back to the legacy top-level bf key.
-    if not bf.get("rows"):
-        bf = {"fy": draft_bf.get("fy") or bf.get("fy"), "rows": draft_bf.get("rows") or bf.get("rows") or []}
+    # The wizard draft is the single source of truth. The legacy top-level `bf` key is a one-off snapshot written by the
+    # old submit path and never refreshed, so it is used only when the draft has no Brought Forward rows at all.
+    if draft_bf.get("rows") is not None:
+        bf = {"fy": draft_bf.get("fy") or bf.get("fy"), "rows": draft_bf["rows"]}
+    elif not bf.get("rows"):
+        bf = {"fy": draft_bf.get("fy") or bf.get("fy"), "rows": []}
     inputs = decl.get("annex_c_inputs") or {}
     fy = int(bf.get("fy") or date.today().year)
     accs = {a["id"]: a for a in _rows("SELECT id, name, tab_name, drcr_account FROM accounts WHERE society_id=%s", (society_id,))}

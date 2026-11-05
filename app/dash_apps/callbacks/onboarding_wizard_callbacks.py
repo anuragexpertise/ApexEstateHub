@@ -418,6 +418,10 @@ def register_onboarding_wizard_callbacks(app):
         except ob.OnboardingError as exc:
             # Keep the modal open and say why inline, so a mistyped password is a retry, not a restart.
             return _alert(str(exc), False), no_update, no_update, no_update, str(exc)
+        try:                                   # regenerate Annexes A-D from the draft just saved, so Annex C is never a stale snapshot
+            ob.build_annexes(sid, uid)
+        except ob.OnboardingError:
+            pass
         body, mk = op.hub_body(role, sid, uid), op.marker(sid)
         return _alert(msg), body, mk, False, ""
 
