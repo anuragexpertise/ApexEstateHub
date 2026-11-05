@@ -1932,6 +1932,24 @@ def render_category_content(category, society_id=None, state=None, constitution=
         if society_id:
             row = db._execute("SELECT financial_year FROM brought_forward WHERE society_id = :id LIMIT 1", {"id": society_id}, fetch_one=True)
             if row: s_fy = row.get("financial_year") or s_fy
+        # Values already saved in the wizard draft: the inputs below must show them, otherwise revisiting this step
+        # shows zeros and the next Next/Previous saves an empty row list over the saved Brought Forward.
+        _saved_bf = {}
+        if society_id:
+            try:
+                from app.services import onboarding_service as _ob_bf
+                _bf_draft = (_ob_bf.load_draft(society_id).get("brought_forward")) or {}
+                _saved_bf = {int(r["acc_id"]): r for r in (_bf_draft.get("rows") or []) if r.get("acc_id") is not None}
+                if _bf_draft.get("fy"):
+                    s_fy = _bf_draft["fy"]
+            except Exception:                                              # noqa: BLE001 - never break the render
+                _saved_bf = {}
+
+        def _saved_amt(acc_id):
+            try:
+                return float(Decimal(str((_saved_bf.get(acc_id) or {}).get("bf_amount") or 0)))
+            except Exception:                                              # noqa: BLE001
+                return 0.0
         from database.seed import ACCOUNTS
 
         # UP AOA labels for the equity / fund accounts. The fund rows come from the shared fund catalogue
@@ -1989,8 +2007,9 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 _name_kids.append(html.Small(f"{acc[2] or ''} · {acc[5] or ''}"))
                 out.append(html.Div([
                     html.Div(_name_kids, className="sw-bf-name"),
-                    dbc.Input(id={"type": "sw-bf-amt", "acc_id": acc[0]}, type="number", value=0.0, step=0.01, min=0, size="sm"),
-                    dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc[0]}, type="text", placeholder="Remarks...", size="sm", className="sw-bf-remarks"),
+                    dbc.Input(id={"type": "sw-bf-amt", "acc_id": acc[0]}, type="number", value=_saved_amt(acc[0]), step=0.01, min=0, size="sm"),
+                    dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc[0]}, type="text", placeholder="Remarks...", size="sm", className="sw-bf-remarks",
+                              value=(_saved_bf.get(acc[0]) or {}).get("remarks") or None),
                 ], className="sw-bf-row", style={**indent, "paddingRight": "12px"}))
             else:        # group heading
                 out.append(html.Div(acc[3] or "", className="sw-bf-group", style=indent))
