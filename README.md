@@ -2389,7 +2389,7 @@ The Secretary holds `roles.manage` and `enrollment.commit`, but the committee an
 | **Vote in polls** ✅ | Polls → open poll → vote | One vote per apartment, secret ballot, weighted by undivided interest when the poll says so; quorum 30 %, majority 51 % of eligible votes; admins cannot vote |
 | **Raise and follow concerns** ✅ | Concerns → New → track; invite, assign or close only your own (§4.6) | Close only after every assignee has resolved |
 | **Answer gate alerts** ✅ | Channels / gate-alerts panel → Approve or Deny | Only a login linked to that flat can answer; Security cannot (`respond_to_alert`) |
-| **Pre-register an expected visitor** ⛔ | API `/api/owner/presumed-visitors` | No screen calls it, and the file does not import `current_user` (§23.5, item 1) |
+| **Pre-register an expected visitor** ⛔ | API `/api/owner/presumed-visitors` | The API works; no screen calls it yet (§23.5, item 1) |
 | **Subscribe to alert channels** ✅ | Channels → profile → Subscribe | School bus, taxi and visitor channels |
 | **Manage the household** ✅ | Members → New → family, tenant or visitor login | `_save_apartment_user` |
 | **Buy event tickets, print own receipts** ✅ | Events → Buy Tickets; Bills Paid → Print | See §23.3 |
@@ -2416,7 +2416,7 @@ The Secretary holds `roles.manage` and `enrollment.commit`, but the committee an
 | **Visitor login** ✅ | Read-only portal: Financials, Concerns and Polls hidden; no member creation | Capability set is `resident.self.view` only |
 | **Walk-in at the gate** ✅ | Security → walk-in form (name, mobile, purpose, flat, vehicle) → visitor row `pending` and the gate notice is logged → push alert to the flat's owner → Approve (`entered`) or Deny (`denied`) | Two-actor rule: the guard cannot approve (`alert_service.py`) |
 | **QR visitor pass** ✅ | Security scans a `VIS` pass → pre-approved passes enter at once; pending passes wait for the owner | §11 |
-| **Presumed visitor** 🟡 | Security → Channels → presumed visitors → Notify owner / Call | Rows come from `visitors`; the owner-side creation route is broken (§23.5, item 1) |
+| **Presumed visitor** 🟡 | Security → Channels → presumed visitors → Notify owner / Call | Rows come from `visitors`; the owner-side creation route has no screen yet (§23.5, item 1) |
 
 #### Vendors
 
@@ -2571,8 +2571,8 @@ The following tables map every user-reachable workflow in the application, organ
 
 ### 23.5 Mismatches found while mapping
 
-1. **Owner pre-registration of visitors cannot run.** `app/routes/presumed_visitor.py` uses `current_user` without importing it, and no screen calls the route. Security's presumed-visitor list reads existing `visitors` rows and is not affected.
-2. **Family and bills.** The matrix in §4.3 says a family member can view bills. In the code, `finance.self.view` is held by owners and vendors only, while the sidebar and drill-down blank the money tabs for tenants and visitors only. Decide which is intended. Also, the gate-alert callback checks only `role = apartment` before calling `respond_to_alert`; whether the service narrows it to owners was not traced.
+1. **Owner pre-registration of visitors has no screen.** The route `app/routes/presumed_visitor.py` imports `current_user`, is registered in `app/__init__.py`, and works as an API; but no screen calls it. It checks `role = apartment` only, although its message says owners only, so a family, tenant or visitor login can also pre-register. Decide whether that is intended. Security's presumed-visitor list reads existing `visitors` rows (it no longer repeats a visitor once per login of the flat).
+2. **Family and bills.** The matrix in §4.3 says a family member can view bills. In the code, `finance.self.view` is held by owners and vendors only, while the sidebar and drill-down blank the money tabs for tenants and visitors only. Decide which is intended. The gate-alert callback checks `role = apartment`, and `respond_to_alert` then requires the caller to be an `apartment` login of that alert's flat and society (any resident type; Security cannot). An alert not linked to a flat is refused.
 3. **Supervisor.** Holds `concern.triage` and `gate.visitor.process`, but its concern and visitor screens are view-only.
 4. **Secretary.** Holds `roles.manage` and `enrollment.commit`, while the committee and team-login services accept only the society Admin.
 5. **Office-bearer powers.** `authorization.py` grants the President, Secretary and Committee concern, poll, channel and event capabilities, and the Treasurer reverse and reconcile. The screens confirmed for them are the signing panels, the governance tabs, the FY lock and the tax-rate screens. The Owner-portal concern, poll and event screens were not traced to these capabilities.

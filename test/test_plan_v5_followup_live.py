@@ -30,9 +30,9 @@ def w():
                                      "state": "UP", "constitution": "AOA", "validity": str(date.today() + timedelta(days=30)), "created_by": MASTER_ID})
     db._execute("UPDATE societies SET onboarding_state='setup draft' WHERE id=%s", (sid,))
     db._execute("INSERT INTO onboarding_annexes (society_id, annex_code, content, content_hash, status) VALUES "
-                "(%s,'A','{}','a','sealed'),(%s,'B','{}','b','sealed'),(%s,'C','{}','c','sealed')", (sid, sid, sid))
+                "(%s,'A','{}','a','sealed'),(%s,'B','{}','b','sealed'),(%s,'C','{}','c','sealed'),(%s,'D','{}','d','sealed')", (sid, sid, sid, sid))
     ag = db._execute("INSERT INTO society_agreements (society_id, body_text) VALUES (%s,%s) RETURNING id",
-                     (sid, "Agreement between the Society and EstateHub LLP of Agra, UP. Annex hashes a b c."), fetch_one=True)["id"]
+                     (sid, "Agreement between the Society and EstateHub LLP of Agra, UP. Annex hashes a b c d."), fetch_one=True)["id"]
     users = {}
     for i, off in enumerate(("president", "secretary", "treasurer"), start=1):
         apt = db._execute("INSERT INTO apartments (society_id, flat_number, owner_name, active) VALUES (%s,%s,'Owner Name',TRUE) RETURNING id",

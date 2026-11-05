@@ -10,6 +10,7 @@ ledger, audit and signature tables are append-only, leaves them behind: use a th
     ESTATEHUB_LIVE_TESTS=1 PGHOST=localhost PGDATABASE=... PGUSER=... PGPASSWORD=... PGSSLMODE=disable \
         SECRET_VAULT_KEY=... pytest test/test_plan_v5_onboarding_live.py
 """
+import base64
 import json
 import os
 from datetime import date, timedelta
@@ -22,6 +23,7 @@ from test.live_db_gate import LIVE_DB_REASON, live_db_enabled
 pytestmark = [pytest.mark.skipif(not live_db_enabled(), reason=LIVE_DB_REASON), pytest.mark.postgres_integration]
 
 PDF = b"%PDF-1.4\n% signed minutes of the general body meeting\n"
+PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")  # a 1x1 signature image
 MASTER_ID = 1
 
 
@@ -58,7 +60,7 @@ def world():
 
 def seat(w, office, flat, email):
     return w["ob"].seat_founding_officer(w["admin"], w["sid"], office, flat, f"{office.title()} Person", email, "9876543210",
-                                         "Temp@12345", f"GBM 1-Oct-2026 Res {flat}", "minutes.pdf", PDF, 1200)
+                                         "Temp@12345", f"GBM 1-Oct-2026 Res {flat}", "minutes.pdf", PDF, "signature.png", PNG, 1200)
 
 
 def _post_voucher(db, sid, dr_acc, cr_acc, amount, journal, entity=None):
@@ -247,8 +249,8 @@ def test_17_office_bearer_arrears_declared_in_annex_c_block_activation(world):
     try:
         db._execute("UPDATE societies SET onboarding_state='setup draft' WHERE id=%s", (sid2,))
         db._execute("INSERT INTO onboarding_annexes (society_id, annex_code, content, content_hash, status) VALUES "
-                    "(%s,'A','{}','a','sealed'),(%s,'B','{}','b','sealed'),(%s,'C',%s::jsonb,'c','sealed')",
-                    (sid2, sid2, sid2, json.dumps({"financial_year": 2026, "opening_balances": [],
+                    "(%s,'A','{}','a','sealed'),(%s,'B','{}','b','sealed'),(%s,'D','{}','d','sealed'),(%s,'C',%s::jsonb,'c','sealed')",
+                    (sid2, sid2, sid2, sid2, json.dumps({"financial_year": 2026, "opening_balances": [],
                                                    "arrears_by_flat": [{"flat_number": "B-1", "amount": "5000", "overdue_days": 120}]})))
         ag = db._execute("INSERT INTO society_agreements (society_id, body_text) VALUES (%s,'t') RETURNING id", (sid2,), fetch_one=True)["id"]
         db._execute("INSERT INTO signed_records (society_id, subject_kind, subject_id, purpose, item_hash, signature, key_version, key_id, algorithm, signers) "
@@ -275,7 +277,7 @@ def test_17_office_bearer_arrears_declared_in_annex_c_block_activation(world):
 def test_20_first_privacy_notice_was_published_at_activation(world):
     from app.services import dpdp_service as dp
     n = dp.current_notice(world["sid"])
-    assert n and n["version"] == 1 and "Meera Rao" in n["body_text"] and "WHO TO ASK" in n["body_text"]
+    assert n and n["version"] == 1 and "G. Officer" in n["body_text"] and "WHO TO ASK" in n["body_text"]
 
 
 def test_21_dashboard_is_gated_until_the_notice_is_accepted(world):

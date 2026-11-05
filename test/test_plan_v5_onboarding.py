@@ -25,7 +25,9 @@ class TestV5Onboarding:
         """societies.onboarding_state exists with the v5 state set."""
         schema = _schema()
         assert "onboarding_state VARCHAR(20) NOT NULL DEFAULT 'registered'" in schema
-        assert "CHECK (onboarding_state IN ('registered', 'committee seated', 'setup draft', 'active', 'suspended'))" in schema
+        # Whitespace-tolerant: the schema file may be laid out on one line or one value per line.
+        flat = re.sub(r"\s+", " ", schema).replace("( ", "(").replace(" )", ")")
+        assert "CHECK (onboarding_state IN ('registered', 'committee seated', 'setup draft', 'active', 'suspended'))" in flat
 
     def test_v5_1_onboarding_guard_triggers(self):
         """A non-active society cannot post receipts, expenses or journals."""

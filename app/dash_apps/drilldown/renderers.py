@@ -6368,7 +6368,6 @@ def render_member_ledger_card(
 
     return html.Div([
         header,
-        mutuality_kpi,
         html.Div(body, style={"padding": "16px"}),
     ], style={"borderRadius": "16px", "border": f"1px solid {color}22",
               "boxShadow": f"0 10px 30px {color}18", "overflow": "hidden"})
