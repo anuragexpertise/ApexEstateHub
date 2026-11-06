@@ -23,21 +23,22 @@ def test_activation_sql_requires_annex_d():
 
 
 def test_dpdp_instruments_seeded_unverified_and_always_applicable():
-    import database.seed as seed
-    rows = {r[2]: r for r in seed.LEGAL_INSTRUMENTS_CENTRAL}
+    # The catalogue moved out of seed.py into database/legal_reference.py (installed by migrate.py /
+    # reset_database.py), and its rows are dicts rather than positional tuples.
+    from database import legal_reference as lr
+    rows = {r["title"]: r for r in lr.INSTRUMENTS}
     act = rows["Digital Personal Data Protection Act, 2023"]
     rules = rows["Digital Personal Data Protection Rules, 2025"]
-    assert act[0] == "CENTRAL" and act[1] == "Central Act" and act[10] == "always"
-    assert rules[1] == "Central Rules" and rules[10] == "always"
-    # no row may claim verification: the seeder never sets it, and no source URL is invented
-    assert all(len(r) == 11 for r in seed.LEGAL_INSTRUMENTS_CENTRAL)
+    assert act["regime_code"] == "CENTRAL" and act["instrument_type"] == "Central Act"
+    assert rules["instrument_type"] == "Central Rules"
+    assert act["applies_when"] == "always" and rules["applies_when"] == "always"
+    # No row may claim verification: this file carries only researched leads, never source_url /
+    # notification_no (what a human sets after opening the text) and never a verification state.
+    assert all("verification" not in r and "source_url" not in r for r in lr.INSTRUMENTS)
     # uq_legal_instrument is (regime_code, title, enactment_year): no duplicates
-    keys = [(r[0], r[2], r[3]) for r in seed.LEGAL_INSTRUMENTS_CENTRAL]
+    keys = [lr.key_of(r) for r in lr.INSTRUMENTS]
     assert len(keys) == len(set(keys))
-    allowed = {"always", "central_it_tan", "central_tds", "central_gst", "central_rera",
-               "has_employees", "has_security_agency", "info"}
-    assert {r[10] for r in seed.LEGAL_INSTRUMENTS_CENTRAL} <= allowed
-    assert {r[1] for r in seed.LEGAL_INSTRUMENTS_CENTRAL} <= {"Act", "Rules", "Bye-laws", "Notification", "Central Act", "Central Rules"}
+    assert lr.validate_instruments() == []
 
 
 def test_signature_path_and_url():
