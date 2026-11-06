@@ -70,6 +70,35 @@ document.addEventListener("DOMContentLoaded", function () {
         }, 5000);
     }
 
+    // On small screens, close the sidebar drawer as soon as a sidebar tab is tapped.
+    // Sidebar tabs are dcc.Link (History API, no page reload), so without this the
+    // drawer stays open over the page the user just navigated to.
+    // We click the overlay instead of editing classes by hand: the toggle_sidebar
+    // callback owns the sidebar class + sidebar-open-store, and routing the close
+    // through it keeps the next hamburger tap in sync. Delegated on document so it
+    // survives Dash re-rendering the nav list on every route change.
+    document.addEventListener("click", function (event) {
+        if (!window.matchMedia("(max-width: 767px)").matches) {
+            return;
+        }
+
+        const target = event.target;
+        if (!target || !target.closest) {
+            return;
+        }
+
+        // Tabs, plus the "+" quick-action buttons that sit on the same rows.
+        if (!target.closest('#app-sidebar .snav-link, #app-sidebar [id*="btn-new-sidebar"]')) {
+            return;
+        }
+
+        const sidebar = document.getElementById("app-sidebar");
+        const overlay = document.getElementById("sb-overlay");
+        if (sidebar && overlay && sidebar.classList.contains("sidebar-open")) {
+            overlay.click();
+        }
+    });
+
     window.addEventListener("resize", syncBodyState);
     syncBodyState();
     syncThemeState();
