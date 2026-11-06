@@ -6,6 +6,8 @@ The society, the user and the role come from the SERVER session. What a person m
 read the notice, manage their own optional consent and raise a request; only the administrator or a serving Secretary may
 work the register, erase, log a breach or publish a notice (dpdp_service re-checks on every call).
 """
+import logging
+
 from dash import ALL, Input, Output, State, ctx, no_update
 
 import dash_bootstrap_components as dbc
@@ -15,6 +17,8 @@ from app.security.audit_context import get_current_society_id, get_current_user_
 from app.security.guards import require_session
 from app.services import dpdp_service as dp
 
+log = logging.getLogger(__name__)
+
 
 def _s():
     sid, uid = get_current_society_id(), get_current_user_id()
@@ -23,6 +27,10 @@ def _s():
 
 def _msg(text, ok=True):
     return dbc.Alert(text, color="success" if ok else "danger", className="py-2", style={"fontSize": "12.5px"}, dismissable=True)
+
+
+def _note(text):
+    return dbc.Alert(text, color="info", className="py-2 mb-0", style={"fontSize": "12.5px"})
 
 
 def register_privacy_callbacks(app):
@@ -78,13 +86,24 @@ def register_privacy_callbacks(app):
     )
     @require_session
     def privacy_open(n_open, n_close):
-        s = _s()
-        if ctx.triggered_id == "close-privacy-rights-btn" or not s:
+        if ctx.triggered_id == "close-privacy-rights-btn":
             return False, no_update
         if not n_open:
             return no_update, no_update
+        # The link sits in Account Settings, which every role sees, so this must ALWAYS answer a click: a callback that
+        # returns nothing (or raises) leaves the link looking dead.
+        s = _s()
+        if not s:
+            # The platform (master) account belongs to no society, so there is no notice or request register to show.
+            return True, _note("Privacy notices and data-rights requests are kept for each society, and this account is not "
+                               "linked to one. Sign in with a society account to read the notice or raise a request.")
         sid, uid, role = s
-        return True, pp.rights_body(sid, uid, role)
+        try:
+            return True, pp.rights_body(sid, uid, role)
+        except Exception:                                                  # noqa: BLE001
+            log.exception("Privacy & data rights panel failed to load (society %s, user %s)", sid, uid)
+            return True, _msg("The privacy panel could not be loaded just now. Please try again; if it keeps happening, "
+                              "contact support.", ok=False)
 
     def _refresh(text, ok=True):
         s = _s()

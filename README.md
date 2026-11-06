@@ -3009,15 +3009,20 @@ There is no `pytest.ini`/`pyproject.toml`; run pytest from the repository root.
 no database):
 
 ```
-3 failed, 1320 passed, 513 skipped, 155 deselected in 14.32s
+1323 passed, 513 skipped, 155 deselected in 11.22s
 ```
 
-The three failures are stale tests, not product regressions: 
-`test_onboarding_review_remaining.py::test_dpdp_instruments_seeded_unverified_and_always_applicable` 
-still imports `seed.LEGAL_INSTRUMENTS_CENTRAL`, but that catalogue moved to 
-`database/legal_reference.py`; and two `test_privacy_rights_open.py` tests use a 
-FakeDB that has no `privacy_notices` relation. They are recorded here rather than 
-hidden. The 513 skips are the live-DB gates. Re-run the command yourself before 
+The 513 skips are the live-DB gates (`ESTATEHUB_LIVE_TESTS=1`). Three tests that
+failed in the previous run were repaired without weakening an assertion:
+`test_onboarding_review_remaining.py::test_dpdp_instruments_seeded_unverified_and_always_applicable`
+was still importing the `LEGAL_INSTRUMENTS_CENTRAL` tuple list from `seed.py`,
+although the catalogue now lives as dict rows in `database/legal_reference.py`
+(`INSTRUMENTS`, installed by `migrate.py`/`reset_database.py`); and the two
+`test_privacy_rights_open.py` failures caught a real regression — `privacy_open`
+had lost the guard that answers a click for the platform (master) account, which
+belongs to no society, and the `try/except` that shows a plain message instead of
+a Dash callback error. Both are restored in
+`app/dash_apps/callbacks/privacy_callbacks.py`. Re-run the command yourself before
 quoting a number — this is a snapshot, not a guarantee.
 
 ```bash
@@ -3214,7 +3219,7 @@ Open, needs CA sign-off before building: 3.3 schedule-format statements and note
   - **Open:** the plan's done-when needs the **CA's own worked example** to reproduce to the paisa. Tests use the worked example in the GST circular at cewacor.nic.in instead; add the CA's figures to `test_ca_worked_example` (currently skipped). Also for the CA: the E and F definitions (deemed exempt supplies, unclassified turnover), whether the non-business 5% applies to a society, and the rounding rule.
   - Screen: Governance, *TDS & GST Rates* tab, section **ITC reversal for exempt supplies (Rule 42)** (`app/dash_apps/callbacks/itc_callbacks.py`). A banner says **PROVISIONAL** until the CA's confirmation is recorded. The administrator records the CA's confirmation, the two journal accounts and the non-business %; the administrator or a serving office-bearer works out drafts, posts, reverses (with a reason) or discards them; the register shows every step and its basis, and downloads as CSV for the CA. Drawn only for people who may act.
 - **1.11 NOC and Security Salaries lists.** Confirmed by building the lists' column metadata and running their loaders against a seeded database (the running app was not opened in a browser, so please glance at both lists as admin): the *Security Salaries Due/Paid* and *Vendor Payables Due* cards sum payables by role and status but opened the payables list with no role, which the loader answers with an empty list on purpose; they now pass the same filter as their totals. The payables list showed *Shift Fraction* and *Mode* columns that `fn_payables_named` never returned (always blank); it now returns them. The NOC list showed *Revoked At* (never selected, always blank) and *Revoked By* (a raw user id); the first is now selected and the second hidden from the list. Four entities showed a label twice (vendors PAN and GSTIN, receivables and assets Account, societies Gate Logic); computed fields no longer duplicate a column already shown. Other lists also have columns their loaders never fill; that wider clean-up is not part of 1.11.
-- **CI (historical).** At the time of that plan pass, the Postgres job passed on a fresh database and the DB-less job passed; stale tests were brought into line with earlier deliberate changes and `database/migrations/` is allowed by the single-SQL-file guard (each migration may only create what `estatehub.sql` also defines). Re-run the suites for the current state; §24 records the snapshot taken for this revision, including three stale tests that still fail.
+- **CI (historical).** At the time of that plan pass, the Postgres job passed on a fresh database and the DB-less job passed; stale tests were brought into line with earlier deliberate changes and `database/migrations/` is allowed by the single-SQL-file guard (each migration may only create what `estatehub.sql` also defines). Re-run the suites for the current state; §24 records the green snapshot taken for this revision.
 
 
 ---
