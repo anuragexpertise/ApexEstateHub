@@ -2,22 +2,144 @@
 ### The Complete Society Management Platform
 
 > **Multi-tenant · Role-aware · Real-time · Zero-reload**
-> Built on Python Dash + Flask + PostgreSQL (Aiven) · Hosted on Render
+> Python 3.12 · Dash 2.14 + Flask 2.2 · PostgreSQL 16 · gunicorn
 
 > ⚖️ **Secretaries, auditors, CAs, tax officers:** start at [At a glance](#at-a-glance-for-secretaries-auditors-cas-and-tax-officers) — what is enforced, how to check it yourself, and what is *not* claimed. Detail: [Statutory Compliance & Audit Assurance](#statutory-compliance--audit-assurance).
 
-> 📌 **Schema source of truth:** `database/estatehub.sql` — see [§22 Database Migrations](#22-deployment--utility-notes) for details.
+> 📌 **Schema source of truth:** `database/estatehub.sql` — 160 tables, 353 `fn_*` functions, 87 triggers. Fresh installs come from that one file; incremental scripts for existing databases live in `database/migrations/`. See [§22 Database install, migrations and reset](#22-deployment-environment-variables--database-operations).
 
-> 🆕 **Recent release — fund segregation & the Agreement print fix.** Agreement
-> Print/Save-as-PDF/Email was broken app-wide by a one-character typo in the
-> shared letterhead JS; it now works, along with every other PDF export that
-> uses the same helper. Fund Management gained **Appropriate Income → Fund**
-> (moving a locked fund's earned interest into a spendable fund) and **Fund
-> Deposit Routing** (per-fund destination bank account, with per-account bank
-> reconciliation to match). Start at
-> [§9 Fund Deposit Routing](#fund-deposit-routing--fund_bank_account_map),
-> [§16](#16-postgresql-function-index) for the new functions, and
-> [§19](#19-known-bugs--fixes-applied) for the full list of what was broken.
+> 🧭 **New to the repository?** Read [§0 Getting started](#0-getting-started) first (virtualenv, `.env`, schema + seed, run commands, demo logins), then [§3 Architecture](#3-architecture-overview) and [§17 Codebase Map](#17-codebase-map).
+
+> ✅ **What this revision was checked against:** the working tree on branch `master`,
+> commit `e39a72d` ("app folder"), on 6 Nov 2026. Counts, file names, tables,
+> SQL functions, environment variables, portals and test commands below were read
+> from the code, `database/estatehub.sql`, `schemes/*.toml`, `docs/`,
+> `.github/workflows/tests.yml` and `requirements.txt`. Historical claims (an old
+> test run, an old host) are labelled as historical instead of being presented as
+> current.
+
+---
+
+## 0. Getting started
+
+### What you need
+
+| Requirement | Notes |
+|---|---|
+| **Python 3.12** | CI uses 3.12; the pins in `requirements.txt` target a modern 3.11+/3.12 runtime. |
+| **PostgreSQL 16** | The schema relies on PostgreSQL-specific DDL, deferred constraint triggers, statement-level TRUNCATE triggers and `pgcrypto`. SQLite is only a fallback DSN in `app/config.py`; it is **not** a supported application database. |
+| **`pgcrypto` extension** | Created by `database/migrate.py`. Used for receipt/ledger hashing. |
+| Optional: Redis | Only for Server-Sent Events fan-out across gunicorn workers (`REDIS_URL`/`KV_URL`). Without it, SSE stays per-process. |
+| Optional: SMTP | Password-reset and notification email. Without it, reset tokens are written to the server log. |
+| Optional: VAPID keys | Browser push notifications (`pywebpush`). FCM additionally needs `firebase_admin`, which is **not** in `requirements.txt`. |
+
+### Install
+
+```bash
+git clone https://github.com/anuragexpertise/ApexEstateHub.git
+cd ApexEstateHub
+python3 -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### Configure `.env`
+
+There is no committed `.env.example`; create `.env` in the repository root (it is
+git-ignored). At an absolute minimum:
+
+```env
+# Database — either a single URL or the PG* set
+DATABASE_URL=postgresql://estatehub:estatehub@localhost:5432/estatehub
+# PGHOST=localhost
+# PGPORT=5432
+# PGDATABASE=estatehub
+# PGUSER=estatehub
+# PGPASSWORD=estatehub
+# PGSSLMODE=require                 # set to disable for a local non-TLS server
+
+# Signing secrets (production refuses to boot with missing/known/too-short values)
+SECRET_KEY=<at least 32 random characters>
+JWT_SECRET_KEY=<at least 32 random characters>
+
+# Wraps every society's per-purpose signing keys (Fernet, comma-separated for rotation)
+SECRET_VAULT_KEY=<output of the command below>
+```
+
+Generate a vault key:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+**Which database wins differs between the web app and the CLI tools** — this is
+deliberate and a common source of "I seeded the wrong database":
+
+* the **web application** (`app/config.py::get_database_url`) prefers `DATABASE_URL`, then the `PG*` set;
+* the **install/reset/seed scripts** (`database/db_config.py`) prefer a complete `PG*` set, and use `DATABASE_URL` only when `PG*` is incomplete. Each script prints the resolved host/database before writing.
+
+The full environment-variable reference is in [§22](#22-deployment-environment-variables--database-operations).
+
+### Create the schema and demo data
+
+```bash
+createdb estatehub                       # or use your managed Postgres database
+python3 database/migrate.py --seed       # schema + legal-reference data + demo society
+```
+
+`database/migrate.py` applies `database/estatehub.sql` as **one transaction onto an
+empty database** and refuses a database that already has tables. To rebuild from
+scratch:
+
+```bash
+python3 database/reset_database.py --yes --after seed
+```
+
+For an existing database that needs the incremental SQL in `database/migrations/`:
+
+```bash
+python3 database/apply_migration.py
+```
+
+### Run
+
+```bash
+python3 run.py                           # development, http://0.0.0.0:8050
+# or production-style:
+gunicorn wsgi:server --workers 2 --threads 8 --timeout 120 --bind 0.0.0.0:8050
+```
+
+`PORT`, `HOST`, `FLASK_CONFIG` and `FLASK_DEBUG` are read from the environment.
+`/` redirects to `/dashboard/`; `/health` reports database connectivity.
+
+### Demo logins (after `--seed`)
+
+| Login | Password | Lands on |
+|---|---|---|
+| `master@estatehub.com` | `Master@2024` | Master Admin |
+| `admin@sunriseresidency.com` | `Admin@2024` | Admin portal |
+| `owner1@sunriseresidency.com` | `Owner1@2024` | Owner portal |
+| `vendor1@sunriseresidency.com` | `Vendor1@2024` | Vendor portal |
+| `guard1@sunriseresidency.com` | `Guard1@2024` | Security portal |
+| `accountant@sunriseresidency.com` | `Accountant@2024` | Accountant portal |
+| `supervisor@sunriseresidency.com` | `Supervisor@2024` | Supervisor portal |
+| `staff@sunriseresidency.com` | `Staff@2024` | Staff portal |
+| `auditor@sunriseresidency.com` | `Auditor@2024` | Auditor portal |
+| `president@sunriseresidency.com` | `President@2024` | Owner portal + committee powers |
+| `secretary@sunriseresidency.com` | `Secretary@2024` | Owner portal + committee powers |
+
+These are demo credentials for a seeded development database. Change or remove
+them before exposing any environment; the seed also uses `Setup@2024` as the
+demo society's step-up password hash.
+
+### First checks after boot
+
+```bash
+curl -s http://localhost:8050/health
+python -m pytest -q test -m "not postgres_integration"   # hermetic suite
+python scripts/check_callback_guards.py                  # every Dash callback has @require_session
+python scripts/inventory_endpoints.py --check            # endpoint inventory matches the reviewed manifest
+```
 
 ---
 
@@ -62,19 +184,19 @@ On a **test** copy, try to alter a posted entry (`UPDATE transactions SET amount
 
 - **Not a return filer.** No income-tax computation, no return, no TRACES filing, no GST return. Exports are working papers for the CA.
 - **Section 80P / 80AC, Form 26AS reconciliation and e-invoicing are not built.** The mutuality summary does not apportion common expenses, and takes no account of depreciation or carried-forward losses.
-- **Not yet DPDP Act, 2023 compliant.** There is no consent record, erasure or retention workflow, or breach procedure (see §6).
+- **DPDP Act, 2023: the machinery is built, but compliance is not certified.** A versioned notice, per-purpose consent records, a rights register, profile-only erasure with blockers, a breach register, retention rules and a grievance-officer contact all exist (see §6). The statutory parameters (response period, lawful basis, notice effective date, retention length) are marked **[Verify]** until the society's adviser confirms them, and breach *notification* to the Data Protection Board is not automated.
 - **Not independently assured, and not "audit-grade".** No external CA review, advocate opinion per rule, or penetration test has been recorded (plan tasks 5.1 to 5.3). See [`docs/PHASE5_ASSURANCE.md`](docs/PHASE5_ASSURANCE.md).
 - **Provisional citations stay provisional** until an advocate confirms each against the gazette text.
 - **Some inputs are still typed by people.** The attendance register is keyed in by the Secretary, and Managing Committee decisions rest on the minutes. TDS rates and thresholds must be re-confirmed by the CA each year.
 - **A database owner holding the signing key is outside these controls.** Against anyone with the owner login alone, the signed and filed anchors catch a rewrite, but only up to the last anchor, so anchoring must be scheduled and the application deployed on its restricted login. The repository does neither for you.
-- **Several screens are not built yet:** classifying accounts for the GST worksheet, and recording the cash counted at the cash-book signing. Both exist in the database only.
+- **One screen is still not built:** recording the cash actually counted at the cash-book signing. `up_aoa_actions.sign_cashbook()` and `fn_cashbook_reconciliation` exist and are tested, but no card calls them, so a cash count cannot yet be entered from the UI. GST account classification **is** built (Admin → Financials → GST Accounts).
 
 The complete, itemised list is [*Gaps we are open about*](#gaps-we-are-open-about).
 
 ### Evidence, and its limits
 
 - **A critical review.** [`ER.md`](ER.md) is a first-person, **unsigned** review of this codebase dated 16 Oct 2026. It says itself that it did not examine the user-interface code, the full SQL line by line, or the exact bye-law text. It is a list of places where a CA or advocate would push back, **not an audit opinion**. Its findings and what has been done about each are in [*Review findings and remediation status*](#review-findings-and-remediation-status). A **signed** review by the society's own CA or advocate is the step that would carry weight, and this repository is arranged so that they can run every check above themselves.
-- **Automated tests.** 855 test functions in 60 files. At the last full run on a clean database **1,130 passed and 16 failed**. The 16 are older failures, in the setup wizard, the fund-controls and rule-layer ratification tests, endpoint-classification checks and a few others. They are listed and not hidden, and because fund controls and ratification are governance features, treat those two areas as **not yet fully proven**.
+- **Automated tests.** **1,214 test functions in 111 files** (`test/test_*.py`), 15 of them marked `postgres_integration`. The hermetic subset runs with no database; the live subset needs a seeded PostgreSQL 16 and `ESTATEHUB_LIVE_TESTS=1`. CI runs both, plus `pip-audit`, `bandit`, gitleaks, the callback-guard check and the endpoint-inventory check on every push — see [§24 Testing & CI](#24-testing--ci). A dated snapshot of an actual run is recorded in [§24](#24-testing--ci); the figure this README used to carry was historical and is not presented as current.
 - **Honesty about status.** Every control below is marked ✅ implemented and tested, 🟡 partial, or ⬜ not yet built, and the ⬜ and 🟡 rows state the limit.
 
 ---
@@ -116,7 +238,7 @@ The full, source-cited catalogue of Acts, Rules, Bye-laws and Notifications for 
 | **Books must balance before a year closes or is locked** | ✅ | `fn_fy_closing_report` rolls every account up its parent hierarchy; a non-zero root total is a hard error. Year-end reserve appropriation **refuses to run on unbalanced books**, and `fn_lock_fy` refuses to lock a year while any journal dated up to it is out of balance (`fn_ledger_integrity_report`). | `fn_fy_close_reserve_appropriation`, `fn_lock_fy`; `test_scenario_g_fy_close.py` |
 | **Posted ledger lines are immutable** | ✅ | `trg_transactions_immutable` refuses any `DELETE`, and any `UPDATE` other than the bank-reconciliation flags (an allow-list, not a block-list; amount, side, account, date, journal, mode, source, entity and creator are frozen). Receipts and expenses carry a source-document guard (`trg_source_doc_guard`). The society-to-ledger foreign key is `ON DELETE RESTRICT`, so deleting a society can no longer wipe its books. The former bank-reconciliation `DELETE FROM transactions` path now posts a reversal instead. *Limit:* `payables` and `receivables` are not yet under the same guard. | `trg_transactions_immutable`, `trg_receipts_source_guard`, `trg_expenses_source_guard` |
 | **Reversal-only correction** | ✅ | A wrong journal is corrected only by `fn_post_reversal_journal(society, journal, reason, user, date)`: a mirror-image journal (Dr↔Cr, each leg linked through `reverses_id`, `is_reversal`, mandatory reason) dated no earlier than the original and in an open period. A second reversal of the same journal is refused. *Limit:* the owner-loan tables have no compensating-entry screen yet. | `fn_post_reversal_journal`; used by Bank Reconcile |
-| **Ledger hash chain, signed anchors and a restricted role** | ✅ | Each society's ledger is a **SHA-256 hash chain** over `(journal, side, account, amount, date)` with a per-society sequence. `fn_verify_ledger_chain()` returns rows when a line was altered, a link broken or a row removed (**empty = intact**). A bare chain is tamper-*evident*, not tamper-proof: whoever can rewrite the table can recompute every hash. Three further layers address that. **(1) Signed anchors:** `fn_anchor_ledger_chain` records the chain head (sequence, hash, row count) in the append-only `ledger_chain_anchors`; the application signs it with an HMAC key **the database never holds** (`LEDGER_ANCHOR_SECRET`, `app/security/ledger_anchor.py`), and `certificate_text` prints a page for the Secretary and Treasurer to sign and file with the society's CA. `fn_verify_ledger_chain` now also checks every anchor, so a chain **rebuilt after an alteration no longer matches what was signed and filed**; an anchor is never taken on a chain that does not verify. `scripts/anchor_ledgers.py` anchors every society and can verify all signatures (run it from a scheduler on a host that is *not* the database host). **(2) TRUNCATE guards:** `TRUNCATE` bypasses row-level triggers and used to bypass the ledger and audit protections; statement-level triggers now refuse it on the ledger, audit log, rule audit, FY locks, anchors and GST worksheets. **(3) A restricted database role:** `python database/app_role.py --apply` creates `estatehub_app`, which cannot truncate, create triggers, delete or update ledger lines (only the two bank-reconciliation flags), change audit/lock records, or call `fn_rebuild_ledger_chain`. Run as that login, **the application's normal work is unaffected**: 1,061 tests still pass, and the additional failures are tests that need owner privileges (creating functions, disabling triggers) or expect a trigger's message where the privilege check now refuses first. *Honest limits:* the chain covers only `(journal, side, account, amount, date)`; the other columns (mode, status, entity, source) are frozen by the immutability trigger and the restricted role but are **not in the hash**. Nothing constrains a **database owner or superuser who also holds the signing key**; against anyone with the owner login *alone*, the signed and filed anchors catch a rewrite, but only for entries **up to the last anchor**, so anchoring has to be scheduled (a cron job is **not** configured by this repo). The restricted role works only if the application is actually deployed to connect as it, and the owner's credentials kept off the application host. In development without a key, a random per-process key is used and signatures do not survive a restart. | `ledger_chain_anchors`, `fn_anchor_ledger_chain`, `fn_verify_ledger_chain`, `trg_no_truncate`; `app/security/ledger_anchor.py`, `scripts/anchor_ledgers.py`, `database/app_role.py`; `test_ledger_anchors_live.py` |
+| **Ledger hash chain, signed anchors and a restricted role** | ✅ | Each society's ledger is a **SHA-256 hash chain** over `(journal, side, account, amount, date)` with a per-society sequence. `fn_verify_ledger_chain()` returns rows when a line was altered, a link broken or a row removed (**empty = intact**). A bare chain is tamper-*evident*, not tamper-proof: whoever can rewrite the table can recompute every hash. Three further layers address that. **(1) Signed anchors:** `fn_anchor_ledger_chain` records the chain head (sequence, hash, row count) in the append-only `ledger_chain_anchors`; the application signs it with the society's **`SIGNING_LEDGER`** HMAC key, wrapped under `SECRET_VAULT_KEY` and never held by the database (`app/security/ledger_anchor.py`; `LEDGER_ANCHOR_SECRET` is now only a legacy verification key for old anchors), and `certificate_text` prints a page for the Secretary and Treasurer to sign and file with the society's CA. `fn_verify_ledger_chain` now also checks every anchor, so a chain **rebuilt after an alteration no longer matches what was signed and filed**; an anchor is never taken on a chain that does not verify. `scripts/anchor_ledgers.py` anchors every society and can verify all signatures (run it from a scheduler on a host that is *not* the database host). **(2) TRUNCATE guards:** `TRUNCATE` bypasses row-level triggers and used to bypass the ledger and audit protections; statement-level triggers now refuse it on the ledger, audit log, rule audit, FY locks, anchors and GST worksheets. **(3) A restricted database role:** `python database/app_role.py --apply` creates `estatehub_app`, which cannot truncate, create triggers, delete or update ledger lines (only the two bank-reconciliation flags), change audit/lock records, or call `fn_rebuild_ledger_chain`. Run as that login, **the application's normal work is unaffected**; the tests that fail under it are the ones that need owner privileges (creating functions, disabling triggers) or expect a trigger's message where the privilege check now refuses first. *Honest limits:* the chain covers only `(journal, side, account, amount, date)`; the other columns (mode, status, entity, source) are frozen by the immutability trigger and the restricted role but are **not in the hash**. Nothing constrains a **database owner or superuser who also holds the signing key**; against anyone with the owner login *alone*, the signed and filed anchors catch a rewrite, but only for entries **up to the last anchor**, so anchoring has to be scheduled (a cron job is **not** configured by this repo). The restricted role works only if the application is actually deployed to connect as it, and the owner's credentials kept off the application host. In development without a key, a random per-process key is used and signatures do not survive a restart. | `ledger_chain_anchors`, `fn_anchor_ledger_chain`, `fn_verify_ledger_chain`, `trg_no_truncate`; `app/security/ledger_anchor.py`, `scripts/anchor_ledgers.py`, `database/app_role.py`; `test_ledger_anchors_live.py` |
 | **Year-end close is idempotent** | ✅ | `UNIQUE (society_id, financial_year)` on `fy_closures` makes a second close impossible, even under a race between two admins. | `fy_closures` |
 | **Immutable audit trail** | 🟡 | `audit_events` records actor, role, society, action, resource, **before/after values (JSONB)**, reason, correlation id (ties one user action to the ledger and notification rows it produced), permission used, authorization-policy version and IP. A trigger raises an exception on any `UPDATE` or `DELETE`. When the caller supplies its transaction cursor the audit row commits or rolls back **with** the business change, so there is no un-audited write. Credential-like keys are stripped before logging. Other append-only logs cover rule changes, concern transitions, receivable payments and polls. *Limit:* the app connects as a single database role, so the trigger is the control; a database superuser can still alter the table. Production should `REVOKE` write access from the app role and back this table up separately (guidance is in the schema comments). Full coverage of every ledger write path has not been independently audited. | `audit_events`, `trg_audit_events_immutable`, `app/security/service_guard.py::audit_event` |
 | **Tamper-evident receipt and expense numbering** | ✅ | On confirmation each receipt is issued a **SHA-256 number** computed over society, account, amount, timestamp, party, mode, date, source reference **and the previous confirmed receipt's hash** for that (society, account). The numbers therefore form a hash chain: altering, inserting or removing a historical receipt breaks every later link. Expenses are chained the same way. | `fn_compute_receipt_hash`, triggers `trg_receipt_hash_*` / `trg_expense_hash_*` |
@@ -150,7 +272,7 @@ The full, source-cited catalogue of Acts, Rules, Bye-laws and Notifications for 
 |---|---|---|
 | **Member-charge threshold** (CGST Act s.22(1); Notification 12/2017-CT(R), Entry 77; Circular 109/28/2019-GST) | ✅ | Billing (`fn_auto_generate_receivables`) levies GST only when the apartment's monthly taxable charge **exceeds ₹7,500** (`gst_per_member_monthly`) **and** the gate on the society's **aggregate turnover (s.2(6))** reads *above* the ₹20 lakh threshold (`gst_turnover_lakh`); both are rows in `state_compliance_thresholds`. **The turnover is a classified worksheet, not a credit-side sum.** The old figure added every credit to every credit-natured account, so it counted GST payable (tax is *excluded* by s.2(6)), funds, capital and liabilities (not supplies), and *dropped* exempt supplies (which s.2(6) *includes*). Now each credit-natured account carries a class (`accounts.gst_supply_class`): **taxable**, **exempt** (counted), **not_a_supply** or **tax** (not counted). Exempt, not-a-supply and tax classes need a reference to the CA's or advocate's advice. The unambiguous heads default sensibly (member maintenance and society charges taxable; GST payable accounts tax; capital, reserves and liabilities not a supply; "Exempt Income" exempt), and **contested heads (interest, rent, tickets, fines, sinking/repair/corpus funds) stay *unclassified*: the software does not guess.** Because unclassified amounts are real, the gate has **three states**: *above* (classified supplies alone exceed the threshold: GST charged), *below* (even counting every unclassified credit it is within the threshold: not charged), and *indeterminate* (the threshold falls between the two bounds: **GST is not charged to members**, a `GST_TURNOVER_INDETERMINATE` compliance flag is raised once per society and year, and the CA classifies the open accounts). Charging tax that may not be due is the worse error, so doubt is never resolved in that direction. The RCM "registered person" gate uses the same test. A dated worksheet can be saved and confirmed against a CA reference (`gst_turnover_worksheets`, immutable once confirmed), and the GST export has an *Aggregate Turnover* sheet. The export's old "Total Turnover" column, which also added the GST collected, now shows the value of supplies excluding GST. If no `gst_rates` row exists, billing raises an error rather than silently charging 0%. *Limits:* it uses **the society's own books only**: s.2(6) is PAN-wide and all-India, so a society with other registrations must add them. The classification is the CA's judgement, and **there is no screen to classify accounts yet**; today it is `fn_set_gst_supply_class` from SQL. Societies that collect sinking/repair funds or earn deposit interest will usually see *indeterminate* until the CA classifies those heads. | `fn_gst_turnover_lines`, `fn_gst_turnover_gate`, `fn_gst_default_supply_class`, `fn_set_gst_supply_class`, `fn_save_gst_turnover_worksheet`, `fn_confirm_gst_turnover_worksheet`; `test_gst_turnover_live.py` |
 | **Rates with effective dates** | ✅ | CGST/SGST come from `gst_rates` (`effective_from` / `effective_to`) in force for the billing month, replacing any hard-coded 18%. |
-| **Sinking / repair fund treatment** | ✅ | `fund_gst_exempt` now **defaults to FALSE** (sinking and repair contributions are inside the taxable base). Setting it to TRUE is refused by the database (`ck_fund_gst_exempt_authority`) unless a **resolution reference and a CA/advocate opinion reference** are both recorded. *Not yet done:* printing that authority on each invoice. |
+| **Sinking / repair fund treatment** | ✅ | `fund_gst_exempt` now **defaults to FALSE** (sinking and repair contributions are inside the taxable base). Setting it to TRUE is refused by the database (`ck_fund_gst_exempt_authority`) unless a **resolution reference and a CA/advocate opinion reference** are both recorded. The authority wording is copied onto each exempt line (`receivables.gst_exempt_authority`, via `fn_gst_exemption_authority`) and printed on the receipt and on the bill's detail view. |
 | **Reverse charge (RCM) and ITC** | ✅ | RCM on unregistered-vendor supplies is computed; **CGST/SGST/IGST Payable and ITC-Receivable** are separate ledger accounts; inter-state supply is determined from `societies.state` and `vendors.state`. |
 | **Returns support** | 🟡 | `gst_export.py` / `rcm_export.py` produce **GSTR-1 / GSTR-3B-shaped summaries** and an RCM register for the CA. EstateHub does not file returns. |
 | **E-invoicing (IRN / QR)** | ⬜ | **Not implemented.** E-invoicing applies only above a notified aggregate-turnover threshold, which a typical society will not reach, but the CA should confirm for each society. |
@@ -203,23 +325,30 @@ Everything below is produced from the ledger on demand. It is not re-keyed, so t
 
 ### 6. Data and privacy (DPDP Act, 2023)
 
-**Status: not yet DPDP-compliant as a product.** EstateHub holds personal data of owners, tenants, family members, vendors and security staff (names, contact details, ID-proof and photo images, vehicle and visitor records), so the Act applies to the society as Data Fiduciary. The following controls exist; the Act's rights-and-notice machinery does not.
+**Status: the DPDP controls are implemented, but this is not a certification.** EstateHub
+holds personal data of owners, tenants, family members, vendors and security staff
+(names, contact details, ID-proof and photo images, vehicle and visitor records), so
+the Act applies to the society as Data Fiduciary. The product now carries the
+notice, consent, rights, retention, breach and grievance machinery; the legal
+parameters behind it are marked **[Verify]** until the society's adviser confirms
+them (`app/services/dpdp_service.py` centralises them).
 
 | Control | Status | Detail |
 |---|---|---|
 | Tenant isolation | ✅ | Every record is scoped by `society_id`; cross-society access is denied centrally. |
 | Least-privilege access | ✅ | Explicit capability sets, no wildcards (see §1 and §5). |
-| Credential protection | ✅ | bcrypt password hashing, password policy, JWT sessions, a secret vault and secret-policy module. Credential-like keys are stripped from audit records. |
+| Credential protection | ✅ | Werkzeug scrypt/pbkdf2 password, PIN and pattern hashes; one password policy; server-side Flask-Login session plus JWT; vault-wrapped signing keys; credential-like keys stripped from audit records. (`passlib`/`bcrypt` are pinned but unused.) |
 | Secret ballot | ✅ | Vote choice cannot be linked to a voter (see §5). |
-| Masked sensitive logs | ✅ | QR re-issue logs mask nonces to their last two digits at the query level. |
-| Purpose-bound access trail | 🟡 | `audit_events` records who did what, with a reason, but read-access logging of personal data is not comprehensive. |
-| Notice and **consent records** | ⬜ | No consent capture or versioned privacy notice is stored. |
-| Data-principal rights (access, correction, **erasure**, nominee) | ⬜ | No self-service or workflow for these requests. |
-| **Retention and deletion schedule** | ⬜ | No automated retention limits. Note that tax and society record-keeping duties may legitimately require retention, so the policy needs to come from the society's advisers. |
-| Breach notification workflow | ⬜ | None. |
-| Grievance officer / contact | ⬜ | None in the product. |
+| Masked sensitive logs | ✅ | Audit redaction (`pii_masking.redact_for_audit`) and QR re-issue logs that mask nonces to their last two digits. |
+| Purpose-bound access trail | 🟡 | `audit_events` records who did what, with a reason, policy version and correlation id; read-access logging of personal data is not comprehensive. |
+| Notice and **consent records** | ✅ | `privacy_notices` is versioned per society (title, body ≥100 characters, effective dates, current flag) and a notice gate holds every user before the dashboard. `consent_records` stores per-purpose consent with the notice version and a withdrawal time; dues and gate safety are recorded as `legitimate_use` **[Verify]**, optional purposes as `consent`. Draft notices carry a "pending legal review" banner. |
+| Data-principal rights (access, correction, **erasure**, nominee, grievance) | ✅ / 🟡 | `rights_requests` records type, due date (`RESPONSE_DAYS = 30`, **[Verify]**) and outcome. Erasure blanks the **profile** only, after a 48-hour notice, and only when `fn_erasure_blockers` reports no blocker (`fn_erase_person_profile`); it never touches ledger rows. Self-service is through Privacy in Settings, not a separate portal. |
+| **Retention and deletion schedule** | 🟡 | `retention_rules` (default 5 years, configurable per society) are swept by `retention_engine.sweep_all_societies` from the scheduler. Whether any Act requires a longer period for a class of record is still a question for the CA (`docs/PHASE0_TRACKER.md`, task 0.4). |
+| Breach notification workflow | 🟡 | `breach_register` records incidents and statuses. **Notification** to the Data Protection Board / affected persons is an operational process, not automated. |
+| Grievance officer / contact | ✅ | `societies.grievance_officer_name/email/phone` are shown on the login page and in every notice; a grievance is one of the request types in the rights register. |
 
-Until these are built, the society should adopt a written privacy notice and retention policy outside the software and restrict ID-proof images to roles that need them.
+Even with these controls, the society should adopt its own written privacy and
+retention policy and restrict ID-proof images to the roles that need them.
 
 ---
 
@@ -234,8 +363,8 @@ Until these are built, the society should adopt a written privacy notice and ret
 | **A-03** Income-tax summary was not a computation | 🟡 Partly done | Rebuilt on accrual P&L accounts and relabelled a working paper. The old function referenced a non-existent column and could not run. No expense apportionment, depreciation or brought-forward losses. |
 | **A-04** No period lock | ✅ Done | Database-enforced lock, now with a Treasurer-only screen that checks the year is closed, balanced and chain-verified, anchors the ledger, records a written reason and (optionally) a passed resolution, and audits the act (see §1). Irreversible by design. |
 | **T-01 / T-02** TDS stale; Income-tax Act 2025 absent | 🟡 Done, with limits | Effective-dated rows, `act_version`, `section_2025`; see the §2 limits. Every figure to be confirmed by your CA. |
-| **X-01** Fund GST toggle defaulted to exempt | ✅ Done | Default FALSE; TRUE needs resolution and opinion references. Authority not yet printed on invoices. |
-| **X-02** Turnover is a credit-side sum; 0% GST on a missing rate | ✅ Done, with limits | Missing rate raises. Turnover is now a classified s.2(6) worksheet with a three-state gate and an export sheet (see §3). No screen to classify accounts yet; own books only, not PAN-wide. |
+| **X-01** Fund GST toggle defaulted to exempt | ✅ Done | Default FALSE; TRUE needs resolution, opinion and who gave it. The authority is copied to `receivables.gst_exempt_authority` and prints on the receipt and bill detail. |
+| **X-02** Turnover is a credit-side sum; 0% GST on a missing rate | ✅ Done, with limits | Missing rate raises. Turnover is now a classified s.2(6) worksheet with a three-state gate, an export sheet and the **GST Accounts** classification screen (CA/Treasurer/Secretary). Own books only, not PAN-wide. |
 | **G-01** Resolution validity only in Python | ✅ Done | CHECK, quorum trigger, freeze, `fn_rule` requires a passed resolution. |
 | **G-02** Self-attested vote tallies | ✅ Done, with limits | General Body resolutions pass only from the registers (see §5). The register is still keyed in by the secretary, and Managing Committee decisions still rest on typed minutes. |
 | **G-03** Thin meeting record | ✅ Already in base | Notice, agenda, chair, adjournment, sign-off fields present. |
@@ -309,7 +438,7 @@ pytest test/ -q
 -- 2. Is the society's ledger chain intact, and does it still match every signed anchor?  (empty = yes)
 SELECT * FROM fn_verify_ledger_chain(<society_id>);
 
--- 2b. Anchor the chain now, and check every anchor's signature (from a host holding LEDGER_ANCHOR_SECRET):
+-- 2b. Anchor the chain now, and check every anchor's signature (run on a host holding SECRET_VAULT_KEY; legacy anchors also need LEDGER_ANCHOR_SECRET):
 --      python scripts/anchor_ledgers.py --verify
 
 -- 3. Any journal out of balance today?  (empty result = none)
@@ -344,16 +473,18 @@ Relevant suites include `test_accounting_integrity_live`, `test_scenario_b_recei
 
 ## Table of Contents
 
+0. [Getting started](#0-getting-started)
 0. [At a glance: for Secretaries, auditors, CAs and tax officers](#at-a-glance-for-secretaries-auditors-cas-and-tax-officers)
 0. [Statutory Compliance & Audit Assurance](#statutory-compliance--audit-assurance)
 1. [What is EstateHub?](#1-what-is-estatehub)
 2. [Feature Highlights](#2-feature-highlights)
 3. [Architecture Overview](#3-architecture-overview)
-4. [The Five Portals](#4-the-five-portals)
-    - [4.6 Concern Lifecycle (`concerns_assigns`)](#46-concern-lifecycle-concerns_assigns)
+4. [The ten portal surfaces](#4-the-ten-portal-surfaces)
+    - [4.11 Role codes and gate-pass rules](#411-role-codes-and-gate-pass-rules)
+    - [4.12 Concern Lifecycle (`concerns_assigns`)](#412-concern-lifecycle-concerns_assigns)
 5. [Portal Data Scoping](#5-portal-data-scoping)
 6. [Drill-Down Navigation Engine](#6-drill-down-navigation-engine)
-7. [Authentication & Security](#7-authentication--security)
+7. [Authentication, Roles & Security](#7-authentication-roles--security)
 8. [KPI Dashboard System](#8-kpi-dashboard-system)
 9. [Financial Module](#9-financial-module)
 10. [Pay Dues — Five Paths](#10-pay-dues--five-paths)
@@ -368,8 +499,11 @@ Relevant suites include `test_accounting_integrity_live`, `test_scenario_b_recei
 19. [Known Bugs & Fixes Applied](#19-known-bugs--fixes-applied)
 20. [🚩 Open Design Subtleties & Flagged Caveats](#20--open-design-subtleties--flagged-caveats)
 21. [🧹 Legacy Code Cleanup Status](#21--legacy-code-cleanup-status)
-22. [Deployment & Utility Notes](#22-deployment--utility-notes)
-23. [Workflows](#23-workflows)
+22. [Deployment, environment variables & database operations](#22-deployment-environment-variables--database-operations)
+23. [Workflows, role by role](#23-workflows)
+24. [Testing & CI](#24-testing--ci)
+25. [Scheduled jobs, key management & operations](#25-scheduled-jobs-key-management--operations)
+A. [Appendix: implementation plan — where it stands](#appendix-implementation-plan--where-it-stands)
 
 ---
 
@@ -377,7 +511,7 @@ Relevant suites include `test_accounting_integrity_live`, `test_scenario_b_recei
 
 **EstateHub** is a **multi-tenant society management web application** that gives housing societies, apartment complexes, and gated communities a single platform to manage residents, vendors, security staff, finances, events, and gate access — all without page reloads.
 
-Each society gets its own fully isolated data silo scoped by `society_id`. A **Master Admin** oversees all societies on the platform. Within each society, an **Admin** manages day-to-day operations across five role-scoped portals, each seeing only data relevant to them.
+Each society gets its own fully isolated data silo scoped by `society_id`. A **Master Admin** oversees all societies on the platform. Within each society there are **ten portal surfaces** (master, admin, owner, vendor, security, accountant, supervisor, staff, auditor, adviser), each reached by its own login role and each seeing only the rows its role is scoped to. The sidebar for each portal is defined once in `app/dash_apps/app_shell.py::ROLE_CONFIG`; the landing page is defined once in `app/security/roles.py::PORTAL_HOME`.
 
 ---
 
@@ -385,94 +519,86 @@ Each society gets its own fully isolated data silo scoped by `society_id`. A **M
 
 | Category | Features |
 |---|---|
-| **Portals** | Master Admin · Society Admin · Apartment Owner · Vendor · Security |
-| **Auth** | Password · PIN · Pattern · JWT tokens · Master Admin flag |
-| **Navigation** | Zero-reload SPA — KPI → List → Profile → Form drill-down |
-| **Financials** | Cashbook · Receipts · Expenses · Receivables · payables · FIFO Pay Dues |
-| **Statutory** | UP AOA compliance layer (bye-laws 7/39/49, undivided interest, s.22, cash limits) as **data-driven rules** · loans to owners · Funds Account schedule |
-| **Entities** | Apartments · Vendors · Security Staff · Societies · Accounts · Assets |
-| **Operations** | Events · Concerns/Complaints · Gate Logs · Attendance · NOC |
-| **Gate Pass** | Fernet-encrypted QR · Dual-mode camera scanner · Entry IN / Exit OUT |
-| **Reports** | XLSX export on every list · KPI Audit Report |
-| **Customization** | Drag-and-drop KPI layout editor per portal+tab · KPI SQL Inspector |
-| **Images** | WebP compression · Logo · Login background · Secretary sign · Profile photos |
-| **DB** | PostgreSQL `fn_*` stored functions · `%s` parameterised queries via psycopg2 |
-| **Security Portal** | Pending receipt creation → admin verification workflow |
-| **NOC** | Eligibility check → rich-text editor → Print / Save as PDF / Email (shared letterhead) |
-| **Gate Pass (NFC)** | Web NFC API — write signed pass payload directly to an NFC tag from the browser |
-| **Patrol** | Interactive Leaflet map for patrol-location create/reissue, with geofencing |
-| **Bank Reconciliation** | Per-bank-account Excel statement upload, exact + fuzzy matching against receipts/expenses, per-row manual reconcile |
-| **Fund Management** | Statutory fund balances with lock/drawable split · Utilize Fund (honours `statutory_lock_pct`) · **Appropriate Income → Fund** (Dr income / Cr fund) with pending→confirm workflow · **Fund Deposit Routing** (per-fund destination bank account) |
-| **Fund Deposit Routing** | A fund's contributions can be banked into a separately-held account/FD instead of the society's primary account; enforced at posting time by `fn_resolve_bank_leg`, and statement uploads are matched per account |
-| **Society Onboarding** | First-time Setup Wizard (charges, GST/TDS defaults, brought-forward, plus a read-only **UP AOA Compliance** step tabulating the governing Act / Rules / Bye-laws from `legal_instrument_catalog`, and a **Bye-Laws Adoption** step where the admin records which Model Bye-Laws clauses the Association is adopting — provisional until a General Body resolution is recorded) + Agreement flow with Print / Save as PDF and an Email button that opens your mail app (`mailto:`; nothing is sent server-side) (shared letterhead: logo · watermark · secretary signature · verification QR) |
-| **Bulk Enrollment** | Excel upload for apartments/vendors/security with template download |
+| **Portals (10)** | Master · Admin · Owner (owner/family/tenant/visitor) · Vendor · Security · Accountant · Supervisor · Staff · Auditor · Adviser |
+| **Auth** | Password · PIN · Pattern · server-side Flask-Login session · JWT access/refresh tokens · lockout and password policy · first-login password change · step-up password for sensitive acts |
+| **Authorization** | Coarse `users.role` portal gate (`security/roles.py`) **plus** society-scoped RBAC (`user_role_assignments` → `role_permissions`) and the pure capability engine (`security/authorization.py`); `@require_session` on every Dash callback |
+| **Navigation** | Zero-reload SPA — KPI → List → Profile → Form drill-down, with a back stack and default profile per portal |
+| **Financials** | Cashbook · Receipts · Expenses · Receivables · Payables · FIFO and selective Pay Dues · interest · reversals · FY close and irreversible FY lock · bank reconciliation |
+| **Statutory engine** | UP AOA 2010 / Model Bye-Laws 2011 as dated data (`regime_rule_parameters`, scheme packs in `schemes/*.toml`) · bye-laws 7/39/49 · undivided interest · s.22 service cut-off checks · cash limits · owner loans · statutory calendar · funds schedule |
+| **Tax** | Effective-dated TDS sections/rates with PAN handling · GST rates by billing month · classified s.2(6) turnover worksheet with a three-state gate · RCM · ITC reversal (Rule 42) · CA confirmation of rates |
+| **Governance** | Meetings · attendance and vote registers · resolution tally and passing · committee offices · polls (secret ballot, frozen eligibility) · ratification register · adviser decisions sealed by two office-bearers |
+| **Entities** | Societies · Apartments · Owners/tenants/family/visitors · Vendors · Security staff · Employees · Accounts · Assets · Deposits · Investments |
+| **Operations** | Concerns with vendor bidding and per-assignee stages · Events and tickets · Gate logs and passes · Patrols and geofencing · Attendance · NOCs · Visitor pre-registration |
+| **Gate pass** | HMAC-signed QR with per-society vault keys and per-entity revocation · Web NFC write · camera scanner (client jsQR + server OpenCV) · entry IN / exit OUT |
+| **Notifications** | Web push (VAPID) · FCM hook (needs `firebase_admin`, not pinned) · Server-Sent Events with Redis pub/sub fan-out · alert channels and subscriptions |
+| **Reports & exports** | XLSX on lists · cashbook · ledger · financial statements · asset register · GST/RCM · TDS 26Q-shaped · mutuality working paper · QR reissue log · KPI Audit Report |
+| **Customization** | Drag-and-drop KPI layout editor per portal+tab · KPI / List / Form inspectors · master "Tests" tab |
+| **Images** | Server-side WebP compression · logo · login background · secretary signature · payment QR · profile and evidence photos, stored per society |
+| **Onboarding** | 7-stage Onboarding Hub: register → founding committee → Setup Wizard draft → Annexes + Agreement signatures → enrollment → bye-law adoption → adviser access; nothing posts before activation |
+| **Privacy** | Versioned DPDP notice gate · purpose-bound consents · rights register (access/correction/erasure/grievance/nominee) · breach register · profile-only erasure that never touches ledger rows |
+| **Assurance** | Auditor portal with eight read-only checks · signed per-FY compliance certificate with a public `/verify/...` page · assurance engagements/findings · rule-opinion references · release gates |
+| **Signing** | Four per-society HMAC-SHA256 purposes (`SIGNING_QR`, `SIGNING_NOC`, `SIGNING_AGREEMENT`, `SIGNING_LEDGER`) wrapped under `SECRET_VAULT_KEY`; eSign adapter (Leegality contract, not live) |
+| **Database** | PostgreSQL 16 · 160 tables · 353 `fn_*` functions · 87 triggers · hash-chained ledger and receipt chains · `pgcrypto` |
+| **Bulk enrollment** | XLSX template download, preview/validation and commit for residents, vendors and staff |
+| **Society admin** | Pending receipt creation at the gate → admin verification; pending expenses above the approval threshold go to the approval ladder |
 
 ---
 
 ## 3. Architecture Overview
 
+EstateHub is one Flask application with a Dash SPA mounted at `/dashboard/`.
+PostgreSQL does the heavy lifting: balances, fund rules, receipts, interest,
+resolution tallies and most reporting live in `fn_*` functions, so the Python
+layer is mostly orchestration, rendering and authorization.
+
 ```
-Browser (Dash SPA)
-│
-├── auth/                     ← JWT handler and authentication logic
-├── models/                   ← SQLAlchemy models (User, Transaction, Apartment, etc.)
-├── routes/                   ← Flask routes and API endpoints
-├── services/                 ← Core business logic (auth, qr)
-│
-├── app_shell.py              ← Top-level layout: header, sidebar, modals, stores
-│
-├── callbacks/                ← 34 modules registered in a single ordered
-│   │                            sequence by callbacks/__init__.py; the core
-│   │                            navigation/auth modules below, plus one
-│   │                            module per feature area (receipts, events,
-│   │                            vendor passes, expenses, bulk enroll, bank
-│   │                            reconciliation, channels, polls, patrol
-│   │                            locations/NFC, QR reissue, etc.)
-│   ├── shell_callbacks.py        ← URL routing, auth guard, sidebar, toast
-│   ├── login_callbacks.py        ← Password / PIN / Pattern / Master login
-│   ├── card_catalogue_callbacks.py  ← KPI value refresh (pattern-matched ALL)
-│   ├── drilldown_callbacks.py    ← Master router: KPI→List→Profile→Form
-│   ├── drillin_callbacks.py      ← Entity-picker / Bill-Group-pay modals
-│   ├── qr_callbacks.py           ← QR modal, camera, gate scan, emergency
-│   ├── qr_reissue_callbacks.py   ← Admin-only QR revoke/reissue (Settings tab)
-│   ├── patrol_map_callbacks.py   ← Leaflet map init for patrol locations
-│   ├── camera_callbacks.py       ← Image capture JS injection
-│   ├── noc_callbacks.py          ← Print / PDF / Email NOC (clientside)
-│   ├── agreement_callbacks.py    ← Print / PDF / Email society Agreement
-│   ├── customize_callbacks.py    ← DnD layout editor
-│   ├── customize_kpi_callbacks.py← KPI Inspector cascading dropdowns
-│   ├── list_inspector_callbacks.py / form_inspector_callbacks.py ← column/field config
-│   ├── setup_wizard_callbacks.py ← First-time society setup wizard
-│   ├── tax_rate_callbacks.py ← Tax rate management (CA/Treasurer)
-│   ├── bulk_enroll_callbacks.py  ← Excel bulk upload for members/staff
-│   ├── bank_reconcile_callbacks.py ← Bank statement upload + reconciliation
-│   ├── channel_callbacks.py / poll_callbacks.py ← Alert channels · Polls
-│   ├── assign_to_callbacks.py / invite_to_callbacks.py / concern_bid_callbacks.py ← Concern workflow
-│   ├── receipt_callbacks.py / expense_callbacks.py / event_ticket_callbacks.py / vendor_pass_callbacks.py ← Print/Save/Email actions
-│   ├── form_autofill_callbacks.py / mode_conditional_callbacks.py / qty_stepper_callbacks.py ← form UX helpers (clientside)
-│   ├── account_callbacks.py      ← Self-service change password
-│   └── debug_callbacks.py        ← KPI Audit Report + SQL Tester
-│
-├── drilldown/
-│   ├── loaders.py            ← All DB reads (fn_* functions + raw SQL)
-│   ├── renderers.py          ← HTML builders for list/profile/form/pay-dues/NOC cards
-│   ├── drillin.py            ← DRILLIN_CONFIG for entity-picker/Bill-Group modals
-│   ├── state.py              ← Navigation stack (drilldown-store)
-│   ├── registry.py           ← DRILLDOWN_MAP, ENTITY_MAP, PK_MAP
-│   ├── profile_actions.py    ← Per-entity action button definitions + FIELD_VISIBILITY
-│   ├── schema_introspect.py  ← Live schema → entity metadata (lazy-cached)
-│   └── image_utils.py        ← WebP compression helper
-│
-└── pages/
-    ├── portal_pages.py       ← 5 portal page layouts (KPI rows + drill panel)
-    └── card_catalogue.py     ← KPI_CARDS dict · DEFAULT_LAYOUTS · make_kpi_card()
+Browser
+  │  HTTP + EventSource + Push
+  ▼
+Flask app (app/__init__.py::create_app)
+  ├── /auth/*            login / refresh / logout / check-auth / push subscribe
+  ├── /api/*             societies, KPIs, QR scan, push, eSign callback
+  ├── /health            DB liveness
+  ├── /verify/<kind>/<id> public signed-record verification (no login)
+  ├── /print_doc/*, /print_wizard/*, /assets/*  (login-gated)
+  └── /dashboard/*       Dash SPA (app/dash_apps/)
+        ├── app_shell.py        ROLE_CONFIG (10 portals), header, sidebar, stores, modals
+        ├── pages/              one file per portal / major screen (21 modules)
+        ├── callbacks/          53 registered modules, one ordered list
+        ├── drilldown/          KPI → list → profile → form engine
+        └── assets/             CSS/JS served by Dash
+  │
+  ├── services/ (49)    business logic: auth, QR, onboarding, finance approvals,
+  │                     DPDP, signing, assurance, jobs, mail, push, SSE
+  ├── security/ (15)    roles, RBAC policy, capability engine, guards, vault,
+  │                     ledger anchors, PII masking, password policy
+  ├── routes/ (9)       Flask blueprints above
+  ├── models/           User and Poll models
+  ├── utils/            fiscal year, field config, particulars, toasts
+  └── auth/             JWT handler
+        │
+        ▼
+  PostgreSQL 16  (database/estatehub.sql: 160 tables, 353 functions, 87 triggers)
 ```
 
-> See [§17 Codebase Map](#17-codebase-map) for the full, current file-by-file
-> breakdown (kept in sync with `callbacks/__init__.py`'s actual registration
-> order, not a hand-maintained summary).
+### Request and identity flow
+
+1. `POST /auth/login` verifies password, PIN or pattern with `werkzeug` hashes
+   (`app/services/auth_service.py`), derives the session role (`master` is
+   computed, never stored), starts a Flask-Login session and issues a JWT pair.
+2. Dash callbacks never trust `auth-store` (a browser-editable `dcc.Store`).
+   `@require_session` refuses the callback without a real server session;
+   `app/security/audit_context.py` resolves the actor, role, society and linked
+   entity from that session for audit and scoping.
+3. Fine-grained actions call `app/security/policy.py` / `authorization.py`
+   (`can(user, action, resource, society_id, entity_id, amount)`), which reads
+   active `user_role_assignments` and `role_permissions` and fails closed.
+4. Writes go through `database/db_manager.py` (psycopg2 pool, quiet retry, named
+   or positional parameters). Stateful workflows use
+   `app/services/workflow.py::transition()` so transition logs stay append-only.
 
 ### Single-Page Flow
+
 
 ```
 Login → auth-store populated
@@ -503,36 +629,67 @@ Profile action / Form submit
 
 ---
 
-## 4. The Five Portals
+## 4. The ten portal surfaces
+
+`ROLE_CONFIG` in `app/dash_apps/app_shell.py` is the single source of the sidebar
+for every portal, and `PORTAL_HOME` in `app/security/roles.py` is the single
+source of the landing route. A user's `users.role` chooses the portal; the
+office they hold (`user_role_assignments`) and the capabilities that come with it
+decide what they may do inside it.
+
+| # | Portal | Login role | Landing route |
+|---|---|---|---|
+| 4.1 | Master Admin | `master` (derived: admin, no society, `is_master_admin`) | `/dashboard/master-societies` |
+| 4.2 | Admin | `admin` with a society | `/dashboard/admin-portal` |
+| 4.3 | Owner / family / tenant / visitor | `apartment` + `user_type` | `/dashboard/owner-portal` |
+| 4.4 | Vendor | `vendor` | `/dashboard/vendor-portal` |
+| 4.5 | Security | `security` | `/dashboard/pass-evaluation` |
+| 4.6 | Accountant | `accountant` | `/dashboard/accountant-portal` |
+| 4.7 | Supervisor | `supervisor` | `/dashboard/supervisor-portal` |
+| 4.8 | Staff | `staff` | `/dashboard/staff-portal` |
+| 4.9 | Auditor | `auditor` | `/dashboard/auditor-portal` |
+| 4.10 | Adviser (Auditor / CA / Advocate) | `adviser` | `/dashboard/adviser-portal` |
+
+`users.role` also drives gate-pass codes (`ADM`, `APT`, `VND`, `SEC`, `ACC`,
+`SPV`, `STF`, `ADT`, `ADV`, `MST`); the rules are in §4.11.
 
 ### 4.1 Master Admin Portal
-Accessible only to users flagged `is_master_admin = TRUE` in DB. `society_id = NULL`.
+Accessible only to users flagged `is_master_admin = TRUE` with `society_id = NULL`.
+The role itself is derived by `resolve_role()` and never written to the database.
 
-- Platform-wide KPIs: total societies, plan distribution, all apartments/vendors/security
-- Drill into any society → view/edit profile, manage plan validity
-- Create new societies with admin credentials
+**Tabs:** Societies · Onboarding · RWA Compliance (INDIA) · RWA Compliance (UP) · AOA Rule Editor · Tests · Settings
+
+- Platform-wide KPIs and society list; drill into any society, edit its profile, plan and validity.
+- Register a society and its first admin login; follow it through the 7-stage Onboarding Hub
+  and sign the Agreement last, which activates the society and posts its opening position.
+- Maintain the Acts/Rules/Bye-Laws catalogue and the dated rule parameters (every change audited).
+- KPI / List / Form inspectors, endpoint and SQL debugging, and the test-runner tab.
+- Masters have **no society-data capability**: `authorization.py` denies them society rows by design.
 
 ### 4.2 Admin Portal (Society Admin)
-Primary management console. Scoped to `society_id`.
+Primary management console, scoped to `society_id`.
 
-**Tabs:** Dashboard · Enroll · Cashbook · Receipts · Expenses · Events · Concerns · Gate Pass · Customize · Settings
+**Tabs:** Dashboard · Financials · Channels · Assets · Events · Concerns · Polls · Evaluate Pass · Enrolled · Team Logins · Registers · Customize · Settings
 
-- Full CRUD on all entities (apartments, vendors, security staff)
-- Financial ledger: auto-generated receivables, FIFO pay dues, receipts, expenses
-- NOC issuance with eligibility check
-- Verify pending receipts created by security portal
-- KPI dashboard customization (drag-and-drop layout editor)
-- Concern assignment and status tracking
+- Enrol residents, vendors and guards singly or by XLSX; issue team logins for accountant, supervisor, staff and auditor.
+- Financial ledger: auto-generated receivables, FIFO/selective Pay Dues, receipts, expenses, bank reconciliation,
+  fund management, FY close/lock, NOC issuance and pending-receipt verification.
+- Governance: meetings and resolutions, committee, bye-laws, adviser decisions, TDS/GST rates and GST account classification.
+- Society operations: concerns (invite/bid/assign/close), polls, events and tickets, channels, assets, gate passes and QR reissue.
+- Register views for tenants, owner loans, flat transfers, admissions and statutory filings.
+- KPI layout customization and the KPI/List/Form inspectors.
 
 ### 4.3 Apartment Portal (Owner / Family / Tenant / Visitor)
-Self-service for residents. Scoped to `[society_id, apartment_id]`.
+Self-service for residents, scoped to `[society_id, apartment_id]`.
 
-**Tabs:** Dashboard · My payables · My Charges · Events · Concerns · Cashbook · Settings
+**Tabs:** Dashboard · Members · Financials · Channels · Bills Paid · Events · Concerns · Polls · Settings
 
-- View own pending dues, payment history, charges
-- Raise and track maintenance concerns
-- View upcoming events, own gate pass QR
-- Default view: own apartment profile card below KPIs
+- Own dues, charges, payment history and receipts; own gate-pass QR and visitor pre-registration.
+- Raise and track concerns, vote in polls (owner logins only), read notices and events.
+- Household logins: an owner can add family, tenant and visitor; a family member or tenant can add visitors only.
+- Office-bearers (President, Secretary, Treasurer, committee) use this same portal with extra
+  governance tabs and capabilities; the seat, not the login, grants the power.
+- Default view: own apartment profile card below the KPIs.
 
 #### Apartment User Type Permissions Matrix
 
@@ -543,30 +700,71 @@ Self-service for residents. Scoped to `[society_id, apartment_id]`.
 | **tenant** | No | Yes | Yes | visitor only |
 | **visitor** | No | No | No | None |
 
-
 ### 4.4 Vendor Portal
-For registered service vendors. Scoped to `[society_id, vendor_id]`.
+For registered service vendors, scoped to `[society_id, vendor_id]`.
 
-**Tabs:** Dashboard · My Cashbook · My Charges · Events · Settings
+**Tabs:** Dashboard · Financials · Passes · Events · Concerns · Settings
 
-- View pass fees and payment status
-- Gate pass QR generation and validity
-- Default view: own vendor profile card below KPIs
+- View pass fees, payment status and own cashbook/ledger.
+- Gate-pass QR generation and validity; concerns the vendor has been invited to, with bid submission/revise.
+- Default view: own vendor profile card below the KPIs.
 
 ### 4.5 Security Portal
-For gate security staff. Scoped to `[society_id, security_id]`.
+For gate security staff, scoped to `[society_id, security_staff.id]`.
 
-**Tabs:** Gate Pass Evaluation · Attendance · All Users · My Cashbook · Receipts · Events · Settings
+**Tabs:** Pass Eval · Channels · Attendance · Receipts · Events · Concerns · Users · Settings
 
-- **Primary:** QR code camera scanning — Entry IN / Exit OUT
-- Create cash receipts at gate (saved as `status='pending'`, verified by admin)
-- Attendance clock-in / clock-out
-- View apartments, vendors, events (read-only)
-- Default view: own security profile card below KPIs
+- **Primary:** QR camera scanning — entry IN / exit OUT, gate alerts (school bus, taxi, visitor, walk-in).
+- Create cash receipts at the gate (saved `status='pending'`, verified by an admin) and use the employee attendance QR.
+- Clock-in / clock-out; duty is an open `gate_access` row and doubles as the attendance record.
+- Read-only views of residents, vendors and events; concerns assigned directly to security (they do not bid).
+- Default view: own security profile card below the KPIs.
 
----
+### 4.6 Accountant Portal
+For the society's accountant login. Prepare and post, but do not approve, reverse or close.
 
-### 4.5a Role codes and gate-pass rules
+**Tabs:** Dashboard · Receipts · Expenses · Dues · Cashbook · Financials · TDS & GST
+
+- Prepare/post receipts and expenses, work pending dues and run the cashbook and statements.
+- TDS/GST rates screen (shared with the Treasurer and Secretary) and GST account classification.
+- Approval of payments, reversal and period close belong to the Treasurer/committee, not this portal.
+
+### 4.7 Supervisor Portal
+For the society's supervisor login, focused on the gate and field staff.
+
+**Tabs:** Dashboard · Gate & Security · Users · Concerns · Events · Channels
+
+- Gate and security oversight, user lists, assigned concerns, events and channels.
+
+### 4.8 Staff Portal
+For general society staff.
+
+**Tabs:** Dashboard · Concerns · Events
+
+- See and act on concerns assigned to staff; read events. No financial or enrolment surface.
+
+### 4.9 Auditor Portal
+Read-only verification for the statutory/internal auditor.
+
+**Tabs:** Verify · Books · Receipts · Expenses · Financials
+
+- Runs the eight read-only checks in `app/services/auditor_checks.py` (ledger chain, journal balance,
+  cash vouchers, cashbook reconciliation, receipt chains, tamper guards, and more) against the SQL
+  verification functions; shows pass / finding / info badges.
+- Views books, receipts, expenses and financial statements without any write path.
+
+### 4.10 Adviser Portal
+For an appointed Auditor, CA or Advocate, bound to an appointment.
+
+**Tabs:** My access
+
+- Shows the appointment, its term and what the role may read.
+- Provides the one masked, logged ledger export (`app/services/adviser_export.py`);
+  every export writes an `export_log` row.
+- Access works only while the appointment is in force (`app/security/adviser_access.py`): not revoked,
+  inside its term, and signed by the required office-bearers.
+
+### 4.11 Role codes and gate-pass rules
 
 A gate pass is the text `<society>-<CODE>-<entity>` (signed where the role has a society key). Codes live in `app/security/roles.py` (`ROLE_CODES`).
 
@@ -581,7 +779,7 @@ A gate pass is the text `<society>-<CODE>-<entity>` (signed where the role has a
 - **Attendance:** that same `gate_access` row is the attendance record. `fn_employee_attendance(society, from, to)` (Python: `employee_attendance.attendance_register`) gives one line per person per day: first in, last out, minutes on duty, still-on-duty flag. Only closed sessions count towards minutes; a night shift is dated by the day it started.
 - **Going on duty:** `validate_attendance_qr` now accepts all four employee roles. A deactivated employee cannot clock in but can always clock out.
 
-### 4.6 Concern Lifecycle (`concerns_assigns`)
+### 4.12 Concern Lifecycle (`concerns_assigns`)
 
 A concern's state lives in **one row per assignee** in `concerns_assigns`, keyed
 by `(concern_id, role, entity_id)` where `role` is `ADM` / `VND` / `SEC`.
@@ -669,55 +867,82 @@ this column alone.
 
 ## 5. Portal Data Scoping
 
-Every list, profile, KPI, and form is filtered at the data layer by the portal's identity. This is enforced at two points:
+Every list, profile, KPI and form is filtered at the data layer by the portal's
+identity. The browser's `auth-store` is **not** the input used for that decision:
+`get_server_auth(auth_data)` overlays the signed Flask-Login session, so a forged
+`role` / `society_id` in localStorage cannot widen a query. (Some older code that
+still accepts the store payload for convenience goes through the same overlay.)
 
 ### 5.1 KPI Scoping (`card_catalogue_callbacks.py`)
 
 ```python
-# Admin / Master: use KPI's own SQL with society_id
+auth_data = get_server_auth(auth_data)      # server session wins over auth-store
+sid       = auth_data.get("society_id")
+role      = auth_data.get("role", "admin")
+apt_id    = auth_data.get("apartment_id")   # linked_id for the owner portal
+vendor_id = auth_data.get("vendor_id")      # linked_id for the vendor portal
+sec_id    = auth_data.get("security_id") or (
+    auth_data.get("linked_id") if role == "security" else None)
+
+# Admin / Master: the KPI's own SQL, bound with society_id
 params = tuple(sid for _ in range(n_params))
 
-# Apartment portal: override to entity-specific SQL
+# Apartment portal: entity-specific override
 "kpi_apartments_dues": (
     "SELECT COALESCE(SUM(amount-paid_amount),0) AS v FROM receivables
      WHERE entity_id=%s AND role='apartment' AND status IN ('pending','partial')",
     (apt_id,),
 )
-
-# Vendor portal: override with vendor_id
-# Security portal: override with sec_staff_id
 ```
+
+Gate-log KPIs use `auth_data["user_id"]`, because `gate_access.entity_id` stores a
+`users.id`, not a `linked_id`. Employee portals (accountant, supervisor, staff)
+have no linked entity row, so their KPIs are society-scoped like the admin's.
 
 ### 5.2 List / Profile Scoping (`drilldown_callbacks._apply_portal_filters`)
 
+The current function reads the **server session**, not the argument it accepts
+for backwards compatibility (abridged):
+
 ```python
 def _apply_portal_filters(filters, auth):
-    role = auth.get("role")
+    role = get_current_user_role()          # from the Flask-Login session
+    f = dict(filters)
     if role == "apartment":
-        filters["apartment_id"] = auth.get("apartment_id") or auth.get("linked_id")
+        apt_id = get_current_linked_id()    # apartments.id
+        f["apartment_id"] = apt_id
+        f["concern_creator_id"] = get_current_user_id()
     elif role == "vendor":
-        filters["vendor_id"] = auth.get("user_id")      # fn_vendors_list uses users.id
+        f["vendor_id"] = get_current_linked_id()   # vendors.id
+        f["vnd_assignee_id"] = f["vendor_id"]
     elif role == "security":
-        filters["security_id"] = auth.get("linked_id")  # security_staff.id
-    return filters
+        f["security_id"] = get_current_linked_id() # security_staff.id
+        f["user_id"] = get_current_user_id()       # receipts.created_by
+        f["sec_assignee_id"] = f["security_id"]
+    return f
 ```
 
-`loaders.load_list()` short-circuits to single-row query when portal entity filter present:
+`loaders.load_list()` short-circuits to a single-row query when a portal entity
+filter is present:
+
 ```python
 if entity == "apartments" and p_apt_id:
     rows = db._execute("SELECT * FROM fn_apartments_list(%s,%s,NULL) WHERE id=%s", ...)
     return rows, len(rows)
 ```
 
-### 5.3 Scoping Summary
+### 5.3 Scoping summary
 
-| Portal | society_id | apartment_id | vendor_id | security_id |
-|---|---|---|---|---|
-| Master | ✗ (all) | ✗ | ✗ | ✗ |
-| Admin | ✓ | ✗ | ✗ | ✗ |
-| Apartment | ✓ | ✓ (`linked_id`) | ✗ | ✗ |
-| Vendor | ✓ | ✗ | ✓ (`user_id`) | ✗ |
-| Security | ✓ | ✗ | ✗ | ✓ (`linked_id`) |
+| Portal | society_id | entity filter | Notes |
+|---|---|---|---|
+| Master | ✗ (platform) | ✗ | Deliberately has no society-data capability in the policy engine |
+| Admin | ✓ | ✗ | Society-wide |
+| Apartment | ✓ | `apartment_id = linked_id` | Concerns also filtered by creator |
+| Vendor | ✓ | `vendor_id = linked_id` | Concern rows at every stage |
+| Security | ✓ | `security_id = linked_id` | Receipts additionally by `users.id` |
+| Accountant / Supervisor / Staff | ✓ | ✗ | No linked entity record |
+| Auditor | ✓ | ✗ | Read-only, verification functions only |
+| Adviser | ✓ | ✗ | Appointment-bound; only the masked export path |
 
 ---
 
@@ -796,7 +1021,7 @@ _PORTAL_PERMS = {
 
 ---
 
-## 7. Authentication & Security
+## 7. Authentication, Roles & Security
 
 ### Login Methods
 
@@ -814,7 +1039,8 @@ Login modal:
 {
     "user_id":       int,
     "email":         str,
-    "role":          "admin" | "apartment" | "vendor" | "security",
+    "role":          "admin" | "apartment" | "vendor" | "security" | "accountant"
+                     | "supervisor" | "staff" | "auditor" | "adviser" | "master",
     "society_id":    int | None,   # None for master admin
     "linked_id":     int,          # FK → apartments.id / vendors.id / security_staff.id
     "apartment_id":  int | None,   # = linked_id when role="apartment"
@@ -833,6 +1059,76 @@ Login modal:
 1. User enters email → `request_password_reset()` → SHA-256 token stored in DB with a 1h expiry (`RESET_TOKEN_HOURS`)
 2. Token is emailed via `app/services/mailer.py` (uses the `SMTP_*` settings). If SMTP is not configured or the send fails, the token is written to the server log so an operator can relay it. The user always sees the same message, "Reset mail sent if account available in database.", whether or not the account exists or the mail went out. The mail server should offer **STARTTLS**; if it does not, the mail is still sent but a warning is logged and the message travels unencrypted
 3. User enters token + new password → `reset_password()` → hash updated, token cleared
+
+### Roles, residencies and seats — three different things
+
+Keeping these apart explains most of the permission questions in this codebase:
+
+1. **Login role** — `users.role`, constrained to `admin`, `apartment`, `vendor`,
+   `security`, `accountant`, `supervisor`, `staff`, `auditor`, `adviser`
+   (`PERSISTED_ROLES` in `app/security/roles.py`). `master` is **virtual**: an
+   `admin` with no `society_id` and `is_master_admin = TRUE`, derived by
+   `resolve_role()` and written into the session/JWT, never into the database.
+2. **Resident type** — `users.user_type` on an `apartment` login: `owner`,
+   `family`, `tenant` or `visitor`, with `linked_id` pointing at the flat.
+3. **Office-bearer seat** — `committee_offices` plus `user_role_assignments`
+   (`society_president`, `society_secretary`, `treasurer`, `committee_member`,
+   …). A seat is held *through* an owner login and adds capabilities; it does not
+   create a login. `app/services/committee_service.py` keeps the two records in
+   step, and a flat in arrears cannot hold office (bye-law 7).
+
+Role codes used in gate passes and `gate_access.role` live in the same module
+(`ROLE_CODES`, `CODE_FOR_ROLE`, `EMPLOYEE_CODES`, `ALWAYS_PASS_CODES`), and the
+landing route for every role lives in `PORTAL_HOME`. Nothing else should
+hard-code a role string.
+
+### Authorization — four layers, deny by default
+
+| Layer | File | What it decides |
+|---|---|---|
+| Portal gate | `app/security/roles.py` | Which dashboard a login may land on (`resolve_role`, `normalize_role`, `portal_home`). Unknown spellings are denied, not guessed. |
+| Session guard | `app/security/guards.py` | `@require_session` refuses a Dash callback body when there is no real Flask-Login session, whatever `auth-store` claims. `scripts/check_callback_guards.py` enforces it in CI, with a reviewed allowlist for login/reset/router callbacks. |
+| RBAC + capability engine | `app/security/policy.py`, `authorization.py`, `service_guard.py` | `can(user_id, action, resource, society_id, entity_id, amount)` reads active `user_role_assignments` → `role_permissions`; capabilities are explicit names, never wildcards; tenant isolation is a hard deny; platform operators have **no** society-data capability; a maker cannot approve/post/reverse their own item; amount thresholds and time-bound delegations are honoured. `service_guard` is the service-boundary wrapper and writes `audit_events`. |
+| Domain guards | `setup_guard.py`, `plan_guard.py`, `adviser_access.py`, `stamp_scope.py` | A society that is not `active` cannot post or bill; an expired paid plan locks out after `PLAN_GRACE_DAYS` (default 7, `Free` never expires); an adviser login works only inside a signed appointment; print/email stamps are ownership-scoped. |
+
+Identity for every audit field and scoped query comes from
+`app/security/audit_context.py` (server session), never from the browser's
+`auth-store`. That was a real vulnerability class: the store is a localStorage
+value, so any callback that trusted its `role`/`society_id` was forgeable by
+calling Dash's update endpoint directly.
+
+### Secrets, signing keys and the vault
+
+| Secret | Where it lives | Purpose |
+|---|---|---|
+| `SECRET_KEY` | host env | Signs the Flask-Login session cookie. Production refuses to boot with a missing, known-default or <32-character value (`app/security/secret_policy.py`). Development generates a random per-process key, so sessions do not survive a restart. |
+| `JWT_SECRET_KEY` | host env | Signs access/refresh JWT pairs (`app/auth/jwt_handler.py`). Same fail-closed policy. |
+| `SECRET_VAULT_KEY` | host env, **not** the database | One Fernet key, or several comma-separated during rotation. Wraps every society's per-purpose signing keys (`app/services/secret_vault.py`). Production calls `assert_vault_ready()` at startup and refuses to boot without it. |
+| `SECRET_MASTER_KEY` | operator's own machine only | Authorises a vault-key rotation (`scripts/rotate_vault_key.py`). Never read by the web app. |
+| `LEDGER_ANCHOR_SECRET` | legacy, optional | Only verifies anchors signed before per-society ledger keys existed; new anchors use `SIGNING_LEDGER`. |
+| `ESIGN_CALLBACK_SECRET` | host env | HMAC of the raw eSign callback body; with no secret set, every callback is refused. |
+
+Each society gets four independent HMAC-SHA256 keys — `SIGNING_QR`,
+`SIGNING_NOC`, `SIGNING_AGREEMENT`, `SIGNING_LEDGER` — created from
+`os.urandom`, stored wrapped in `society_signing_keys`, and unwrapped only inside
+`app/services/signing_service.py`. Every signed message carries a purpose label
+(`ApexEstateHub/v1/<PURPOSE>/society:<id>|`) so a QR tag cannot pass as a NOC
+signature. Rotation retires a key version without deleting it, so old records
+still verify; revoking a compromised key makes later signatures "untrusted".
+Creation, rotation and revocation are audited.
+
+### Public, unauthenticated surfaces
+
+Only these are reachable without a login, and each is deliberately narrow:
+
+* `GET /verify/<kind>/<id>` and `GET /verify/certificate/<id>` — recompute a
+  signed record's hash and show valid/superseded/revoked/tampered/untrusted/
+  unsigned, plus the signing offices. They never show content, names, flats or
+  voter information (`Cache-Control: no-store`, `X-Robots-Tag: noindex`).
+* `POST /api/esign/callback/<vendor_request_id>` — HMAC-authenticated vendor
+  callback, idempotent, returns only a status.
+* `GET /health` — database liveness, no data.
+* The login/reset endpoints themselves.
 
 ---
 
@@ -1439,21 +1735,42 @@ Any path to profile_apartment
 The platform relies heavily on QR codes for access control, asset tracking, and auditing. Unlike simple static text, the QR architecture uses cryptographic signing to prevent forgery and a versioning system to allow for remote revocation of lost or stolen passes.
 
 ### Core Cryptography & Generation
-- **Payload Format:** `<society_id>-<ROLE_CODE>-<entity_id>-<qr_version>-<signature>`.
-- **Signing (`SIGNING_SECRET`):** Each society configures a unique `SIGNING_SECRET` in their Setup Wizard (encrypted at rest in the database). This secret is used to generate an HMAC-SHA256 signature for the QR payload. This guarantees that a printed, static QR code cannot be forged by simply guessing sequential entity IDs.
-- **Legacy Unsigned Codes:** If a society hasn't configured a secret yet, or if they have old codes printed before the signing requirement, the system falls back to a 3-part unsigned payload (`<society_id>-<ROLE_CODE>-<entity_id>`).
+- **Payload Format:** `<society_id>-<ROLE_CODE>-<entity_id>` for legacy codes, or
+  `<society_id>-<ROLE_CODE>-<entity_id>-<qr_version>-<10-char HMAC>` once the
+  society has a signing key (`build_qr_payload()`).
+- **Signing:** each society has a random `SIGNING_QR` key held in the vault
+  (`app/services/signing_service.py`, wrapped under `SECRET_VAULT_KEY`). No human
+  knows it. `_get_signing_secret()` resolves it per call and `_qr_sign()` computes
+  HMAC-SHA256 over `society-ROLE-entity-version`, truncated to 10 hex characters.
+  This makes forgery by guessing sequential entity IDs infeasible.
+- **Fail closed:** a configured-but-unwrappable key raises `QRSigningError`
+  instead of silently downgrading the society to unsigned codes.
+- **Legacy Unsigned Codes:** a society with no key yet (setup not finished) gets a
+  3-part unsigned payload. `ADT`, `ADV` and `MST` are deliberately never signed:
+  they are `0-<CODE>-None` platform/reviewer passes with no society or entity row.
 
 ### Identity & Versioning (Revocable Passes)
-Certain roles represent long-term identities (like a resident or a vendor). These passes are **versioned**, meaning their QR payload includes a `qr_version` nonce (a random 4-digit number).
-- **Versioned Roles:** Apartments (`APT`), Vendors (`VND`), Security Staff (`SEC`), Patrol Locations (`PTL`), and Admins (`ADM`).
-- **Revocation (`revoke_and_reissue`):** If a physical pass is lost or stolen, an Admin can revoke it. The system derives a completely new 4-digit nonce and updates the entity's `qr_version` column in the database. Because the database version no longer matches the version printed on the lost QR code, the old code instantly fails signature validation without affecting anyone else's pass.
-- **Admin Edge-Case:** A promoted apartment owner's Admin badge rides on their `apartments.qr_version` counter. A seeded first-admin falls back to their `users.qr_version` counter.
+Long-lived passes include a `qr_version` nonce (a random 4-digit number) and are
+revocable.
+- **Versioned roles:** apartments (`APT`), vendors (`VND`), security staff (`SEC`),
+  patrol locations (`PTL`), admins (`ADM`), concerns (`CON`), receipts (`RPT`),
+  expenses (`EXP`), assets (`AST`), NOCs (`NOC`), event tickets (`EVT`), polls
+  (`POL`), plus employee logins keyed on `users.id` (`ACC`, `SPV`, `STF`).
+- **Revocation (`revoke_and_reissue`):** an Admin revokes a lost or stolen pass
+  after confirming the step-up password. The replacement nonce is derived from the
+  society's key, `qr_version` is bumped for that one entity, and every previously
+  printed code for it stops validating. The action is written to `qr_reissue_log`.
+  There is no unsigned fallback for revocation.
+- **Admin edge-case:** a promoted apartment owner's Admin badge rides on their
+  `apartments.qr_version`; a seeded first admin falls back to `users.qr_version`.
 
-### Lookup & Utility Tags (Unversioned)
-Some QR codes act as immutable, physical lookup tags rather than access credentials. These are **unversioned** and cannot be "revoked" via `revoke_and_reissue`.
-- **Receipts (`RPT`)**: Scans perform a pure read against the `receipts` table to verify authenticity and current status (Pending/Confirmed).
-- **Assets (`AST`)**: Functions as a physical asset tag. Scans verify name, purchase value, and disposal status.
-- **Concerns (`CON`)**: Acts as a physical tag for a logged issue (e.g., stuck on a door). Scans return the concern type and real-time resolution status.
+### Lookup & Utility Tags
+Document tags are now signed and versioned too (the 2026-09 extension): receipts,
+expenses, concerns, assets, NOCs, event tickets and polls each carry their own
+`qr_version`, so reissuing one document invalidates only its old tag. A scan
+performs a read against the source table and returns the current status
+(pending/confirmed, disposed, resolved, etc.); it does not by itself post a
+ledger entry.
 
 ### Actionable Workflows
 - **Visitors (`VIS`)**: Scans enforce a strict Two-Actor security policy. Only pre-approved passes (`status='approved'`) are admitted instantly on scan. Pending passes resolve to `PENDING_CONFIRMATION` which triggers an app alert, forcing the guard to wait for explicit owner approval before entry is granted.
@@ -1571,24 +1888,37 @@ Always construct full asset URLs at render time using `renderers.get_image_url(f
 
 ## 15. Tech Stack Reference
 
+Versions are the pins in `requirements.txt`.
+
 | Layer | Technology | Notes |
 |---|---|---|
-| Frontend | Python Dash 2.x + React 18 | SPA, no page reloads |
-| UI | Dash Bootstrap Components (DBC) | Cards, modals, badges |
-| Backend | Flask (embedded in Dash) | `app.server` for Flask routes |
-| Auth | JWT (PyJWT) + Werkzeug password hashing | Multi-method |
-| Database | PostgreSQL via Aiven | Managed PostgreSQL |
-| DB Driver | psycopg2 + SQLAlchemy text() | Named params via `_to_pyformat()` |
-| ORM | SQLAlchemy `db.Model` + raw SQL | SQLAlchemy models in `app/models/` alongside `fn_*` stored functions |
-| Image Processing | Pillow (PIL) | WebP compression to ≤25KB |
-| Excel Export | pandas + openpyxl | |
-| QR | `qrcode[pil]` + `cryptography.Fernet` | Encrypted payloads |
-| Camera | jsQR (clientside) + `/api/scan-qr` | Server-side decode |
-| Hosting | Render | Gunicorn |
+| Frontend | Dash 2.14.2 with its bundled React 18 | SPA at `/dashboard/`, no page reloads; `app/dash_patch.py` patches a Dash 2.14.2 `State` + pattern-matching `ALL` bug |
+| UI | dash-bootstrap-components 1.7.1, plotly 7.1.0 | Cards, modals, badges; Plotly is used by Dash itself |
+| Map | Leaflet 1.9.4 (CDN) | Patrol-location map and geofencing UI |
+| Backend | Flask 2.2.5 / Werkzeug 2.2.3 | Flask app hosts the Dash app (`dash_app.server`) plus the blueprints in `app/routes/` |
+| Server | gunicorn 26 (Procfile: 2 workers, 8 threads, 120 s timeout) | `wsgi:server` is the production entry point; `run.py` is for development |
+| Auth | Werkzeug password/PIN/pattern hashes, Flask-Login session, PyJWT 2.15 | Access and refresh tokens; server session is the source of truth |
+| Database | PostgreSQL 16 + `pgcrypto` | Managed Postgres (Aiven historically, NeonDB per `docs/SCHEDULER.md`); schema is PostgreSQL-specific |
+| DB driver | psycopg2-binary 2.9.13 with `ThreadedConnectionPool` | `db._execute()` accepts both `:name` dict params and positional `%s`; no SQLAlchemy ORM is in use (the SQLAlchemy imports were removed) |
+| Models | Python dataclasses (`app/models/`) | `User`, `Poll` and helpers — not ORM entities |
+| Money | `database/money.py` | `Decimal` to the paisa; `D` / `money` / `rupee`; float is forbidden on money paths (see `docs/FLOAT_AUDIT.md`) |
+| Images | Pillow 13 | Upload → WebP compression, per-society asset folders |
+| Excel | openpyxl 3.1 + pandas 3 | Statement/ledger/cashbook/GST/TDS/asset exports |
+| QR | `qrcode[pil]` 8.2, HMAC-SHA256, `cryptography` Fernet | Signed payloads + vault-wrapped keys |
+| Camera | jsQR (clientside) + OpenCV `QRCodeDetector` (`/api/scan-qr`) | Server decode is login-gated and size-capped |
+| Push / realtime | pywebpush + VAPID, APScheduler, Redis pub/sub, SSE | FCM is a code path but `firebase_admin` is not pinned |
+| Documents | Markdown 3.11 | `/print_doc` renders `docs/ADMIN_QUICKSTART.md` and `database/AGREEMENT.md` |
+| Testing | pytest 9.1.1, `sqlparse`, `Markdown` | 1,214 tests; `postgres_integration` marker for live DB |
+| Pinned but unused | Flask-Migrate, Flask-WTF, Flask-Session, passlib, bcrypt | Kept in `requirements.txt`; no import in `app/`, `database/`, `scripts/` or `test/` |
 
 ---
 
 ## 16. PostgreSQL Function Index
+
+`database/estatehub.sql` defines **353 `fn_*` functions** and 87 triggers. This
+section indexes the ones a reader is most likely to need; it is not exhaustive —
+search the SQL file for the full list. Every function name below was checked
+against `CREATE OR REPLACE FUNCTION` in that file.
 
 | Function | Purpose |
 |---|---|
@@ -1656,167 +1986,169 @@ Always construct full asset URLs at render time using `renderers.get_image_url(f
 ## 17. Codebase Map
 
 ```
-EstateHub/
-│
+ApexEstateHub/
 ├── app/
-│   ├── auth/                                 ← JWT handler and token logic
-│   ├── models/                               ← SQLAlchemy models (User, Transaction, Apartment, etc.)
-│   ├── routes/                               ← Flask routes and API endpoints
-│   ├── dash_apps/
-│   │   ├── app_shell.py                      ← Layout root + all dcc.Store definitions
-│   │   ├── layout.py                         ← Shared page layout and UI components
-│   │   ├── callbacks/                        ← 39 modules; see registration order below
-│   │   │   ├── __init__.py                   ← Registration order & loader rules (source of truth — read this file directly for the current wiring, it's kept well-commented)
-│   │   │   ├── shell_callbacks.py            ← URL routing, auth guard, sidebar, toast
-│   │   │   ├── login_callbacks.py            ← All login methods + password reset
-│   │   │   ├── card_catalogue_callbacks.py   ← KPI refresh (single callback, ALL pattern)
-│   │   │   ├── drilldown_callbacks.py        ← Master router + form submit + default profile
-│   │   │   ├── drillin_callbacks.py          ← Entity-picker modal (FK fields) + Bill-Group Pay picker
-│   │   │   ├── qr_callbacks.py               ← QR modal, camera JS, gate scan, emergency, NFC write
-│   │   │   ├── qr_reissue_callbacks.py       ← Admin-only Settings-tab Re-issue QR (revoke_and_reissue)
-│   │   │   ├── patrol_map_callbacks.py       ← Clientside Leaflet map init for patrol locations
-│   │   │   ├── camera_callbacks.py           ← Image capture JS (entity forms)
-│   │   │   ├── noc_callbacks.py              ← Print / PDF / Email NOC (clientside)
-│   │   │   ├── agreement_callbacks.py        ← Print / PDF / Email society Agreement (clientside)
-│   │   │   ├── customize_callbacks.py        ← DnD layout editor
-│   │   │   ├── customize_kpi_callbacks.py    ← KPI Inspector + _KPI_PORTAL_ENTRIES
-│   │   │   ├── list_inspector_callbacks.py   ← List column configuration
-│   │   │   ├── form_inspector_callbacks.py   ← Form field configuration
-│   │   │   ├── setup_wizard_callbacks.py     ← First-time society setup wizard
-│   │   │   ├── tax_rate_callbacks.py         ← Tax rate management (CA/Treasurer)
-│   │   │   ├── bulk_enroll_callbacks.py      ← Excel bulk upload for members/staff
-│   │   │   ├── bank_reconcile_callbacks.py   ← Bank statement upload and reconciliation, per bank account (Bank Account selector on the upload modal; candidates filtered by where the money actually landed)
-│   │   │   ├── assign_to_callbacks.py        ← Assign-To modal (concern → admin/vendor/security)
-│   │   │   ├── concern_bid_callbacks.py      ← Vendor "Save Bid" on a concern
-│   │   │   ├── invite_to_callbacks.py        ← Invite vendors to bid on a concern; security are placed straight at 'assigned' (they don't bid)
-│   │   │   ├── channel_callbacks.py          ← Channel creation, subscribe/unsubscribe
-│   │   │   ├── poll_callbacks.py             ← Owner voting and poll management
-│   │   │   ├── account_callbacks.py          ← Account settings / change password
-│   │   │   ├── mode_conditional_callbacks.py ← Clientside field visibility (cheque_no/txn_id by Mode)
-│   │   │   ├── qty_stepper_callbacks.py      ← Clientside +/- quantity stepper (event ticket qty)
-│   │   │   ├── form_autofill_callbacks.py    ← Particulars auto-suggestion for Receipts/Expenses
-│   │   │   ├── receipt_callbacks.py          ← Receipt Print / Save / Email
-│   │   │   ├── event_ticket_callbacks.py     ← Event ticket Print / Save / Email
-│   │   │   ├── vendor_pass_callbacks.py      ← Vendor pass Print / Save / Email
-│   │   │   ├── expense_callbacks.py          ← Expense voucher Print / Save / Email
-│   │   │   ├── financial_statements_callbacks.py ← 6 Statements card Print / PDF / Email (clientside)
-│   │   │   ├── fund_management_callbacks.py  ← Fund Management: utilize, income→fund appropriation (+pending confirm/cancel), fund→bank deposit routing. Every write is split into a write phase and a refresh phase — see [§9 Fund Management — Write Contract](#fund-management--write-contract-do-not-collapse-these-two-phases). Also owns the shared card builders (`build_balances_table`, `build_fund_options`, `build_income_source_options`, `build_appropriation_log_table`, `build_fund_bank_mapping_rows`, `build_log_table`) |
-│   │   │   ├── up_compliance_callbacks.py   ← UP AOA Compliance card: 11 write callbacks (filings, annexure export, undivided-interest fill/basis, transfers + No Dues, bye-law 7, s.22, owner loan + repayment). Each returns through `_run()` → (toast, re-rendered body); `_ctx()` gates on role + resolves the society from the session |
-│   │   │   ├── debug_callbacks.py            ← KPI audit + SQL tester
-│   │   │   ├── admin_callbacks.py            ← No-op registration slot (all callbacks pruned — see file docstring); kept so future admin-only callbacks have a documented slot
-│   │   │   ├── security_callbacks.py         ← Gate-alert buttons (School Bus/Taxi escalate, visitor notify, walk-in, QR validate, attendance). Wired in as step 6b
-│   │   │   └── print_letterhead.py           ← Shared letterhead helper (logo · login_background watermark · secretary sign · verification QR) used by receipt, NOC, event-ticket, and any future print/PDF/email flow; not a callbacks module, imported by the print callback modules
-│   │   ├── drilldown/
-│   │   │   ├── loaders.py                    ← All DB reads, verify_*, pay_dues_fifo. Fund Management: `get_fund_balances`, `get_expense_bank_accounts`, `get_fund_utilization_log`, `get_fund_bank_mappings`, `get_income_accounts_for_appropriation`, `get_fund_appropriation_log`
-│   │   │   ├── renderers.py                  ← list/profile/form/pay-dues/NOC card HTML
-│   │   │   ├── drillin.py                    ← DRILLIN_CONFIG for entity-picker/Bill-Group modals
-│   │   │   ├── state.py                      ← navigate_to, navigate_back, initial_state
-│   │   │   ├── registry.py                   ← DRILLDOWN_MAP, ENTITY_MAP, PK_MAP, helpers
-│   │   │   ├── profile_actions.py            ← PROFILE_ACTIONS + FIELD_VISIBILITY dicts
-│   │   │   ├── schema_introspect.py          ← Live schema → entity meta (lazy-cached)
-│   │   │   ├── image_utils.py                ← compress_to_webp()
-│   │   │   └── `__init__ ().py`              ← ⚠️ Stray duplicate of `__init__.py` (note the space + parens in the filename) — looks like an accidental extra save, not imported by anything; safe to delete, see [§21](#21--legacy-code-cleanup-status)
-│   │   └── pages/
-│   │       ├── portal_pages.py               ← 5 portal page layouts
-│   │       ├── card_catalogue.py             ← KPI_CARDS, DEFAULT_LAYOUTS, make_kpi_card()
-│   │       ├── customize_layout.py           ← KPI Customize layout views
-│   │       ├── login_system.py               ← Login and pattern/PIN authentication views
-│   │       ├── setup_wizard.py               ← First-time society setup wizard (imports `statutory_rules.STEP_ROWS` for its Acts & Rules panel)
-│   │       ├── tax_rates_page.py            ← Tax rates page (CA/Treasurer)
-│   │       ├── up_compliance_card.py         ← UP AOA Compliance card renderer — 7 sections, all component ids prefixed `upc-`. `render_up_compliance_body()` returns sections only so a save can swap the body without losing the toast (it reads `card.children[2].children` positionally)
-│   │       └── router.py                     ← Page routing definitions
-│   ├── services/
-│   │   ├── auth_service.py                   ← authenticate_user(), reset flow
-│   │   ├── qr_service.py                     ← generate_static_qr_code(), validate_qr_code()
-│   │   ├── statutory_rules.py                ← Acts & Rules summary rows for the Setup Wizard's right-hand panel, plus the Act/Rules/Bye-laws loader (`instruments_for_society()`) that reads `legal_instrument_catalog` (Master Portal → RWA Compliance (UP)) for the wizard's "UP AOA Compliance" step, falling back to `LEGAL_INSTRUMENTS_UP_AOA` in seed.py when that table isn't integrated yet. **Presentation strings only** — the enforced thresholds live in `regime_rule_parameters` (§9), not here
-│   │   ├── tax_rate_service.py               ← CA/Treasurer tax rate management service
-│   │   ├── up_aoa_actions.py                 ← The live UP AOA service: every handler returns `(ok, message)` and re-checks society ownership via `_owns()`; also `load_card_data()` (the single read path the renderer consumes) and `annexure_workbook_bytes()` (openpyxl, `Owners` + `Loanees` sheets)
-│   │   └── up_aoa_compliance_service.py      ← ⚠️ Dead code — a read-only wrapper over nine SQL functions with zero importers; the card uses `up_aoa_actions`. Keep as the documented "these functions report only" contract, or delete it — don't wire both
-│   └── assets/                               ← Static files + uploaded images
+│   ├── __init__.py              Flask factory: config, error handlers, blueprints,
+│   │                            /assets, /print_doc, /print_wizard, vault fail-fast, scheduler
+│   ├── config.py                Config classes; DATABASE_URL → PG* → SQLite fallback
+│   ├── dash_patch.py            Dash 2.14.2 State+ALL pattern-matching fix
+│   ├── crossfile_validation.py  Cross-file consistency checks used by scripts/tests
+│   ├── auth/jwt_handler.py      JWT creation, verify, bearer auth, role_required
+│   ├── models/                  User, Poll (dataclasses)
+│   ├── utils/                   fiscal year, field_config, auto_particulars, ux_toasts
+│   ├── assets/                  Serving folder for per-society uploads (`<society_id>/…`)
+│   ├── static/                  Logo/background, JS (push, mobile, error monitor, QR scanner,
+│   │                            service worker), templates (base/index/login/test_push)
+│   ├── templates/               Flask/Jinja pages
+│   ├── routes/                  10 modules → blueprints: auth, api, web, scan, push,
+│   │                            sse, presumed_visitor, verify, esign, __init__
+│   ├── services/                49 modules + __init__ (below)
+│   ├── security/                15 modules (below)
+│   └── dash_apps/
+│       ├── __init__.py          Dash factory: assets, external scripts/styles, callbacks
+│       ├── app_shell.py         ROLE_CONFIG (10 portals), header, sidebar, stores, modals
+│       ├── layout.py            Shared layout components
+│       ├── print_render.py      Component → HTML for print views
+│       ├── callbacks/           53 registered modules + print_letterhead.py (helper)
+│       ├── drilldown/           loaders, renderers, registry, curated, drillin, state,
+│       │                        profile_actions, schema_introspect, image_utils, __init__
+│       └── pages/               21 modules: portal_pages, card_catalogue, login_system,
+│                                setup_wizard, onboarding_page, wizard_registry,
+│                                governance_settings, governance_guide, committee_page,
+│                                adviser_page, adviser_portal, auditor_page, privacy_page,
+│                                poll_page, team_page, tax_rates_page, gst_accounts_page,
+│                                master_rules_page, customize_layout, adoption_panel,
+│                                up_compliance_card
 │
 ├── database/
-│   ├── db_manager.py                         ← db._execute() → Aiven
-│   ├── estatehub.sql                         ← Full schema + all fn_* functions (incl. the UP AOA compliance layer)
-│   ├── migrate.py                            ← Fresh schema install (delegates demo seeding to seed.py)
-│   ├── seed.py                               ← Idempotent demo/seed data (society, users, accounts, events, concerns). Also assigns `society_legal_regime` for UP societies and the `UP_AOA_ACCOUNT_MAPPINGS` statutory heads
-│   └── reset_database.py                     ← Destructive DB reset and schema reload utility
+│   ├── estatehub.sql            THE schema: 160 tables, 353 functions, 87 triggers
+│   ├── migrate.py               Fresh install onto an empty DB (+ --seed)
+│   ├── reset_database.py        Destructive: drop schema, reinstall, optional seed
+│   ├── apply_migration.py       Applies database/migrations/*.sql to an existing DB
+│   ├── migrations/              001_society_signing_keys.sql,
+│   │                            002_master_instrument_verification.sql
+│   ├── seed.py                  Idempotent demo society (Sunrise Residency)
+│   ├── legal_reference.py       Acts/Rules/Bye-laws catalogue + regime profiles
+│   ├── db_config.py             CLI target resolution (PG* first, DATABASE_URL fallback)
+│   ├── db_manager.py            psycopg2 pool, named→pyformat params, retry, health
+│   ├── app_role.py              Creates the restricted `estatehub_app` DB login
+│   ├── money.py                 Decimal money policy
+│   ├── exports: asset_export, cashbook_export, financial_statements_export,
+│   │            gst_export, income_tax_export, ledger_export, qr_reissue_export,
+│   │            rcm_export, tds_export
+│   ├── tds_compliance.py        Python wrappers over TDS SQL functions
+│   ├── default_accounts_estateacc.py, enroll_and_calc.py, make_sbi_statement.py
+│   └── reference documents: AGREEMENT.md, VISION.md, xlsx templates, statutory PDF
 │
-├── test/                                    ← pytest suite (no pytest.ini/pyproject — run from the repo root)
-│   ├── conftest.py / fake_db.py              ← FakeDB singleton + per-test reset; backs the non-DB scenarios
-│   ├── test_scenario_*.py                    ← Scenario A–K, T, GST — FakeDB, no Postgres needed
-│   ├── test_up_aoa_compliance_live.py        ← UP AOA engine, 30 tests. **Live Postgres**, skipped unless PGHOST is set
-│   └── test_up_compliance_ui_live.py         ← UP AOA renderer/callback/handler wiring, 9 tests. **Live Postgres**
-│
-├── cleanup.py                                ← Cleanup script for removing redundant files
-├── run.py                                    ← Local server launcher (dash)
-├── wsgi.py                                   ← WSGI entry point for production hosting
-└── requirements.txt
+├── schemes/                     TOML scheme packs (UP_AOA_2010, GENERIC) + loader +
+│                                fund_register.py; `scripts/build_scheme_sql.py` renders
+│                                the reviewable SQL block from the TOML
+├── scripts/                     anchor_ledgers, audit_drilldown, build_scheme_sql,
+│                                check_callback_guards, check_save_handlers,
+│                                inventory_endpoints, manage_apartment_users,
+│                                patrol_cron, release_check, rotate_vault_key,
+│                                run_job, simulate_workflows
+├── test/                        111 test files, fake_db.py, conftest.py, fixtures,
+│                                live_db_gate.py
+├── docs/                        ADMIN_QUICKSTART, admin onboarding + re-audit,
+│                                FLOAT_AUDIT, PHASE0_*, PHASE5_ASSURANCE, SCHEDULER,
+│                                UP_AOA_FUNDS, authz_manifest.json, endpoint_inventory.*
+├── .github/workflows/tests.yml  Three CI jobs: hermetic, postgres, security-scans
+├── .kilo/                       Agent notes and implementation plans (not runtime)
+├── run.py                       Development server (debug, no reloader)
+├── wsgi.py                      Production WSGI entry point (`server`)
+├── Procfile                     gunicorn command
+├── requirements.txt             Pinned dependencies
+├── db_query.py, seed_legal_instrument_sources.py   Operator utilities
+└── ER.md, EstateHub Gold-Standard Plan v2–v5, RWA architecture, legal PDFs/DOCX
 ```
 
-### Callback Registration Order (`callbacks/__init__.py`)
+### `app/services/` (49 modules + package `__init__`)
 
-`__init__.py` iterates a `CALLBACK_MODULES` list in a loop. For each
-module it imports it and calls **every function whose name starts with
-`register_`** — so a module like `drillin_callbacks.py` that exposes
-both `register_drillin_callbacks` and `register_pay_dues_bill_callbacks`
-has both called automatically from a single list entry. Each module is
-wrapped in a `try/except`, so one broken module logs a `⚠️` and is
-skipped rather than crashing the whole app on boot. A startup-time check
-also warns if any `*_callbacks.py` file on disk defines a `register_*`
-function but is absent from `CALLBACK_MODULES`. Current order
-(module names match the files in [§17](#17-codebase-map) above):
+| Area | Modules |
+|---|---|
+| Auth, people, access | `auth_service`, `society_service`, `team_service`, `committee_service`, `employee_attendance`, `adviser_decisions`, `adviser_export`, `plan_limits` |
+| Money and funds | `expense_approval`, `fund_withdrawal_approval`, `fy_lock_service`, `pending_receivables`, `receivable_dispute_service`, `ratification_service` |
+| Tax and compliance | `gst_classification`, `itc_reversal_service`, `tax_rate_service`, `instrument_verification`, `statutory_rules`, `regime_rules_admin`, `rule_params`, `up_aoa_actions`, `up_aoa_compliance_service` (live: registers via `up_aoa_actions.load_card_data`), `up_aoa_fund_catalog`, `compliance_certificate` |
+| Onboarding and e-sign | `onboarding_service`, `onboarding_jobs`, `xlsx_templates`, `document_signing`, `esign_adapter`, `signing_service`, `secret_vault` |
+| Privacy and audit | `dpdp_service`, `retention_engine`, `auditor_checks`, `audit_runs`, `assurance` |
+| Operations | `qr_service`, `alert_service`, `event_service`, `maintenance_service`, `workflow`, `workflow_service`, `kpi_rule_links_service` |
+| Infrastructure | `scheduler`, `job_runner`, `mailer`, `push_service`, `redis_broker` (+ package `__init__.py`) |
+
+### `app/security/` (15 modules)
+
+`roles`, `guards`, `audit_context`, `policy`, `authorization`, `service_guard`,
+`setup_guard`, `plan_guard`, `adviser_access`, `password_policy`, `secret_policy`,
+`pii_masking`, `stamp_scope`, `ledger_anchor`, `vault_rotation`.
+
+### Callback registration order (`app/dash_apps/callbacks/__init__.py`)
+
+`__init__.py` imports each module in a fixed list and calls **every** function
+whose name starts with `register_`. Each import is wrapped in `try/except`, so one
+broken module logs a warning and the rest still boot. A startup check warns when
+a `*_callbacks.py` file defines `register_*` but is missing from the list. The
+current list (53 entries; `print_letterhead.py` is a helper, not a module):
 
 ```python
-"shell_callbacks"            # 1.  URL routing MUST be first
-"login_callbacks"            # 2.  Auth before data callbacks
-"drilldown_callbacks"        # 3.  Navigation engine (owns drill-content)
-"patrol_map_callbacks"       #     Leaflet map init (module-level clientside_callback)
-"card_catalogue_callbacks"   # 4.  KPI refresh
-"customize_callbacks"        # 5.  DnD layout editor
-"qr_callbacks"               # 6.  QR gate pass
-"security_callbacks"         # 6b. Gate alerts — previously never called (fixed)
-"camera_callbacks"           # 7.  Image capture JS
-"customize_kpi_callbacks"    # 8.  KPI inspector
-"list_inspector_callbacks"   # 8b. List column configuration
-"form_inspector_callbacks"   #     Form field configuration
-"setup_wizard_callbacks"     # 9.  First-time society setup wizard
-"debug_callbacks"            # 10. Dev tools
-"noc_callbacks"              # 10. NOC actions (clientside)
-"agreement_callbacks"        # 10b. Agreement actions (clientside)
-"admin_callbacks"            # 11. No-op slot (all callbacks pruned)
-"form_autofill_callbacks"    # 12. Particulars auto-suggestion
-"receipt_callbacks"          # 13. Receipt Print/Save/Email
-"event_ticket_callbacks"     # 13b. Event ticket Print/Save/Email
-"vendor_pass_callbacks"      # 13c. Vendor pass Print/Save/Email
-"expense_callbacks"          # 13d. Expense Print/Save/Email
-"up_compliance_callbacks"    # 13g. UP AOA Compliance card (admin only; registered as a standalone custom card)
-"bulk_enroll_callbacks"      # 14. Excel bulk upload
-"bank_reconcile_callbacks"   # 14a2. Bank statement reconciliation
-"assign_to_callbacks"        # 14b. Concern assignment
-"concern_bid_callbacks"      # 14c. Vendor bid on concern
-"invite_to_callbacks"        # 14d. Invite vendors to bid; security are assigned directly (no bidding)
-"drillin_callbacks"          # 14e. Entity-picker modal + Bill Group Pay (both register_* fns auto-called)
-"channel_callbacks"          # 15. Channels
-"poll_callbacks"             # 16. Polls
-"account_callbacks"          # 17. Change password
-"mode_conditional_callbacks" # 18. Clientside field visibility
-"qty_stepper_callbacks"      # 19. Clientside qty stepper
-"qr_reissue_callbacks"       # 21. Admin QR revoke/reissue (Settings tab)
+"shell_callbacks"              # 1. routing MUST be first
+"login_callbacks"              # 2. auth before data callbacks
+"drilldown_callbacks"          # 3. KPI → list → profile → form
+"patrol_map_callbacks"         #    Leaflet map (module-level clientside callback)
+"card_catalogue_callbacks"     # 4. KPI refresh
+"onboarding_wizard_callbacks"  # 4b. Setup Wizard nav/save/review
+"customize_callbacks"          # 5. layout editor
+"qr_callbacks"                 # 6. QR modal, camera, gate scan, NFC
+"security_callbacks"           # 6b. gate alerts
+"camera_callbacks"             # 7. image capture
+"customize_kpi_callbacks"      # 8. KPI inspector
+"list_inspector_callbacks"     # 8b. list columns
+"form_inspector_callbacks"     #    form fields
+#  "setup_wizard_callbacks"     # 9. intentionally disabled: merged into the Onboarding Hub
+"debug_callbacks"              # 10. KPI audit + SQL tester
+"noc_callbacks"                # 10. NOC print/PDF/email
+"agreement_callbacks"          # 10b. Agreement print/PDF/email
+"onboarding_callbacks"         # 10b2. Onboarding Hub (seat, annexes, sign)
+"adviser_portal_callbacks"     # 10b4. adviser masked ledger export
+"privacy_callbacks"            # 10b3. DPDP notice + rights register
+"ratification_callbacks"       # 10d. to-ratify + rule-application registers
+"dispute_callbacks"            # 10e. disputed bills
+"itc_callbacks"                # 10f. ITC reversal register
+"signature_callbacks"          # 10c. sign/decline panel
+"admin_callbacks"              # 11. documented no-op slot
+"form_autofill_callbacks"      # 12. particulars suggestions
+"receipt_callbacks"            # 13. receipt print/save/email
+"event_ticket_callbacks"       # 13b. event tickets
+"vendor_pass_callbacks"        # 13c. vendor passes
+"expense_callbacks"            # 13d. expense vouchers
+"financial_statements_callbacks"  # 13e. six statements
+"fund_management_callbacks"       # 13f. funds + routing
+"up_compliance_callbacks"         # 13g. UP AOA card
+"master_rules_callbacks"          # 13h. AOA rule editor
+"master_tests_callbacks"          # 13i. master test runner
+"team_callbacks"                  # 13j2. team logins
+"governance_callbacks"            # 13j. governance settings
+"committee_callbacks"             # 13j2. managing committee
+"tax_rate_callbacks"              # 13j3. TDS & GST rates
+"adviser_callbacks"               # 13j4. adviser decisions
+"gst_class_callbacks"             # 13j5. GST account classes
+"auditor_callbacks"               # 13k. auditor portal
+"bulk_enroll_callbacks"        # 14. XLSX enrolment
+"bank_reconcile_callbacks"     # 14a2. bank reconciliation
+"assign_to_callbacks"          # 14b. assign concern
+"concern_bid_callbacks"        # 14c. vendor bid
+"invite_to_callbacks"          # 14d. invite vendors; security assigned directly
+"drillin_callbacks"            # 14e. entity picker + bill-group pay
+"channel_callbacks"            # 15. channels
+"poll_callbacks"               # 16. polls
+"account_callbacks"            # 17. account settings
+"mode_conditional_callbacks"   # 18. mode-dependent fields
+"qty_stepper_callbacks"        # 19. quantity stepper
+"qr_reissue_callbacks"         # 21. QR revoke/reissue
 ```
 
-`owner_callbacks.py` no longer exists in the codebase (removed).
-
-> **Note on `admin_callbacks.py`:** registered as a documented no-op — all
-> of its callbacks were pruned because their target component IDs didn't
-> exist (see step 11 above). `security_callbacks.py` **is** registered
-> (step 6b); it was previously an unintentional gap now fixed. `owner_callbacks.py`
-> has been deleted from the repo entirely.
-
-> **Note on `print_letterhead.py`:** this file lives in `callbacks/` by
-> convention (shared utilities alongside the print callbacks that use it)
-> but it is **not** a callbacks module — it defines no `register_*`
-> function and is not listed in `CALLBACK_MODULES`. The startup-time dead-
-> code check skips it correctly because it contains no `register_` symbol.
+The list currently has no dead entries: every module named exists on disk, and
+`setup_wizard_callbacks.py` exists but is deliberately **not** registered — its
+functionality moved into `onboarding_wizard_callbacks` and the Onboarding Hub.
 
 ---
 
@@ -1830,8 +2162,10 @@ Rule 3: allow_duplicate=True + prevent_initial_call="initial_duplicate" → OK (
 Rule 4: ENTITY_META must be lazily initialised — never build at module import time.
         Use get_entity_meta() which builds and caches on first callback invocation.
 
-Rule 5: SQL parameter style is psycopg2 %s (not SQLAlchemy :param).
-        All db._execute() calls use positional %s parameters.
+Rule 5: db._execute() accepts BOTH styles: a dict → :name / %(name)s, or a
+        tuple/list → positional %s. Never build SQL by string interpolation;
+        pass parameters. (The old blanket "always %s" rule was wrong — both are
+        in use and both are supported by _to_pyformat().)
 
 Rule 6: fn_save_receipt arg order: (society_id, acc_id, particulars, amount, entity_id, role, ...)
         NOT (society_id, entity_id, role, acc_id, particulars, amount, ...).
@@ -1840,8 +2174,10 @@ Rule 6: fn_save_receipt arg order: (society_id, acc_id, particulars, amount, ent
 Rule 7: Always build safe_filename AFTER WebP compression, not before.
         Always force .webp extension regardless of upload source format.
 
-Rule 8: _save_entity must stamp user_id from auth-store into merged before dispatch.
-        Forms never collect user_id — it must come from auth.
+Rule 8: _save_entity must stamp the actor from the SERVER SESSION
+        (app/security/audit_context.py), never from auth-store. Forms never
+        collect user_id, and client-supplied role/society/user values are not
+        trusted for identity-bearing writes.
 
 Rule 9: portal-content-store is the page-load trigger for the drilldown router.
         Do not remove it. Do not replace with prevent_initial_call=False on the main router
@@ -2165,114 +2501,168 @@ All dead, superseded, or bug-inducing code identified in previous phases has bee
 
 ---
 
-## 22. Deployment & Utility Notes
+## 22. Deployment, environment variables & database operations
 
-### Environment Variables
+### Environment variables
 
-```env
-DATABASE_URL=postgresql://user:pass@host/dbname?sslmode=require
-SECRET_KEY=<flask-session-secret>
-JWT_SECRET=<jwt-signing-secret>
-FERNET_KEY=<base64-fernet-key>   # for QR encryption
-```
+The code reads the variables below (`os.getenv` / `os.environ.get` across
+`app/`, `database/`, `scripts/`). There is no committed `.env.example`.
 
-### Render / Gunicorn
+| Variable | Required | Purpose |
+|---|---|---|
+| `FLASK_CONFIG` | no (default `development`) | Chooses `DevelopmentConfig`, `ProductionConfig` or `TestingConfig` from `app/config.py`. `wsgi.py` defaults to `production`. |
+| `FLASK_DEBUG` | no (default `true` in `run.py`) | Debug flag for the development server. |
+| `HOST`, `PORT` | no (default `0.0.0.0`, `8050`) | Development bind address and port. |
+| `DATABASE_URL` | one of this or `PG*` | Full PostgreSQL DSN. `postgres://` is rewritten to `postgresql://`. |
+| `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | one of this or `DATABASE_URL` | Discrete connection settings; the app adds `sslmode` and a CA if configured. |
+| `PGSSLMODE` | no (default `require`) | `disable` for a local server without TLS. |
+| `PGSSL_CA` | no | Path to a CA file; the app builds an SSL context from it. |
+| `PGSSLROOTCERT` | no | CA path used by the CLI install/reset scripts. |
+| `TZ` | no (default `Asia/Kolkata`) | Sent to PostgreSQL as `options=-c timezone=…` (`Asia/Calcutta` is normalised). |
+| `PG_SKIP_STARTUP_OPTIONS` | no | Set `1` behind PgBouncer/Aiven pools that reject the `options` startup parameter. |
+| `DB_POOL_MIN`, `DB_POOL_MAX` | no (default `4`, `10`) | psycopg2 `ThreadedConnectionPool` bounds. |
+| `SECRET_KEY` | **yes in production** | Flask session signing. Missing/short/known values refuse to boot in production; development gets a random per-process key. |
+| `JWT_SECRET_KEY` | **yes in production** | JWT signing. Same policy. |
+| `JWT_ACCESS_TOKEN_EXPIRES`, `JWT_REFRESH_TOKEN_EXPIRES` | no (default 3600 s / 2592000 s) | Token lifetimes. |
+| `SECRET_VAULT_KEY` | **yes in production** | Fernet key(s) wrapping society signing keys. Startup fails without it. |
+| `SECRET_MASTER_KEY` | rotation only | Offline key that authorises `scripts/rotate_vault_key.py`; never read by the web app. |
+| `LEDGER_ANCHOR_SECRET` | legacy only | Verifies anchors signed before per-society ledger keys. |
+| `ESIGN_CALLBACK_SECRET` | eSign only | HMAC secret for the vendor callback; with none set every callback is refused. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | no | Password-reset and notification mail. Without SMTP, reset tokens go to the log. |
+| `FRONTEND_URL` | no | Base URL used in reset/notification links. |
+| `VAPID_PUBLIC` / `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE` / `VAPID_PRIVATE_KEY`, `VAPID_EMAIL` / `VAPID_CLAIM_EMAIL` | web push only | Web-push key pair and contact. Both spellings are read. |
+| `FCM_SERVER_KEY` | no | Legacy FCM push hook; also needs `firebase_admin`, which is not pinned. |
+| `REDIS_URL` or `KV_URL` | no | Redis pub/sub for SSE fan-out across workers. |
+| `PLAN_GRACE_DAYS` | no (default `7`) | Days a paid society stays usable after `plan_validity`; `0` = hard cut-off. `Free` never expires. |
+| `JOB_ALLOW_OWNER_LOGIN` | no | Development escape hatch: allows scheduled jobs to run as the DB owner/superuser. |
+| `RENDER`, `DYNO` | no | Presence is treated as a production host by `secret_policy.py`. |
+| `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_SSL_*` | legacy | Read by the standalone `db_query.py` utility only. |
+
+### Run commands
 
 ```bash
-gunicorn app:server -w 4 -b 0.0.0.0:8050 --timeout 120
+# development (debugger on, reloader off)
+python3 run.py
+
+# production / container
+gunicorn wsgi:server --workers 2 --threads 8 --timeout 120 --bind 0.0.0.0:8050
 ```
 
-- Set `debug=False` in `app.run_server()` for production.
-- `/app/assets/` must be writable for image uploads.
-- Aiven: use `?sslmode=require` and connection pooling.
-- `suppress_callback_exceptions=True` is required in `app = Dash(...)` because list, profile, and form components are rendered dynamically.
+`Procfile` carries the same gunicorn shape and honours `${PORT}`. `wsgi.py` adds
+the project root to `sys.path`, builds `create_app('production')` and exports
+`server`; it must not be run directly in production.
 
-### Database Reset Utility
+**Startup does real work:**
 
-A utility script `database/reset_database.py` is provided to perform a destructive reset of the database schema:
+* `create_app` calls `assert_vault_ready()` unless `TESTING`. In production a
+  missing, malformed or wrong-database `SECRET_VAULT_KEY` is a **hard startup
+  failure**, not a warning.
+* The APScheduler background scheduler starts once per worker process (skipped
+  under Werkzeug's reloader and in tests). With several gunicorn workers, each
+  worker starts its own scheduler; the scheduled jobs in §25 are designed to be
+  run by an external scheduler instead.
+* `app/assets/default/*` folders are created; the folder must be writable, as
+  must `app/static/uploads/` for uploads.
+
+Production notes:
+
+* `suppress_callback_exceptions=True` is required because list, profile and form
+  components are rendered dynamically.
+* The database must be PostgreSQL with `pgcrypto`; SQLite is only a development
+  fallback and cannot run the schema.
+* Put the web host on the restricted `estatehub_app` database login (see §25),
+  keep the owner credentials off the web host, and keep `SECRET_VAULT_KEY` out of
+  the database.
+* Serve HTTPS. Session cookies and the SSE endpoint assume same-origin, and push
+  subscriptions require a secure context.
+* `flask_session` is configured for filesystem sessions (`SESSION_TYPE`), but the
+  package is not imported; the default Flask signed-cookie session is what is in
+  use. Do not assume server-side session storage.
+
+### Database install, migrations and reset
+
+> **`database/estatehub.sql` is the source of truth for the schema.** Every
+> table, view, trigger and `fn_*` function is defined there. Read or diff that
+> file before trusting any prose description, including this one.
+
+Three install paths exist, and they are not interchangeable:
+
 ```bash
+# 1. New/empty database: schema + legal-reference data (+ optional demo society)
+python3 database/migrate.py
+python3 database/migrate.py --seed
+
+# 2. Existing database that needs the incremental SQL in database/migrations/
+python3 database/apply_migration.py
+
+# 3. Destructive rebuild (drops and recreates the public schema)
 python3 database/reset_database.py
+python3 database/reset_database.py --yes --after seed
 ```
-This script connects to the target database, recreates the `public` schema CASCADE, executes all schema definitions and functions inside `database/estatehub.sql`, and runs a validation suite to verify the active table count, view count, and stored procedures.
 
-### Demo / Seed Data (`database/seed.py`)
+* `migrate.py` applies the schema as **one transaction onto an empty database**
+  and refuses a database that already has tables. The SQL has no `IF NOT EXISTS`
+  guards on tables; the supported reinstall is `reset_database.py`.
+* `database/migrations/` holds incremental, idempotent scripts that
+  `apply_migration.py` runs on an existing database. `estatehub.sql` includes
+  the same objects, so a fresh install does not need them:
+  `001_society_signing_keys.sql` and `002_master_instrument_verification.sql`.
+* Either database must be reachable with `pgcrypto`:
+  `CREATE EXTENSION IF NOT EXISTS pgcrypto;`. Everything lives in `public`; no
+  `search_path` overrides are required.
+* Schema changes normally touch four places: `database/estatehub.sql`, the query
+  in `app/dash_apps/drilldown/loaders.py`, the matching `_save_*` handler in
+  `app/dash_apps/callbacks/drilldown_callbacks.py` (or the feature callback), and
+  the scheme pack in `schemes/*.toml` when a rule parameter is involved. Run
+  `python3 scripts/build_scheme_sql.py --check` if you edited a scheme pack.
 
-`database/migrate.py --seed` delegates to `database/seed.py`, which idempotently
-seeds a single demo society ("Sunrise Residency", `society_id = 1`) with:
+### Demo / seed data (`database/seed.py`)
 
-| Entity | Count | Notes |
+`migrate.py --seed` delegates to `database/seed.py`, which idempotently seeds a
+single demo society ("Sunrise Residency", `society_id = 1`). Re-running it is
+safe: every insert is guarded by an existence check, so it fills missing rows
+rather than duplicating them (and does **not** update rows that already exist).
+
+| Entity | Approx. count | Notes |
 |---|---|---|
 | Master admin | 1 | `master@estatehub.com` |
 | Society admin | 1 | `admin@sunriseresidency.com` |
-| Apartment owners | 21 | 9 original owners (Blocks A/B; mix of rate-based and fixed-amount maintenance charge histories) + the 12 office-bearers' flats C-101 to C-112 |
-| Managing Committee | 12 | 1 President (`president@sunriseresidency.com`), 1 Secretary (`secretary@sunriseresidency.com`), 10 Working Committee members (`committee1` … `committee10@sunriseresidency.com`). Each holds a flat via `committee_offices` (seated with `fn_appoint_office_bearer`, so bye-law 7 applies) and the RBAC role `society_president` / `society_secretary` / `committee_member`. Their flats are billed from the month after the seed runs, so they are in good standing on seed day. The admin keeps the treasurer post, and holds secretary only while none is seated |
-| Society employees | 4 | `accountant@`, `auditor@`, `supervisor@`, `staff@sunriseresidency.com`, each routed to its own portal; the accountant also holds the `accountant` RBAC role |
-| Vendors | 12 | 12 distinct service types (Plumbing, Gardening, Electrical, Carpentry, Painting, Pest Control, Housekeeping, CCTV & Security, AC Repair, Elevator Maintenance, Catering, Landscaping) |
-| Security staff | 12 | Mixed morning/evening/night shifts, roster + gate-log attendance for the first two guards |
-| Events | 12 | Spread across the demo financial year, all `open_to = 'all'` |
-| Concerns | 11 | Mixed types/statuses (`open`, `assigned`, `resolved`, `closed`); several pre-assigned to a vendor or security guard via `concerns_assigns` |
-| Chart-of-accounts | 83 | Full tree across Assets / Liabilities / Equity & Reserves & Funds / Income / Expenses, incl. the statutory funds (Sinking 3210, Repair 3220, Corpus 3230). `mutuality_nature` and `tds_section` are **inline fields on the `ACCOUNTS` tuple** (not side-dicts) and are written straight into the `accounts` columns of the same name |
+| Apartment owners | 21 | 9 original owners plus the 12 office-bearers' flats (C-101…C-112) |
+| Managing Committee | 12 | President, Secretary and 10 working members, each holding a flat via `committee_offices` and an RBAC role; the admin keeps the treasurer post until a Treasurer is elected |
+| Society employees | 4 | `accountant@`, `auditor@`, `supervisor@`, `staff@` — team logins, each routed to its portal |
+| Vendors | 12 | 12 distinct service types |
+| Security staff | 12 | Mixed shifts, roster and gate-log attendance for the first guards |
+| Events / concerns | 12 / 11 | Mixed statuses and types; several concerns pre-assigned |
+| Chart of accounts | ~82 | Full block tree (Assets/Liabilities/Equity & Funds/Income/Expenses), `mutuality_nature` and `tds_section` inline on each row |
 
-> **The chart of accounts is jurisdiction-agnostic by lookup, not by id.** No
-> function hardcodes `3210`/`3220`/`3230`. Funds are resolved by walking the
-> subtree of whichever account is named `ILIKE '%Equity%'`, income accounts by
-> `ILIKE '%Income%'`, bank accounts by their parent's name — the same approach
-> in SQL (`fn_funds_account_fy`) and in Python
-> (`loaders.get_fund_balances`, `get_fund_bank_mappings`,
-> `get_income_accounts_for_appropriation`,
-> `get_expense_bank_accounts`), so a society on a different chart of accounts
-> numbering still works. See [§20](#20--open-design-subtleties--flagged-caveats)
-> for why a hardcoded id list broke the fund dropdowns before.
+Credentials are listed in [§0](#0-getting-started). Two seed helpers are specific
+to the UP AOA layer and run only from `run_seed`:
 
-Re-running the seed is safe — every insert is guarded by an existence check
-(`ON CONFLICT` or a `SELECT ... WHERE NOT EXISTS`-style guard), so it will
-only fill in missing rows rather than duplicate demo data. Note that the
-guard is existence-based, not update-based: a row that already exists is
-**left untouched**, so re-seeding will not retroactively apply a changed
-`mutuality_nature`/`tds_section` to an existing account.
+* `seed_society_legal_regime()` writes `society_legal_regime = ('UP_AOA_2010')`
+  only where `societies.state = 'Uttar Pradesh'`, and returns early if a row
+  already exists. Without it the UP AOA card renders "rules are not active".
+* `seed_account_statutory_mappings()` applies `UP_AOA_ACCOUNT_MAPPINGS`
+  (e.g. 1410 → `LOANS_GIVEN`, 3270 → `MAJOR_REPAIR_FUND`, 3230 → `IFMS_CORPUS`).
+  `4116 Interest on Owner Loans` is deliberately unmapped.
 
-```bash
-python3 database/seed.py                 # standalone
-python3 database/migrate.py --seed       # schema init + seed in one step
-```
+The rule-parameter rows themselves live in `estatehub.sql` and the TOML scheme
+packs, not in `seed.py`.
 
-Two seed functions are specifically about the **UP AOA layer**, and they only run from `run_seed` — not from a bare account insert:
+### Operations quick reference
 
-- `seed_society_legal_regime()` writes `society_legal_regime = ('UP_AOA_2010', effective_from 2011-11-16)` **only** where `societies.state = 'Uttar Pradesh'`, and returns early if a row already exists. This is the gate that makes every rule in `regime_rule_parameters` reachable — without it the UP AOA card renders its "rules are not active" alert even though every threshold row exists. There is no UI that assigns a regime.
-- `seed_account_statutory_mappings()` applies `UP_AOA_ACCOUNT_MAPPINGS` — every account→statutory-head binding for the regime, with `regime_code` and `effective_from` hard-coded (`1400`/`1410` → `LOANS_GIVEN`, `2110` → `LOANS_TAKEN`, `3270` → `MAJOR_REPAIR_FUND`, `3230` → `IFMS_CORPUS`, and the whole tax/GST/CASH_BANK set). Note `4116 Interest on Owner Loans` is deliberately **not** in that mapping, so it reports a NULL statutory head in the I&E.
-
-The rule-parameter rows themselves live in `estatehub.sql`, not `seed.py`.
-
-### Database Migrations
-
-> **`database/estatehub.sql` is the single source of truth for the schema.** Every table, view, and `fn_*` stored function is defined there — it is what `database/reset_database.py` loads to rebuild the database from scratch, and it is the file to consult (or diff) before trusting any other description of the schema, including the summaries elsewhere in this README.
-
-All database stored procedures and queries are prefixed with `fn_` and use `%s` positional parameter placeholders (psycopg2 style). Schema changes require updating:
-1. The corresponding SQL function definitions in `database/estatehub.sql`.
-2. The corresponding database query inside `app/dash_apps/drilldown/loaders.py`.
-3. The parameter list in `_save_*` inside `app/dash_apps/callbacks/drilldown_callbacks.py` (for database writes).
-
-**Fresh installs only. There is no migration path and no backward compatibility.**
-`database/estatehub.sql` is the only SQL file in the codebase; a schema change is an edit to that file, and every
-database is built from it from scratch:
-
-```bash
-python3 database/migrate.py --seed                       # empty database: schema + demo data
-python3 database/reset_database.py --yes --after seed    # wipe and reinstall
-```
-
-`database/migrate.py` applies the file as one transaction onto an EMPTY database and refuses one that already has
-tables, so nothing needs to be idempotent (`CREATE TABLE`, not `IF NOT EXISTS`; no guarded `ALTER`/backfill
-blocks) and there are no numbered or dated migration scripts.
-
-### Required PostgreSQL Extensions
-
-The application requires the `pgcrypto` extension for SHA-256 receipt hashing and chain verification. Setup scripts automatically create this extension if missing:
-```sql
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-```
-
-All application tables, functions, triggers, and views live in the standard `public` schema. No custom schema or `search_path` overrides are required at runtime.
+| Task | Command |
+|---|---|
+| Health check | `curl -s http://localhost:8050/health` |
+| Hermetic tests | `python -m pytest -q test -m "not postgres_integration"` |
+| Live tests | `ESTATEHUB_LIVE_TESTS=1 python -m pytest -q test` |
+| Callback guard check | `python scripts/check_callback_guards.py` |
+| Endpoint inventory check | `python scripts/inventory_endpoints.py --check` |
+| Scheme SQL drift check | `python scripts/build_scheme_sql.py --check` |
+| Anchor every ledger + verify signatures | `python scripts/anchor_ledgers.py --verify` |
+| Scheduled job | `python scripts/run_job.py anchors` (and §25) |
+| Assurance/release gate | `python scripts/release_check.py status` |
+| Create restricted DB login | `python database/app_role.py --apply` |
+| Rotate the vault key | `python scripts/rotate_vault_key.py rotate` (operator machine) |
 
 ### VS Code / Pylance Setup
 
@@ -2295,7 +2685,7 @@ This section lists, role by role, the workflows the code implements. It was writ
 
 - **§23.1** explains what "role" means in this codebase (it means three different things).
 - **§23.2** lists the workflows of each of the 17 roles.
-- **§23.3** keeps the earlier screen-by-screen tables (KPI → list → profile) for the five portals.
+- **§23.3** keeps the earlier screen-by-screen tables (KPI → list → profile) for the original five portals (Master, Admin, Owner, Vendor, Security). The employee, auditor and adviser portals are covered by §23.2 and §4.
 - **§23.4** shows the hand-offs between roles (who prepares, who approves, who signs).
 - **§23.5** lists mismatches found while mapping.
 
@@ -2593,9 +2983,194 @@ The following tables map every user-reachable workflow in the application, organ
 5. **Office-bearer powers.** `authorization.py` grants the President, Secretary and Committee concern, poll, channel and event capabilities, and the Treasurer reverse and reconcile. The screens confirmed for them are the signing panels, the governance tabs, the FY lock and the tax-rate screens. The Owner-portal concern, poll and event screens were not traced to these capabilities.
 6. **§4 tab lists.** The tab lists in §4.2 to §4.5 are older than `ROLE_CONFIG` in `app/dash_apps/app_shell.py`. §23 follows `ROLE_CONFIG`.
 
+## 24. Testing & CI
+
+### Layout
+
+* `test/test_*.py` — **111 files, 1,214 test functions**.
+* `test/conftest.py` — puts the repo root on `sys.path`, resets the in-memory
+  `FakeDB` around every test, and provides fixtures such as `patched_db`,
+  `grant_society_admin` and `revoke_role` that mirror `database/seed.py`'s RBAC
+  grants.
+* `test/fake_db.py` — a small in-memory database used by the hermetic suite.
+* `test/live_db_gate.py` — decides whether a live suite may run.
+* `test/*_fixtures.py` — loan and resolution fixtures.
+
+Two kinds of test:
+
+| Kind | Gate | Needs |
+|---|---|---|
+| Hermetic | default | nothing; no database, no network |
+| Live (`@pytest.mark.postgres_integration`, 15 functions) | `ESTATEHUB_LIVE_TESTS=1` | a real PostgreSQL 16 loaded from `database/estatehub.sql` and seeded, plus `SECRET_VAULT_KEY` |
+
+There is no `pytest.ini`/`pyproject.toml`; run pytest from the repository root.
+
+**Status observed on 6 Nov 2026** (this README pass, Python 3.12 virtualenv,
+no database):
+
+```
+3 failed, 1320 passed, 513 skipped, 155 deselected in 14.32s
+```
+
+The three failures are stale tests, not product regressions: 
+`test_onboarding_review_remaining.py::test_dpdp_instruments_seeded_unverified_and_always_applicable` 
+still imports `seed.LEGAL_INSTRUMENTS_CENTRAL`, but that catalogue moved to 
+`database/legal_reference.py`; and two `test_privacy_rights_open.py` tests use a 
+FakeDB that has no `privacy_notices` relation. They are recorded here rather than 
+hidden. The 513 skips are the live-DB gates. Re-run the command yourself before 
+quoting a number — this is a snapshot, not a guarantee.
+
+```bash
+# Hermetic suite exactly as CI runs it (DB env vars explicitly removed)
+env -u PGHOST -u PGDATABASE -u PGUSER -u PGPASSWORD -u DATABASE_URL \
+  python -m pytest -q test -m "not postgres_integration"
+
+# Full suite against a local, seeded database
+export PGHOST=localhost PGDATABASE=estatehub PGUSER=estatehub PGPASSWORD=estatehub
+export ESTATEHUB_LIVE_TESTS=1
+export SECRET_VAULT_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+python -m pytest -q test
+```
+
+### CI (`.github/workflows/tests.yml`)
+
+Every push and pull request runs three jobs:
+
+1. **hermetic** — Python 3.12, `pip install -r requirements.txt`, the DB-less
+   suite, `scripts/check_callback_guards.py` and
+   `scripts/inventory_endpoints.py --check`.
+2. **postgres** — a PostgreSQL 16 service, schema loaded with
+   `psql -v ON_ERROR_STOP=1`, demo seed run with a throwaway vault key, then
+   **every** test (live suites included).
+3. **security-scans** — `pip-audit --strict` with an explicit, documented
+   ignore-list for the pinned Flask/Werkzeug/Dash stack, `bandit -lll -iii` over
+   `app`, `database` and `scripts`, and gitleaks.
+
+The ignore-list in the workflow is intentional: any **new** known-vulnerable pin
+fails the push. Removing an id requires upgrading the package, and the comment
+says to record it in `docs/`.
+
+### Other checks in `scripts/`
+
+| Script | What it enforces | In CI? |
+|---|---|---|
+| `check_callback_guards.py` | Every Dash callback has `@require_session` except a reviewed allowlist | yes |
+| `inventory_endpoints.py --check` | Every Flask route and server callback appears in `docs/authz_manifest.json` with a classification | yes |
+| `build_scheme_sql.py --check` | The generated scheme block in `estatehub.sql` matches `schemes/*.toml` | no (run locally/pre-commit) |
+| `check_save_handlers.py` | Save handlers' keys against the schema/entity metadata | no |
+| `release_check.py gate/status/worklist` | Phase-5 assurance gates and what may be claimed | operator/CI gate |
+
+At this pass `inventory_endpoints.py --check` reported **317 endpoints**
+(32 classified `action`, 66 `exempt`, 93 `legacy-gated`, 126 still
+`unclassified`), and `check_callback_guards.py` reported 54 callback files
+guarded or allowlisted. Both commands exited 0.
+
+`docs/endpoint_inventory.md` is generated by `inventory_endpoints.py --write`;
+do not hand-edit it. The reviewed classifications live in
+`docs/authz_manifest.json`, where new endpoints are added as `unclassified` so a
+human must classify them.
+
 ---
 
-*EstateHub — Built for societies that mean business.*
+## 25. Scheduled jobs, key management & operations
+
+### Scheduled jobs (`python scripts/run_job.py <job>`)
+
+Each run writes one `job_runs` row (start, finish, `ok`/`failed`, detail, error).
+A failure alerts every platform master by push and exits non-zero so the host's
+scheduler also flags it. Jobs refuse to run as the database owner or a superuser
+unless `JOB_ALLOW_OWNER_LOGIN=1` (development only).
+
+| Job | Recommended cadence | What it does |
+|---|---|---|
+| `anchors` | daily, e.g. `0 21 * * *` UTC (02:30 IST) | Anchors every society's ledger chain (`method='scheduled'`) and verifies every anchor signature; a chain that does not verify is never anchored and the job fails. |
+| `patrol` | hourly | Marks missed patrol scans and assigns new patrols. |
+| `ratification` | daily | Expires overdue ratifications and ratification items (`fn_expire_overdue_ratifications`), returning rules to the layer beneath and raising a compliance flag. |
+| `expiry` | daily | Ends adviser appointments past their term and expires stale eSign requests. |
+| `watchdog` | hourly | Alerts masters when `anchors`/`ratification`/`expiry` has no successful run in 26 hours or `patrol` in 2.5 hours — this is what catches a scheduler that never fired. |
+
+`docs/SCHEDULER.md` documents the host setup (currently ApexWeave + NeonDB, per
+that file; the code is host-neutral). Run the jobs with the same environment as
+the web service except the database login: use `estatehub_app`, not the owner.
+The signing key must not sit on the database host.
+
+### Database roles
+
+```bash
+python database/app_role.py --apply
+```
+
+Creates the restricted `estatehub_app` login. It cannot truncate, create
+triggers, delete or update ledger lines (except the two bank-reconciliation
+flags), alter audit/lock rows, or call `fn_rebuild_ledger_chain`. Deploy the web
+app (and the scheduled jobs) as this login; keep owner credentials off those
+hosts. A separate key-rotation login is created for `scripts/rotate_vault_key.py`.
+
+### Signing keys and rotation
+
+* Four per-society HMAC keys (`SIGNING_QR`, `SIGNING_NOC`, `SIGNING_AGREEMENT`,
+  `SIGNING_LEDGER`) live wrapped in `society_signing_keys`.
+* `SECRET_VAULT_KEY` can hold several comma-separated Fernet keys: the first
+  wraps new material, all listed keys can unwrap (rotation window).
+* Rotation is an **operator-machine** action, never a web-host action:
+
+```bash
+# once: record the master verifier and vault fingerprint
+python scripts/rotate_vault_key.py init
+# generate a new vault key, re-wrap every society key, write a sealed recovery file
+python scripts/rotate_vault_key.py rotate
+# print the vault key from a sealed recovery file
+python scripts/rotate_vault_key.py recover FILE
+```
+
+Put the new key in the host `.env`, restart, verify, then destroy the old key.
+`SECRET_MASTER_KEY` must stay outside `.env` and the database.
+
+### Ledger anchors
+
+```bash
+python scripts/anchor_ledgers.py            # anchor every society
+python scripts/anchor_ledgers.py --verify   # also verify every stored signature
+```
+
+Run it on a schedule from a host that holds `SECRET_VAULT_KEY` and is **not** the
+database host. A chain that does not verify is never anchored; the exit status is
+non-zero if any society fails or any signature is bad.
+
+### Assurance and release gate
+
+```bash
+python scripts/release_check.py status      # where 5.1–5.3 stand; what may be claimed
+python scripts/release_check.py gate v2026.11.0 --max-age 30
+python scripts/release_check.py worklist    # rules/decision types with no opinion
+```
+
+`status` exits 0 only when the external review, advocate opinions and penetration
+test records are complete. Until then the product's own label is *"Provisional:
+independent assurance incomplete"*. Do not use "audit-grade" before the gate
+passes. Marking an opinion `disputes` does not cover a rule.
+
+### Retention and privacy operations
+
+`app/services/retention_engine.py` runs a per-society retention sweep
+(`retention_rules`, default 5 years, configurable) from the scheduler.
+`app/services/dpdp_service.py` enforces the 48-hour erasure notice and refuses
+erasure while `fn_erasure_blockers` reports a blocker; erasure blanks the
+person's profile and never touches ledger rows. Breach and rights requests stay
+in `breach_register` and `rights_requests`.
+
+### Backups and evidence
+
+Back up PostgreSQL and keep a copy of signed anchor certificates and the
+`job_runs` log off the database host. A database dump alone yields only
+vault-wrapped signing keys — the vault key is what makes them usable, so treat
+its custody as a separate operational duty.
+
+## Appendix. Implementation plan — where it stands
+
+These are the stage and task notes from the plan of record, kept because the
+compliance tables above cite them. They are not a claim that every task is done;
+open items are stated as open.
 
 ### Stage 2 compliance changes (UP Apartment Act 2010 / Model Bye-Laws 2011, gazette numbering)
 
@@ -2619,7 +3194,7 @@ The following tables map every user-reachable workflow in the application, organ
 
 Provisional figures needing an opinion: 2/3 policy and 1/2 resolution majorities, cash ceiling, bye-law 46(d) depreciation-fund label, bye-law 7 year basis, poll majority basis (task 0.2). Retention default 5 years, configurable per society, subject to CA confirmation on longer periods required by any applicable Act (task 0.4).
 
-## Phase 3 (auditor and CA experience) — status
+### Phase 3 (auditor and CA experience) — status
 
 Done: 3.1/3.2 signed stored auditor checks and tie-out report, 3.8 source-document guard and voucher numbers, 3.4 Decimal money policy (`database/money.py`: paisa for ledgers, whole rupee for TDS; floats only at JSON/Excel display boundaries and for rule parameters and vote weights).
 
@@ -2639,4 +3214,9 @@ Open, needs CA sign-off before building: 3.3 schedule-format statements and note
   - **Open:** the plan's done-when needs the **CA's own worked example** to reproduce to the paisa. Tests use the worked example in the GST circular at cewacor.nic.in instead; add the CA's figures to `test_ca_worked_example` (currently skipped). Also for the CA: the E and F definitions (deemed exempt supplies, unclassified turnover), whether the non-business 5% applies to a society, and the rounding rule.
   - Screen: Governance, *TDS & GST Rates* tab, section **ITC reversal for exempt supplies (Rule 42)** (`app/dash_apps/callbacks/itc_callbacks.py`). A banner says **PROVISIONAL** until the CA's confirmation is recorded. The administrator records the CA's confirmation, the two journal accounts and the non-business %; the administrator or a serving office-bearer works out drafts, posts, reverses (with a reason) or discards them; the register shows every step and its basis, and downloads as CSV for the CA. Drawn only for people who may act.
 - **1.11 NOC and Security Salaries lists.** Confirmed by building the lists' column metadata and running their loaders against a seeded database (the running app was not opened in a browser, so please glance at both lists as admin): the *Security Salaries Due/Paid* and *Vendor Payables Due* cards sum payables by role and status but opened the payables list with no role, which the loader answers with an empty list on purpose; they now pass the same filter as their totals. The payables list showed *Shift Fraction* and *Mode* columns that `fn_payables_named` never returned (always blank); it now returns them. The NOC list showed *Revoked At* (never selected, always blank) and *Revoked By* (a raw user id); the first is now selected and the second hidden from the list. Four entities showed a label twice (vendors PAN and GSTIN, receivables and assets Account, societies Gate Logic); computed fields no longer duplicate a column already shown. Other lists also have columns their loaders never fill; that wider clean-up is not part of 1.11.
-- **CI.** The Postgres job now passes on a fresh database, and the DB-less job passes; stale tests were brought into line with earlier deliberate changes and `database/migrations/` is allowed by the single-SQL-file guard (each migration may only create what `estatehub.sql` also defines).
+- **CI (historical).** At the time of that plan pass, the Postgres job passed on a fresh database and the DB-less job passed; stale tests were brought into line with earlier deliberate changes and `database/migrations/` is allowed by the single-SQL-file guard (each migration may only create what `estatehub.sql` also defines). Re-run the suites for the current state; §24 records the snapshot taken for this revision, including three stale tests that still fail.
+
+
+---
+
+*EstateHub — Built for societies that mean business.*
