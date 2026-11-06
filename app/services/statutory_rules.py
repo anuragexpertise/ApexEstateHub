@@ -1,0 +1,557 @@
+# app/services/statutory_rules.py
+"""
+Acts & Rules content for the Setup Wizard's right-hand panel.
+
+Source of truth: README.md → "EstateHub Compliance — Statutory Framework
+Coverage" table (UP AOA 2010 first). Rows here are short, wizard-sized
+summaries of that table; edit the README table and this list together.
+
+Why this exists
+---------------
+The wizard used to call get_links_for_categories([<wizard step name>]) but
+kpi_rule_links.category holds keys like 'sinking_fund' / 'fund_gst' /
+'tds_no_pan' — never "Society Details", "Vendor Charges", etc. — so the
+panel was empty for every step. STEP_LINK_CATEGORIES bridges the two, and
+STATUTORY_ROWS supplies the framework rows that have no external link.
+"""
+
+# key -> (area, governing provisions, requirement, coverage_ok, coverage_note)
+STATUTORY_ROWS = {
+    "it_mutuality": (
+        "Income Tax — Taxability & Mutuality",
+        "Sec. 2(31), Sec. 4, Doctrine of Mutuality",
+        "Member maintenance is exempt under Mutuality; non-mutual income "
+        "(bank interest, rentals, cell towers) is taxable at AOP rates.",
+        True,
+        "Income accounts are tagged mutual / non-mutual; Mutuality Summary export.",
+    ),
+    "it_80p": (
+        "Income Tax — Deductions",
+        "Sec. 80P(2)(c) / 80P(2)(d)",
+        "Deduction on interest from cooperative banks, claimed via annual return.",
+        False,
+        "Not yet tracked.",
+    ),
+    "it_return": (
+        "Income Tax — Return of Income",
+        "Sec. 139(1), Sec. 44AB",
+        "Annual ITR-5 filing; tax audit if commercial turnover exceeds the threshold.",
+        False,
+        "Out of e-filing scope. A provisional Sec. 44AB flag exists (fn_tax_audit_flag, tax_audit_thresholds): it warns, the CA decides.",
+    ),
+    "tds": (
+        "TDS (Income Tax Act, 1961)",
+        "Sec. 194A, 194C, 194H, 194-I, 194-IA/IB/IC, 194J",
+        "Deduct TDS on vendor payouts (contracts, professional fees, rent, "
+        "brokerage), remit it, and file 26Q.",
+        True,
+        "Section / rate / PAN-vs-no-PAN engine, single-bill & annual thresholds, "
+        "structured 26Q-shaped export.",
+    ),
+    "labour": (
+        "Labour & Safety Compliances",
+        "EPF & MP Act 1952, ESI Act 1948, Contract Labour Act 1970",
+        "Minimum-wage / EPF / ESIC compliance for direct employees; manpower "
+        "agencies (security, housekeeping) must furnish monthly PF/ESIC challans.",
+        True,
+        "Challan capture (EPF/ESIC) for direct employees and manpower agencies; "
+        "invoice-hold gate on missing challans; monthly compliance dashboard.",
+    ),
+    "gst": (
+        "GST (CGST Act, 2017)",
+        "Sec. 22(1), Notification 12/2017-CT(R) Entry 77",
+        "Up to ₹7,500/month/member is exempt; above that, 18% on the entire "
+        "amount if society turnover exceeds ₹20L (₹10L in special-category "
+        "states). RCM applies on unregistered vendors.",
+        True,
+        "gst_rates table, registration-threshold gate, RCM accounts, "
+        "inter-state IGST via societies.state, GSTR-1/3B-shaped export.",
+    ),
+    "reserve": (
+        "Reserve Fund",
+        "UP Model Bye-Laws 2011 (common profits form the nucleus of the reserve funds)",
+        "Reserve from net surplus, for long-term solvency. The UP Act and Model "
+        "Bye-Laws fix no percentage: the share set aside at FY close (default 25%) "
+        "is society policy, edited by General Body resolution. The UP transfer fee "
+        "(1/2%, paid by the seller) goes to the Major Repair Fund, not here.",
+        True,
+        "Mapped to the RESERVE_FUND head; FY close appropriates the surplus.",
+    ),
+    "sinking": (
+        "Sinking Fund",
+        "Not prescribed by the UP Apartment Act 2010 or the 2011 Model Bye-Laws",
+        "Dedicated fund for structural overhauls, lifts and DG sets, levied under "
+        "a General Body resolution; any rate (e.g. 0.25–0.33%/yr of construction "
+        "cost) is a society or builder-agreement choice, not a UP statutory rate.",
+        True,
+        "Dedicated ledger account, per-society rate basis, auto-billed monthly.",
+    ),
+    "repair": (
+        "Repair & Maintenance Fund",
+        "UP Apartment Act 2010 s.18 (common expenses charged by undivided interest)",
+        "Routine upkeep of common areas, plumbing and electricals, charged as "
+        "common expenses. No minimum rate (such as 0.75%/yr of construction "
+        "cost) is fixed by the UP Act or Model Bye-Laws; it is a society choice.",
+        True,
+        "Dedicated ledger account, same rate config and billing as Sinking Fund.",
+    ),
+    "corpus": (
+        "Corpus Fund (IFMS)",
+        "UP Apartment Act 2010 s.14(5) proviso; UP RERA General Regulations 2019 Reg. 47 as amended "
+        "(Notification 7098/U.P. RERA/Regulation/2026-27, 13.07.2026)",
+        "Interest-Free Maintenance Security collected by the promoter at registration of the deed and handed to the "
+        "AOA at handover. One-time receipt, so it only ever appears as an opening balance (Brought Forward). Spend is "
+        "limited to operation, maintenance, repair and replacement of common areas; it sits in a separate account with "
+        "separate books and a CA audit. The 2026 category rates were taken from press / law-firm reports and are "
+        "provisional until checked against the notification text. A corpus a society builds for itself, rather than "
+        "receives from the promoter, is an optional General Body choice, not a UP rule.",
+        True,
+        "Dedicated ledger account (3230); principal locked by policy via statutory_lock_pct.",
+    ),
+    "up_aoa_act": (
+        "Governing Statute — UP Apartment Act, 2010",
+        "Sec. 3 (common areas), 12 (promoter's Declaration), 14 (AOA & "
+        "bye-laws), 18/20 (common expenses / common profits)",
+        "Every building with 4+ apartments must form an Association of "
+        "Apartment Owners with bye-laws adopted at a General Body; common "
+        "expenses and common profits are accounted for separately.",
+        True,
+        "UP_AOA_2010 regime drives the statutory head mapping on the Balance "
+        "Sheet, the fund ledgers and the AOA compliance card.",
+    ),
+    "up_aoa_rules": (
+        "UP Apartment Rules, 2011 & Model Bye-Laws",
+        "Rules notified 16-11-2011; Model Bye-laws on arrears (bye-law 7), "
+        "transfer fee ½% and No Dues (39), accounts & audit (49), "
+        "Act prevails (54), adoption by 2/3rd majority (58). Numbers follow the "
+        "gazette; confirm against your society's adopted copy.",
+        "Procedural code under the Act — competent authority, Declaration and "
+        "Deed of Apartment forms; bye-laws fix the financial framework "
+        "(funds, accounts, audit); it does not fix sinking / repair / reserve "
+        "rates, which this wizard sets as society policy.",
+        True,
+        "Fund bases and rates configured on the Society Compliance / "
+        "Apartment Charges steps; statutory_calendar tracks the filings.",
+    ),
+    "legal_instruments": (
+        "Act / Rules / Bye-laws catalog",
+        "legal_instrument_catalog (regime UP_AOA_2010)",
+        "The full tabulated list of Acts, Rules, Bye-laws and Notifications "
+        "governing this AOA, with applicability, key provisions and sources.",
+        True,
+        "Full table on the Setup Wizard's 'Legal Regime & Compliance' step; Master "
+        "maintains it on Master Portal → RWA Compliance (UP).",
+    ),
+}
+
+# Wizard step -> ordered STATUTORY_ROWS keys. Steps with no direct statute
+# (Administrator, Instructions, Agreement) fall back to the full framework.
+STEP_ROWS = {
+    "Society Details":          ["it_mutuality", "it_return", "labour"],
+    # Central Acts are a banner on this step (not a step of their own), so their rows are listed here.
+    "Legal Regime Selection":   ["up_aoa_act", "up_aoa_rules", "legal_instruments",
+                                 "it_mutuality", "it_return", "gst", "tds"],
+    "Funds":                    ["sinking", "repair", "reserve", "corpus"],
+    "TAN & TDS Rates":          ["tds"],
+    "GSTIN & GST Rate":         ["gst"],
+    "Apartment Charges":        ["sinking", "repair", "gst"],
+    "Vendor Charges":           ["tds", "gst", "labour"],
+    "Society Operations":       ["labour"],
+    "Accounts Heads":           ["it_mutuality", "it_80p", "reserve", "corpus"],
+    "Brought Forward":          ["corpus", "reserve", "sinking", "repair"],
+}
+
+# Wizard step -> kpi_rule_links.category keys (external "read the Act" links).
+STEP_LINK_CATEGORIES = {
+    "Society Details":          ["apartment_act", "cooperative_act", "rera"],
+    "Administrator":            ["apartment_act"],
+    "Legal Regime Selection":   ["apartment_act", "cooperative_act", "rera",
+                                 "fund_gst", "gst_registered", "tds_no_pan", "income_tax_mutuality"],
+    "Funds":                    ["sinking_fund", "apartment_act"],
+    "TAN & TDS Rates":          ["tds_no_pan", "income_tax_mutuality"],
+    "GSTIN & GST Rate":         ["gst_registered", "fund_gst"],
+    "Apartment Charges":        ["sinking_fund", "apartment_act", "cooperative_act"],
+    "Vendor Charges":           ["tds_no_pan", "gst_registered"],
+    "Accounts Heads":           ["income_tax_mutuality"],
+    "Brought Forward":          ["sinking_fund", "rera"],
+    "Agreement":                ["apartment_act", "cooperative_act"],
+}
+
+# Steps whose "Acts & Rules" column also lists the tabulated Act / Rules /
+# Bye-laws for the society's regime (legal_instrument_catalog). Steps without
+# an entry render the framework rows and official links only.
+STEP_INSTRUMENTS = {"Society Details", "Legal Regime Selection", "Apartment Charges", "Accounts Heads"}
+
+
+# ── Act / Rules / Bye-laws catalog (legal_instrument_catalog) ───────────────
+# The wizard's "Legal Regime & Compliance" step shows the same tabulated Acts, Rules,
+# Bye-laws and Notifications that the Master Portal's "RWA Compliance (UP)" tab
+# renders (app/dash_apps/pages/portal_pages.py::_rwa_compliance_up_page), from
+# the same table — so an admin reads the governing provisions while setting
+# the fund rates / bases those provisions require. Rows are seeded from
+# database/seed.py::LEGAL_INSTRUMENTS_UP_AOA.
+
+DEFAULT_REGIME = "UP_AOA_2010"
+
+# societies.state -> legal_regime_profiles.code (same state codes as
+# app/services/kpi_rule_links_service.get_states). UP is the only fully
+# seeded regime; the rest fall back to UP until their own rows exist.
+STATE_REGIME = {
+    "UP": "UP_AOA_2010",
+    "MH": "MH_COOP_1965",
+}
+
+# Table order for the grouped render (anything else keeps display_order).
+INSTRUMENT_TYPE_ORDER = ["Act", "Central Act", "Rules", "Central Rules",
+                         "Bye-laws", "Notification"]
+
+INSTRUMENT_BADGE_COLOR = {
+    "Act": "primary", "Central Act": "info", "Rules": "secondary",
+    "Central Rules": "info", "Bye-laws": "warning", "Notification": "dark",
+}
+
+
+def normalize_state(value):
+    """
+    societies.state -> the two-letter code used by kpi_rule_links /
+    state_compliance_thresholds / legal_regime_profiles.
+
+    Both shapes are in the wild: the Setup Wizard's State dropdown writes the
+    code ('UP'), while rows seeded earlier hold the full name
+    ('Uttar Pradesh' — societies.id 1 on the live DB). Both must resolve to
+    the same regime, or the wizard shows one state's statutes for a society
+    that believes it is another. Unknown / blank -> 'UP', matching the
+    wizard's own default (build_rules_panel).
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return "UP"
+    if raw.upper() == raw and len(raw) <= 3:
+        return raw.upper()          # already a code
+    try:
+        from app.services.kpi_rule_links_service import get_states
+        wanted = raw.lower()
+        for code, name in get_states().items():
+            if code != "ALL" and (name or "").strip().lower() == wanted:
+                return code
+    except Exception:
+        pass
+    return "UP"
+
+
+# How each regime collects a Sinking / Repair fund. Mirrors the regime parameters fund_collection_mode and
+# fund_allocation_basis (schemes/*.toml); used only to explain the rule on screen if the database is unreachable.
+# The billing engine itself reads the parameters through fn_fund_rule.
+FUND_COLLECTION_FALLBACK = {"UP_AOA_2010": ("fy_close", "undivided_interest")}
+FUND_COLLECTION_DEFAULT = ("on_bill", "per_sq_ft")
+
+
+def fund_collection_for_regime(regime_code):
+    """(fund_collection_mode, fund_allocation_basis) the regime sets for Sinking / Repair funds."""
+    from database.db_manager import db
+    mode, basis = FUND_COLLECTION_FALLBACK.get(regime_code, FUND_COLLECTION_DEFAULT)
+    try:
+        rows = db._execute(
+            """SELECT rule_key, value_text FROM regime_rule_parameters
+               WHERE regime_code = %s AND rule_key IN ('fund_collection_mode', 'fund_allocation_basis')
+                 AND effective_to IS NULL""",
+            (regime_code,), fetch_all=True,
+        ) or []
+        found = {r["rule_key"]: r["value_text"] for r in rows if r.get("value_text")}
+        mode, basis = found.get("fund_collection_mode", mode), found.get("fund_allocation_basis", basis)
+    except Exception:
+        pass
+    return mode, basis
+
+
+def scheme_for(state_code=None, constitution=None):
+    """The scheme (regime pack) the BILLING ENGINE will assign: mirrors fn_sync_society_regime. A researched scheme
+    exists for a state x constitution pair (UP + AOA today); every other society gets GENERIC. Not the same as
+    regime_for_society(), which picks the statutes to DISPLAY and falls back to UP for an unknown state."""
+    from database.db_manager import db
+    code = normalize_state(state_code) if state_code else None
+    const = (constitution or "AOA").upper()
+    try:
+        row = db._execute(
+            """SELECT code FROM legal_regime_profiles
+               WHERE state_code = %s AND constitution = %s AND status = 'active'
+               ORDER BY effective_from DESC LIMIT 1""", (code, const), fetch_one=True)
+        if row and row.get("code"):
+            return row["code"]
+        return "GENERIC"
+    except Exception:
+        return "UP_AOA_2010" if (code, const) == ("UP", "AOA") else "GENERIC"
+
+
+def regime_reserve_pct(regime_code):
+    """Share of net surplus moved to the Reserve Fund at FY close (regime parameter reserve_appropriation_pct)."""
+    from database.db_manager import db
+    try:
+        row = db._execute(
+            """SELECT value FROM regime_rule_parameters
+               WHERE regime_code = %s AND rule_key = 'reserve_appropriation_pct' AND effective_to IS NULL
+               ORDER BY effective_from DESC LIMIT 1""", (regime_code,), fetch_one=True)
+        if row and row.get("value") is not None:
+            return float(row["value"])
+    except Exception:
+        pass
+    return 25.0
+
+
+CONSTITUTION_LABELS = {
+    "AOA": "Apartment Owners' Association (AOA)",
+    "REG_SOCIETY": "Registered Society (Societies Registration Act, 1860)",
+    "COOP": "Co-operative Housing Society",
+    "GENERIC": "Generic / Other (central laws only)",
+}
+
+
+def regime_options(state_code):
+    """What each constitution gives in this State, for the 'choose your constitution' table.
+
+    [{constitution, label, regime, dedicated, name, status}] - `regime` is the scheme the billing engine will use
+    (scheme_for), so the table and the engine cannot disagree. dedicated=False means only the central laws apply
+    (GENERIC): no State Act, Rules or Model Bye-Laws pack has been researched for that State + constitution."""
+    out = []
+    for const, label in CONSTITUTION_LABELS.items():
+        regime = scheme_for(state_code, const)
+        name, status = regime_profile(regime)
+        out.append({"constitution": const, "label": label, "regime": regime, "dedicated": regime != "GENERIC",
+                    "name": name, "status": status})
+    return out
+
+
+def regime_selection(state_code, constitution):
+    """The society's legal regime for the State + Constitution it picked: {regime, dedicated, name, status,
+    constitution_label}. Empty regime until a State is chosen."""
+    const = (constitution or "AOA").upper()
+    label = CONSTITUTION_LABELS.get(const, const)
+    if not state_code:
+        return {"regime": None, "dedicated": False, "name": None, "status": None, "constitution_label": label}
+    regime = scheme_for(state_code, const)
+    name, status = regime_profile(regime)
+    return {"regime": regime, "dedicated": regime != "GENERIC", "name": name, "status": status,
+            "constitution_label": label}
+
+
+def regime_for_society(society_id=None, state_code=None):
+    """
+    Legal regime governing this society.
+
+    An explicitly chosen state_code (the Setup Wizard's State dropdown, which
+    is only persisted on submit) wins; otherwise society_legal_regime is used,
+    then societies.state. societies.state is empty for a society part-way
+    through the wizard, so the UP default covers that case.
+    """
+    if state_code:
+        return STATE_REGIME.get(normalize_state(state_code), DEFAULT_REGIME)
+    if not society_id:
+        return DEFAULT_REGIME
+    try:
+        from database.db_manager import db
+        row = db._execute(
+            "SELECT regime_code FROM society_legal_regime WHERE society_id=%s",
+            (society_id,), fetch_one=True,
+        )
+        if row and row.get("regime_code"):
+            return row["regime_code"]
+        row = db._execute("SELECT state FROM societies WHERE id=%s", (society_id,), fetch_one=True)
+        return STATE_REGIME.get(normalize_state((row or {}).get("state")), DEFAULT_REGIME)
+    except Exception:
+        return DEFAULT_REGIME
+
+
+def _seed_fallback_instruments(regime_code):
+    """LEGAL_INSTRUMENTS_UP_AOA rows as plain dicts, for a database where
+    legal_instrument_catalog hasn't been integrated yet."""
+    try:
+        from database.seed import LEGAL_INSTRUMENTS_UP_AOA
+    except Exception:
+        return []
+    out = []
+    for (rc, itype, title, year, authority, applicability, provisions,
+         source, order, status) in LEGAL_INSTRUMENTS_UP_AOA:
+        if rc != regime_code:
+            continue
+        out.append({
+            "instrument_type": itype, "title": title, "enactment_year": year,
+            "issuing_authority": authority, "applicability": applicability,
+            "key_provisions": provisions, "source_reference": source,
+            "display_order": order, "status": status, "last_verified_on": None,
+        })
+    return out
+
+
+# Instruments that must not be listed for a regime even if the catalog (or an older seed) still holds them.
+# The UP Co-operative Societies Act, 1965 governs housing co-operatives, not an AOA under the UP Apartment Act 2010.
+EXCLUDED_INSTRUMENTS = {
+    "UP_AOA_2010": {"Uttar Pradesh Co-operative Societies Act, 1965"},
+}
+
+
+def instruments_for_regime(regime_code=DEFAULT_REGIME):
+    """
+    Act / Rules / Bye-laws rows for one regime, from legal_instrument_catalog.
+
+    Includes CENTRAL (pseudo-regime) rows that apply to every society, then the
+    regime's own rows. De-duplicates by title: the regime row wins over CENTRAL.
+
+    Falls back to the seed list in database/seed.py when the table is missing
+    on this database (the same "not integrated yet" situation the Master tab
+    renders setup instructions for) so the wizard step never comes up blank.
+    """
+    try:
+        from database.db_manager import db
+        central = db._execute(
+            """SELECT instrument_type, title, enactment_year, issuing_authority,
+                      applicability, key_provisions, source_reference, source_url,
+                      display_order, status, last_verified_on, verification,
+                      notification_no, applies_when, topic
+               FROM legal_instrument_catalog
+               WHERE regime_code='CENTRAL'
+               ORDER BY display_order""",
+            fetch_all=True,
+        ) or []
+        rows = db._execute(
+            """SELECT instrument_type, title, enactment_year, issuing_authority,
+                      applicability, key_provisions, source_reference, source_url,
+                      display_order, status, last_verified_on, verification,
+                      notification_no, applies_when, topic
+               FROM legal_instrument_catalog
+               WHERE regime_code=%s
+               ORDER BY display_order""",
+            (regime_code,), fetch_all=True,
+        ) or []
+    except Exception:
+        central = []
+        rows = []
+    if not central and not rows:
+        central = _seed_fallback_instruments("CENTRAL")
+        rows = _seed_fallback_instruments(regime_code)
+    _skip = EXCLUDED_INSTRUMENTS.get(regime_code, set())
+    rows = [r for r in rows if r.get("title") not in _skip]
+    seen = {r.get("title") for r in rows}
+    for c in central:
+        if c.get("title") not in seen:
+            rows.append(c)
+    return sorted(
+        rows,
+        key=lambda r: (
+            INSTRUMENT_TYPE_ORDER.index(r["instrument_type"])
+            if r.get("instrument_type") in INSTRUMENT_TYPE_ORDER else len(INSTRUMENT_TYPE_ORDER),
+            r.get("display_order") or 0,
+        ),
+    )
+
+
+def instrument_applies(instrument: dict, answers: dict) -> tuple[bool, str | None]:
+    """
+    Whether a catalog instrument applies to this society, given its Yes/No answers.
+
+    Returns (applies: bool, reason: str | None). reason is set when applies is False,
+    e.g. "not triggered: you answered No" or None when always/informational.
+    """
+    trigger = instrument.get("applies_when") or "always"
+    if trigger == "always":
+        return True, None
+    if trigger == "info":
+        return False, None  # informational: shown, never bold
+    answer_key = trigger
+    if answers.get(answer_key) is True:
+        return True, None
+    return False, f"not triggered: you answered “No” to {trigger.replace('_', ' ')}"
+
+
+def instruments_for_society(society_id=None, state_code=None):
+    """(regime_code, instrument rows) for one society (or for a state the
+    admin has just picked in the wizard but not yet saved)."""
+    regime = regime_for_society(society_id, state_code)
+    return regime, instruments_for_regime(regime)
+
+
+def grouped_instruments(rows):
+    """{instrument_type: [rows]} in INSTRUMENT_TYPE_ORDER."""
+    groups: dict[str, list] = {}
+    for r in rows:
+        groups.setdefault(r.get("instrument_type") or "Other", []).append(r)
+    return groups
+
+
+def rows_for_step(step: str):
+    """Framework rows for a wizard step; full framework if none map."""
+    keys = STEP_ROWS.get(step) or list(STATUTORY_ROWS.keys())
+    return [STATUTORY_ROWS[k] for k in keys]
+
+
+# ── Fund applicability (Sinking / Repair / Corpus) ──────────────────────────
+# A fund is only a Setup Wizard question when the society's state PRESCRIBES it
+# (state_compliance_thresholds holds a numeric minimum, e.g. MH 0.25% / 0.75%
+# of construction cost). Where the threshold is NULL (UP: "no statutory floor",
+# database/seed.py NULL_NO_FLOOR) the fund is a society choice made by General
+# Body resolution under the Model Bye-Laws, so the wizard asks for it on the
+# Model Bye-Laws Adoption step and shows rate fields only if the society opts in.
+# The Corpus Fund is a one-time builder-handover receipt: it is never a setup
+# rate, so it only ever appears as an opening balance (Brought Forward).
+FUND_THRESHOLD_KEYS = {
+    "sinking": "sinking_fund_pct_construction_cost",
+    "repair": "repair_fund_pct_construction_cost",
+}
+
+
+def fund_rules_for_state(state_code=None):
+    """{'sinking'|'repair'|'corpus': {'mode': 'statutory'|'optional',
+    'min_pct': float|None, 'note': str}} for a state (blank -> UP)."""
+    state = normalize_state(state_code)
+    out = {f: {"mode": "optional", "min_pct": None, "note": ""} for f in FUND_THRESHOLD_KEYS}
+    out["corpus"] = {"mode": "optional", "min_pct": None,
+                     "note": "Builder-handover receipt; recorded when received, not a setup rate."}
+    rows = []
+    try:
+        from database.db_manager import db
+        rows = db._execute(
+            """SELECT threshold_key, value, notes FROM state_compliance_thresholds
+               WHERE state = %s AND threshold_key IN (%s, %s) AND effective_to IS NULL""",
+            (state, *FUND_THRESHOLD_KEYS.values()), fetch_all=True,
+        ) or []
+    except Exception:
+        rows = []
+    if not rows:                      # table missing / not integrated: use the seed list
+        try:
+            from database.seed import STATE_COMPLIANCE_THRESHOLDS
+            rows = [{"threshold_key": k, "value": v, "notes": n}
+                    for (st, k, v, _vt, _u, _ef, et, n) in STATE_COMPLIANCE_THRESHOLDS
+                    if st == state and k in FUND_THRESHOLD_KEYS.values() and et is None]
+        except Exception:
+            rows = []
+    by_key = {v: k for k, v in FUND_THRESHOLD_KEYS.items()}
+    for r in rows:
+        fund = by_key.get(r["threshold_key"])
+        if fund and r.get("value") not in (None, 0):
+            out[fund] = {"mode": "statutory", "min_pct": float(r["value"]), "note": r.get("notes") or ""}
+    return out
+
+
+def state_has_own_regime(state_code=None):
+    """False when the state has no legal_regime_profiles row of its own and
+    regime_for_society() is only falling back to UP_AOA_2010."""
+    return bool(state_code) and normalize_state(state_code) in STATE_REGIME
+
+
+def regime_profile(regime_code):
+    """(name, status) of a regime from legal_regime_profiles; (code, None) if unavailable."""
+    try:
+        from database.db_manager import db
+        row = db._execute("SELECT name, status FROM legal_regime_profiles WHERE code=%s",
+                          (regime_code,), fetch_one=True)
+        if row:
+            return row["name"], row["status"]
+    except Exception:
+        pass
+    return regime_code, None
+
+
+def tax_audit_flag(society_id: int, fy: int) -> dict | None:
+    """Provisional s.44AB warning for financial year `fy` (starting year). 'ok' | 'warn' (80% of the limit) | 'flag'.
+    The threshold is effective-dated and still unconfirmed by a CA; treat the result as a prompt to ask, not a finding."""
+    from database.db_manager import db
+    return db._execute("SELECT * FROM fn_tax_audit_flag(%s, %s)", (society_id, fy), fetch_one=True)

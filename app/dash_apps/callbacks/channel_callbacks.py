@@ -1,0 +1,258 @@
+# ============================================================
+# app/dash_apps/callbacks/channel_callbacks.py
+# ============================================================
+# Callbacks for the Channels module (drilldown-aligned):
+#   1. Toggle Target Apartment field on New Channel form
+#   2. Open/close Channel Subscribers modal
+#   3. Approve pending alert from channel profile alert events table
+# ============================================================
+
+import logging
+from dash import Input, Output, State, ALL, ctx, html, no_update
+from dash.exceptions import PreventUpdate
+import dash_bootstrap_components as dbc
+
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+    get_current_linked_id,
+)
+from app.utils.ux_toasts import error_toast
+from app.security.authorization import Cap
+from app.security.service_guard import audit_event, authorize_resource, blocks
+
+logger = logging.getLogger(__name__)
+
+
+def render_channels_page(society_id: int, auth: dict) -> html.Div:
+    """
+    Re-render the owner channels page after an approve/deny action.
+    DEPRECATED: inline rendering removed from portal_pages.py; kept
+    as a utility in case external callers still reference it.
+    """
+    from app.services.alert_service import list_channels, get_active_alerts
+    from app.dash_apps.drilldown.renderers import render_subscribable_alert_manager
+
+    apartment_id = get_current_linked_id()
+    channels = list_channels(society_id or 1, apartment_id=apartment_id, is_admin=False)
+    alerts = get_active_alerts(society_id or 1)
+    return render_subscribable_alert_manager(channels, alerts, is_admin=False, apartment_id=apartment_id)
+
+
+def register_channel_callbacks(app):
+
+    # ── 0. Show the "Target Apartment" picker only for Taxi / Visitor ───────
+    @app.callback(
+        Output({"type": "form-field", "entity": "channel", "field": "apartment_id"}, "style"),
+        Input({"type": "form-field", "entity": "channel", "field": "channel_type"}, "value"),
+        prevent_initial_call=False,
+    )
+    @require_session
+    def toggle_apartment_field(ch_type):
+        if ch_type in ("taxi", "visitor"):
+            return {"display": "block"}
+        return {"display": "none"}
+
+    # ── 1. Open Channel Subscribers modal ────────────────────────────────────
+    @app.callback(
+        Output("channel-subscribers-modal", "is_open", allow_duplicate=True),
+        Output("channel-subscribers-modal-body", "children", allow_duplicate=True),
+        Input("profile-action-trigger", "data"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def open_subscribers_modal(trigger_data, auth):
+        if not trigger_data or not isinstance(trigger_data, dict):
+            raise PreventUpdate
+        action = trigger_data.get("action")
+        if action != "open_subscribers_modal":
+            raise PreventUpdate
+        params = trigger_data.get("params") or {}
+        channel_id = params.get("channel_id")
+        if not channel_id:
+            return False, no_update
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "apartment", "security"):
+            return False, html.Div("Not authorized.", style={"color": "#de5c52"})
+        society_id = get_current_society_id()
+        try:
+            from app.services.alert_service import get_channel_subscribers
+            from app.dash_apps.drilldown.renderers import render_channel_subscriber_profiles
+            result = get_channel_subscribers(channel_id=channel_id, society_id=society_id)
+            channel_name = result.get("channel_name", "Channel")
+            subscribers = result.get("subscribers", [])
+            return True, render_channel_subscriber_profiles(channel_name, subscribers)
+        except Exception as e:
+            logger.error(f"open_subscribers_modal error: {e}")
+            return False, html.Div(error_toast(e, "Unable to load subscribers.")["message"], style={"color": "#de5c52"})
+
+    # ── 2. Close Channel Subscribers modal ───────────────────────────────────
+    @app.callback(
+        Output("channel-subscribers-modal", "is_open", allow_duplicate=True),
+        Input("close-channel-subscribers-modal", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def close_subscribers_modal(n_clicks):
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
+    # ── 3. Approve pending alert from channel profile alert events table ─────
+    @app.callback(
+        Output("toast-store", "data", allow_duplicate=True),
+        Output("drilldown-store", "data", allow_duplicate=True),
+        Input({"type": "channel-approve-alert-btn", "alert_event_id": ALL}, "n_clicks"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def approve_channel_alert(n_clicks_list, auth):
+        if not any(n for n in (n_clicks_list or []) if n):
+            raise PreventUpdate
+        triggered = ctx.triggered_id
+        if not triggered:
+            raise PreventUpdate
+        alert_event_id = triggered.get("alert_event_id")
+        if not alert_event_id:
+            raise PreventUpdate
+        role = get_current_user_role() or ""
+        if role != "apartment":
+            return {"type": "error", "message": "Only apartment owners can approve alerts."}, no_update
+        user_id = get_current_user_id()
+        society_id = get_current_society_id()
+        if not society_id:
+            return {"type": "error", "message": "Session expired"}, no_update
+        try:
+            from app.services.alert_service import respond_to_alert
+            ok, msg = respond_to_alert(int(alert_event_id), user_id, "approve")
+            store = {"refresh": True}
+            toast = {"type": "success" if ok else "error", "message": msg or "Action failed"}
+            if ok:
+                try:
+                    import app.services.push_service as PushService
+                    from database.db_manager import db
+                    evt = db._execute(
+                        "SELECT ae.channel_id, ac.name, ac.channel_type FROM alert_events ae "
+                        "LEFT JOIN alert_channels ac ON ac.id=ae.channel_id WHERE ae.id=%s",
+                        (alert_event_id,), fetch_one=True
+                    )
+                    if evt and evt.get("channel_id"):
+                        subs = db._execute(
+                            "SELECT u.id FROM alert_subscriptions sub "
+                            "JOIN users u ON u.linked_id=sub.apartment_id AND u.role='apartment' "
+                            "WHERE sub.channel_id=%s",
+                            (evt["channel_id"],), fetch_all=True
+                        ) or []
+                        for s in subs:
+                            try:
+                                PushService.send_push_notification(
+                                    s["id"],
+                                    "✅ Channel Approved",
+                                    f"{evt.get('name','Channel')} ({evt.get('channel_type','')}) has been approved.",
+                                    url="/dashboard/channels",
+                                    society_id=society_id,
+                                )
+                            except Exception:
+                                pass
+                except Exception as e:
+                    logger.error(f"Channel approval push notify failed: {e}")
+            return toast, store
+        except Exception as e:
+            logger.error(f"approve_channel_alert error: {e}")
+            return error_toast(e, "Unable to approve this alert. Please try again."), no_update
+
+    # ── 4. Subscribe / Unsubscribe channel from alert card ──────────────────
+    @app.callback(
+        Output("toast-store", "data", allow_duplicate=True),
+        Input({"type": "alert-sub-btn", "channel_id": ALL}, "n_clicks"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def toggle_channel_subscription(n_clicks_list, auth):
+        if not any(n for n in (n_clicks_list or []) if n):
+            raise PreventUpdate
+        triggered = ctx.triggered_id
+        if not isinstance(triggered, dict):
+            raise PreventUpdate
+        channel_id = triggered.get("channel_id")
+        if not channel_id:
+            raise PreventUpdate
+        role = get_current_user_role() or ""
+        if role != "apartment":
+            return {"type": "error", "message": "Only apartment owners can manage subscriptions."}
+        apartment_id = get_current_linked_id()
+        if not apartment_id:
+            return {"type": "error", "message": "Apartment not found."}
+        society_id = get_current_society_id()
+        try:
+            channel_id = int(channel_id)
+        except (TypeError, ValueError):
+            return {"type": "error", "message": "Channel not found."}
+        # Action-level authorization (RWA3 WP4 item 2): the channel is resolved
+        # INSIDE the caller's own society first, so a forged channel_id from
+        # another tenant is indistinguishable from a missing one and never
+        # reaches the write below.
+        decision, _row = authorize_resource(Cap.CHANNEL_SUBSCRIBE, "alert_channel",
+                                            "alert_channels", channel_id)
+        if blocks(decision):
+            return {"type": "error", "message": "You cannot change subscriptions for this channel."}
+        try:
+            from app.services.alert_service import (
+                get_channel_subscribers, subscribe_channel, unsubscribe_channel)
+            result = get_channel_subscribers(channel_id=channel_id, society_id=society_id)
+            subscribers = result.get("subscribers", [])
+            is_subscribed = any(s.get("apartment_id") == apartment_id for s in subscribers)
+            if is_subscribed:
+                ok, msg = unsubscribe_channel(channel_id=channel_id, apartment_id=apartment_id,
+                                              society_id=society_id)
+                verb = "channel.unsubscribe"
+            else:
+                ok, msg = subscribe_channel(channel_id=channel_id, apartment_id=apartment_id,
+                                            society_id=society_id)
+                verb = "channel.subscribe"
+            if ok:
+                audit_event(verb, "alert_channel", channel_id,
+                            after={"apartment_id": apartment_id},
+                            permission_used=Cap.CHANNEL_SUBSCRIBE)
+            return {"type": "success" if ok else "error", "message": msg or "Action failed"}
+        except Exception as e:
+            logger.error(f"toggle_channel_subscription error: {e}")
+            return error_toast(e, "Unable to update your subscription. Please try again.")
+
+    # ── 5. View Subscribers from alert card ──────────────────────────────
+    @app.callback(
+        Output("channel-subscribers-modal", "is_open", allow_duplicate=True),
+        Output("channel-subscribers-modal-body", "children", allow_duplicate=True),
+        Input({"type": "view-subscribers-btn", "channel_id": ALL}, "n_clicks"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def open_subscribers_from_alert(n_clicks_list, auth):
+        if not any(n for n in (n_clicks_list or []) if n):
+            raise PreventUpdate
+        triggered = ctx.triggered_id
+        if not isinstance(triggered, dict):
+            raise PreventUpdate
+        channel_id = triggered.get("channel_id")
+        if not channel_id:
+            raise PreventUpdate
+        role = get_current_user_role() or ""
+        if role not in ("admin", "master", "apartment", "security"):
+            return False, html.Div("Not authorized.", style={"color": "#de5c52"})
+        society_id = get_current_society_id()
+        try:
+            from app.services.alert_service import get_channel_subscribers
+            from app.dash_apps.drilldown.renderers import render_channel_subscriber_profiles
+            result = get_channel_subscribers(channel_id=channel_id, society_id=society_id)
+            channel_name = result.get("channel_name", "Channel")
+            subscribers = result.get("subscribers", [])
+            return True, render_channel_subscriber_profiles(channel_name, subscribers)
+        except Exception as e:
+            logger.error(f"open_subscribers_from_alert error: {e}")
+            return False, html.Div(error_toast(e, "Unable to load subscribers.")["message"], style={"color": "#de5c52"})

@@ -1,0 +1,1497 @@
+# app/dash_apps/app_shell.py
+"""
+Dash application shell — renders ONCE at startup.
+All dynamic content injected by callbacks.
+
+"""
+
+from dash import html, dcc
+import dash_bootstrap_components as dbc
+
+
+# ── Login modal body base style ────────────────────────────────────────────
+# Shared with shell_callbacks.py's inject_stage2/back_to_stage1, which swap
+# only backgroundImage (default EstateHub art vs. the selected society's
+# login_background) — everything else about the panel stays fixed here so
+# the two never drift apart.
+LOGIN_MODAL_BODY_BASE_STYLE = {
+    "backgroundSize": "cover",
+    "backgroundPosition": "center",
+    "minHeight": "400px",
+}
+
+
+# ── Role configuration ────────────────────────────────────────────────────────
+
+ROLE_CONFIG = {
+    "admin": {
+        "color": "#1859b8",
+        "label": "Admin Portal",
+        "icon": "fa-user-shield",
+        "tabs": [
+            {"label": "Dashboard",     "href": "/dashboard/admin-portal",  "icon": "fa-th-large"},
+            {"label": "Financials",    "href": "/dashboard/financials",     "icon": "fa-book"},
+            {"label": "Channels",      "href": "/dashboard/channels",       "icon": "fa-bullhorn"},
+            {"label": "Assets",        "href": "/dashboard/assets",         "icon": "fa-building"},
+            {"label": "Events",        "href": "/dashboard/events",         "icon": "fa-calendar-alt"},
+            {"label": "Concerns",      "href": "/dashboard/concerns",        "icon": "fa-hand-point-up"},
+            {"label": "Polls",         "href": "/dashboard/polls",         "icon": "fa-poll"},
+            {"label": "Evaluate Pass", "href": "/dashboard/evaluate-pass",  "icon": "fa-qrcode"},
+            {"label": "Enrolled",      "href": "/dashboard/enrolled",         "icon": "fa-user-plus"},
+            {"label": "Team Logins",   "href": "/dashboard/team-logins",      "icon": "fa-id-badge"},
+            {"label": "Registers",     "href": "/dashboard/registers",        "icon": "fa-book-open"},
+            {"label": "Customize",     "href": "/dashboard/customize",      "icon": "fa-edit"},
+            {"label": "Settings",      "href": "/dashboard/settings",       "icon": "fa-cog"},
+        ],
+    },
+    "apartment": {
+        "color": "#18794e",
+        "label": "Owner Portal",
+        "icon": "fa-home",
+        "tabs": [
+            {"label": "Dashboard",   "href": "/dashboard/owner-portal",    "icon": "fa-th-large"},
+            {"label": "Members",     "href": "/dashboard/owner-members",   "icon": "fa-users"},
+            {"label": "Financials",  "href": "/dashboard/owner-financials", "icon": "fa-book"},
+            {"label": "Channels",    "href": "/dashboard/owner-channels",   "icon": "fa-bullhorn"},
+            {"label": "Bills Paid",  "href": "/dashboard/owner-receipts",   "icon": "fa-file-invoice-dollar"},
+            {"label": "Events",      "href": "/dashboard/owner-events",     "icon": "fa-calendar-alt"},
+            {"label": "Concerns",    "href": "/dashboard/owner-concerns",   "icon": "fa-hand-point-up"},
+            {"label": "Polls",       "href": "/dashboard/owner-polls",     "icon": "fa-poll"},
+            {"label": "Settings",    "href": "/dashboard/owner-settings",   "icon": "fa-cog"},
+        ],
+    },
+    "vendor": {
+        "color": "#b98a07",
+        "label": "Vendor Portal",
+        "icon": "fa-briefcase",
+        "tabs": [
+            {"label": "Dashboard", "href": "/dashboard/vendor-portal",   "icon": "fa-th-large"},
+            {"label": "Financials", "href": "/dashboard/vendor-financials", "icon": "fa-book"},
+            {"label": "Passes", "href": "/dashboard/vendor-passes",   "icon": "fa-id-card"},
+            {"label": "Events",    "href": "/dashboard/vendor-events",   "icon": "fa-calendar-alt"},
+            {"label": "Concerns",  "href": "/dashboard/vendor-concerns", "icon": "fa-hand-point-up"},
+            {"label": "Settings",  "href": "/dashboard/vendor-settings", "icon": "fa-cog"},
+        ],
+    },
+    "security": {
+        "color": "#b63b3b",
+        "label": "Security Portal",
+        "icon": "fa-shield-alt",
+        "tabs": [
+            {"label": "Pass Eval",   "href": "/dashboard/pass-evaluation",  "icon": "fa-qrcode"},
+            {"label": "Channels",    "href": "/dashboard/security-channels", "icon": "fa-bullhorn"},
+            {"label": "Attendance",  "href": "/dashboard/attendance",        "icon": "fa-clock"},
+            {"label": "Receipts",    "href": "/dashboard/security-receipts",  "icon": "fa-plus-circle"},
+            {"label": "Events",      "href": "/dashboard/security-events",   "icon": "fa-calendar-alt"},
+            {"label": "Concerns",    "href": "/dashboard/security-concerns",  "icon": "fa-hand-point-up"},
+            {"label": "Users",       "href": "/dashboard/security-users",    "icon": "fa-users"},
+            {"label": "Settings",    "href": "/dashboard/security-settings",   "icon": "fa-cog"},
+        ],
+    },
+    "accountant": {
+        "color": "#7c3aed",
+        "label": "Accountant Portal",
+        "icon": "fa-calculator",
+        "tabs": [
+            {"label": "Dashboard",  "href": "/dashboard/accountant-portal",     "icon": "fa-th-large"},
+            {"label": "Receipts",   "href": "/dashboard/accountant-receipts",   "icon": "fa-receipt"},
+            {"label": "Expenses",   "href": "/dashboard/accountant-expenses",   "icon": "fa-file-invoice"},
+            {"label": "Dues",       "href": "/dashboard/accountant-dues",       "icon": "fa-hand-holding-usd"},
+            {"label": "Cashbook",   "href": "/dashboard/accountant-cashbook",   "icon": "fa-book"},
+            {"label": "Financials", "href": "/dashboard/accountant-financials", "icon": "fa-balance-scale"},
+            {"label": "TDS & GST",  "href": "/dashboard/accountant-taxrates",   "icon": "fa-percent"},
+        ],
+    },
+    "supervisor": {
+        "color": "#ea580c",
+        "label": "Supervisor Portal",
+        "icon": "fa-user-tie",
+        "tabs": [
+            {"label": "Dashboard",       "href": "/dashboard/supervisor-portal",   "icon": "fa-th-large"},
+            {"label": "Gate & Security", "href": "/dashboard/supervisor-gate",     "icon": "fa-shield-alt"},
+            {"label": "Users",           "href": "/dashboard/supervisor-users",    "icon": "fa-users"},
+            {"label": "Concerns",        "href": "/dashboard/supervisor-concerns", "icon": "fa-hand-point-up"},
+            {"label": "Events",          "href": "/dashboard/supervisor-events",   "icon": "fa-calendar-alt"},
+            {"label": "Channels",        "href": "/dashboard/supervisor-channels", "icon": "fa-bullhorn"},
+        ],
+    },
+    "staff": {
+        # White theme: the sidebar is dark, so the white accent reads there; label_color is the readable
+        # slate used where the accent would otherwise sit on a light background (portal name in the header).
+        "color": "#ffffff",
+        "label_color": "#475569",
+        "label": "Staff Portal",
+        "icon": "fa-id-badge",
+        "tabs": [
+            {"label": "Dashboard", "href": "/dashboard/staff-portal",   "icon": "fa-th-large"},
+            {"label": "Concerns",  "href": "/dashboard/staff-concerns", "icon": "fa-hand-point-up"},
+            {"label": "Events",    "href": "/dashboard/staff-events",   "icon": "fa-calendar-alt"},
+        ],
+    },
+    "adviser": {
+        "color": "#7c3aed",
+        "label": "Adviser Portal",
+        "icon": "fa-user-tie",
+        "tabs": [{"label": "My access", "href": "/dashboard/adviser-portal", "icon": "fa-user-tie"}],
+    },
+    "auditor": {
+        "color": "#dc2626",
+        "label": "Auditor Portal",
+        "icon": "fa-search",
+        "tabs": [
+            {"label": "Verify",     "href": "/dashboard/auditor-portal",     "icon": "fa-check-double"},
+            {"label": "Books",      "href": "/dashboard/auditor-books",      "icon": "fa-book"},
+            {"label": "Receipts",   "href": "/dashboard/auditor-receipts",   "icon": "fa-receipt"},
+            {"label": "Expenses",   "href": "/dashboard/auditor-expenses",   "icon": "fa-file-invoice"},
+            {"label": "Financials", "href": "/dashboard/auditor-financials", "icon": "fa-balance-scale"},
+        ],
+    },
+    "master": {
+        "color": "#c96a19",
+        "label": "Master Admin",
+        "icon": "fa-crown",
+        "tabs": [
+            {"label": "Societies",      "href": "/dashboard/master-societies",   "icon": "fa-building"},
+            {"label": "Onboarding",     "href": "/dashboard/master-onboarding",  "icon": "fa-clipboard-check"},
+            {"label": "RWA Compliance- INDIA", "href": "/dashboard/master-compliance-india", "icon": "fa-gavel"},
+            {"label": "RWA Compliance (UP)", "href": "/dashboard/master-compliance-up", "icon": "fa-gavel"},
+            {"label": "AOA Rule Editor", "href": "/dashboard/master-aoa-rules", "icon": "fa-sliders-h"},
+            {"label": "Tests",          "href": "/dashboard/master-tests",   "icon": "fa-flask"},
+            {"label": "Settings",       "href": "/dashboard/master-settings", "icon": "fa-cog"},
+        ],
+    },
+}
+
+
+# ── Login modal ───────────────────────────────────────────────────────────────
+
+def _login_modal() -> html.Div:
+    from app.dash_apps.pages.login_system import (
+        society_select_layout,
+        forgot_password_modal,
+        reset_password_modal,
+    )
+    return html.Div([
+        dbc.Modal(
+            [
+                dbc.ModalHeader(
+                    html.Div(
+                        [
+                            html.Img(
+                                id="login-society-logo",
+                                src="/static/assets/EH_logo.png",
+                                style={"height": "36px", "marginRight": "10px"},
+                            ),
+                            html.Span(
+                                "EstateHub",
+                                style={"fontWeight": "700", "fontSize": "20px", "color": "#fff"},
+                            ),
+                        ],
+                        style={"display": "flex", "alignItems": "center"},
+                    ),
+                    id="login-modal-header",
+                    style={
+                        "background": "linear-gradient(135deg,#667eea 0%,#764ba2 100%)",
+                        "borderRadius": "15px 15px 0 0",
+                    },
+                    close_button=False,
+                ),
+                dbc.ModalBody(
+                    [
+                        html.Div(id="login-stage-1", children=society_select_layout()),
+                        html.Div(id="login-stage-2", style={"display": "none"}),
+                    ],
+                    id="login-modal-body",
+                    style={
+                        "--login-bg": "url(/static/assets/EH_bk.jpg)",
+                        **LOGIN_MODAL_BODY_BASE_STYLE,
+                    },
+                ),
+                dbc.ModalFooter(
+                    html.Small(
+                        "Need help? Contact your society administrator.",
+                        style={"color": "#999", "fontSize": "11px"},
+                    ),
+                    id="modal-footer",
+                ),
+            ],
+            id="login-modal",
+            is_open=True,      # Starts open; guard_modal callback closes it if authenticated
+            backdrop="static",
+            keyboard=False,
+            centered=True,
+            size="md",
+            style={"zIndex": "2000"},
+        ),
+        forgot_password_modal(),
+        reset_password_modal(),
+    ])
+
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+
+def _sidebar() -> html.Aside:
+    return html.Aside(
+        [
+            html.Div(
+                [
+                    html.Img(
+                        src="/static/assets/EH_logo.png",
+                        style={"width": "46px", "borderRadius": "10px", "marginBottom": "8px"},
+                    ),
+                    html.Div(
+                        "EstateHub",
+                        style={"fontWeight": "700", "fontSize": "14px", "color": "#fff"},
+                    ),
+                    html.Button(
+                        html.I(className="fas fa-chevron-left"),
+                        id="sb-collapse-btn",
+                        n_clicks=0,
+                        style={
+                            "position": "absolute", "right": "10px", "top": "16px",
+                            "background": "rgba(255,255,255,0.1)", "border": "none",
+                            "color": "#fff", "borderRadius": "50%",
+                            "width": "26px", "height": "26px",
+                            "cursor": "pointer", "fontSize": "11px",
+                        },
+                    ),
+                ],
+                style={
+                    "padding": "18px 14px 12px",
+                    "textAlign": "center",
+                    "borderBottom": "1px solid rgba(255,255,255,0.1)",
+                    "position": "relative",
+                },
+            ),
+            # Nav populated by route_page → _make_nav_items() using dcc.Link
+            html.Nav(
+                html.Ul(
+                    id="sb-nav-list",
+                    style={"listStyle": "none", "margin": "0", "padding": "10px 8px 170px"},
+                    children=[],
+                ),
+                style={"flex": "1", "overflowY": "auto", "overflowX": "hidden", "minHeight": "0"},
+            ),
+            html.Div(
+                [
+                    html.Hr(style={"borderColor": "rgba(255,255,255,0.1)", "margin": "0 12px 8px"}),
+                    html.Div(
+                        [
+                            html.Div(
+                                id="sb-avatar",
+                                children="?",
+                                style={
+                                    "width": "32px", "height": "32px", "borderRadius": "50%",
+                                    "background": "linear-gradient(135deg,#667eea,#764ba2)",
+                                    "display": "flex", "alignItems": "center",
+                                    "justifyContent": "center",
+                                    "fontWeight": "700", "fontSize": "13px", "color": "#fff",
+                                    "flexShrink": "0",
+                                },
+                            ),
+                            html.Div(
+                                [
+                                    html.Div(id="sb-user-name", children="—",
+                                             style={"fontSize": "12px", "fontWeight": "600", "color": "#fff"}),
+                                    html.Div(id="sb-user-role", children="—",
+                                             style={"fontSize": "10px", "color": "rgba(255,255,255,0.5)"}),
+                                ],
+                                style={"marginLeft": "8px", "overflow": "hidden"},
+                            ),
+                        ],
+                        style={"display": "flex", "alignItems": "center", "padding": "0 14px 8px"},
+                    ),
+                    html.Button(
+                        [html.I(className="fas fa-key me-2"), "Account Settings"],
+                        id="account-settings-btn",
+                        n_clicks=0,
+                        style={
+                            "width": "calc(100% - 28px)", "margin": "0 14px 8px",
+                            "background": "rgba(255,255,255,0.08)",
+                            "border": "1px solid rgba(255,255,255,0.15)",
+                            "color": "#fff", "borderRadius": "8px",
+                            "padding": "6px", "cursor": "pointer", "fontSize": "12px",
+                        },
+                    ),
+                    html.Button(
+                        [html.I(className="fas fa-sign-out-alt me-2"), "Logout"],
+                        id="sb-logout-btn",
+                        n_clicks=0,
+                        style={
+                            "width": "calc(100% - 28px)", "margin": "0 14px 12px",
+                            "background": "rgba(231,76,60,0.15)",
+                            "border": "1px solid rgba(231,76,60,0.3)",
+                            "color": "#e74c3c", "borderRadius": "8px",
+                            "padding": "6px", "cursor": "pointer", "fontSize": "12px",
+                        },
+                    ),
+                ],
+                style={"flexShrink": "0", "width": "100%"},
+            ),
+        ],
+        id="app-sidebar",
+        className="app-sidebar",
+        style={"display": "flex", "flexDirection": "column", "overflow": "hidden"},
+    )
+
+
+# ── Header ────────────────────────────────────────────────────────────────────
+
+def _header() -> html.Header:
+    return html.Header(
+        [
+            html.Button(
+                html.I(className="fas fa-bars"),
+                id="hdr-hamburger-btn",
+                n_clicks=0,
+                className="mobile-menu-btn",
+            ),
+            html.Div(
+                [
+                    html.Img(
+                        id="hdr-society-logo",
+                        src="/static/assets/EH_logo.png",
+                        style={"width": "50px", "height": "25px",
+                               "borderRadius": "10px", "objectFit": "contain", "flexShrink": "0"},
+                    ),
+                    html.Div(
+                        id="hdr-society-name",
+                        children="EstateHub",
+                        style={"fontWeight": "700", "fontSize": "14px", "marginLeft": "10px"},
+                    ),
+                ],
+                style={"display": "flex", "alignItems": "center", "flex": "1"},
+            ),
+            html.Div(
+                id="hdr-portal-label",
+                children="",
+                style={"fontWeight": "700", "fontSize": "20px",
+                       "minWidth": "160px", "textAlign": "center"},
+            ),
+            html.Div(
+                [
+                    html.Button(
+                        [html.I(className="fas fa-search"), html.Span("Search", className="header-search-label")],
+                        id="global-card-search-btn",
+                        n_clicks=0,
+                        title="Search dashboard cards",
+                        **{"aria-label": "Search dashboard cards"},
+                        className="header-search-btn",
+                        style={
+                            "background": "none", "border": "1px solid #d8e1ec", "color": "#526579",
+                            "fontSize": "12px", "cursor": "pointer", "marginRight": "10px",
+                            "padding": "6px 10px", "borderRadius": "8px",
+                            "display": "flex", "alignItems": "center", "gap": "6px",
+                        },
+                    ),
+                    html.Button(
+                        html.I(className="fas fa-rotate", id="hdr-refresh-kpi-icon"),
+                        id="hdr-refresh-kpi-btn",
+                        n_clicks=0,
+                        title="Refresh KPIs on this tab",
+                        className="kpi-refresh-btn",
+                        style={
+                            "background": "none", "border": "none", "color": "#000",
+                            "fontSize": "16px", "cursor": "pointer", "marginRight": "10px",
+                            "width": "34px", "height": "34px", "borderRadius": "50%",
+                            "display": "flex", "alignItems": "center", "justifyContent": "center",
+                        },
+                    ),
+                    # Debounce timer for the refresh button above (see the
+                    # two clientside callbacks in card_catalogue_callbacks.py
+                    # that arm/disarm it): starts disabled, gets a fresh
+                    # single-shot fire armed on every click, and its
+                    # n_intervals tick is what re-enables the button —
+                    # purely time-based, independent of how long the
+                    # server-side KPI fetch itself takes.
+                    dcc.Interval(
+                        id="kpi-refresh-debounce",
+                        interval=1000,
+                        n_intervals=0,
+                        max_intervals=-1,
+                        disabled=True,
+                    ),
+                    html.Div(id="hdr-entity-name", children="User",
+                             style={"fontWeight": "600", "fontSize": "13px", "marginRight": "8px"}),
+                    html.Div([
+                        html.Button(
+                            html.I(className="far fa-bell"),
+                            id="notifications-btn",
+                            n_clicks=0,
+                            style={
+                                "background": "none", "border": "none", "color": "#000",
+                                "fontSize": "18px", "cursor": "pointer", "position": "relative",
+                            },
+                        ),
+                        html.Span(
+                            id="notifications-badge",
+                            children="0",
+                            style={
+                                "position": "absolute", "top": "-6px", "right": "-8px",
+                                "background": "#ef4444", "color": "#fff", "fontSize": "10px",
+                                "fontWeight": "700", "width": "18px", "height": "18px",
+                                "borderRadius": "50%", "display": "none",
+                                "alignItems": "center", "justifyContent": "center",
+                            },
+                        ),
+                    ], style={"position": "relative", "marginRight": "8px"}),
+                    html.Div(
+                        id="hdr-avatar", children="?", n_clicks=0,
+                        title="Show my QR code", role="button",
+                        style={
+                            "width": "34px", "height": "34px", "borderRadius": "50%",
+                            "background": "linear-gradient(135deg,#667eea,#764ba2)",
+                            "display": "flex", "alignItems": "center", "justifyContent": "center",
+                            "fontWeight": "700", "color": "#fff", "fontSize": "13px",
+                            "cursor": "pointer",
+                        },
+                    ),
+                ],
+                style={"display": "flex", "alignItems": "center",
+                       "justifyContent": "flex-end", "flex": "1"},
+            ),
+        ],
+        className="glass-header",
+        style={"display": "flex", "alignItems": "center",
+               "justifyContent": "space-between", "padding": "0 16px"},
+    )
+
+
+# ── Bulk Enroll modal ───────────────────────────────────────────────────────────
+# Single global modal (like the QR modal below) reused for all three
+# enrollable entities — apartments, vendors, security. Which entity it's
+# currently open for is tracked in "bulk-enrolled-entity-store"; content/labels
+# are filled in dynamically by bulk_enroll_callbacks.py.
+
+def _bulk_enroll_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                dbc.ModalTitle(id="bulk-enroll-modal-title", children="Bulk Enroll"),
+                close_button=True,
+            ),
+            dbc.ModalBody(
+                html.Div([
+                    html.Div(id="bulk-enroll-instructions", className="mb-2"),
+                    dbc.Button(
+                        [html.I(className="fas fa-file-download me-2"), "Download Excel Template"],
+                        id="bulk-enroll-template-btn", n_clicks=0,
+                        color="secondary", outline=True, size="sm",
+                        className="mb-3",
+                    ),
+                    dcc.Download(id="bulk-enroll-template-download"),
+                    dcc.Upload(
+                        id="bulk-enroll-upload",
+                        children=html.Div([
+                            html.I(className="fas fa-cloud-upload-alt me-2"),
+                            "Drag & drop or click to select an Excel file",
+                        ]),
+                        style={
+                            "width": "100%", "height": "70px", "lineHeight": "70px",
+                            "borderWidth": "2px", "borderStyle": "dashed",
+                            "borderRadius": "10px", "textAlign": "center",
+                            "borderColor": "#667eea",
+                            "background": "rgba(102,126,234,0.04)",
+                            "color": "#667eea", "cursor": "pointer",
+                        },
+                        multiple=False, accept=".xlsx,.xls",
+                    ),
+                    html.Small(
+                        id="bulk-enroll-file-feedback",
+                        className="invalid-feedback d-block",
+                        style={"fontSize": "11px", "marginTop": "6px"},
+                    ),
+                    dcc.Loading(
+                        html.Div(id="bulk-enroll-result", className="mt-3"),
+                        type="dot",
+                    ),
+                ])
+            ),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="close-bulk-enroll-modal", n_clicks=0, color="secondary"),
+            ),
+        ],
+        id="bulk-enroll-modal",
+        size="md", is_open=False, centered=True,
+        style={"zIndex": "20050"},
+    )
+
+
+# ── Bank Reconcile modals ────────────────────────────────────────────────────────
+# Two modals: a bulk upload modal (mirrors _bulk_enroll_modal — Excel
+# upload + template download, opened by the "Bulk Reconcile" button next to
+# "New" on list_receipts/list_expenses), and a per-row picker modal (mirrors
+# _pay_dues_bill_modal — a tappable candidate list, opened by the row-level
+# "Reconcile" button). Both driven by bank_reconcile_callbacks.py.
+
+def _agreement_modal() -> dbc.Modal:
+    """
+    Self-contained, permanently-mounted modal (same pattern as
+    _bank_reconcile_modal below) — deliberately NOT routed through the
+    generic drilldown/DRILLDOWN_MAP system that most cards use. That
+    system is a large multi-Input router keyed off card_id; wiring a new
+    entity through it just to show one whole-society document auto-fired
+    right after the Setup Wizard closes would add real risk for no
+    benefit here. submit_setup_wizard sets is_open + agreement-modal-body
+    directly once setup succeeds; render_agreement_card supplies the
+    actual content either way, so a future reprint entry point (e.g. a
+    Settings button that re-fetches via _get_or_create_agreement and sets
+    these same two Outputs) reuses this exact modal with no new plumbing.
+    """
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                dbc.ModalTitle("Society Onboarding Agreement"),
+                close_button=True,
+            ),
+            dbc.ModalBody(html.Div(id="agreement-modal-body")),
+        ],
+        id="agreement-modal",
+        size="lg", is_open=False, centered=True,
+        backdrop=True, keyboard=True,
+        style={"zIndex": "20060"},
+    )
+
+
+def _bank_reconcile_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                dbc.ModalTitle(id="bank-reconcile-modal-title", children="Bank Reconcile"),
+                close_button=True,
+            ),
+            dbc.ModalBody(
+                html.Div([
+                    html.Div(id="bank-reconcile-instructions", className="mb-2"),
+                    # Which account is this statement from? Reconciliation is
+                    # per-account since fund_bank_account_map started routing
+                    # fund money into separately-held accounts — reconciling
+                    # a second account's statement against the primary
+                    # account's receipts silently matched the wrong money.
+                    html.Div([
+                        dbc.Label(
+                            [
+                                "Bank Account",
+                                html.Small(" — the account this statement was drawn from",
+                                           style={"color": "#7d8ea3", "fontWeight": "400"}),
+                            ],
+                            style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "4px"},
+                        ),
+                        dcc.Dropdown(
+                            id="bank-reconcile-bank-select",
+                            options=[],
+                            value=None,
+                            clearable=False,
+                            placeholder="Select the bank account…",
+                            style={"fontSize": "13px"},
+                        ),
+                    ], className="mb-3"),
+                    dbc.Button(
+                        [html.I(className="fas fa-file-download me-2"), "Download Template"],
+                        id="bank-reconcile-template-btn", n_clicks=0,
+                        color="secondary", outline=True, size="sm",
+                        className="mb-3",
+                    ),
+                    dcc.Download(id="bank-reconcile-template-download"),
+                    dcc.Upload(
+                        id="bank-reconcile-upload",
+                        children=html.Div([
+                            html.I(className="fas fa-cloud-upload-alt me-2"),
+                            "Drag & drop or click to select an Excel file",
+                        ]),
+                        style={
+                            "width": "100%", "height": "70px", "lineHeight": "70px",
+                            "borderWidth": "2px", "borderStyle": "dashed",
+                            "borderRadius": "10px", "textAlign": "center",
+                            "borderColor": "#667eea",
+                            "background": "rgba(102,126,234,0.04)",
+                            "color": "#667eea", "cursor": "pointer",
+                        },
+                        multiple=False, accept=".xlsx,.xls",
+                    ),
+                    dcc.Loading(
+                        html.Div(id="bank-reconcile-result", className="mt-3"),
+                        type="dot",
+                    ),
+                ])
+            ),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="close-bank-reconcile-modal", n_clicks=0, color="secondary"),
+            ),
+        ],
+        id="bank-reconcile-modal",
+        size="md", is_open=False, centered=True,
+        style={"zIndex": "20055"},
+    )
+
+
+def _bank_reconcile_picker_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Reconcile Against Bank Statement"), close_button=True),
+            dbc.ModalBody(
+                dcc.Loading(
+                    html.Div(id="bank-reconcile-picker-list",
+                             style={"maxHeight": "420px", "overflowY": "auto"}),
+                    type="circle", color="#17976e",
+                )
+            ),
+            dbc.ModalFooter([
+                dbc.Button("Cancel", id="close-bank-reconcile-picker-modal", color="secondary", size="sm"),
+            ]),
+        ],
+        id="bank-reconcile-picker-modal",
+        size="md", is_open=False, centered=True,
+        style={"zIndex": "20056"},
+    )
+
+
+# ── Assign-To modal ─────────────────────────────────────────────────────────────
+# File-Explorer style modal for assigning concerns to admins/vendors/security.
+# Three entity-type cards at the top; clicking loads the respective list below.
+# Multi-select with checkboxes; Submit writes to concerns_assigns.
+
+def _assign_to_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                dbc.ModalTitle("Assign Concern To"),
+                close_button=True,
+            ),
+            dbc.ModalBody(
+                html.Div([
+                    dbc.Alert(
+                        [
+                            html.I(className="fas fa-info-circle me-2"),
+                            "Please select people to assign",
+                        ],
+                        color="info",
+                        style={"fontSize": "13px", "fontWeight": "600",
+                               "padding": "10px 14px", "borderRadius": "10px",
+                               "marginBottom": "12px"},
+                    ),
+                    # ── Entity-type selector cards ──────────────────────────────
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Button(
+                                [html.I(className="fas fa-user-shield me-2"), "ADM"],
+                                id={"type": "assign-card", "role": "ADM"},
+                                color="primary", outline=True,
+                                size="lg", className="w-100 py-3",
+                                style={"fontSize": "16px", "fontWeight": "700", "borderRadius": "10px"},
+                            ),
+                        ], width=4),
+                        dbc.Col([
+                            dbc.Button(
+                                [html.I(className="fas fa-truck me-2"), "VND"],
+                                id={"type": "assign-card", "role": "VND"},
+                                color="success", outline=True,
+                                size="lg", className="w-100 py-3",
+                                style={"fontSize": "16px", "fontWeight": "700", "borderRadius": "10px"},
+                            ),
+                        ], width=4),
+                        dbc.Col([
+                            dbc.Button(
+                                [html.I(className="fas fa-shield-alt me-2"), "SEC"],
+                                id={"type": "assign-card", "role": "SEC"},
+                                color="warning", outline=True,
+                                size="lg", className="w-100 py-3",
+                                style={"fontSize": "16px", "fontWeight": "700", "borderRadius": "10px"},
+                            ),
+                        ], width=4),
+                    ], className="mb-3"),
+
+                    # ── Search + view toggle ────────────────────────────────────
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Input(
+                                id="assign-search", type="text",
+                                placeholder="Search…",
+                                size="sm", className="mb-2",
+                            ),
+                        ], width=8),
+                        dbc.Col([
+                            dbc.ButtonGroup([
+                                dbc.Button(
+                                    html.I(className="fas fa-list"),
+                                    id={"type": "assign-view-toggle", "view": "list"},
+                                    color="primary", outline=True, size="sm",
+                                ),
+                                dbc.Button(
+                                    html.I(className="fas fa-th-large"),
+                                    id={"type": "assign-view-toggle", "view": "grid"},
+                                    color="primary", outline=True, size="sm",
+                                ),
+                            ], className="mb-2"),
+                        ], width=4),
+                    ]),
+
+                    # ── List / grid container ───────────────────────────────────
+                    html.Div(id="assign-list-container", children=[
+                        html.P("Select an entity type above to browse assignable people.",
+                               className="text-muted text-center", style={"padding": "30px 0"}),
+                    ]),
+
+                    # ── Selected summary ────────────────────────────────────────
+                    html.Div(id="assign-selected-summary", className="mt-3"),
+                ])
+            ),
+            dbc.ModalFooter([
+                dbc.Button("Clear All", id="assign-clear-btn", color="secondary", size="sm", outline=True),
+                dbc.Button("Submit Assignments", id="assign-submit-btn", color="success"),
+            ]),
+        ],
+        id="assign-to-modal",
+        size="lg", is_open=False, centered=True,
+        style={"zIndex": "20060"},
+    )
+
+
+# ── Concern Invite modal ─────────────────────────────────────────────
+# Admin/Owner's "Invite" action on a concern profile. Writes into the same
+# concerns_assigns table as the Assign modal, at the 'invited' stage —
+# vendors/security submit bids before being formally assigned.
+
+def _concern_invite_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Invite to Bid"), close_button=True),
+            dbc.ModalBody(
+                html.Div([
+                    dbc.Alert(
+                        [
+                            html.I(className="fas fa-info-circle me-2"),
+                            "Please select invitees and wait for bids",
+                        ],
+                        color="info",
+                        style={"fontSize": "13px", "fontWeight": "600",
+                               "padding": "10px 14px", "borderRadius": "10px",
+                               "marginBottom": "12px"},
+                    ),
+                    html.P(
+                        "Invite a vendor or security staff to submit a bid.",
+                        className="text-muted", style={"fontSize": "13px"},
+                    ),
+                    # ── Role selector cards ──────────────────────────────
+                    html.Div([
+                        dbc.Button([
+                            html.I(className="fas fa-truck fa-2x mb-2",
+                                   style={"color": "#17976e", "display": "block"}),
+                            html.H6("Vendor", style={"fontWeight": "600", "fontSize": "13px", "marginBottom": "2px"}),
+                            html.Small("Invite a vendor to bid",
+                                       style={"fontSize": "11px"}),
+                        ], id={"type": "invite-card", "role": "VND"},
+                           color="secondary", outline=True,
+                           style={"flex": "1", "padding": "12px", "borderRadius": "10px",
+                                  "textAlign": "center"}),
+                        dbc.Button([
+                            html.I(className="fas fa-shield-alt fa-2x mb-2",
+                                   style={"color": "#e59620", "display": "block"}),
+                            html.H6("Security", style={"fontWeight": "600", "fontSize": "13px", "marginBottom": "2px"}),
+                            html.Small("Invite security to bid",
+                                       style={"fontSize": "11px"}),
+                        ], id={"type": "invite-card", "role": "SEC"},
+                           color="secondary", outline=True,
+                           style={"flex": "1", "padding": "12px", "borderRadius": "10px",
+                                  "textAlign": "center"}),
+                    ], className="d-flex gap-2 mb-3", style={"justifyContent": "center"}),
+                    # ── Search ───────────────────────────────────────────
+                    dbc.InputGroup([
+                        dbc.InputGroupText([
+                            html.I(className="fas fa-search"),
+                        ]),
+                        dbc.Input(id="invite-search", placeholder="Search…",
+                                  style={"fontSize": "13px"}),
+                    ], className="mb-3"),
+                    # ── Selected summary ─────────────────────────────────
+                    html.Div(id="invite-selected-summary", className="mt-2"),
+                    # ── Entity list ──────────────────────────────────────
+                    html.Div(id="invite-list-container",
+                             style={"maxHeight": "400px", "overflowY": "auto"}),
+                ])
+            ),
+            dbc.ModalFooter([
+                dbc.Button("Clear All", id="invite-clear-btn", color="secondary", size="sm", outline=True),
+                dbc.Button("Send Invitations", id="invite-submit-btn", color="info"),
+            ]),
+        ],
+        id="invite-to-modal",
+        size="lg", is_open=False, centered=True,
+        style={"zIndex": "20060"},
+    )
+
+
+# ── Drill-In entity picker modal ──────────────────────────────────────────
+# Generic tap-through card picker for entity_id-style fields on schema-
+# driven forms (New Receipt, New Expense, New Concern, and any other field
+# opted into app/dash_apps/drilldown/drillin.py's DRILLIN_CONFIG). Same UX
+# pattern as the Concerns "Invite to Bid" modal above, but fully generic —
+# see drillin_callbacks.py for the navigation logic.
+
+def _drillin_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Select Entity", id="drillin-modal-title"), close_button=True),
+            dbc.ModalBody(
+                html.Div([
+                    html.Div(id="drillin-breadcrumb"),
+                    dbc.InputGroup([
+                        dbc.InputGroupText([html.I(className="fas fa-search")]),
+                        dbc.Input(id="drillin-search", placeholder="Search…",
+                                  style={"fontSize": "13px"}),
+                    ], className="mb-3"),
+                    dcc.Loading(
+                        html.Div(id="drillin-nav-container",
+                                 style={"maxHeight": "420px", "overflowY": "auto"}),
+                        type="circle", color="#1d74d8",
+                    ),
+                ])
+            ),
+            dbc.ModalFooter([
+                dbc.Button([html.I(className="fas fa-arrow-left me-1"), "Back"],
+                           id="drillin-back-btn-modal", color="secondary", size="sm",
+                           outline=True, style={"display": "none"}),
+                dbc.Button("Clear Selection", id="drillin-clear-btn",
+                           color="secondary", size="sm", outline=True),
+                dbc.Button("Cancel", id="close-drillin-modal", color="secondary", size="sm"),
+            ]),
+        ],
+        id="drillin-modal",
+        size="lg", is_open=False, centered=True,
+        style={"zIndex": "20070"},
+    )
+
+
+# ── Pay Dues Bill Group picker modal ──────────────────────────────────────────
+# Modal for selecting an unpaid bill group in the Pay Dues card's
+# "Bill Group Pay" tab. Shows all unpaid bill groups for the current apartment
+# as tappable cards; selecting one writes its bill_group_id into the form's
+# hidden field and closes the modal.
+
+def _pay_dues_bill_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Select Unpaid Bill"), close_button=True),
+            dbc.ModalBody(
+                html.Div([
+                    dbc.InputGroup([
+                        dbc.InputGroupText([html.I(className="fas fa-search")]),
+                        dbc.Input(id="pay-dues-bill-search", placeholder="Search bills…",
+                                  style={"fontSize": "13px"}),
+                    ], className="mb-3"),
+                    dcc.Loading(
+                        html.Div(id="pay-dues-bill-list",
+                                 style={"maxHeight": "420px", "overflowY": "auto"}),
+                        type="circle", color="#17976e",
+                    ),
+                ])
+            ),
+            dbc.ModalFooter([
+                dbc.Button("Cancel", id="close-pay-dues-bill-modal", color="secondary", size="sm"),
+            ]),
+        ],
+        id="pay-dues-bill-modal",
+        size="lg", is_open=False, centered=True,
+        style={"zIndex": "20075"},
+    )
+
+
+# ── Concern Bid modal ────────────────────────────────────────────────────────
+# Vendor's "Save Bid" action on a concern profile. Small single-field modal —
+# doesn't need the full schema-driven form engine, mirrors _assign_to_modal's
+# structure at a much smaller scale.
+
+def _concern_bid_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Save Your Bid"), close_button=True),
+            dbc.ModalBody(
+                html.Div([
+                    dbc.Alert(
+                        [
+                            html.I(className="fas fa-info-circle me-2"),
+                            "Bid sensibly — you only get one chance",
+                        ],
+                        color="warning",
+                        style={"fontSize": "13px", "fontWeight": "600",
+                               "padding": "10px 14px", "borderRadius": "10px",
+                               "marginBottom": "12px"},
+                    ),
+                    html.P(
+                        "Enter the amount you're bidding to resolve this concern.",
+                        className="text-muted", style={"fontSize": "13px"},
+                    ),
+                    dbc.InputGroup([
+                        dbc.InputGroupText("₹"),
+                        dbc.Input(
+                            id="concern-bid-amount-input", type="number",
+                            min=0, step=1, placeholder="Bid amount",
+                        ),
+                    ]),
+                    html.Div(id="concern-bid-error", className="text-danger mt-2", style={"fontSize": "13px"}),
+                ])
+            ),
+            dbc.ModalFooter([
+                dbc.Button("Cancel", id="close-concern-bid-modal", color="secondary", size="sm", outline=True),
+                dbc.Button("Save Bid", id="concern-bid-submit-btn", color="primary"),
+            ]),
+        ],
+        id="concern-bid-modal",
+        size="sm", is_open=False, centered=True,
+        style={"zIndex": "20060"},
+    )
+
+
+def _privacy_modals() -> list:
+    """DPDP: the notice every person accepts before their dashboard, and the Privacy & data rights panel (privacy_callbacks.py)."""
+    return [
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Your privacy"), close_button=False),
+            dbc.ModalBody([html.Div(id="privacy-notice-body"),
+                           dbc.Checkbox(id="privacy-opt-announcements", label="Send me society announcements by push notification and email (optional)",
+                                        value=False, className="mt-3")]),
+            dbc.ModalFooter(dbc.Button("I have read this", id="privacy-accept-btn", color="primary", n_clicks=0)),
+        ], id="privacy-notice-modal", size="lg", is_open=False, centered=True, backdrop="static", keyboard=False, scrollable=True,
+            style={"zIndex": "20070"}),
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Privacy & data rights"), close_button=False),
+            dbc.ModalBody(html.Div(id="privacy-rights-body")),
+            dbc.ModalFooter(dbc.Button("Close", id="close-privacy-rights-btn", color="secondary", n_clicks=0)),
+        ], id="privacy-rights-modal", size="xl", is_open=False, centered=True, scrollable=True, style={"zIndex": "20060"}),
+    ]
+
+
+def _account_settings_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                dbc.ModalTitle("Account Settings"),
+                # No header "X": Cancel is the only dismiss control, so the
+                # compulsory first-login password change can hide it.
+                close_button=False,
+            ),
+            dbc.ModalBody(
+                html.Div([
+                    html.P("Change your password", className="mb-2",
+                           style={"fontWeight": "600", "fontSize": "13px"}),
+                    dbc.Label("Current password", size="sm"),
+                    dbc.Input(id="current-password-input", type="password",
+                              className="mb-2"),
+                    dbc.Label("New password", size="sm"),
+                    dbc.Input(id="new-password-input-acct", type="password",
+                              className="mb-2"),
+                    dbc.Label("Confirm new password", size="sm"),
+                    dbc.Input(id="confirm-password-input-acct", type="password",
+                              className="mb-2"),
+                    html.Small(
+                        "Must be at least 8 characters.",
+                        style={"color": "#7d8ea3"},
+                    ),
+                    html.Hr(),
+                    dbc.Button([html.I(className="fas fa-user-shield me-2"), "Privacy & data rights"],
+                               id="open-privacy-rights-btn", n_clicks=0, color="link", size="sm", className="p-0"),
+                ])
+            ),
+            dbc.ModalFooter([
+                dbc.Button("Cancel", id="close-account-settings-modal",
+                           n_clicks=0, color="secondary"),
+                dbc.Button("Update Password", id="change-password-btn",
+                           n_clicks=0, color="primary"),
+            ]),
+        ],
+        id="account-settings-modal",
+        size="sm", is_open=False, centered=True,
+        backdrop=True, keyboard=True,
+        style={"zIndex": "20050"},
+    )
+
+
+# ── QR modal ──────────────────────────────────────────────────────────────────
+
+def _qr_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Gate Pass QR Code"), close_button=True),
+            dbc.ModalBody(
+                html.Div([
+                    html.Img(id="qr-modal-img", src="",
+                             style={"width": "200px", "height": "200px",
+                                    "margin": "0 auto", "display": "block",
+                                    "border": "2px solid #667eea",
+                                    "borderRadius": "10px", "padding": "8px"}),
+                    html.Div(id="qr-modal-validity", className="mt-2 text-center"),
+                    html.Hr(),
+                    dbc.Button(
+                        [html.I(className="fas fa-wifi me-2"), "Write to NFC Tag"],
+                        id="qr-modal-write-nfc-btn", n_clicks=0,
+                        color="primary", size="lg",
+                        style={"width": "100%", "marginBottom": "10px"},
+                    ),
+                    dbc.Textarea(id="qr-modal-text", readOnly=True,
+                                 style={"marginTop": "10px", "minHeight": "54px",
+                                        "fontSize": "22px", "fontFamily": "monospace",
+                                        "resize": "none", "textAlign": "center"}),
+                    # ATD-only — ticks every 1s while the modal is open so
+                    # qr-modal-validity can show a live countdown; the
+                    # refresh callback itself only regenerates a new QR
+                    # every 60th tick (see refresh_atd_qr in qr_callbacks.py).
+                    dcc.Interval(id="qr-atd-refresh-interval", interval=1000,
+                                 n_intervals=0, disabled=True),
+                    # Revoke & Reissue was here (2026-09 in-modal button) —
+                    # moved 2026-09 to a dedicated Admin > Settings tool
+                    # ("Re-issue QR" KPI -> render_qr_reissue_card in
+                    # renderers.py, callbacks in qr_reissue_callbacks.py).
+                    # Revoking a printed pass is now a deliberate,
+                    # manually-targeted Settings-tab action requiring the
+                    # society's own SIGNING_SECRET typed in to confirm,
+                    # rather than a button sitting next to every QR view.
+                ])
+            ),
+            dbc.ModalFooter(
+                html.Div(
+                    [
+                        dbc.Button(html.I(className="fas fa-sign-out-alt"),
+                                   id="qr-modal-logout-btn", n_clicks=0,
+                                   color="link", style={"color": "#e74c3c", "fontSize": "18px"}),
+                        dbc.Button([html.I(className="fas fa-microchip me-2"), "Program NFC"],
+                                   id="program-nfc-btn", n_clicks=0, color="warning", size="sm", style={"display": "none"}),
+                        dbc.Button([html.I(className="fas fa-download me-2"), "Save PNG"],
+                                   id="save-qr-png-btn", n_clicks=0, color="success", size="sm"),
+                        dbc.Button([html.I(className="fas fa-print me-2"), "Print"],
+                                   id="print-qr-png-btn", n_clicks=0, color="info", size="sm"),
+                        dbc.Button("Close", id="close-qr-modal", n_clicks=0, color="secondary"),
+                        dcc.Download(id="qr-download"),
+                    ],
+                    style={"display": "flex", "alignItems": "center",
+                           "justifyContent": "space-between", "width": "100%", "gap": "8px"},
+                )
+            ),
+        ],
+        id="qr-modal",
+        size="sm", is_open=False, centered=True,
+        style={"zIndex": "20050"},
+    )
+
+
+
+
+def _global_card_search_modal() -> dbc.Modal:
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                [
+                    html.I(className="fas fa-search me-2"),
+                    html.Span("Search dashboard cards"),
+                ],
+                close_button=True,
+            ),
+            dbc.ModalBody(
+                [
+                    dcc.Input(
+                        id="global-card-search-input",
+                        type="search",
+                        placeholder="Search dues, receipts, concerns, gates…",
+                        autoFocus=True,
+                        debounce=True,
+                        className="form-control",
+                        style={"fontSize": "13px"},
+                    ),
+                    html.Div(
+                        id="global-card-search-results",
+                        className="global-card-search-results",
+                        style={"marginTop": "14px"},
+                    ),
+                ]
+            ),
+        ],
+        id="global-card-search-modal",
+        is_open=False,
+        centered=True,
+        size="lg",
+    )
+
+
+# ── Full shell layout ─────────────────────────────────────────────────────────
+
+def shell_layout() -> html.Div:
+    return html.Div(
+        [
+            # ── Routing ────────────────────────────────────────────────────────
+            # refresh=False is mandatory for SPA behaviour — tab clicks via dcc.Link
+            # update this pathname without triggering an HTTP request
+            dcc.Location(id="url", refresh=False),
+
+            # ── Stores ─────────────────────────────────────────────────────────
+            # auth-store: localStorage — survives refresh + tab close + new tab
+            dcc.Store(id="auth-store",             storage_type="local", data=None),
+            # cookie-store: localStorage — society selection cookie
+            dcc.Store(id="cookie-store",            storage_type="local", data={}),
+            # ephemeral stores — memory (JS variable, reset on mount)
+            dcc.Store(id="toast-store",             storage_type="memory", data=None),
+            # Bumped when a compulsory first-login password change succeeds;
+            # trigger_setup_wizard waits on it (see account_callbacks.py).
+            dcc.Store(id="pwd-gate-store",          storage_type="memory", data=0),
+            dcc.Store(id="kpi-refresh-side-effects-store", storage_type="memory", data=None),
+            dcc.Store(id="sidebar-open-store",      storage_type="memory", data={"collapsed": False}),
+            dcc.Store(id="profile-action-trigger",  storage_type="memory", data={"action": None, "params": {}}),
+            dcc.Store(id="qr-entity-store",         storage_type="memory", data={}),
+            dcc.Store(id="qr-camera-store",         storage_type="memory", data={"facing": "environment", "active": False,
+                            "mode": None, "torch": False}),
+            dcc.Store(id="qr-scan-log",             storage_type="memory", data=[]),
+            dcc.Store(id="debug-kpi-log",           storage_type="memory"),
+            dcc.Store(id="debug-list-log",          storage_type="memory"),
+            dcc.Store(id="debug-sql-error",         storage_type="memory"),
+            dcc.Store(id="noc-action-store-print",        storage_type="memory"),
+            dcc.Store(id="noc-action-store-pdf",        storage_type="memory"),
+            dcc.Store(id="noc-action-store-email",        storage_type="memory"),
+            # noc-action-store: dummy Output anchor actually targeted by
+            # noc_callbacks.py's clientside Print/PDF/Email callbacks and by
+            # its server-side last_printed_at/last_emailed_at stamping
+            # callbacks (2026-08 fix — the three -print/-pdf/-email stores
+            # above were registered but never targeted by anything, so the
+            # NOC print/PDF/email buttons had no working Output and would
+            # fail at runtime; left the unused ones in place rather than
+            # risk removing a store something else depends on).
+            dcc.Store(id="noc-action-store",        storage_type="memory"),
+            # agreement-action-store(-print/-email): same dummy-Output-anchor
+            # pattern as noc-action-store above, for agreement_callbacks.py's
+            # clientside Print/PDF/Email callbacks and server-side
+            # last_printed_at/last_emailed_at stamping.
+            dcc.Store(id="agreement-action-store",        storage_type="memory"),
+            dcc.Store(id="agreement-action-store-print",  storage_type="memory"),
+            dcc.Store(id="agreement-action-store-email",  storage_type="memory"),
+            # cam-delegation-dummy: dummy Output anchor for camera_callbacks.py's
+            # click-delegation clientside callback. Deliberately separate from
+            # qr-camera-store (which belongs to qr_callbacks.py's entry/exit gate
+            # scanner) — the two were previously colliding on the same store.
+            dcc.Store(id="cam-delegation-dummy",    storage_type="memory"),
+            # receipt-action-store: dummy Output anchor for receipt_callbacks.py's
+            # server-side last_printed_at/last_emailed_at stamping callbacks
+            # (same pattern as noc-action-store — the card is rendered
+            # dynamically inside drill-content, not part of this permanent
+            # shell layout).
+            dcc.Store(id="receipt-action-store",    storage_type="memory"),
+            # receipt-action-store-print/-pdf/-email: dummy Output anchors
+            # actually targeted by receipt_callbacks.py's clientside Print/
+            # Save as PDF/Email callbacks (2026-08 fix — these were targeted
+            # by the callbacks but never registered here, so the receipt
+            # print/PDF/email buttons had no working Output and would fail
+            # at runtime).
+            dcc.Store(id="receipt-action-store-print",  storage_type="memory"),
+            dcc.Store(id="receipt-action-store-pdf",    storage_type="memory"),
+            dcc.Store(id="receipt-action-store-email",  storage_type="memory"),
+            # event-ticket-action-store*: dummy Output anchors for
+            # event_ticket_callbacks.py's clientside Print/PDF/Email
+            # callbacks and server-side last_printed_at/last_emailed_at
+            # stamping (new 2026-08 — event tickets previously had no
+            # print/download flow at all).
+            dcc.Store(id="event-ticket-action-store",       storage_type="memory"),
+            dcc.Store(id="event-ticket-action-store-print", storage_type="memory"),
+            dcc.Store(id="event-ticket-action-store-pdf",   storage_type="memory"),
+            dcc.Store(id="event-ticket-action-store-email", storage_type="memory"),
+            # vendor-pass-action-store*: dummy Output anchors for
+            # vendor_pass_callbacks.py's clientside Print/PDF/Email
+            # callbacks and server-side last_printed_at/last_emailed_at
+            # stamping (new 2026-08 — vendor passes previously had no
+            # print/download flow at all).
+            dcc.Store(id="vendor-pass-action-store",       storage_type="memory"),
+            dcc.Store(id="vendor-pass-action-store-print", storage_type="memory"),
+            dcc.Store(id="vendor-pass-action-store-pdf",   storage_type="memory"),
+            dcc.Store(id="vendor-pass-action-store-email", storage_type="memory"),
+            # expense-action-store*: dummy Output anchors for
+            # expense_callbacks.py's clientside Print/PDF/Email
+            # callbacks and server-side last_printed_at/last_emailed_at
+            # stamping (new 2026-08 — expenses previously had no
+            # print/download flow at all).
+            dcc.Store(id="expense-action-store",       storage_type="memory"),
+            dcc.Store(id="expense-action-store-print", storage_type="memory"),
+            dcc.Store(id="expense-action-store-pdf",   storage_type="memory"),
+            dcc.Store(id="expense-action-store-email", storage_type="memory"),
+            # fin-stmt-action-store*: dummy Output anchors for
+            # financial_statements_callbacks.py's clientside Print/PDF/Email
+            # callbacks (new 2026-09 — 6 Statements previously had no
+            # print/download flow at all).
+            dcc.Store(id="fin-stmt-action-store",       storage_type="memory"),
+            dcc.Store(id="fin-stmt-action-store-print", storage_type="memory"),
+            dcc.Store(id="fin-stmt-action-store-pdf",   storage_type="memory"),
+            dcc.Store(id="fin-stmt-action-store-email", storage_type="memory"),
+            # session stores — survive page refresh but reset on tab close
+            dcc.Store(id="drilldown-store",         storage_type="session", 
+                       data={"stack": [], "active_card": "", "filters": {}, "prefill": {}, "list_pages": {}, "list_search": {}}),
+            dcc.Store(id="portal-content-store",     storage_type="memory", data={"rendered": False}),
+            dcc.Store(id="dnd-layout-store",        storage_type="session", data={"active": [], "available": []}),
+            dcc.Store(id="notifications-store",     storage_type="memory", data={"unread_count": 0, "items": []}),
+            dcc.Store(id="bulk-enroll-entity-store", storage_type="memory", data=None),
+            dcc.Store(id="bank-reconcile-entity-store", storage_type="memory", data=None),
+            dcc.Store(id="bank-reconcile-picker-store", storage_type="memory", data=None),
+            dcc.Store(id="assign-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
+            dcc.Store(id="concern-bid-store",        storage_type="memory", data={"concern_id": None}),
+            dcc.Store(id="invite-to-store",          storage_type="memory", data={"concern_id": None, "selected": {}, "active_role": None}),
+            dcc.Store(id="drillin-store",             storage_type="memory",
+                       data={"entity": None, "field": None, "config": None,
+                             "role": None, "target_table": None,
+                             "group_label": None, "group": None, "search": ""}),
+            dcc.Store(id="pay-dues-bill-store",       storage_type="memory",
+                       data={"apartment_id": None, "society_id": None, "selected_bill": None}),
+            # NOTE (2026-08): poll-action-store / poll-detail-store removed —
+            # they were only ever written/read by poll_callbacks.py's now-
+            # removed orphaned callbacks (dead since the Polls tab moved to
+            # the generic drill panel). See poll_callbacks.py's docstring.
+
+            # ── Hidden utility elements ────────────────────────────────────────
+            html.Button(id="show-qr-btn",    n_clicks=0, style={"display": "none"}),
+            html.Div(id="dnd-init-dummy",            style={"display": "none"}),
+            dcc.Input(id="dnd-order-capture", value="",
+                      debounce=False,                style={"display": "none"}),
+            dcc.Interval(id="notifications-interval", interval=120_000, n_intervals=0),
+            html.Div(id="push-init-dummy", style={"display": "none"}),
+
+            html.Div(
+                id="customize-placeholder",
+                style={"display": "none"},
+                children=[
+                    dcc.Dropdown(id="layout-portal-select", options=[], value=None),
+                    dcc.Dropdown(id="layout-tab-select", options=[], value=None),
+                    html.Div(id="dnd-active-zone"),
+                    html.Div(id="dnd-palette-zone"),
+                    dbc.Badge(id="active-count-badge", children="0 / 12 active"),
+                ],
+            ),
+
+            # ── Login modals ───────────────────────────────────────────────────
+            _login_modal(),
+            _global_card_search_modal(),
+
+            # ── App shell ──────────────────────────────────────────────────────
+            html.Div(
+                [
+                    _sidebar(),
+                    html.Div(id="sb-overlay", n_clicks=0,
+                             className="sidebar-overlay", style={"display": "none"}),
+                    html.Div(
+                        [
+                            _header(),
+                            html.Main(
+                                [
+                                    dbc.Button(
+                                        [html.I(className="fas fa-arrow-left me-2"), "Back"],
+                                        id="drill-back-btn", n_clicks=0,
+                                        color="secondary", size="sm", outline=True,
+                                        className="mb-3", style={"display": "none"},
+                                    ),
+                                    html.Div(
+                                        html.Nav(
+                                            html.Ol(id="breadcrumb-ol",
+                                                    className="breadcrumb", children=[]),
+                                            className="glass-breadcrumb",
+                                        ),
+                                        style={"padding": "5px 5px 0"},
+                                    ),
+                                    html.Div(
+                                        id="portal-content",
+                                        children=html.P("Loading…",
+                                                        className="text-muted text-center mt-5"),
+                                        style={"padding": "10px 20px",
+                                               "minHeight": "calc(100vh - 130px)"},
+                                    ),
+                                ],
+                                id="main-content",
+                            ),
+                        ],
+                        id="page-wrapper",
+                        className="page-wrapper",
+                    ),
+                ],
+                id="app-root",
+                className="app-shell",
+            ),
+
+            # ── Toast container ────────────────────────────────────────────────
+            html.Div(id="toast-container",
+                     style={"position": "fixed", "top": "80px", "right": "16px",
+                            "zIndex": "9999", "minWidth": "280px"}),
+            dcc.Store(id="toast-sound-trigger", storage_type="memory", data=None),
+            dcc.Store(id="evaluate-pass-sound-store", storage_type="memory", data=None),
+            html.Div(id="evaluate-pass-sound-dummy", style={"display": "none"}),
+
+            # ── Notifications dropdown ─────────────────────────────────────────
+            html.Div(
+                id="notifications-dropdown",
+                children=[
+                    html.Div([
+                        html.H6("Notifications", className="mb-2",
+                                style={"fontWeight": "700", "fontSize": "14px"}),
+                        dbc.Button("Mark all read", id="notifications-mark-all",
+                                    n_clicks=0, size="sm", color="link",
+                                    style={"fontSize": "11px", "padding": 0}),
+                    ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"}),
+                    html.Hr(style={"margin": "4px 0 8px"}),
+                    html.Div(id="notifications-list", children=[
+                        html.P("No notifications yet", className="text-muted text-center",
+                               style={"fontSize": "12px", "padding": "12px 0"}),
+                    ]),
+                ],
+                style={
+                    "position": "fixed", "top": "68px", "right": "56px",
+                    "width": "340px", "maxHeight": "420px",
+                    "background": "#fff", "border": "1px solid #e2e8f0",
+                    "borderRadius": "12px", "boxShadow": "0 12px 40px rgba(0,0,0,0.15)",
+                    "zIndex": "9998", "display": "none", "overflow": "hidden",
+                },
+            ),
+
+            # ── Account Settings modal (Change Password, all roles) ─────────────
+            _account_settings_modal(),
+
+            # ── QR modal ───────────────────────────────────────────────────────
+            _qr_modal(),
+
+            # ── Bulk Enroll modal ────────────────────────────────────────────────
+            _bulk_enroll_modal(),
+
+            # ── Bank Reconcile modals (bulk upload + per-row picker) ─────────────
+            _bank_reconcile_modal(),
+            _bank_reconcile_picker_modal(),
+
+            # ── Society Onboarding Agreement modal ────────────────────────────
+            _agreement_modal(),
+            *_privacy_modals(),
+
+            # ── Assign-To modal ──────────────────────────────────────────────────
+            _assign_to_modal(),
+
+            # ── Invite-To modal (admin/owner: Invite action on a concern) ─────────
+            _concern_invite_modal(),
+
+            # ── Concern Bid modal (vendor: Save Bid action) ───────────────────────
+            _concern_bid_modal(),
+
+            # ── Drill-In entity picker modal (New Receipt/Expense/Concern/…) ─────
+            _drillin_modal(),
+
+            # ── Pay Dues Bill Group picker modal (Bill Group Pay tab) ───────────
+            _pay_dues_bill_modal(),
+
+            # ── Channel Subscribers modal ──────────────────────────────────────────
+            dbc.Modal([
+                dbc.ModalHeader(dbc.ModalTitle("Channel Subscribers")),
+                dbc.ModalBody(html.Div(id="channel-subscribers-modal-body")),
+                dbc.ModalFooter([
+                    dbc.Button("Close", id="close-channel-subscribers-modal", color="secondary", size="sm"),
+                ]),
+            ], id="channel-subscribers-modal", size="lg", is_open=False, centered=True,
+               style={"zIndex": "20060"}),
+
+            # SSE client script (injected once, manages EventSource lifecycle)
+            html.Script("""
+                (function() {
+                    var es = null;
+                    var audioCtx = null;
+                    var toastContainer = document.getElementById('toast-container');
+
+                    function playTone() {
+                        try {
+                            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                            var osc = audioCtx.createOscillator();
+                            var gain = audioCtx.createGain();
+                            osc.connect(gain);
+                            gain.connect(audioCtx.destination);
+                            osc.frequency.value = 800;
+                            osc.type = 'sine';
+                            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+                            osc.start(audioCtx.currentTime);
+                            osc.stop(audioCtx.currentTime + 0.4);
+                        } catch (e) {
+                            console.debug('Tone play failed', e);
+                        }
+                    }
+
+                    function showToast(message, type) {
+                        if (!toastContainer) return;
+                        var colors = {
+                            info: '#d1ecf1',
+                            success: '#d4edda',
+                            warning: '#fff3cd',
+                            error: '#f8d7da',
+                        };
+                        var el = document.createElement('div');
+                        el.style.cssText = 'padding:10px 14px;margin-bottom:8px;border-radius:8px;font-size:13px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:' + (colors[type] || colors.info) + ';border:1px solid #c3e6cb;box-shadow:0 4px 12px rgba(0,0,0,.08);animation:toastIn .3s ease';
+                        el.textContent = (message && String(message).trim()) ? message : 'You have a new notification.';
+                        toastContainer.appendChild(el);
+                        setTimeout(function() {
+                            el.style.opacity = '0';
+                            el.style.transition = 'opacity .3s';
+                            setTimeout(function() { el.remove(); }, 300);
+                        }, 4000);
+                    }
+
+                    function startSSE() {
+                        if (es) return;
+                        try {
+                            es = new EventSource('/api/sse/events');
+                            es.addEventListener('open', function() {
+                                console.log('SSE connected');
+                            });
+                            es.addEventListener('error', function() {
+                                console.debug('SSE error, will retry');
+                            });
+                            es.addEventListener('message', function(e) {
+                                try {
+                                    var payload = JSON.parse(e.data);
+                                    
+                                    if (payload.type === 'kpi_update') {
+                                        var group = payload.workflow_group;
+                                        var currentPath = window.location.pathname;
+                                        var shouldRefresh = false;
+                                        
+                                        if (group === 'financials' && (currentPath.includes('financials') || currentPath.includes('receipts') || currentPath.includes('cashbook') || currentPath.includes('dues') || currentPath.includes('receivables'))) shouldRefresh = true;
+                                        else if (group === 'concerns' && currentPath.includes('concerns')) shouldRefresh = true;
+                                        else if (group === 'events' && currentPath.includes('events')) shouldRefresh = true;
+                                        else if (group === 'polls' && currentPath.includes('polls')) shouldRefresh = true;
+                                        else if (group === 'channels' && currentPath.includes('channels')) shouldRefresh = true;
+                                        // "all" groups or overview could be added here
+                                        else if (currentPath.endsWith('-portal') || currentPath === '/dashboard/') shouldRefresh = true;
+                                        
+                                        if (shouldRefresh) {
+                                            var btn = document.getElementById('hdr-refresh-kpi-btn');
+                                            if (btn && !btn.disabled) {
+                                                btn.click();
+                                            }
+                                        }
+                                        return; // Skip toast and tone
+                                    }
+
+                                    var data = payload.data || {};
+                                    var title = data.name || data.visitor_name || data.channel_type || 'Alert';
+                                    var body = '';
+                                    var st = data.state ? String(data.state) : '';
+                                    if (payload.type === 'channel_alert') body = 'Channel alert: ' + title + (st ? ' \u2014 ' + st : '');
+                                    else if (payload.type === 'visitor_alert') body = 'Visitor arrived: ' + title;
+                                    else if (payload.type === 'alert_response') body = st ? 'Alert updated: ' + st : 'An alert was updated.';
+                                    else if (payload.type === 'visitor_response') body = st ? 'Visitor status: ' + st : 'A visitor status was updated.';
+                                    else if (payload.type === 'presumed_visitor_created') body = 'New presumed visitor: ' + title;
+                                    else body = 'You have a new notification.';
+                                    showToast(body, 'info');
+                                    playTone();
+                                } catch (err) {
+                                    console.debug('SSE message parse error', err);
+                                }
+                            });
+                        } catch (e) {
+                            console.debug('SSE start failed', e);
+                        }
+                    }
+
+                    function stopSSE() {
+                        if (es) {
+                            es.close();
+                            es = null;
+                        }
+                    }
+
+                    window.EstateHubSSE = { start: startSSE, stop: stopSSE };
+                })();
+            """),
+        ]
+    )
