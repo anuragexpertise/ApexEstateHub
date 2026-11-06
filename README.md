@@ -566,6 +566,21 @@ For gate security staff. Scoped to `[society_id, security_id]`.
 
 ---
 
+### 4.5a Role codes and gate-pass rules
+
+A gate pass is the text `<society>-<CODE>-<entity>` (signed where the role has a society key). Codes live in `app/security/roles.py` (`ROLE_CODES`).
+
+| Code | Role | Who | Gate result |
+|---|---|---|---|
+| `ADM` `APT` `VND` | admin, apartment, vendor | As before | Dues / expiry rules, unchanged |
+| `SEC` `ACC` `SPV` `STF` | security, accountant, supervisor, staff | The society's **employees** | **PASS only if status = Active AND duty = OnDuty** |
+| `ADT` `ADV` `MST` | auditor, adviser, master | Reviewers and the platform operator | **Always PASS** |
+
+- **Always-PASS codes** are exactly `0-ADT-None`, `0-ADV-None`, `0-MST-None`: society 0, no entity, unsigned, accepted at every society's gate, no database lookup. `None` is accepted nowhere else. Because they are unsigned, anyone who knows the text can present one.
+- **Employees** are signed passes keyed on `users.id` (`ACC`/`SPV`/`STF`) or `security_staff.id` (`SEC`); an unsigned employee code is refused when the society has a signing key. *Status* is `users.active` (and `security_staff.active` for a guard). *Duty* is an open `gate_access` row (clocked in, not yet out), checked by `fn_evaluate_gate_pass`.
+- **Attendance:** that same `gate_access` row is the attendance record. `fn_employee_attendance(society, from, to)` (Python: `employee_attendance.attendance_register`) gives one line per person per day: first in, last out, minutes on duty, still-on-duty flag. Only closed sessions count towards minutes; a night shift is dated by the day it started.
+- **Going on duty:** `validate_attendance_qr` now accepts all four employee roles. A deactivated employee cannot clock in but can always clock out.
+
 ### 4.6 Concern Lifecycle (`concerns_assigns`)
 
 A concern's state lives in **one row per assignee** in `concerns_assigns`, keyed
