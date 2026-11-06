@@ -1,0 +1,588 @@
+# app/dash_apps/callbacks/assign_to_callbacks.py
+"""
+Assign-To Modal Callbacks
+=========================
+File-Explorer style modal for assigning concerns to admins / vendors / security.
+
+UI flow:
+  1. User clicks "Assign" on concern profile → modal opens
+  2. Modal shows 3 cards: ADM, VND, SEC
+  3. Clicking a card loads the respective entity list below
+  4. User toggles selection on items (checkboxes / card click)
+  5. Submit writes to concerns_assigns table
+  6. Modal closes, concern list/profile refreshes
+"""
+
+from __future__ import annotations
+
+from dash import Input, Output, State, no_update, html, ctx, ALL, MATCH
+from dash.exceptions import PreventUpdate
+import dash_bootstrap_components as dbc
+from database.db_manager import db
+from app.dash_apps.drilldown.loaders import (
+    get_concern_assignments,
+    list_assignable_admins,
+    list_assignable_vendors,
+    list_assignable_security,
+    humanize_assignment,
+)
+from app.security.guards import require_session
+from app.security.authorization import Cap
+from app.security.service_guard import audit_event, authorize_resource, blocks
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+)
+from app.utils.ux_toasts import error_toast
+from app.utils.field_config import DEFAULT_CONCERN_TYPE
+
+PORTAL_ROLE_LABEL = {
+    "ADM": "Admin",
+    "VND": "Vendor",
+    "SEC": "Security",
+}
+
+
+# Human labels for the concerns_assigns.status enrichment optionally
+# joined in by list_assignable_*() when a concern_id is passed. See
+# Concerns_Workflow_Review.md §2.2. Mirrors _CONCERN_STAGE_LABEL in
+# renderers.py — 'declined' and 'accepted' were missing here too, so a
+# candidate who had opted out or an admin who had already accepted rendered
+# a raw "Declined"/"Accepted" string with no pill styling.
+_STAGE_LABEL = {
+    "invited": ("Invited", "#7d8ea3"),
+    "bid_submitted": ("Bid submitted", "#1d74d8"),
+    "declined": ("Declined", "#94a3b8"),
+    "assigned": ("Assigned", "#e59620"),
+    "accepted": ("Accepted", "#2563eb"),
+    "resolved": ("Resolved", "#17976e"),
+    "closed": ("Closed", "#64748b"),
+}
+
+
+def _stage_badge(row: dict):
+    """Small status pill shown next to a candidate's name in the Assign
+    modal, if they already have a concerns_assigns row for this concern —
+    so an admin doesn't have to guess whether "checked" means "invited" or
+    "already assigned and resolved" (§2.2)."""
+    status = row.get("assign_status")
+    if not status:
+        return None
+    label, color = _STAGE_LABEL.get(status, (status.title(), "#0a3974"))
+    bid = row.get("assign_bid_amount")
+    text = f"{label} · ₹{bid:,.0f}" if bid not in (None, "") else label
+    return dbc.Badge(text, style={
+         "backgroundColor": f"{color}", "color": "#ffffff",
+         "fontWeight": "600", "fontSize": "10px", "marginLeft": "6px",
+     })
+
+
+def _render_assign_item(row: dict, role: str, selected: bool, view: str = "list") -> html.Div:
+    """Render a single assignable entity item."""
+    stage_badge = _stage_badge(row)
+    if role == "ADM":
+        label = row.get("name") or row.get("email", "Admin")
+        sub = row.get("email", "")
+        icon = "fas fa-user-shield"
+        color = "#1d74d8"
+    elif role == "VND":
+        label = row.get("business_name") or row.get("name", "Vendor")
+        sub = row.get("mobile", "")
+        icon = "fas fa-truck"
+        color = "#17976e"
+    else:
+        label = row.get("name", "Security")
+        sub = f"{row.get('shift', '')} {row.get('mobile', '')}".strip()
+        icon = "fas fa-shield-alt"
+        color = "#e59620"
+
+    rid = row.get("id")
+    # NOTE: must be the pattern-matching dict id, not a plain string —
+    # the toggle_selection callback below listens on
+    # Input({"type": "assign-item", "role": ALL, "entity_id": ALL}, "n_clicks")
+    # and a plain string id ("assign-item-ADM-3") never matches that pattern,
+    # so clicks silently went nowhere and selections never reached the store.
+    item_id = {"type": "assign-item", "role": role, "entity_id": rid}
+
+    if view == "grid":
+        inner = dbc.Card([
+            dbc.CardBody([
+                html.Div([
+                    html.I(className=f"{icon} fa-2x mb-2", style={"color": color}),
+                    html.H6(label, style={"fontWeight": "600", "fontSize": "13px"}),
+                    html.Small(sub, style={"color": "#64748b", "fontSize": "11px"}),
+                    html.Div(stage_badge, className="mt-1") if stage_badge else None,
+                ], className="text-center"),
+            ], style={"padding": "12px"}),
+        ], style={
+            "borderRadius": "10px",
+            "border": f"2px solid {color}" if selected else "1px solid #e2e8f0",
+            "cursor": "pointer",
+            "backgroundColor": f"{color}10" if selected else "#fff",
+        }, id=item_id, className="mb-2")
+    else:
+        inner = dbc.ListGroupItem([
+            html.Div([
+                dbc.Checkbox(
+                    id={"type": "assign-check", "role": role, "entity_id": rid},
+                    value=selected,
+                    style={"marginRight": "10px", "pointerEvents": "none"},
+                ),
+                html.I(className=f"{icon} me-2", style={"color": color, "width": "20px", "textAlign": "center"}),
+                html.Div([
+                    html.Span([label, stage_badge] if stage_badge else label,
+                              style={"fontWeight": "600", "fontSize": "13px"}),
+                    html.Br(),
+                    html.Small(sub, style={"color": "#64748b", "fontSize": "11px"}),
+                ]),
+            ], className="d-flex align-items-center"),
+        ], action=True, id=item_id, style={
+            "cursor": "pointer",
+            "border": f"2px solid {color}" if selected else None,
+            "backgroundColor": f"{color}10" if selected else None,
+        })
+
+    return html.Div(inner, className="mb-1")
+
+
+def register_assign_to_callbacks(app):
+    """Register all assign-to modal callbacks."""
+
+    # ── 1. Open modal from concern profile action ────────────────────────────
+    @app.callback(
+        Output("assign-to-modal", "is_open", allow_duplicate=True),
+        Output("assign-to-store", "data", allow_duplicate=True),
+        Input("profile-action-trigger", "data"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def open_assign_modal(trigger_data, auth):
+        if not trigger_data or not isinstance(trigger_data, dict):
+            raise PreventUpdate
+        action = trigger_data.get("action")
+        if action != "open_assign_modal":
+            raise PreventUpdate
+        params = trigger_data.get("params") or {}
+        concern_id = params.get("concern_id")
+        if not concern_id:
+            return False, no_update
+        society_id = get_current_society_id()
+        selected = {}
+        if society_id and concern_id:
+            try:
+                assigns = get_concern_assignments(int(concern_id))
+                for a in assigns:
+                    role = a.get("role")
+                    eid = a.get("entity_id")
+                    if role and eid:
+                        selected[f"{role}-{eid}"] = True
+            except Exception:
+                pass
+        return True, {"concern_id": int(concern_id), "selected": selected, "active_role": None}
+
+    # ── 2. Close modal ────────────────────────────────────────────────────────
+    @app.callback(
+        Output("assign-to-modal", "is_open", allow_duplicate=True),
+        Input("close-assign-to-modal", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def close_assign_modal(n_clicks):
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
+    # ── 2a. View toggle (list / grid) ───────────────────────────────────────────
+    @app.callback(
+        Output("assign-to-store", "data", allow_duplicate=True),
+        Input({"type": "assign-view-toggle", "view": ALL}, "n_clicks"),
+        State("assign-to-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def toggle_assign_view(n_clicks_list, store):
+        if not any(n for n in (n_clicks_list or []) if n):
+            raise PreventUpdate
+        triggered = ctx.triggered_id
+        if not isinstance(triggered, dict):
+            raise PreventUpdate
+        view = triggered.get("view", "list")
+        store = dict(store or {})
+        store["view"] = view
+        return store
+
+    # ── 3. Entity-type card click OR search change → (re)load list ────────────
+    # `assign-search` is a real Input here (not just a State read at click
+    # time), and the currently-active role is tracked in assign-to-store, so
+    # typing in the search box re-runs the query for whichever role list is
+    # currently open. Previously the search box was only a State, and a
+    # separate callback zeroed out the cards' n_clicks on every keystroke to
+    # "force" a reload — but that zeroing made every n_clicks falsy, so the
+    # `if not any(...)` guard here would immediately PreventUpdate and the
+    # list never actually refreshed.
+    @app.callback(
+        Output("assign-list-container", "children"),
+        Output({"type": "assign-card", "role": ALL}, "color"),
+        Output({"type": "assign-card", "role": ALL}, "outline"),
+        Output("assign-to-store", "data", allow_duplicate=True),
+        Input({"type": "assign-card", "role": ALL}, "n_clicks"),
+        Input("assign-search", "value"),
+        State("assign-to-store", "data"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def load_assign_list(n_clicks_list, search, store, auth):
+        store = dict(store or {})
+        triggered = ctx.triggered_id
+
+        if triggered == "assign-search":
+            # Re-filtering whatever list is already open; if no card has
+            # been picked yet there's nothing to filter.
+            role = store.get("active_role")
+            if role not in ("ADM", "VND", "SEC"):
+                raise PreventUpdate
+        elif isinstance(triggered, dict) and triggered.get("type") == "assign-card":
+            role = triggered.get("role")
+            if role not in ("ADM", "VND", "SEC"):
+                raise PreventUpdate
+            store["active_role"] = role
+        else:
+            raise PreventUpdate
+
+        selected = store.get("selected", {})
+
+        society_id = get_current_society_id()
+        if not society_id:
+            # NOTE (fixed 2026-08): same bug as invite_to_callbacks.py's
+            # load_invite_list — the color/outline outputs below are
+            # ALL-wildcard ({"type":"assign-card","role":ALL}), matching 3
+            # components here (ADM/VND/SEC). Dash's validate_multi_return()
+            # requires a list of that length, not a bare no_update, or it
+            # 500s. This was very likely why the Assign modal appeared to
+            # "not open" — the moment auth-store hadn't populated
+            # society_id yet (e.g. a fast click right after page load) this
+            # branch crashed instead of showing the auth message.
+            return (
+                html.P("Not authenticated.", style={"color": "#de5c52"}),
+                [no_update, no_update, no_update], [no_update, no_update, no_update], no_update,
+            )
+
+        s = (search or "").strip() or None
+        concern_id = store.get("concern_id")
+        try:
+            if role == "ADM":
+                rows = list_assignable_admins(society_id, s, concern_id=concern_id)
+            elif role == "VND":
+                rows = list_assignable_vendors(society_id, s, concern_id=concern_id)
+            else:
+                rows = list_assignable_security(society_id, s, concern_id=concern_id)
+        except Exception as e:
+            # Same fix — see note above.
+            return (
+                html.P(f"Error loading list: {e}", style={"color": "#de5c52"}),
+                [no_update, no_update, no_update], [no_update, no_update, no_update], no_update,
+            )
+
+        # Card highlight reflects the active role directly, not accumulated
+        # n_clicks — with n_clicks, once two cards had each been clicked at
+        # least once in the session, both stayed highlighted forever.
+        card_colors = []
+        card_outlines = []
+        for card_role in ("ADM", "VND", "SEC"):
+            if card_role == role:
+                card_colors.append("primary" if role == "ADM" else "success" if role == "VND" else "warning")
+                card_outlines.append(False)
+            else:
+                card_colors.append("secondary")
+                card_outlines.append(True)
+
+        if not rows:
+            empty = html.P(
+                f"No {PORTAL_ROLE_LABEL[role].lower()}s found.",
+                className="text-muted text-center", style={"padding": "30px"},
+            )
+            return empty, card_colors, card_outlines, store
+
+        view = store.get("view", "list")
+        items = [_render_assign_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view=view) for r in rows]
+        return html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}), card_colors, card_outlines, store
+
+    # ── 4. Toggle selection on item click ────────────────────────────────────
+    # NOTE: previously only wrote assign-to-store + the summary badges — the
+    # clicked row itself never re-rendered, so its checkbox/border never
+    # visually updated (same latent bug as the invite modal shared this code
+    # with). Now also re-renders the visible list on toggle.
+    @app.callback(
+        Output("assign-to-store", "data", allow_duplicate=True),
+        Output("assign-selected-summary", "children"),
+        Output("assign-list-container", "children", allow_duplicate=True),
+        Input({"type": "assign-item", "role": ALL, "entity_id": ALL}, "n_clicks"),
+        State("assign-to-store", "data"),
+        State("assign-search", "value"),
+        State("auth-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def toggle_selection(n_clicks_list, store, search, auth):
+        if not any(n for n in (n_clicks_list or []) if n):
+            raise PreventUpdate
+        triggered = ctx.triggered_id
+        if not triggered or not isinstance(triggered, dict):
+            raise PreventUpdate
+        role = triggered.get("role")
+        eid = triggered.get("entity_id")
+        if not role or eid is None:
+            raise PreventUpdate
+
+        store = dict(store or {})
+        selected = dict(store.get("selected", {}))
+        key = f"{role}-{eid}"
+        selected[key] = not selected.get(key, False)
+        store["selected"] = selected
+
+        # Build summary
+        badges = []
+        for k, v in selected.items():
+            if not v:
+                continue
+            parts = k.split("-", 1)
+            r = parts[0]
+            e = parts[1] if len(parts) > 1 else ""
+            label = f"{PORTAL_ROLE_LABEL.get(r, r)} #{e}"
+            badges.append(
+                dbc.Badge(
+                    label,
+                    className="me-1",
+                    style={"backgroundColor": "#1d74d8", "color": "#ffffff",
+                           "fontSize": "11px", "fontWeight": "600"},
+                )
+            )
+        summary = html.Div(badges) if badges else html.Small("No assignments selected.", className="text-muted")
+
+        # Re-render the currently-visible list so the clicked row shows its
+        # new checked/border state immediately.
+        list_children = no_update
+        society_id = get_current_society_id()
+        if role in ("ADM", "VND", "SEC") and society_id:
+            s = (search or "").strip() or None
+            concern_id = store.get("concern_id")
+            try:
+                if role == "ADM":
+                    rows = list_assignable_admins(society_id, s, concern_id=concern_id)
+                elif role == "VND":
+                    rows = list_assignable_vendors(society_id, s, concern_id=concern_id)
+                else:
+                    rows = list_assignable_security(society_id, s, concern_id=concern_id)
+                items = [_render_assign_item(r, role, selected.get(f"{role}-{r.get('id')}", False), view=store.get("view", "list")) for r in rows]
+                list_children = html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}) if rows else html.P(
+                    f"No {PORTAL_ROLE_LABEL[role].lower()}s found.", className="text-muted text-center", style={"padding": "30px"},
+                )
+            except Exception:
+                pass
+
+        return store, summary, list_children
+
+    # ── 5. Clear all selections ──────────────────────────────────────────────
+    @app.callback(
+        Output("assign-to-store", "data", allow_duplicate=True),
+        Output("assign-selected-summary", "children", allow_duplicate=True),
+        Input("assign-clear-btn", "n_clicks"),
+        State("assign-to-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def clear_selections(n_clicks, store):
+        if not n_clicks:
+            raise PreventUpdate
+        store = dict(store or {})
+        store["selected"] = {}
+        return store, html.Small("No assignments selected.", className="text-muted")
+
+    # ── 6. Submit assignments ────────────────────────────────────────────────
+    @app.callback(
+        Output("assign-to-modal", "is_open", allow_duplicate=True),
+        Output("toast-store", "data", allow_duplicate=True),
+        Output("drilldown-store", "data", allow_duplicate=True),
+        Output("drill-content", "children", allow_duplicate=True),
+        Output("drill-breadcrumb", "children", allow_duplicate=True),
+        Input("assign-submit-btn", "n_clicks"),
+        State("assign-to-store", "data"),
+        State("auth-store", "data"),
+        State("drilldown-store", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def submit_assignments(n_clicks, store, auth, drill_store):
+        if not n_clicks:
+            raise PreventUpdate
+        store = store or {}
+        concern_id = store.get("concern_id")
+        selected = store.get("selected", {})
+        if not concern_id:
+            return False, {"type": "warning", "message": "No concern selected."}, no_update, no_update, no_update
+
+        society_id = get_current_society_id()
+        actor_user_id = get_current_user_id()
+        if not society_id:
+            return False, {"type": "error", "message": "Session expired."}, no_update, no_update, no_update
+
+        # ── Server-side role + ownership check ──────────────────────────────
+        # Previously this endpoint had NO role check at all — only the
+        # "Assign" button's client-side visibility was gated to
+        # admin/apartment (profile_actions.py). Since Dash callbacks are
+        # directly reachable independent of what buttons a given portal
+        # renders, that meant any authenticated Vendor/Security session, or
+        # an Owner acting on a concern they didn't raise, could previously
+        # write arbitrary concerns_assigns rows. Mirrors the check already
+        # used by close_concern's handler. See Concerns_Workflow_Review.md §3.1.
+        caller_role = get_current_user_role()
+        if caller_role not in ("admin", "apartment"):
+            return False, {"type": "error", "message": "Only Admin or the concern creator can assign this concern."}, no_update, no_update, no_update
+        if caller_role == "apartment":
+            concern_owner_row = db._execute(
+                "SELECT created_by FROM concerns WHERE id=%s AND society_id=%s",
+                (concern_id, society_id), fetch_one=True,
+            ) or {}
+            # Was (auth or {}).get("user_id") — auth-store, client-editable.
+            # actor_user_id (computed above from get_current_user_id()) is
+            # the server-verified equivalent; this comparison is the whole
+            # point of the ownership check, so it needs the same treatment
+            # as caller_role two lines up, not the value it was written to
+            # guard against.
+            if concern_owner_row.get("created_by") != actor_user_id:
+                return False, {"type": "error", "message": "Only Admin or the concern creator can assign this concern."}, no_update, no_update, no_update
+
+        # Action-level authorization (RWA3 WP4/WP5): an admin assigning must hold
+        # concern.assign, and the concern is resolved inside the caller's own
+        # society first (a forged concern id from another tenant is "not found").
+        # A resident creator keeps the legacy ownership path above; that
+        # exception is recorded in docs/authz_manifest.json.
+        if caller_role == "admin":
+            _decision, _ = authorize_resource(Cap.CONCERN_ASSIGN, "concern", "concerns", concern_id)
+            if blocks(_decision):
+                return False, {"type": "error", "message": "You do not have permission to assign this concern."}, no_update, no_update, no_update
+
+        try:
+            with db._conn() as conn:
+                cur = conn.cursor()
+                # Lock the concern's assignment rows so concurrent submits
+                # serialise on this concern (prevents one admin's DELETE
+                # from removing rows another admin just INSERTed).
+                cur.execute(
+                    "SELECT role, entity_id, status FROM concerns_assigns "
+                    "WHERE concern_id=%s AND society_id=%s FOR UPDATE",
+                    (concern_id, society_id),
+                )
+                prior_rows = [dict(r) for r in cur.fetchall()]
+                prior_by_key = {f"{r['role']}-{r['entity_id']}": r["status"] for r in prior_rows}
+                prior_keys = set(prior_by_key.keys())
+
+                selected_keys = {k for k, v in selected.items() if v}
+                to_delete = prior_keys - selected_keys
+                to_insert = selected_keys - prior_keys
+
+                # Unchecking someone must not silently erase committed work —
+                # only rows still in-flight (invited, bid_submitted, assigned,
+                # declined) can be removed here. 'accepted' was missing from
+                # this list even though the comment claimed the row's history
+                # was protected: an admin who had already ACCEPTED the job
+                # could be silently un-assigned by unticking their box,
+                # dropping them back to the start of the admin sub-lifecycle.
+                for key in to_delete:
+                    if prior_by_key.get(key) in ("accepted", "resolved", "closed"):
+                        continue
+                    parts = key.split("-", 1)
+                    role = parts[0]
+                    try:
+                        entity_id = int(parts[1])
+                    except (IndexError, ValueError):
+                        continue
+                    cur.execute(
+                        "DELETE FROM concerns_assigns "
+                        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id=%s "
+                        "AND status NOT IN ('accepted', 'resolved', 'closed')",
+                        (concern_id, society_id, role, entity_id),
+                    )
+
+                inserted = 0
+                newly_assigned = []
+                for key in to_insert:
+                    parts = key.split("-", 1)
+                    role = parts[0]
+                    try:
+                        entity_id = int(parts[1])
+                    except (IndexError, ValueError):
+                        continue
+                    cur.execute(
+                        "INSERT INTO concerns_assigns (concern_id, society_id, role, entity_id, assigned_by, status) "
+                        "VALUES (%s, %s, %s, %s, %s, 'assigned') "
+                        "ON CONFLICT (concern_id, role, entity_id) DO UPDATE SET "
+                        "  status='assigned', assigned_by=EXCLUDED.assigned_by, updated_at=NOW() "
+                        "WHERE concerns_assigns.status NOT IN ('resolved', 'closed')",
+                        (concern_id, society_id, role, entity_id, actor_user_id),
+                    )
+                    inserted += 1
+                    newly_assigned.append((role, entity_id))
+
+                    # Auto-decline any other still-open (invited/bid_submitted)
+                    # candidates of the SAME role for this concern — choosing
+                    # one vendor's bid implicitly declines the other vendors
+                    # who bid but weren't picked. Doesn't touch other roles
+                    # (e.g. a separately-assigned SEC row) or anyone already
+                    # resolved/closed. See Concerns_Workflow_Review.md §2.7.
+                    cur.execute(
+                        "DELETE FROM concerns_assigns "
+                        "WHERE concern_id=%s AND society_id=%s AND role=%s AND entity_id != %s "
+                        "AND status IN ('invited', 'bid_submitted')",
+                        (concern_id, society_id, role, entity_id),
+                    )
+
+                # Audit in the SAME transaction as the assignment rows: if this
+                # insert fails the whole assignment rolls back (no un-audited write).
+                audit_event("concern.assign", "concern", concern_id,
+                            before={"assigned": sorted(prior_keys)},
+                            after={"assigned": sorted(selected_keys)},
+                            permission_used=Cap.CONCERN_ASSIGN, cur=cur)
+
+                # concerns.status is now kept in sync automatically by
+                # trg_concerns_assigns_sync_status (see estatehub.sql) whenever
+                # concerns_assigns rows are inserted/updated/deleted above — no
+                # manual UPDATE concerns SET status=... needed here anymore.
+
+                # Push-notify only the newly-assigned entities.
+                if newly_assigned:
+                    try:
+                        from app.services.push_service import notify_concern_assigned
+                        cur.execute(
+                            "SELECT concern_type FROM concerns WHERE id=%s AND society_id=%s",
+                            (concern_id, society_id),
+                        )
+                        concern_row = cur.fetchone()
+                        notify_concern_assigned(
+                            society_id, concern_id,
+                            (dict(concern_row) if concern_row else {}).get("concern_type", DEFAULT_CONCERN_TYPE),
+                            newly_assigned,
+                        )
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "notify_concern_assigned failed (concern_id=%s): %s", concern_id, e,
+                        )
+
+            # Refresh the concern list/profile
+            from app.dash_apps.callbacks.drilldown_callbacks import _render_current
+            content, breadcrumb, db_err = _render_current(drill_store or {}, auth or {})
+            return (
+                False,
+                {"type": "success", "message": f"Assignments updated: {inserted} assignee(s)."},
+                no_update,
+                content,
+                breadcrumb,
+            )
+        except Exception as e:
+            return False, error_toast(e, "Unable to update assignments. Please try again."), no_update, no_update, no_update
+
+    print("  ✓ Assign-to callbacks registered")

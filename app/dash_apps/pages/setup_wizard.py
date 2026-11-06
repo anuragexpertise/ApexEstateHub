@@ -1,0 +1,2307 @@
+import logging
+import os
+
+from dash import html, dcc, dash_table, Input, Output, State, ALL, callback, no_update
+from app.utils.fiscal import fy_start_date, fy_start_year
+import dash_bootstrap_components as dbc
+from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
+from decimal import Decimal
+from database.db_manager import db
+
+
+# ── Defaults requested for first-time setup ────────────────────────────────
+# Sinking and Repair & Maintenance Fund rates have NO default and NO cap: the figure is whatever the society's General
+# Body resolved. A blank rate means "not entered", never a silent 0.
+DEFAULT_INTEREST_RATE_PCT = None    # leave blank; rate set by General Body resolution per UP Model Bye-Laws 2011 bye-law 46(a)
+# There is no hard cap in the wizard: the rate is whatever the General Body resolved.
+INTEREST_RATE_NOTE = ("Simple interest, % per month, on overdue dues after the Billing Due Day. "
+                      "UP Model Bye-Laws 2011, bye-law 46(a): the rate is set by General Body resolution.")
+# Case name + citation to print under the interest field. Left None until a verified citation is supplied.
+INTEREST_CASE_CITATION = None
+DEFAULT_VENDOR_1DAY, DEFAULT_VENDOR_7DAY, DEFAULT_VENDOR_1MTH = 100, 500, 2000
+
+# UP AOA is the default regime. The program is not UP-only: other states / constitutions are chosen on Society Details.
+DEFAULT_STATE = "UP"
+
+_log = logging.getLogger(__name__)
+
+# Legal hierarchy rows are built from the society's regime: see legal_hierarchy_rows()
+
+_Label = dbc.Label
+
+FIELD_TIPS = {
+    # Society Details
+    "Society Name": "Registered name of the society. Fixed at onboarding — contact Master to change it.",
+    "Society Logo (Image)": "Shown on receipts, letterheads and the portal header. Images are compressed to WebP under 50 KB.",
+    "Address": "Full postal address. Printed on receipts, bills and the Agreement.",
+    "State": "Decides inter-state (IGST) vs intra-state (CGST+SGST) on RCM, and which state's statutory rules and fund-rate defaults apply.",
+    "Email": "Society contact email used on bills and notices.",
+    "Phone Number": "Society contact number printed on receipts and notices.",
+    "PAN Number": "Society PAN. Fixed at onboarding — contact Master to change it.",
+    "Registration Number": "Registration number under the Societies Registration Act / UP Apartment Act as printed on your registration certificate.",
+    "Gate Pass Enforcement": "Which gate movement is denied when a vendor's or resident's pass is invalid or unpaid: entry, exit, or both.",
+    "Security Duty Hours": "Shift pattern for the security roster: 8-hour (three shifts) or 12-hour (day and night).",
+    "Login Background (Image)": "Optional picture shown behind your society's login screen.",
+    # Administrator
+    "Secretary Name": "Name of the Secretary / authorised signatory, printed on receipts and the Agreement.",
+    "Secretary Phone": "Secretary's contact number.",
+    "Secretary Email": "Secretary's contact email.",
+    "Secretary Signature Image": "Scanned signature printed on receipts and official letters.",
+    "SIGNING_SECRET (Strong Password)": "Step-up password: it only confirms sensitive actions such as QR re-issue and key rotation. It signs nothing; the society's four signing keys are made by the server. Minimum 8 characters with upper case, lower case and a special character.",
+    "Confirm SIGNING_SECRET": "Re-enter the SIGNING_SECRET exactly to avoid a typo locking you out of QR issuing.",
+    # Society Compliance
+    "Registered for GST?": "Yes shows the GSTIN & GST Rate step. Societies are usually registered only when turnover crosses the GST threshold.",
+    "Deducts TDS?": "Yes shows the TAN & TDS Rates step. Needed when you pay vendors above the TDS thresholds.",
+    "Sinking Fund Basis": "How the Sinking Fund contribution is calculated: per sq ft of apartment area, or as a share of construction cost.",
+    "Repair Fund Basis": "How the Repair & Maintenance Fund contribution is calculated: per sq ft, or as a share of construction cost.",
+    "Fund GST Exempt": "On = sinking / repair fund collections are treated as GST-exempt (see CBIC Circular 109/28/2019-GST).",
+    "Fund Charges Interest": "On = late-payment interest also applies to overdue Sinking / Repair fund dues.",
+    "GST Filing Cadence": "Monthly = a return every month. QRMP = quarterly returns with monthly tax payment.",
+    "TDS No PAN Action": "What happens when a payee has no PAN (Sec. 206AA higher rate): Warn = allow with a warning, Block = stop the payment.",
+    "Export Format": "Default layout for compliance exports: Structured (generic), GSTN Offline (GST portal) or TRACES 26Q (TDS return).",
+    # TAN / TDS
+    "TAN Number": "Tax Deduction Account Number (10 characters, e.g. ABCD12345E). Required to deposit TDS and file 26Q.",
+    "TDS Effective Date": "Date from which the TDS rates below apply. The default is the start of the financial year.",
+    # GST
+    "GSTIN": "15-character GST identification number issued on registration.",
+    "CGST Rate (%)": "Central GST rate as advised by your CA. Pending CA confirmation.",
+    "SGST Rate (%)": "State GST rate as advised by your CA. Pending CA confirmation.",
+    "Annual Turnover Limit for GST (Lakhs)": "Statutory turnover above which registration is mandatory. Maintained by Master — read-only.",
+    "Monthly Exemption Limit (₹ per member)": "Maintenance up to this amount per member per month is GST-exempt. Maintained by Master — read-only.",
+    # Apartment charges
+    "Base Maintenance Amount": "Flat monthly maintenance charged per apartment. Leave 0 if you charge only by rate per sq ft.",
+    "Maintenance Rate/SqFt": "Monthly maintenance per sq ft of apartment area.",
+    "Billing Due Day": "Day of the month by which bills must be paid (1–31). Interest starts after this day.",
+    "Sinking Fund Rate": "Sinking Fund contribution, on the basis chosen on the Funds step. No default and no cap: enter the rate the General Body resolved.",
+    "Repair Fund Rate": "Repair & Maintenance Fund contribution, on the basis chosen on the Funds step. No default and no cap: enter the rate the General Body resolved.",
+    "Charges Interest Rate (% per month)": "Simple interest per month on overdue dues. The rate is the one your General Body resolved (UP Model Bye-Laws 2011, bye-law 46(a)).",
+    "Construction Cost of Project (₹)": "Total construction cost of the project. Recorded for fund percentages and the Declaration; it is not billed as maintenance.",
+    "Monthly Common-Expense Budget (₹)": "Society's monthly common-expense budget. Under Undivided Interest billing each flat pays this x its undivided-interest %.",
+    "Default Rate per sq ft (₹)": "Monthly maintenance per sq ft of apartment area. Needed when the billing basis is Per Sq Ft.",
+    "Default Fixed Amount (₹)": "Flat monthly maintenance per apartment. Needed when the billing basis is Fixed Amount.",
+    # Vendor charges
+    "Vendor Pass (1 Day) ₹": f"Default fee for a one-day vendor pass. Default ₹{DEFAULT_VENDOR_1DAY}.",
+    "Vendor Pass (7 Days) ₹": f"Default fee for a seven-day vendor pass. Default ₹{DEFAULT_VENDOR_7DAY}.",
+    "Vendor Pass (1 Month) ₹": f"Default fee for a one-month vendor pass. Default ₹{DEFAULT_VENDOR_1MTH}.",
+    # Accounts / BF
+    "Payment QR Code Image": "Your society's payment QR (UPI). It must belong to the primary bank account (the seeded 'SBI A/c - Society' unless you change it).",
+    "Accounting/Calculation Start Date": "Date from which EstateHub calculates bills, interest and books. Usually the start of a financial year.",
+    "Financial Year (Start Year)": "Year in which the financial year of these opening balances starts (e.g. 2024 for FY 2024-25).",
+    # Agreement
+    "Type 'I AGREE' below to proceed": "Type I AGREE in capitals to accept the EstateHub terms and agreement.",
+    "Admin Password": "Your own login password. Confirms it is really you finalising the setup.",
+    "SIGNING_SECRET": "The SIGNING_SECRET you created on the Administrator step.",
+}
+
+
+def _tip_icon(tip):
+    """CSS-only tooltip (see setup_wizard.css .sw-tip) — no ids, works on hover and keyboard focus."""
+    return html.Span(
+        html.I(className="fas fa-info-circle"),
+        className="sw-tip", tabIndex=0,
+        **{"data-tip": tip, "aria-label": tip},
+    )
+
+
+def _label(text, *args, tip=None, **kwargs):
+    """dbc.Label with an info-icon tooltip looked up from FIELD_TIPS (or passed as tip=)."""
+    tip = tip or (FIELD_TIPS.get(text) if isinstance(text, str) else None)
+    children = [text, _tip_icon(tip)] if tip else text
+    return _Label(children, *args, **kwargs)
+
+
+def _th(text, tip=None):
+    """Table header cell with optional tooltip."""
+    return html.Div([text, _tip_icon(tip)] if tip else text)
+
+
+def _existing_society_images(society_id):
+    """Already-saved image filenames for this society (so re-opening the wizard shows them)."""
+    if not society_id:
+        return {}
+    try:
+        row = db._execute(
+            "SELECT logo, login_background, payment_qr, secretary_sign FROM societies WHERE id = :id",
+            {"id": society_id}, fetch_one=True,
+        ) or {}
+    except Exception:
+        return {}
+    return {
+        "logo": row.get("logo"), "bg": row.get("login_background"),
+        "pay_qr": row.get("payment_qr"), "sec_sign": row.get("secretary_sign"),
+    }
+
+
+def build_rules_panel(step, society_id=None, state=None):
+    """
+    Body of the "Acts & Rules" column for one wizard step.
+
+    1) Framework rows from README "Statutory Framework Coverage" (app/services/statutory_rules.py)
+    2) For the steps listed in STEP_INSTRUMENTS, the tabulated Act / Rules /
+       Bye-laws governing this society's regime (legal_instrument_catalog)
+    3) Official "read the Act" links from kpi_rule_links, looked up through
+       STEP_LINK_CATEGORIES — the old code queried the wizard step *name*
+       ("Society Details") against kpi_rule_links.category ('sinking_fund',
+       'fund_gst', ...) and always got nothing — for the society's own state
+       (was hard-coded "ALL", which also hid every UP-specific link).
+
+    `state` is the value of the Society Details State dropdown, when it has
+    been picked but not yet saved (societies.state is only written on
+    submit) — without it the panel showed the old/blank DB state while the
+    admin was looking at a freshly-chosen one.
+    """
+    from app.services.statutory_rules import (
+        rows_for_step, STEP_LINK_CATEGORIES, STEP_INSTRUMENTS,
+        instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR,
+        normalize_state,
+    )
+
+    if state:
+        state = normalize_state(state)
+    else:
+        state = "UP"
+        if society_id:
+            try:
+                row = db._execute("SELECT state FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+                state = normalize_state((row or {}).get("state"))
+            except Exception:
+                pass
+
+    cards = []
+    for area, sections, requirement, covered, note in rows_for_step(step):
+        cards.append(html.Div([
+            html.Div(area, className="sw-rule-area"),
+            html.Div(sections, className="sw-rule-sec"),
+            html.Div(requirement, className="sw-rule-req"),
+            html.Div(
+                [html.I(className=f"fas {'fa-check-circle' if covered else 'fa-exclamation-circle'} me-1"),
+                 ("In EstateHub: " if covered else "Not yet covered: ") + note],
+                className="sw-rule-cov " + ("ok" if covered else "partial"),
+            ),
+        ], className="sw-rule"))
+
+    instruments_html = []
+    if step in STEP_INSTRUMENTS:
+        regime, instruments = instruments_for_society(society_id, state)
+        instruments_html.append(html.H6(
+            [html.I(className="fas fa-gavel me-2"), "Act / Rules / Bye-laws"],
+            style={"fontWeight": "700", "color": "#2c3e50", "marginTop": "18px", "marginBottom": "6px"},
+        ))
+        instruments_html.append(html.Small(
+            f"{regime} · {len(instruments)} instrument{'s' if len(instruments) != 1 else ''} — full table on the "
+            "'Legal Regime & Compliance' step.",
+            className="text-muted", style={"display": "block", "marginBottom": "6px"},
+        ))
+        for itype, items in grouped_instruments(instruments).items():
+            instruments_html.append(html.Div(
+                [dbc.Badge(itype, color=INSTRUMENT_BADGE_COLOR.get(itype, "light"), className="me-2",
+                           pill=True, style={"fontSize": "10px"}),
+                 html.Small(items[0]["title"] + (f" ({items[0]['enactment_year']})" if items[0].get("enactment_year") else ""),
+                            style={"fontSize": "11.5px", "fontWeight": "600", "color": "#1f3b57"})],
+                style={"marginBottom": "3px"},
+            ))
+            for r in items[1:]:
+                instruments_html.append(html.Small(
+                    "· " + r["title"] + (f" ({r['enactment_year']})" if r.get("enactment_year") else ""),
+                    className="text-muted", style={"display": "block", "marginLeft": "8px", "fontSize": "11px"},
+                ))
+
+    links = []
+    cats = STEP_LINK_CATEGORIES.get(step, [])
+    if cats:
+        try:
+            from app.services.kpi_rule_links_service import get_links_for_categories
+            by_cat = get_links_for_categories(cats, state=state)
+        except Exception:
+            by_cat = {}
+        seen = set()
+        for cat in cats:
+            for lk in by_cat.get(cat, []):
+                if lk.url in seen:
+                    continue
+                seen.add(lk.url)
+                links.append(html.Div([
+                    html.A([html.I(className="fas fa-external-link-alt me-1"), lk.label],
+                           href=lk.url, target="_blank", rel="noopener noreferrer",
+                           style={"fontWeight": "500", "color": "#0d6efd", "textDecoration": "none", "display": "block", "marginBottom": "3px"}),
+                    html.P(lk.description, style={"fontSize": "11.5px", "color": "#6c757d", "marginBottom": "8px", "lineHeight": "1.4"}),
+                ], style={"borderBottom": "1px solid #eee", "marginBottom": "8px"}))
+
+    out = cards + instruments_html
+    if links:
+        out = out + [html.H6("Official sources", className="text-primary mt-3 mb-2")] + links
+    return out
+
+
+def rules_subtitle(step, society_id=None, state=None):
+    """`<step> · <regime>` for the Acts & Rules column header."""
+    from app.services.statutory_rules import regime_for_society
+    regime = regime_for_society(society_id, state)
+    return f"{step} · {regime}"
+
+
+def _field_feedback(field_id):
+    return html.Small(
+        id=field_id,
+        className="invalid-feedback d-block",
+        style={"fontSize": "11px", "marginTop": "4px"},
+    )
+def load_conversation_data():
+    data = []
+    here = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.abspath(os.path.join(here, "../../../conversation.xlsx"))
+    if os.path.exists(file_path):
+        try:
+            import pandas as pd
+            df = pd.read_excel(file_path)
+            # Replace NaNs with empty strings
+            df = df.fillna('')
+            data = df.to_dict('records')
+        except Exception as e:
+            print(f"Error loading conversation.xlsx: {e}")
+    return data
+
+CONVERSATION_DATA = load_conversation_data()
+# conversation.xlsx is a binary file; corrected wording lives here so the fix is reviewable as text.
+CONVERSATION_TEXT_OVERRIDES = {
+    "Vendor Charges": ("Set the price of Vendor Passes (1-day, 7-day, 1-month) that vendors pay to work in the society. "
+                       "These are pass prices, not penalties or fines. Match them to your vendor policy."),
+    "Legal Regime Selection": ("Check that the State and Constitution you set on Society Details give the legal regime you expect, then answer the Yes/No questions. "
+                               "Rows marked unverified have not yet been verified in RWA Compliance; they are shown for reference and drive no enforcement."),
+}
+REVIEW_STEP_NAME = "Review"
+WIZARD_GROUPS = {
+    "Organization Details": ["Instructions", "Society Details", "Administrator"],
+    "Legal Regime & Funds": ["Legal Regime Selection", "Funds"],
+    "Statutory Compliance": ["TAN & TDS Rates", "GSTIN & GST Rate"],
+    "Society Policy & Operations": ["Apartment Charges", "Vendor Charges", "Accounts Heads", "Brought Forward"],
+    "Finalization": ["Review"],
+}
+# CATEGORIES holds INTERNAL step keys. statutory_rules.py (STEP_ROWS, STEP_LINK_CATEGORIES), the render branches in
+# render_category_content() and the callbacks all key on them. STEP_LABELS is display wording only.
+STEP_LABELS = {
+    "GSTIN & GST Rate": "GSTIN & GST Rates",
+    "Accounts Heads": "Accounts",
+}
+
+
+def step_label(cat):
+    return STEP_LABELS.get(cat, cat)
+
+
+CATEGORIES = [
+    'Instructions',
+    'Society Details',
+    'Administrator',
+    'Legal Regime Selection',
+    'Funds',
+    'TAN & TDS Rates',
+    'GSTIN & GST Rate',
+    'Apartment Charges',
+    'Vendor Charges',
+    'Accounts Heads',
+    'Brought Forward',
+    'Review',
+]
+
+CATEGORY_ICONS = {
+    "Society Details": "fas fa-building",
+    "Administrator": "fas fa-user-shield",
+    "Instructions": "fas fa-info-circle",
+    "Legal Regime Selection": "fas fa-balance-scale",
+    "Funds": "fas fa-piggy-bank",
+    "TAN & TDS Rates": "fas fa-percent",
+    "GSTIN & GST Rate": "fas fa-file-invoice-dollar",
+    "Apartment Charges": "fas fa-home",
+    "Vendor Charges": "fas fa-truck",
+    "Accounts Heads": "fas fa-book",
+    "Brought Forward": "fas fa-arrow-right",
+    "Review": "fas fa-clipboard-check",
+}
+
+def _render_image_capture_control(entity, field, existing=None, society_id=None):
+    """
+    Upload-or-camera control for a single image field, reusing the exact
+    working id/data-attribute pattern from renderers.py's "image_upload"
+    field type (cam-btn-/cam-snap-/cam-stop- id substrings, plus the
+    <video>/<canvas> elements camera_callbacks.py's clientside delegation
+    listens for).
+
+    The wizard previously built its own "Snap" buttons with
+    id={"type": "camera-snap-btn", ...} — a Dash pattern-matching dict id
+    that never matches the app's camera click-delegation listener (which
+    matches on id substrings like "cam-snap-"), and with no <video>/
+    <canvas> elements anywhere on the page for a capture to target. Those
+    buttons were inert: clicking "Snap" did nothing at all. Rebuilding the
+    control with the shared helper fixes that and keeps the wizard in
+    sync with the one working camera implementation instead of a second,
+    broken one.
+    """
+    cam_vid_id  = f"cam-vid-{entity}-{field}"
+    cam_cvs_id  = f"cam-cvs-{entity}-{field}"
+    cam_snap_id = f"cam-snap-{entity}-{field}"
+    cam_stop_id = f"cam-stop-{entity}-{field}"
+    cam_btn_id  = f"cam-btn-{entity}-{field}"
+    prev_img_id = f"cam-prev-{entity}-{field}"
+    hidden_marker = f'"entity": "{entity}", "field": "{field}"'
+
+    _btn_base = {
+        "display": "inline-flex", "alignItems": "center", "justifyContent": "center",
+        "cursor": "pointer", "userSelect": "none", "borderRadius": "8px",
+        "fontSize": "12px", "fontWeight": "600", "padding": "6px 14px", "border": "none",
+    }
+
+    return html.Div([
+        html.Div([
+            dcc.Upload(
+                id={"type": "form-upload", "entity": entity, "field": field},
+                children=html.Div([
+                    html.I(className="fas fa-cloud-upload-alt me-1"),
+                    "Upload / Drop",
+                ], style={"fontSize": "12px"}),
+                style={
+                    "flex": "1", "height": "42px", "lineHeight": "42px",
+                    "borderWidth": "2px", "borderStyle": "dashed", "borderRadius": "10px",
+                    "textAlign": "center", "borderColor": "#667eea",
+                    "background": "rgba(102,126,234,0.04)", "cursor": "pointer",
+                    "color": "#667eea", "minWidth": "110px",
+                },
+                multiple=False, accept="image/*",
+            ),
+            html.Div(
+                [html.I(className="fas fa-camera me-1"), "Camera"],
+                id=cam_btn_id,
+                **{
+                    "data-cam-video": cam_vid_id,
+                    "data-cam-canvas": cam_cvs_id,
+                    "data-cam-snap": cam_snap_id,
+                    "data-cam-stop": cam_stop_id,
+                },
+                style={
+                    **_btn_base, "flex": "0 0 auto", "height": "42px",
+                    "border": "2px dashed #17976e", "background": "rgba(23,151,110,0.06)",
+                    "color": "#17976e", "padding": "0 14px",
+                },
+            ),
+        ], style={"display": "flex", "gap": "10px", "marginBottom": "5px"}),
+
+        html.Video(
+            id=cam_vid_id, autoPlay=True, muted=True,
+            style={
+                "width": "100%", "maxHeight": "200px", "borderRadius": "10px",
+                "display": "none", "objectFit": "cover", "background": "#111",
+                "marginBottom": "6px",
+            },
+        ),
+        html.Canvas(id=cam_cvs_id, style={"display": "none"}),
+
+        html.Div([
+            html.Div(
+                [html.I(className="fas fa-circle me-1"), "Snap"],
+                id=cam_snap_id,
+                **{
+                    "data-cam-video":     cam_vid_id,
+                    "data-cam-canvas":    cam_cvs_id,
+                    "data-cam-btn":       cam_btn_id,   # ← lets snapCamCapture reset the Camera button label
+                    "data-cam-stop":      cam_stop_id,
+                    "data-preview-id":    prev_img_id,
+                    "data-hidden-marker": hidden_marker,
+                },
+                style={**_btn_base, "background": "#de5c52", "color": "#fff", "display": "none"},
+            ),
+            html.Div(
+                [html.I(className="fas fa-stop me-1"), "Stop"],
+                id=cam_stop_id,
+                **{"data-cam-video": cam_vid_id, "data-cam-btn": cam_btn_id, "data-cam-snap": cam_snap_id},
+                style={**_btn_base, "background": "#7d8ea3", "color": "#fff", "display": "none"},
+            ),
+        ], style={"display": "flex", "gap": "6px", "justifyContent": "center", "marginBottom": "6px"}),
+
+        html.Div(
+            id={"type": "image-preview", "entity": entity, "field": field},
+            style={"marginTop": "5px", "marginBottom": "15px"},
+            # Show what is already saved; a new upload/snap overwrites this div.
+            children=(
+                html.Img(
+                    src=f"/assets/{society_id}/{existing}" if (existing and society_id and "/" not in str(existing)) else existing,
+                    style={"maxWidth": "200px", "maxHeight": "150px", "borderRadius": "8px", "border": "1px solid #ddd"},
+                ) if existing else None
+            ),
+        ),
+        html.Img(id=prev_img_id, style={
+            "display": "none", "maxWidth": "100%", "maxHeight": "160px",
+            "borderRadius": "8px", "marginTop": "6px", "border": "1px solid #ddd",
+        }),
+        # value=existing keeps an already-saved image when nothing new is uploaded
+        # (fn_complete_society_setup COALESCEs, so re-sending the same name is a no-op).
+        # NOTE: the old duplicate {"type": "form-entity-pk", "entity": entity} hidden input
+        # that used to be emitted here (once per image field => 4 identical ids for
+        # entity "society") was the likely cause of the upload callback never firing;
+        # it was an unused State, and has been removed from handle_image_upload as well.
+        dcc.Input(id={"type": "form-field-hidden", "entity": entity, "field": field}, type="hidden", value=existing or ""),
+    ])
+
+
+def _render_banner(title, text):
+    return dbc.Card([
+        dbc.CardBody([
+            html.H6([html.I(className="fas fa-info-circle me-2"), title], className="text-primary mb-2"),
+            html.P(text, className="small text-muted mb-0")
+        ], className="p-3")
+    ], className="mb-4 shadow-sm border-0 bg-light")
+
+
+def pending_ca_banner(what):
+    """Warning shown wherever the admin types TDS / GST figures: they are provisional until the CA confirms them."""
+    return dbc.Alert([html.I(className="fas fa-exclamation-triangle me-2"), html.Strong("Pending CA confirmation. "),
+                      f"The {what} you enter here is provisional. Enter what your Chartered Accountant has advised; the CA "
+                      "can edit and confirm it later after logging in. A blank row is not saved (no figure is assumed)."],
+                     color="warning", className="py-2 mb-3", style={"fontSize": "12.5px"})
+
+
+def _central_acts_banner():
+    """Read-only table of the Central Acts (Layer 0). Nothing here is entered or chosen: figures go on the
+    'TAN & TDS Rates' and 'GSTIN & GST Rate' steps. Wording is deliberately conservative: the Income-tax Act, 2025
+    replaced the 1961 Act from 1 April 2026, and this app's section references still follow the 1961 Act."""
+    return dbc.Table([
+        html.Thead(html.Tr([html.Th("Central Act"), html.Th("What it means for your society"), html.Th("Where you enter it")])),
+        html.Tbody([
+            html.Tr([html.Td("Income-tax Act, 2025 (in force 1 April 2026; replaced the Income-tax Act, 1961)"),
+                     html.Td(["TAN, TDS on payments to vendors and contractors, and the mutuality position. ",
+                              html.Strong("Section references in this app still follow the 1961 Act"),
+                              " - your CA must re-map them for FY 2026-27 onward."]),
+                     html.Td("TAN & TDS Rates step (skipped if you answered TDS = No)")]),
+            html.Tr([html.Td("Central GST Act, 2017, and the UP GST Act, 2017 (state law mirroring it)"),
+                     html.Td("GST on maintenance above the per-member threshold, and reverse charge (RCM)."),
+                     html.Td("GSTIN & GST Rate step (skipped if you answered GST = No)")]),
+            html.Tr([html.Td("Real Estate (Regulation and Development) Act, 2016"),
+                     html.Td("Applies to registered projects and to the promoter's duties up to handover (maintenance until the "
+                             "association takes over, handover of common areas). It is not a compliance category for the "
+                             "association's own accounts."),
+                     html.Td("Nothing to enter")]),
+        ]),
+    ], bordered=True, size="sm", style={"fontSize": "12.5px"})
+
+
+def _render_tds_rates_table():
+    """Render the TDS rates table for the TAN & TDS Rates step."""
+    from database.seed import tds_wizard_rows
+    header = html.Div([
+        _th("Section", "Income Tax Act section the TDS is deducted under (e.g. 194C contractors, 194J professionals)."),
+        _th("Discriminator", "Sub-category inside a section (for example payee type). Fixed by the seed data."),
+        _th("Nature of Income", "Description of the payment this row covers. Editable."),
+        _th("Rate (%)", "TDS rate when the payee has a PAN."),
+        _th("No Pan (%)", "Higher rate when the payee has no PAN (Sec. 206AA, typically 20%)."),
+        _th("Single Bill (₹)", "A single bill above this amount attracts TDS."),
+        _th("Aggregate (₹)", "TDS applies once total payments to a payee in the financial year exceed this."),
+    ], className="sw-grid-row sw-tds-grid sw-grid-head")
+
+    rows = []
+    for idx, item in enumerate(tds_wizard_rows()):
+        section, discriminator, nature, rate, rate_no_pan, single_bill, agg_bill = item[:7]  # seed rows also carry eff_from / act_version / section_2025
+        rows.append(html.Div([
+            html.Div(dbc.Input(id={"type": "tds-section", "index": idx}, value=section, readonly=True, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-discriminator", "index": idx}, value=discriminator or "", readonly=True, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-nature", "index": idx}, value=nature, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-rate", "index": idx}, type="number", value=None, placeholder=str(rate), step=0.1, min=0, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-rate-no-pan", "index": idx}, type="number", value=None, placeholder=str(rate_no_pan), step=0.1, min=0, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-single-bill", "index": idx}, type="number", value=None, placeholder=str(single_bill), min=0, size="sm")),
+            html.Div(dbc.Input(id={"type": "tds-agg-bill", "index": idx}, type="number", value=None, placeholder=str(agg_bill), min=0, size="sm")),
+        ], className="sw-grid-row sw-tds-grid"))
+    return html.Div([header] + rows, className="sw-hscroll")
+
+
+def _society_state(society_id):
+    if not society_id:
+        return None
+    try:
+        row = db._execute("SELECT state FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+        return (row or {}).get("state") or None
+    except Exception:
+        return None
+
+
+FUND_NAMES = {
+    "sinking": "Sinking Fund",
+    "repair": "Repair & Maintenance Fund",
+    "reserve": "Reserve Fund",
+    "major_repair": "Major Repair Fund",
+    "ifms_corpus": "IFMS Corpus",
+}
+FUND_MODE_LABELS = {"on_bill": "On every maintenance bill", "fy_close": "At year close, from surplus", "none": "Not collected"}
+FUND_BASIS_LABELS = {"per_sq_ft": "Per sq ft of apartment area", "construction_cost": "% of construction cost per year, shared by undivided interest",
+                     "undivided_interest": "Society's monthly fund amount, shared by undivided interest"}
+FUND_BASES = ("per_sq_ft", "construction_cost", "undivided_interest")
+
+
+# UP AOA fund catalogue (status, rate, applicability) lives in app/services/up_aoa_fund_catalog.py so the Funds step
+# and the Brought Forward step read one source. UP_AOA_FUNDS keeps its old name and legacy keys.
+from app.services.up_aoa_fund_catalog import (UP_AOA_FUNDS, bf_info as _bf_fund_info, fund_facts as _fund_facts,  # noqa: E402
+                                              status_spec as _fund_status_spec, verify_spec as _fund_verify_spec)
+
+
+def _fund_badge(text, colour, **kw):
+    return dbc.Badge(text, color=colour, pill=True, className=kw.pop("className", "me-1"),
+                     text_color="dark" if colour == "warning" else None, **kw)
+
+
+def _fund_facts_block(fund):
+    """Applicability / when levied / rate / use / source / verification, as small label: text lines."""
+    return html.Div([html.Small([html.B(f"{lbl}: "), txt], className="text-muted d-block mb-1")
+                     for lbl, txt in _fund_facts(fund)], className="mb-2")
+
+
+def fund_status_children(fund, opted=None):
+    """The status + verification badges of a fund card.
+
+    `opted` is None for funds whose status does not depend on a choice. For an Optional fund it says whether the
+    society has actually answered Yes: until then the badge reads just "Optional" (not "opted by Society")."""
+    st_text, st_col = _fund_status_spec(fund)
+    if opted is not None and fund.get("status") == "optional" and not opted:
+        st_text = "Optional"
+    v_text, v_col = _fund_verify_spec(fund)
+    return [_fund_badge(st_text, st_col), _fund_badge(v_text, v_col)]
+
+
+def _fund_status_badges(fund, opted=None, fund_key=None):
+    # fund_key gives the block an id so the Funds step can refresh it live when the Yes / No answer changes
+    return html.Div(fund_status_children(fund, opted), className="mb-2",
+                    **({"id": f"sw-fund-{fund_key}-status"} if fund_key else {}))
+
+
+_SUPPORT_ORDER = ("automatic", "partial", "manual")
+
+
+def _fund_register_card(fp, sink_rate, repair_rate, dep_opted=False):
+    """Funds this society holds (prescribed + opted), their live parameters and where each is appropriated."""
+    from database.seed import ACCOUNTS
+    from app.services.up_aoa_fund_catalog import FUNDS, register_rows
+    modes = {k: fp["plan"][k]["mode"] for k in ("sinking", "repair")}
+    modes["depreciation"] = "fy_close" if dep_opted else "none"      # appropriated once a year, only if opted
+    names = {a[0]: a[1] for a in ACCOUNTS}      # a[1] is accounts.name
+    values = {"apt_sinking_fund_rate": sink_rate or None, "apt_repair_fund_rate": repair_rate or None}
+    for k in ("sinking", "repair"):
+        p = fp["plan"][k]
+        values.update({f"levy_{k}_fund": p["levy"], f"{k}_fund_collection": p["mode"], f"{k}_fund_basis": p["basis"]})
+    blocks = []
+    for r in register_rows(modes, names, values):
+        st_text, st_col = _fund_status_spec(FUNDS[r["key"]])
+        v_text, v_col = _fund_verify_spec(FUNDS[r["key"]])
+        route_rows = [html.Tr([html.Td(x["trigger"]), html.Td(x["dr"]), html.Td(x["cr"]), html.Td(x["when"]),
+                               html.Td(html.Small(x["function"], className="text-muted"))]) for x in r["routes"]]
+        blocks.append(html.Div([
+            html.Div([html.Strong(r["name"] + "  "), _fund_badge(st_text, st_col), _fund_badge(v_text, v_col)], className="mb-1"),
+            html.Small([html.B("Held in account: "), r["account"],
+                        " \u2014 shared with the Reserve Fund / Repair & Maintenance Fund pair." if r["shares_account"] else ""],
+                       className="d-block text-muted mb-1"),
+            html.Small([html.B("Parameters: "), "; ".join(f"{a}: {b}" for a, b in r["parameters"])], className="d-block text-muted mb-1"),
+            dbc.Table([html.Thead(html.Tr([html.Th("Trigger"), html.Th("Debit"), html.Th("Credit"), html.Th("When"), html.Th("Engine")])),
+                       html.Tbody(route_rows)], bordered=True, size="sm", className="mb-3", style={"fontSize": "11.5px"}),
+        ]))
+    held = {r["key"] for r in register_rows(modes, names, values)}
+    not_opted = [FUNDS[k]["name"] for k in ("sinking", "repair", "depreciation") if k not in held]
+    foot = (html.Small("Not opted by this society (no balance, no billing, hidden from Brought Forward): " + ", ".join(not_opted)
+                       + ". Choose 'Yes' above to opt in.", className="text-muted d-block") if not_opted else None)
+    return dbc.Card([dbc.CardHeader(html.Strong("Fund register \u2014 funds this society holds, and where each is appropriated")),
+                     dbc.CardBody([*blocks] + ([foot] if foot else []))], className="mb-3 shadow-sm")
+
+
+def _ifms_slab_card():
+    """UP RERA Reg. 47(d) IFMS rates by project type and house category, with what the text does not say."""
+    from app.services.up_aoa_fund_catalog import IFMS_NOTES, IFMS_PROJECT_TYPES, IFMS_SLABS
+
+    def area(r):
+        lo, hi = r["area_sqm_from"], r["area_sqm_to"]
+        return "\u2014" if lo is None and hi is None else f"{lo}\u2013{hi}" if lo is not None and hi is not None else (f"above {lo}" if hi is None else f"up to {hi}")
+
+    rows = []
+    for ptype, label in IFMS_PROJECT_TYPES.items():
+        for r in IFMS_SLABS[ptype]:
+            rate = f"\u20b9{r['rate_min']}" if r["rate_min"] == r["rate_max"] else f"\u20b9{r['rate_min']}\u2013{r['rate_max']}"
+            rows.append(html.Tr([html.Td(label), html.Td(r["label"]), html.Td(area(r)), html.Td(html.B(rate + " per sq ft"))]))
+    return dbc.Card([dbc.CardHeader(html.Strong("IFMS rates \u2014 UP RERA Regulation 47(d), collected by the promoter at deed registration")),
+                     dbc.CardBody([dbc.Table([html.Thead(html.Tr([html.Th("Project type"), html.Th("Category"), html.Th("Carpet / plot area (sq m)"), html.Th("Rate")])),
+                                              html.Tbody(rows)], bordered=True, size="sm", style={"fontSize": "11.5px"}),
+                                   *[html.Small(n, className="text-muted d-block mb-1") for n in IFMS_NOTES],
+                                   html.Small("Slabs as supplied by the society's administrator from Notification No. 7098/UPRERA/Regulation/2026-27; "
+                                              "the notification itself was not independently read.", className="text-muted d-block")])],
+                    className="mb-3 shadow-sm")
+
+
+def _billing_channels_card():
+    """The nine ways money reaches the books, and whether the engine does it or the admin must."""
+    from app.services.up_aoa_fund_catalog import BILLING_CHANNELS, FUNDS, SUPPORT_META
+    rows = []
+    for c in BILLING_CHANNELS:
+        t, col = SUPPORT_META[c["support"]]
+        rows.append(html.Tr([
+            html.Td(str(c["no"])), html.Td(html.B(c["channel"])),
+            html.Td(", ".join(FUNDS[k]["name"] for k in c["funds"]) or "\u2014"),
+            html.Td(_fund_badge(t, col)), html.Td([c["how"], html.Br(), html.Small(c["engine"], className="text-muted")]),
+        ]))
+    return dbc.Card([dbc.CardHeader(html.Strong("How each fund is billed")),
+                     dbc.CardBody(dbc.Table([html.Thead(html.Tr([html.Th("#"), html.Th("Channel"), html.Th("Funds"), html.Th("In this app"),
+                                                                 html.Th("How it works")])), html.Tbody(rows)],
+                                            bordered=True, size="sm", style={"fontSize": "11.5px"}))], className="mb-3 shadow-sm")
+
+
+def fund_effective(statutory, regime_mode, regime_basis, levy, collection, basis_pick):
+    """(mode, basis) a fund ends up with.
+
+      statutory   : the state prescribes the fund -> on every bill, shared by construction cost, no resolution needed
+      collection / basis_pick : the society's explicit choice, or 'regime_default' to keep the regime's default basis
+      levy        : a Sinking / Repair fund is NEVER opted in automatically. Unless the society answers 'yes' (or names a
+                    collection mode itself) the fund is not collected, whatever the regime's default mode is.
+
+    The SQL function fn_fund_rule still honours a regime whose default mode is on_bill (GENERIC), but a fund the society
+    did not opt into is stored with rate 0 on submit, so nothing is billed.
+    """
+    if statutory:
+        return "on_bill", "construction_cost"
+    mode, basis = "none", regime_basis or "none"
+    if collection in ("on_bill", "fy_close", "none"):
+        mode = collection
+    elif levy == "yes":
+        mode = regime_mode if regime_mode in ("on_bill", "fy_close") else "on_bill"
+    if basis_pick in FUND_BASES:
+        basis = basis_pick
+    if mode == "on_bill" and basis not in FUND_BASES:
+        basis = "per_sq_ft"
+    return mode, basis
+
+
+def fund_rate_label(basis):
+    return {"per_sq_ft": "Rate (₹ per sq ft per month)",
+            "construction_cost": "Rate (% of project construction cost per year)",
+            "undivided_interest": "Monthly fund amount for the whole society (₹)"}.get(basis, "Rate")
+
+
+def fund_plan(society_id=None, state=None, chosen=None, constitution=None):
+    """Per fund: is it prescribed or optional, and the mode / basis it ends up with.
+
+    `chosen` ({policy_key: value}) overrides what is stored: the Funds step passes the live drop-down values so the
+    screen follows the admin's clicks; everything else reads the saved (provisional or active) choice."""
+    from app.services.statutory_rules import fund_rules_for_state, fund_collection_for_regime, scheme_for
+    from app.services import regime_rules_admin as rra
+    picked_state = state if state else _society_state(society_id)
+    rules = fund_rules_for_state(picked_state)
+    if not constitution and society_id:      # the live dropdown wins; otherwise what the society has saved
+        _row = db._execute("SELECT constitution FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+        constitution = (_row or {}).get("constitution")
+    regime = scheme_for(picked_state, constitution)      # the scheme the billing engine will use
+    reg_mode, reg_basis = fund_collection_for_regime(regime)
+    chosen = chosen or {}
+
+    def pick(key):
+        if key in chosen and chosen[key]:
+            return chosen[key]
+        return rra.policy_intent(society_id, key) if society_id else rra.policy_default(key)
+
+    plan = {}
+    for fund in ("sinking", "repair"):
+        statutory = rules[fund]["mode"] == "statutory"
+        mode, basis = fund_effective(statutory, reg_mode, reg_basis, pick(f"levy_{fund}_fund"),
+                                     pick(f"{fund}_fund_collection"), pick(f"{fund}_fund_basis"))
+        plan[fund] = {"statutory": statutory, "min_pct": rules[fund]["min_pct"], "mode": mode, "basis": basis,
+                      "levy": pick(f"levy_{fund}_fund"), "regime_mode": reg_mode, "regime_basis": reg_basis}
+    return {"rules": rules, "regime": regime, "plan": plan,
+            "sinking": plan["sinking"]["mode"] == "on_bill", "repair": plan["repair"]["mode"] == "on_bill"}
+
+
+def fund_flags(society_id=None, state=None, constitution=None):
+    """Which fund RATE inputs the wizard should ask for: a fund needs a rate only if it is collected on the bill.
+    (Kept for existing callers; the full answer, with mode and basis, is fund_plan().)"""
+    p = fund_plan(society_id, state, constitution=constitution)
+    return {"rules": p["rules"], "sinking": p["sinking"], "repair": p["repair"], "plan": p["plan"], "regime": p["regime"]}
+
+
+# render_category_content() imports fund_plan locally in its Funds branch, which makes the bare name a local variable
+# for the whole function; other branches read the module-level function through this alias instead.
+_fund_plan_fn = fund_plan
+
+
+def funds_error(plan, sink_rate, repair_rate, project_cost):
+    """First problem in the fund answers, or None. A fund collected on every bill needs a rate above 0 (and at least the
+    statutory minimum where the state prescribes one); a construction-cost basis needs the project's construction cost."""
+    for fund, rate in (("sinking", sink_rate), ("repair", repair_rate)):
+        f = plan[fund]
+        if f["mode"] != "on_bill":
+            continue
+        try:
+            r = float(rate or 0)
+        except (TypeError, ValueError):
+            r = 0.0
+        name = FUND_NAMES[fund]
+        if r <= 0:
+            return f"Funds: the {name} is collected on every bill, so its rate is required (above 0)."
+        if f["statutory"] and f["min_pct"] is not None and r < float(f["min_pct"]):
+            return f"Funds: the {name} rate is below the statutory minimum of {f['min_pct']}% of construction cost per year."
+        if f["basis"] == "construction_cost":
+            try:
+                ok = D(project_cost) > 0
+            except (TypeError, ValueError):
+                ok = False
+            if not ok:
+                return f"Funds: the {name} is shared by construction cost, so enter the Construction Cost of Project on Apartment Charges."
+    return None
+
+
+def fund_hint(f, regime):
+    """Sentence under a fund's rate field, for the fund's current mode / basis."""
+    from app.services.statutory_rules import regime_reserve_pct
+    if f["mode"] == "none":
+        return "Not collected."
+    if f["mode"] == "fy_close":
+        return (f"Nothing is added to the monthly bill. The reserve is built at financial-year close: {regime_reserve_pct(regime):g}% of net surplus "
+                "goes to the Reserve Fund as one collective pool (a General Body resolution can change the share).")
+    return {"per_sq_ft": "Billed with every maintenance bill: area x this rate.",
+            "construction_cost": "Billed with every maintenance bill: project construction cost x this rate ÷ 12, shared by each flat's undivided-interest %.",
+            "undivided_interest": "Billed with every maintenance bill: this amount shared by each flat's undivided-interest %."}[f["basis"]]
+
+
+def fund_note(flags, regime):
+    """One-line explanation shown above the fund fields."""
+    r = flags["rules"]
+    if r["sinking"]["mode"] == "statutory" or r["repair"]["mode"] == "statutory":
+        return (f"{regime} prescribes minimum Sinking / Repair fund rates "
+                f"(sinking {r['sinking']['min_pct']}% , repair {r['repair']['min_pct']}% of construction cost per year).")
+    from app.services.statutory_rules import fund_collection_for_regime
+    mode, basis = fund_collection_for_regime(regime)   # regime default, before the society's own choice on the Funds step
+    if mode == "fy_close":
+        return (f"{regime}: no fixed Sinking / Repair fund rate was found, so by default nothing is added to the monthly bill. "
+                "Reserves are built from the year's surplus at financial-year close. To levy a fund on every bill instead, opt in on the "
+                "Funds step (or Stage 6, Adoption, after activation); a rate entered here is billed only once that General Body resolution is recorded.")
+    if mode == "none":
+        return f"{regime} collects no Sinking or Repair fund. None is being levied."
+    if flags["sinking"] or flags["repair"]:
+        return (f"{regime} sets no statutory rate; these funds are added to each monthly bill at the rate you enter, "
+                f"shared by default {basis.replace('_', ' ')}. Choose the basis on the Funds step.")
+    return (f"{regime} does not prescribe a Sinking or Repair fund. None is being levied. To levy one, opt in on the "
+            "Funds step (or Stage 6, Adoption, after activation).")
+
+
+def regime_badge(state_code, constitution=None):
+    """Society Details: the legal regime the picked State + Constitution put the society under, by name."""
+    from app.services.statutory_rules import regime_selection
+    if not state_code:
+        return html.Small("Select a State, then a Constitution, to see the legal regime that applies.", className="text-muted")
+    sel = regime_selection(state_code, constitution)
+    parts = [html.Span([html.B("Legal regime: "), dbc.Badge(sel["regime"], color="primary" if sel["dedicated"] else "secondary", className="me-2"),
+                        html.Span(sel["name"] or "", className="small")])]
+    if sel["status"] == "draft":
+        parts.append(dbc.Badge("draft", color="warning", text_color="dark", className="ms-2"))
+    parts.append(html.Div(
+        f"{sel['constitution_label']} in this State is governed by the central Acts, the State Act, its Rules and the Model Bye-Laws bundled in {sel['regime']}."
+        if sel["dedicated"] else
+        f"No State Act / Rules / Model Bye-Laws pack is seeded for {sel['constitution_label']} in this State yet, so only the central laws "
+        f"(regime GENERIC) apply. Confirm the applicable law with an advocate.",
+        className="small text-muted" if sel["dedicated"] else "small text-warning mt-1"))
+    return html.Div(parts)
+
+
+def state_thresholds_rows(state_code):
+    """Society Compliance: thresholds for ALL-India plus only the picked state (was: every state's)."""
+    from database.seed import STATE_COMPLIANCE_THRESHOLDS
+    from app.services.statutory_rules import normalize_state
+    st = normalize_state(state_code)
+    rows = []
+    for (state, key, val, val_text, unit, eff_from, eff_to, notes) in STATE_COMPLIANCE_THRESHOLDS:
+        if state not in ("ALL", st) or eff_to is not None:
+            continue
+        rows.append(dbc.Row([dbc.Col(html.B(state), width=1), dbc.Col(html.Span(key, className="small text-muted"), width=3),
+                             dbc.Col(html.Span(val if val is not None else (val_text or "no floor"), className="small fw-bold"), width=2),
+                             dbc.Col(html.Span(unit or "", className="small text-muted"), width=1),
+                             dbc.Col(html.Span(notes or "", className="small text-muted"), width=5)], className="mb-2"))
+    return rows
+
+
+# ── Apartment Charges: society-default billing basis ───────────────────────
+BILLING_BASIS_OPTIONS = [
+    {"label": "Undivided Interest (monthly budget x flat's % of undivided interest)", "value": "undivided_interest"},
+    {"label": "Per Sq Ft (rate x apartment area)", "value": "per_sqft"},
+    {"label": "Fixed Amount per Apartment", "value": "fixed"},
+]
+BASIS_NEEDS = {   # basis -> (field label, key)
+    "undivided_interest": ("Monthly Common-Expense Budget (₹)", "budget"),
+    "per_sqft": ("Default Rate per sq ft (₹)", "rate"),
+    "fixed": ("Default Fixed Amount (₹)", "amt"),
+}
+
+
+def apt_charges_error(basis, budget, rate, amt):
+    """Message if the field the chosen billing basis needs is missing or 0, else None."""
+    need = BASIS_NEEDS.get(basis or "undivided_interest")
+    if not need:
+        return "Apartment Charges: choose a Maintenance Billing Basis."
+    label, key = need
+    try:
+        ok = D({"budget": budget, "rate": rate, "amt": amt}[key]) > 0
+    except (TypeError, ValueError):
+        ok = False
+    if not ok:
+        return f"Apartment Charges: '{label}' is required (above 0) for the selected billing basis."
+    return None
+
+
+def basis_hint(basis):
+    label, _ = BASIS_NEEDS.get(basis or "undivided_interest", BASIS_NEEDS["undivided_interest"])
+    extra = (" Each flat also needs its undivided-interest % (area share is used until the Declaration figures are entered after enrolment)."
+             if (basis or "undivided_interest") == "undivided_interest" else "")
+    return dbc.Alert([html.I(className="fas fa-hand-point-up me-2"), html.Strong("Required for this basis: "), label + "." + extra],
+                     color="warning", className="py-2 mb-3", style={"fontSize": "12.5px"})
+
+
+# ── Legal Hierarchy: instruments as links ─────────────────────────────────
+_UNVERIFIED_URLS = {"https://indiankanoon.org/doc/1987654321/"}   # placeholder-looking seed ID, never surface
+
+
+def _usable_url(url):
+    u = (url or "").strip()
+    return u if u.lower().startswith(("http://", "https://")) and u not in _UNVERIFIED_URLS else None
+
+
+def _instrument_link(title, url, year=None):
+    text = title + (f" ({year})" if year else "")
+    u = _usable_url(url)
+    if not u:
+        return html.Span(text)
+    return html.A([text, html.I(className="fas fa-external-link-alt ms-1", style={"fontSize": "9px"})],
+                  href=u, target="_blank", rel="noopener noreferrer")
+
+
+def _office_bearer_status(society_id):
+    """Read-only status of the three serving office-bearers on the Administrator step. Incomplete ones link back to Stage 2."""
+    if not society_id:
+        return html.Div()
+    try:
+        rows = db._execute(
+            """SELECT v.office_code, v.holder_name, v.complete, v.missing, a.flat_number
+                 FROM v_office_bearer_completeness v LEFT JOIN apartments a ON a.id = v.apartment_id
+                WHERE v.society_id = :s ORDER BY v.office_code, v.holder_name""", {"s": society_id}, fetch_all=True) or []
+    except Exception:
+        return html.Div()
+    seated = {r["office_code"] for r in rows}
+    items = []
+    for r in rows:
+        if r["complete"]:
+            items.append(html.Li([f"{r['office_code'].replace('_', ' ').title()}: {r['holder_name']} (flat {r['flat_number'] or '?'}) - ",
+                                  html.Span("complete", style={"color": "#17976e"})]))
+        else:
+            items.append(html.Li([f"{r['office_code'].replace('_', ' ').title()}: {r['holder_name']} (flat {r['flat_number'] or '?'}) - ",
+                                  html.Span("incomplete, missing " + ", ".join(r["missing"] or []), style={"color": "#b02a37"})]))
+    items += [html.Li([f"{o.replace('_', ' ').title()}: ", html.Span("not yet appointed", style={"color": "#b26a00"})])
+              for o in ("president", "secretary", "treasurer") if o not in seated]
+    complete = all((r.get("complete") for r in rows)) and len(seated) == 3
+    return html.Div([html.Div("Serving office-bearers", style={"fontWeight": "600", "fontSize": "13px"}),
+                     html.Ul(items, style={"fontSize": "12px"}) if items else html.Div("None appointed yet.", style={"fontSize": "12px"}),
+                     html.Div([
+                         dbc.Button("Complete missing details", id="onb-back-to-committee", color="secondary", size="sm", outline=True,
+                                    disabled=complete, style={"fontSize": "12px", "marginTop": "6px"}),
+                         html.Span("  Opens Stage 2 to finish mobile, signature image and election minutes for each officer.",
+                                   style={"fontSize": "11px", "color": "#888", "marginLeft": "8px"})],
+                        style={"marginTop": "6px"})], className="mb-3")
+
+
+LEGAL_ANSWER_DEFAULTS = {"central_it_tan": True, "central_tds": True, "central_gst": True, "central_rera": True,
+                         "has_employees": False, "has_security_agency": False}
+_OPERATIONAL_TRIGGERS = ("has_employees", "has_security_agency")
+
+# Status column of the Legal Hierarchy table: key -> (label, badge colour).
+LEGAL_STATUS = {
+    "locked": ("Locked", "success"),            # fixed by law: applies to every society, not a choice
+    "inactive": ("In-active", "secondary"),     # listed, but not triggered by the Yes/No answers, or superseded
+    "provisional": ("Provisional", "warning"),  # not final until adopted (society bye-laws before Stage 6, draft catalog rows)
+    "normal": ("Normal", "info"),               # General Body / Managing Committee layer
+}
+_MUTED = "#8a8f98"
+
+
+def legal_status_badge(key):
+    label, colour = LEGAL_STATUS[key]
+    return dbc.Badge(label, color=colour, text_color="dark" if colour == "warning" else None, pill=True, style={"fontSize": "10px"})
+
+
+def verification_badge(verified):
+    """green 'verified' / yellow 'unverified' (a row is verified only in Master Settings -> RWA Compliance)."""
+    return dbc.Badge("verified" if verified else "unverified", color="success" if verified else "warning",
+                     text_color=None if verified else "dark", pill=True, className="ms-1", style={"fontSize": "10px"})
+
+
+def _picked_state_constitution(society_id=None, state=None, constitution=None):
+    """(state, constitution) as the Society Details step has them: the live dropdown value when given (they are only
+    persisted on Next), else what is saved on the society. State defaults to DEFAULT_STATE when unset; constitution
+    defaults to AOA."""
+    st = (state or "").strip() or _society_state(society_id) or DEFAULT_STATE
+    const = (constitution or "").strip()
+    if not const and society_id:
+        try:
+            row = db._execute("SELECT constitution FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+        except Exception:                                                      # noqa: BLE001
+            row = None
+        const = (row or {}).get("constitution") or ""
+    return st, (const or "AOA").upper()
+
+
+def _state_label(state):
+    """Full State name for display ('UP' -> 'Uttar Pradesh'); the value as given when it is not a known code."""
+    raw = (state or "").strip()
+    if not raw:
+        return None
+    try:
+        from app.services.kpi_rule_links_service import get_states
+        return get_states().get(raw.upper()) or raw
+    except Exception:                                                          # noqa: BLE001
+        return raw
+
+
+def _saved_legal_answers(society_id=None):
+    """The six Yes/No answers of this step: the saved draft where there is one, else the defaults (Central Acts Yes,
+    Operational laws No). Without this the radios came back at their defaults after a reload and Next saved them over the draft."""
+    saved = {}
+    if society_id:
+        try:
+            from app.services import onboarding_service as _ob
+            saved = (_ob.load_draft(society_id) or {}).get("legal_regime") or {}
+        except Exception:                                                      # noqa: BLE001
+            saved = {}
+    return {k: (default if saved.get(k) is None else bool(saved.get(k))) for k, default in LEGAL_ANSWER_DEFAULTS.items()}
+
+
+def legal_hierarchy_rows(society_id=None, state=None, answers=None, constitution=None):
+    """Body rows of the Legal Hierarchy (Precedence Order) table. One row per instrument, highest level first.
+
+    Columns: Level | Name | Status.
+    * Name: the instrument (a link to its source text once verified) and a verification badge:
+      "verified" [green] / "unverified" [yellow]. A row is verified in Master Settings -> RWA Compliance, where a
+      Treasurer or an Auditor records the notification number, date and opinion reference. Until then it is shown
+      for information only and never drives enforcement.
+    * Status: "Locked" [green] fixed by law, applies to every society; "In-active" [grey] listed but not triggered
+      by the Yes/No answers (or superseded); "Provisional" [yellow] not final until adopted (society bye-laws before
+      Stage 6); "Normal" [light blue] General Body / Managing Committee layer.
+
+    The instruments come from the regime the State + Constitution select (the same one the billing engine and Annex A
+    use). A State + Constitution with no researched pack gets the Central Acts only.
+
+    `answers` maps the six Yes/No keys (central_it_tan, central_tds, central_gst, central_rera, has_employees,
+    has_security_agency) to booleans; a missing key takes its default. Returns (rows, {}).
+    """
+    from app.services.statutory_rules import (regime_selection, instruments_for_regime, instrument_applies, grouped_instruments,
+                                          normalize_state)
+    st, const = _picked_state_constitution(society_id, state, constitution)
+    regime = regime_selection(st, const)["regime"] or "GENERIC"
+    instruments = instruments_for_regime(regime)
+    answers = {**LEGAL_ANSWER_DEFAULTS, **(answers or {})}
+    try:
+        from app.services.kpi_rule_links_service import get_links_for_categories
+        central_links = get_links_for_categories(["central_acts"], state=normalize_state(st)).get("central_acts", [])
+    except Exception:                                                          # noqa: BLE001
+        central_links = []
+
+    def entry(r):
+        """(Name cell, status key) for one catalog instrument."""
+        applies, reason = instrument_applies(r, answers)
+        verified = r.get("verification") == "verified"
+        note = None
+        if r.get("status") == "superseded":
+            key, note = "inactive", "superseded, no longer in force"
+        elif (r.get("applies_when") or "always") == "info":
+            key, note = "locked", "informational"
+        elif applies:
+            key = "provisional" if r.get("status") == "draft" else "locked"
+        else:
+            key, note = "inactive", reason
+        year = r.get("enactment_year")
+        link = _instrument_link(r["title"], r.get("source_url") if verified else None, None if year and str(year) in r["title"] else year)
+        parts = [link, verification_badge(verified)]
+        if note:
+            parts.append(html.Span(f" — {note}", style={"color": _MUTED, "fontSize": "11px"}))
+        return html.Div(parts, style={"fontSize": "12px", **({"color": _MUTED} if key == "inactive" else {})}), key
+
+    def text_entry(text, key, strong=None):
+        body = [html.Span(text, className="text-muted")] + ([html.Strong(strong)] if strong else [])
+        return html.Div(body, style={"fontSize": "12px"}), key
+
+    operational = [r for r in instruments if r.get("applies_when") in _OPERATIONAL_TRIGGERS]
+    _op_ids = {id(r) for r in operational}
+    groups = grouped_instruments([r for r in instruments if id(r) not in _op_ids])
+
+    def of_types(*types):
+        return [entry(r) for t in types for r in groups.get(t, [])]
+
+    central_acts = of_types("Central Act")
+    if not central_acts:       # catalog not integrated: fall back to the official links
+        central_acts = [(html.Div([_instrument_link(l.label.split(" — ")[0], l.url), verification_badge(False)],
+                                  style={"fontSize": "12px"}), "locked") for l in central_links]
+    if operational:
+        operational_laws = [entry(r) for r in operational]
+    else:                      # catalog has no operational rows: say what the two questions switch on
+        operational_laws = []
+        for trig, label in (("has_employees", "Employees / labour laws"), ("has_security_agency", "Security agency / PSARA")):
+            on = answers.get(trig) is True
+            operational_laws.append((html.Div([html.Span(label), html.Span("" if on else f" — not triggered: you answered “No” to {trig.replace('_', ' ')}",
+                                                                          style={"color": _MUTED, "fontSize": "11px"})],
+                                              style={"fontSize": "12px", **({} if on else {"color": _MUTED})}), "locked" if on else "inactive"))
+
+    blocks = [
+        ("L0 Central Acts", central_acts),
+        ("L0 Central Rules & Notifications", of_types("Central Rules")),
+        ("L0 State Acts", of_types("Act")),
+        ("L0 State Rules", of_types("Rules", "Notification")),
+        ("L0 Model Bye-laws (notified)", of_types("Bye-laws")),
+        ("L0 Operational laws", operational_laws),
+        ("L1 Society-adopted Bye-laws", [text_entry("Before Stage 6 the Model Bye-Laws apply as notified; ", "provisional",
+                                                    "the society may adopt or vary them in Stage 6 (Adoption).")]),
+        ("L2 General Body Resolutions", [text_entry("Majority rules from decision_types (existing rule engine layer).", "normal")]),
+        ("L3 Board / Managing Committee", [text_entry("Meetings and decisions of the Managing Committee.", "normal")]),
+    ]
+    out = []
+    for label, entries in blocks:
+        entries = entries or [text_entry("None recorded for this regime.", "inactive")]
+        level = dbc.Badge(label, color="primary" if label.startswith("L0") else "secondary", pill=True, style={"fontSize": "10px"})
+        for i, (name, key) in enumerate(entries):
+            # The Level badge sits on the first row of its group; later rows keep an empty cell so the columns stay aligned
+            # in the printed view too (that renderer drops rowSpan).
+            first = {"borderTop": "2px solid #c9d2dc"} if i == 0 else {}
+            out.append(html.Tr([html.Td(level if i == 0 else "", style={"verticalAlign": "top", **first}),
+                                html.Td(name, style={"verticalAlign": "top", "fontSize": "12px", **first}),
+                                html.Td(legal_status_badge(key), style={"verticalAlign": "top", **first})]))
+    return out, {}
+
+
+def _yn(v):
+    return "Yes" if v else "No"
+
+
+def render_review(draft, society_id=None):
+    """Review step body built from the SAVED DRAFT (never from live component State).
+
+    The draft is current because Next/Previous autosave first (§4.2). Master-owned values
+    (name / PAN / registration) come from the database. Returns a list of Dash components."""
+    draft = draft or {}
+    db_s = {}
+    if society_id:
+        db_s = db._execute("SELECT name, pan_number, registration_number FROM societies WHERE id = :id",
+                           {"id": society_id}, fetch_one=True) or {}
+
+    def num(x, d=0.0):
+        try:
+            return float(x if x not in (None, "") else d)
+        except (TypeError, ValueError):
+            return d
+
+    def rs(x):
+        return f"₹{num(x):,.2f}"
+
+    sd = draft.get("society_details") or {}
+    regime = draft.get("legal_regime") or {}
+    tds = draft.get("tds") or {}
+    gst = draft.get("gst") or {}
+    funds = draft.get("funds") or {}
+    accts = draft.get("accounts") or {}
+    bf = draft.get("brought_forward") or {}
+    images = dict(draft.get("images") or {})
+    if accts.get("pay_qr"):
+        images["pay_qr"] = accts["pay_qr"]          # the payment QR is saved under the Accounts step
+    admin = draft.get("administrator") or {}
+
+    basis = funds.get("apt_billing_basis") or "undivided_interest"
+    basis_label = {o["value"]: o["label"] for o in BILLING_BASIS_OPTIONS}.get(basis, basis)
+    problems = []
+    for label, val in (("Address", sd.get("address")), ("Email", sd.get("email")), ("Phone", sd.get("phone"))):
+        if not str(val or "").strip():
+            problems.append(f"{label} is empty (Society Details).")
+    if not sd.get("state"):
+        problems.append("State is not selected (Society Details): the legal regime cannot be assigned.")
+    err = apt_charges_error(basis, funds.get("apt_budget"), funds.get("apt_rate"), funds.get("apt_amt"))
+    if err:
+        problems.append(err)
+    if regime.get("central_tds") and not str(tds.get("tan") or "").strip():
+        problems.append("TDS applies but no TAN is entered (TAN & TDS Rates).")
+    if regime.get("central_gst") and not str(gst.get("gstin") or "").strip():
+        problems.append("GST applies but no GSTIN is entered (GSTIN & GST Rate).")
+    if regime.get("central_gst") and (gst.get("cgst") in (None, "") or gst.get("sgst") in (None, "")):
+        problems.append("GST applies but CGST / SGST are not entered: no GST rate will exist until your CA's figures are entered.")
+    if not str(admin.get("stepup_hash") or "").strip():
+        problems.append("Step-up password is not set (Administrator).")
+
+    # Brought Forward totals
+    bf_dr = bf_cr = Decimal(0)
+    bf_n = 0
+    try:
+        from database.seed import ACCOUNTS
+        drcr = {a[0]: a[5] for a in ACCOUNTS}
+        for r in bf.get("rows") or []:
+            a = money(r.get("bf_amount"))
+            if a:
+                bf_n += 1
+                if r.get("side") == "Dr":
+                    bf_dr += a
+                else:
+                    bf_cr += a
+    except Exception:
+        pass
+    if bf_n and bf_dr != bf_cr:
+        problems.append(f"Brought Forward does not balance: Dr ₹{bf_dr:,.2f} vs Cr ₹{bf_cr:,.2f}.")
+
+    # Receivables tie-out
+    rec_total = Decimal(0)
+    for r in bf.get("receivables") or []:
+        rec_total += money(r.get("amount"))
+    sdr_total = Decimal(0)
+    for r in bf.get("rows") or []:
+        if r.get("side") == "Dr" and r.get("tab") in ("SDr", "SDrCash", "SDrDig"):
+            sdr_total += money(r.get("bf_amount"))
+    if bf.get("receivables") and rec_total != sdr_total:
+        problems.append(f"Pending receivables (₹{rec_total}) do not tie to Sundry Debtors (₹{sdr_total}).")
+
+    tds_rows = tds.get("rows") or []
+    tds_entered = sum(1 for r in tds_rows if r.get("rate") not in (None, ""))
+
+    fund_rows = []
+    try:
+        fp = fund_plan(society_id, sd.get("state"), {})
+        for fund, rate in (("sinking", funds.get("apt_sinking")), ("repair", funds.get("apt_repair"))):
+            f = fp["plan"][fund]
+            status = "Prescribed by the state" if f["statutory"] else ("Opted in" if f["mode"] != "none" else "Not collected")
+            fund_rows.append((FUND_NAMES[fund], f"{status}; {FUND_MODE_LABELS[f['mode']].lower()}"))
+            if f["mode"] == "on_bill":
+                fund_rows.append((f"  {FUND_NAMES[fund]} basis and rate", f"{FUND_BASIS_LABELS[f['basis']]}: {num(rate):g}"))
+        _fe = funds_error(fp["plan"], funds.get("apt_sinking"), funds.get("apt_repair"), funds.get("apt_cost"))
+        if _fe:
+            problems.append(_fe)
+    except Exception:
+        fund_rows = [("Funds", "-")]
+
+    def yn(val):
+        return "Yes" if val else "No"
+
+    # Images with thumbnails
+    def thumb(key):
+        path = images.get(key)
+        if not path:
+            return "—"
+        return html.Img(src=f"/assets/{path}", style={"maxWidth": "120px", "maxHeight": "60px", "border": "1px solid #c9d2dc", "borderRadius": "4px", "marginTop": "4px"})
+
+    sections = [
+        ("Society Identity", [
+            ("Society Name (Master)", db_s.get("name") or "—"),
+            ("PAN (Master)", db_s.get("pan_number") or "—"),
+            ("Registration No. (Master)", db_s.get("registration_number") or "— (ask Master to enter it)"),
+            ("State", sd.get("state") or "—"),
+            ("Constitution", sd.get("constitution") or "—"),
+            ("Address", sd.get("address") or "—"),
+            ("Email", sd.get("email") or "—"),
+            ("Phone", sd.get("phone") or "—"),
+            ("Gate Pass Enforcement", str(sd.get("gate_logic") or "—").title()),
+            ("Security Duty Hours", f"{sd.get('duty_hrs') or '—'} hours"),
+            ("Logo", thumb("logo")),
+            ("Background image", thumb("bg")),
+        ]),
+        ("Founding committee", _committee_review_rows(society_id)),
+        ("Step-up password", [("Status", "Set — initial, replace within 30 days of activation")] if admin.get("stepup_hash") else [("Status", "Not set")]),
+        ("Legal regime & compliance", [
+            ("Regime code", str(sd.get("state") or "") + " / " + str(sd.get("constitution") or "")),
+            ("Income Tax - TAN required", yn(regime.get("central_it_tan"))),
+            ("TDS applicable", yn(regime.get("central_tds"))),
+            ("GST applicable", yn(regime.get("central_gst"))),
+            ("RERA applicable", yn(regime.get("central_rera"))),
+            ("Has employees", yn(regime.get("has_employees"))),
+            ("Security agency", yn(regime.get("has_security_agency"))),
+        ]),
+        ("Funds", [
+            ("Maintenance Billing Basis", basis_label),
+            ("Construction Cost of Project", rs(funds.get("apt_cost"))),
+            ("Monthly Common-Expense Budget", rs(funds.get("apt_budget"))),
+            ("Default Rate per sq ft", rs(funds.get("apt_rate"))),
+            ("Default Fixed Amount", rs(funds.get("apt_amt"))),
+            ("Billing Due Day", str(funds.get("apt_due_day") or "—")),
+            ("Sinking Fund Rate", f"{num(funds.get('apt_sinking')):g}" if funds.get("apt_sinking") not in (None, "") else "Not entered"),
+            ("Repair Fund Rate", f"{num(funds.get('apt_repair')):g}" if funds.get("apt_repair") not in (None, "") else "Not entered"),
+            ("Interest (% per month, simple)", (f"{num(funds.get('apt_interest')):g}%" if num(funds.get("apt_interest")) > 0
+                                                else "Not set: no interest is charged on overdue dues until the General Body rate is entered")),
+        ]),
+        ("Funds (Sinking / Repair)", fund_rows),
+        ("TAN & TDS", [
+            ("TAN", tds.get("tan") or "—"),
+            ("TDS effective date", tds.get("effective_date") or "—"),
+            ("TDS rate rows entered (pending CA confirmation)", tds_entered),
+        ]),
+        ("GST", [
+            ("GSTIN", gst.get("gstin") or "—"),
+            ("CGST / SGST (pending CA confirmation)",
+             (f"{num(gst.get('cgst')):g}% / {num(gst.get('sgst')):g}%" if gst.get("cgst") not in (None, "") and gst.get("sgst") not in (None, "")
+              else "Not entered")),
+        ]),
+        ("Vendor Pass Charges", [
+            ("1 Day Pass", f"₹{num(draft.get('vendor', {}).get('vendor_1day')):,.0f}"),
+            ("7 Day Pass", f"₹{num(draft.get('vendor', {}).get('vendor_7day')):,.0f}"),
+            ("1 Month Pass", f"₹{num(draft.get('vendor', {}).get('vendor_1mth')):,.0f}"),
+        ]),
+        ("Apartment Charges", []),
+        ("Accounts", [
+            ("Accounting/calculation start date", accts.get("calc_start") or "—"),
+            ("Payment QR", thumb("pay_qr") if accts.get("pay_qr") else "—"),
+        ]),
+        ("Brought Forward", [
+            ("Financial year", str(bf.get("fy") or "—")),
+            ("Accounts with an opening balance", bf_n),
+            ("Total Dr / Total Cr", f"₹{bf_dr:,.2f} / ₹{bf_cr:,.2f}"),
+        ]),
+        ("Pending receivables by apartment", _receivables_review_rows(bf)),
+        ("Reconciliation & evidence", _reconciliation_review_rows(bf)),
+    ]
+
+    def card(title, items):
+        rows = [html.Tr([html.Td(html.Strong(k), style={"width": "36%", "fontSize": "12px"}),
+                         html.Td(val, style={"fontSize": "12px"})]) for k, val in items if val is not None]
+        return dbc.Card([dbc.CardHeader(html.H6(title, className="mb-0", style={"fontSize": "13px"})),
+                         dbc.CardBody(dbc.Table([html.Tbody(rows)], bordered=False, size="sm", style={"marginBottom": "0"}), className="py-2")],
+                        className="mb-3 shadow-sm")
+
+    # Bye-law / policy choices ARE saved instantly (provisional), so the database is the right source for these.
+    bye_law_status, policy_status = [], []
+    if society_id:
+        try:
+            from app.services import regime_rules_admin as rra
+            for r in rra.list_society_bye_laws(society_id):
+                if r["layer"] == 1 and r["status"] == "provisional":
+                    bye_law_status.append(f"{r['clause_id']}: {r['proposed_status'].replace('_', ' ').title()}")
+            for k, pv in rra.list_society_policies(society_id).items():
+                if pv["proposed"]:
+                    policy_status.append(f"{k}: {pv['proposed']} (awaiting resolution)")
+        except Exception:
+            pass
+    ratification = []
+    if bye_law_status:
+        ratification.append(html.Li([html.Strong("Bye-Law Adoptions: "), html.Ul([html.Li(i, style={"fontSize": "11px"}) for i in bye_law_status])]))
+    if policy_status:
+        ratification.append(html.Li([html.Strong("Society Policies: "), html.Ul([html.Li(i, style={"fontSize": "11px"}) for i in policy_status])]))
+    if not ratification:
+        ratification = [html.Li("No pending ratifications.", className="text-muted", style={"fontSize": "12px"})]
+
+    attention = (dbc.Alert([html.Strong("Fix before you continue:"), html.Ul([html.Li(x) for x in problems], className="mb-0")], color="danger", className="py-2")
+                 if problems else dbc.Alert("Nothing missing in the steps checked above.", color="success", className="py-2"))
+    return [
+        _render_banner("Review & Confirm", "These are the values saved in your draft. Nothing is posted to the ledger until the Agreement is signed and the society is activated."),
+        attention,
+        html.Div([card(t, i) for t, i in sections]),
+        html.H6("Pending Ratification Checklist", className="text-primary mt-3 mb-2"),
+        html.P("These provisional choices need a General Body resolution to become active:", className="text-muted small mb-2"),
+        html.Ul(ratification, style={"fontSize": "12px"}),
+    ]
+
+
+def _committee_review_rows(society_id):
+    """Review rows for the three founding office-bearers (from the DB, not the draft)."""
+    try:
+        from app.services.onboarding_service import seated_officers, signature_url
+        officers = seated_officers(society_id)
+    except Exception:
+        officers = {}
+    rows = []
+    for office in ("president", "secretary", "treasurer"):
+        v = officers.get(office) or {}
+        name = v.get("holder_name") or "—"
+        flat = v.get("flat_number") or "—"
+        sig = v.get("signature_image")
+        sig_url = signature_url(society_id, sig)
+        sig_cell = html.Img(src=sig_url, style={"maxWidth": "100px", "maxHeight": "50px", "border": "1px solid #c9d2dc", "borderRadius": "4px", "marginTop": "3px"}) if sig_url else "no signature image"
+        rows.append((f"{office.replace('_', ' ').title()} — name", name))
+        rows.append((f"{office.replace('_', ' ').title()} — flat", flat))
+        rows.append((f"{office.replace('_', ' ').title()} — signature image", sig_cell))
+        rows.append((f"{office.replace('_', ' ').title()} — mobile", v.get("phone") or "—"))
+        rows.append((f"{office.replace('_', ' ').title()} — completeness", "complete" if v.get("holder_name") and v.get("email") and v.get("phone") and v.get("signature_image") else "incomplete"))
+    return rows
+
+
+def _saved_receivables(society_id):
+    """Receivable rows already saved in the draft, so revisiting the step shows them (and Next does not wipe them)."""
+    try:
+        from app.services import onboarding_service as _ob
+        d = _ob.declaration(society_id) if society_id else None
+        rows = (((d or {}).get("draft") or {}).get("brought_forward") or {}).get("receivables") or []
+        out = []
+        for r in rows:
+            try:
+                amt = float(Decimal(str(r.get("amount"))))
+            except Exception:                                              # noqa: BLE001
+                amt = r.get("amount")
+            out.append({"flat_number": r.get("flat_number") or "", "amount": amt,
+                        "overdue_days": r.get("overdue_days"), "remarks": r.get("remarks") or ""})
+        return out
+    except Exception:                                                      # noqa: BLE001
+        return []
+
+
+def _receivables_review_rows(bf):
+    from app.services import pending_receivables as pr
+    raw = bf.get("receivables") or []
+    if not raw:
+        return [("Pending receivables", "None entered.")]
+    clean, errors = pr.clean_rows(raw)              # same rules as the grid; a bad amount must not crash Review
+    cell = {"fontSize": "12px"}
+    items = [html.Tr([html.Td(r["flat_number"], style=cell), html.Td(f"₹{Decimal(r['amount']):,.2f}", style=cell),
+                      html.Td("—" if r["overdue_days"] is None else str(r["overdue_days"]), style=cell),   # 0 days is a value
+                      html.Td(r["remarks"], style=cell)]) for r in clean]
+    items.append(html.Tr([html.Td(html.Strong("Total"), style=cell), html.Td(html.Strong(f"₹{pr.total(clean):,.2f}"), style=cell),
+                          html.Td(""), html.Td("")], style={"borderTop": "1px solid #999"}))
+    header = html.Tr([html.Th("Flat no.", style={"fontSize": "11px"}), html.Th("Value receivable (₹)", style={"fontSize": "11px"}),
+                      html.Th("Days overdue", style={"fontSize": "11px"}), html.Th("Remarks", style={"fontSize": "11px"})])
+    out = [("Pending receivables", dbc.Table([html.Thead(header), html.Tbody(items)], bordered=False, size="sm"))]
+    if errors:
+        out.append(("Receivable problems", html.Ul([html.Li(e) for e in errors], className="text-danger mb-0")))
+    return out
+
+
+def _saved_reconciliation(society_id):
+    try:
+        from app.services import onboarding_service as _ob
+        return _ob.get_bank_reconciliation(society_id) if society_id else {}
+    except Exception:                                                      # noqa: BLE001
+        return {}
+
+
+def _reconciliation_review_rows(bf):
+    rec = bf.get("reconciliation") or {}
+    if not rec:
+        return [("Reconciliation & evidence", "Not yet completed.")]
+    items = []
+    for key, val in rec.items():
+        if key.endswith("_sha256") or key.endswith("_stored"):
+            continue
+        items.append((key.replace("_", " ").title(), str(val)))
+    return [("Reconciliation & evidence", items if items else "Not yet completed.")]
+
+
+def legal_regime_live(society_id=None, state=None, constitution=None):
+    """'Your Legal Regime' card of the Legal Regime Selection step: State and Constitution (both chosen on Society Details)
+    and the regime they select.
+
+    `state` / `constitution` are the live Society Details dropdown values (they are only persisted on Next); when absent
+    we fall back to what is saved on the society. Re-rendered live by legal_regime_refresh when either dropdown changes.
+    """
+    from app.services.statutory_rules import regime_selection
+    st, const = _picked_state_constitution(society_id, state, constitution)
+    sel = regime_selection(st, const)
+    state_name = _state_label(st)
+
+    def fact(label, value):
+        return dbc.Col([html.Div(label, className="text-muted", style={"fontSize": "11px", "textTransform": "uppercase", "letterSpacing": ".04em"}),
+                        html.Div(value, style={"fontWeight": "600", "fontSize": "14px"})], md=4, className="mb-2")
+
+    if st:
+        regime_value = [dbc.Badge(sel["regime"], color="primary" if sel["dedicated"] else "secondary", className="me-2"),
+                        html.Span(sel["name"] or "", className="small fw-normal")]
+        if sel["status"] == "draft":
+            regime_value.append(dbc.Badge("draft", color="warning", text_color="dark", className="ms-1"))
+    else:
+        regime_value = html.Span("—", className="text-muted")
+
+    if not st:
+        note = dbc.Alert("Choose a State on the Society Details step. The legal regime is worked out from the State and the Constitution together.",
+                         color="warning", className="py-2 mb-0", style={"fontSize": "12.5px"})
+    elif sel["dedicated"]:
+        note = html.Div(f"{sel['constitution_label']} in {state_name} is governed by the Central Acts, the State Act, its Rules and the Model Bye-Laws bundled in "
+                        f"{sel['regime']}. They are listed, highest level first, in the Legal Hierarchy table below.", className="small text-muted")
+    else:
+        note = dbc.Alert(f"No State Act, Rules or Model Bye-Laws pack is available yet for {sel['constitution_label']} in {state_name}, so only the Central Acts "
+                         "apply (regime GENERIC). Confirm the applicable law with an advocate.", color="warning", className="py-2 mb-0", style={"fontSize": "12.5px"})
+    return [
+        dbc.Card(dbc.CardBody([
+            html.H6([html.I(className="fas fa-balance-scale me-2"), "Your Legal Regime"], className="text-primary mb-3"),
+            dbc.Row([fact("State", state_name or html.Span("not chosen", className="text-muted")),
+                     fact("Constitution", sel["constitution_label"]),
+                     fact("Legal regime", regime_value)]),
+            note,
+            html.Div("State and Constitution come from the Society Details step; change them there.", className="small text-muted mt-2"),
+        ]), className="mb-3 shadow-sm"),
+    ]
+
+
+def render_category_content(category, society_id=None, state=None, constitution=None):
+    """
+    Step body for one wizard category.
+
+    `state` is the Society Details State dropdown value; it is only persisted
+    on submit, so any step whose content depends on the state (the "UP AOA
+    Compliance" statutes) has to be re-rendered when the admin picks it — see
+    refresh_up_aoa_step_content in setup_wizard_callbacks.py.
+    """
+    elements = []
+    _imgs = _existing_society_images(society_id) if category in ("Society Details", "Administrator", "Accounts") else {}
+    
+    # Render conversational header(s) if available. A category can have more
+    # than one guidance row in conversation.xlsx (e.g. "Society Details" has
+    # both a Duty Hours tip and a State/Jurisdiction tip) — this used to
+    # take only the first match via next(...), so any row after the first
+    # for the same category was seeded correctly but never actually
+    # rendered. In particular the jurisdiction-aware State guidance row
+    # (added in an earlier audit) silently never appeared on screen because
+    # it wasn't the first "Society Details" row in the sheet. Now every
+    # matching row for the category renders as its own banner.
+    conv_infos = [item for item in CONVERSATION_DATA if item.get('Setup Wizard Category') == category]
+    for conv_info in conv_infos:
+        _conv_text = CONVERSATION_TEXT_OVERRIDES.get(category) or conv_info.get('Recommendation from Master to Admin')
+        if _conv_text:
+            elements.append(
+                dbc.Alert(
+                    [html.I(className="fas fa-lightbulb me-2"), _conv_text],
+                    color="info",
+                    className="mb-3",
+                    style={"fontSize": "13px"}
+                )
+            )
+        
+    # Print button for every step except those with their own print link
+    # (Instructions, Agreement) or that are filled in live by a callback (Review).
+    # It opens the clean /print_wizard/<category> view, not window.print().
+    if category not in ("Instructions", "Agreement", "Review"):
+        elements.append(
+            html.Div([
+                dbc.Button([html.I(className="fas fa-print me-2"), "Print / Open in New Window"], 
+                           id={"type": "sw-print-btn", "cat": category}, 
+                           color="outline-secondary", size="sm")
+            ], style={"textAlign": "right", "marginBottom": "15px"})
+        )
+
+    if category == "Society Details":
+        s_name, s_addr, s_pan, s_reg, s_phone, s_email, s_gate_logic, s_duty_hrs, s_state, s_constitution = "", "", "", "", "", "", "both", "8", DEFAULT_STATE, "AOA"
+        if society_id:
+            row = db._execute("SELECT name, address, phone, email, PAN_number, registration_number, gate_logic, duty_hrs, state, constitution FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            if row:
+                s_name = row.get("name", "") or ""
+                s_addr = row.get("address", "") or ""
+                s_phone = row.get("phone", "") or ""
+                s_email = row.get("email", "") or ""
+                s_pan = row.get("pan_number", row.get("PAN_number", "")) or ""
+                s_reg = row.get("registration_number", "") or ""
+                s_gate_logic = row.get("gate_logic", "both") or "both"
+                s_duty_hrs = row.get("duty_hrs", "8") or "8"
+                s_state = row.get("state", "") or DEFAULT_STATE
+                s_constitution = row.get("constitution", "AOA") or "AOA"
+        from app.services.kpi_rule_links_service import get_states
+        # Jurisdiction-aware statutory rules (fn_balance_sheet_fy statutory
+        # head mapping, state_compliance_thresholds sinking/repair-fund
+        # rates) are fully seeded for UP only today; other states show
+        # generic/Union-law figures until their own regime is seeded — see
+        # legal_regime_profiles.status ('active' vs 'draft'). This dropdown
+        # is also the society's ONLY write path for `societies.state`,
+        # which GST RCM interstate/intrastate determination
+        # (fn_compute_rcm / vendor.state comparison) depends on entirely —
+        # previously state had no UI at all and every RCM check silently
+        # fell back to guessing the state from the free-text address.
+        _state_choices = get_states()
+        state_options = [{"label": "— Select State —", "value": ""}] + [
+            {"label": f"{name}{' (jurisdiction-aware rules active)' if code == 'UP' else ''}", "value": code}
+            for code, name in _state_choices.items() if code != "ALL"
+        ]
+        constitution_options = [
+            {"label": "Apartment Owners' Association (AOA) - UP Apartment Act, 2010", "value": "AOA"},
+            {"label": "Registered Society - Societies Registration Act, 1860 (as amended in UP)", "value": "REG_SOCIETY"},
+            {"label": "Co-operative Housing Society - UP Co-operative Societies Act", "value": "COOP"},
+            {"label": "Generic / Other (central laws only)", "value": "GENERIC"},
+        ]
+        return elements + [
+            _render_banner("Society Details", "Enter society identity details. State + Constitution together select the legal regime. Name, PAN and Registration Number are set by Master and cannot be edited here. Logo and Background images are optional."),
+            _label("Society Name"),
+            dbc.Input(id="sw-society-name", type="text", required=True, className="mb-3", value=s_name, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
+            _label("Society Logo (Image)"),
+            _render_image_capture_control("society", "logo", _imgs.get("logo"), society_id),
+            _label("Address"),
+            dbc.Textarea(id="sw-society-address", required=True, className="mb-3", value=s_addr),
+            _field_feedback("sw-society-address-feedback"),
+            _label("State", html_for="sw-society-state"),
+            dbc.Select(id="sw-society-state", options=state_options, value=s_state, className="mb-1"),
+            _label("Constitution", html_for="sw-society-constitution"),
+            dbc.Select(id="sw-society-constitution", options=constitution_options, value=s_constitution, className="mb-3"),
+            html.Div(id="sw-regime-badge", children=regime_badge(s_state, s_constitution), className="mb-2"),
+            html.P(
+                "State + Constitution together select the legal regime (Central Acts → State Act → Rules → Model Bye-laws → "
+                "Society Bye-laws → Policy / Resolutions → Board). In UP an AOA is itself registered as a society; "
+                "the Apartment Act applies on top. "
+                "Drives GST inter-state (IGST) vs intra-state (CGST+SGST) determination on RCM, and which "
+                "state's statutory Balance Sheet head-mapping / fund-rate defaults apply.",
+                className="text-muted small mb-3",
+            ),
+            _label("Email"),
+            dbc.Input(id="sw-society-email", type="email", required=True, className="mb-3", value=s_email),
+            _field_feedback("sw-society-email-feedback"),
+            _label("Phone Number"),
+            dbc.Input(id="sw-society-phone", type="tel", required=True, className="mb-3", value=s_phone),
+            _field_feedback("sw-society-phone-feedback"),
+            _label("PAN Number"),
+            dbc.Input(id="sw-society-pan", type="text", required=True, className="mb-3", value=s_pan, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
+            _label("Registration Number"),
+            dbc.Input(id="sw-society-reg", type="text", className="mb-1", value=s_reg, readonly=True, style={"opacity": "0.7", "backgroundColor": "#e9ecef"}),
+            html.Small("Entered by Master. Contact Master to change it." if s_reg else "Not entered yet. Ask Master to add your registration number.", className="text-muted d-block mb-3"),
+            _field_feedback("sw-society-reg-feedback"),
+            _label("Gate Pass Enforcement"),
+            dbc.Select(id="sw-gate-logic", options=[{"label": "Deny Both Entry and Exit", "value": "both"},
+                                                     {"label": "Deny Entry Only", "value": "entry"},
+                                                     {"label": "Deny Exit Only", "value": "exit"}],
+                       value=s_gate_logic, className="mb-3"),
+            _label("Security Duty Hours"),
+            dbc.Select(id="sw-duty-hrs", options=[{"label": "8 Hours (morning, evening, night)", "value": "8"},
+                                                   {"label": "12 Hours (day, night)", "value": "12"}],
+                       value=s_duty_hrs, className="mb-3"),
+            _label("Login Background (Image)"),
+            _render_image_capture_control("society", "bg", _imgs.get("bg"), society_id),
+        ]
+    elif category == "Legal Regime Selection":
+        # The six Yes/No answers come from the saved draft, so they survive a reload and the table below starts out right.
+        lr = _saved_legal_answers(society_id)
+
+        def yes_no(component_id, key):
+            return dbc.RadioItems(id=component_id, options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}],
+                                  value=lr[key], inline=True, className="mb-3")
+
+        try:
+            hierarchy_rows, _ = legal_hierarchy_rows(society_id, state, lr, constitution)
+        except Exception:                                                      # noqa: BLE001
+            _log.exception("Legal Hierarchy could not be rendered")
+            hierarchy_rows = []
+        return elements + [
+            _render_banner("Legal Regime Selection", "Your State and Constitution, chosen on the Society Details step, decide which Acts, Rules and Bye-laws govern the society. "
+                                                     "A lower level can never loosen a higher one."),
+            # State/Constitution are only persisted on Next, so this card is re-rendered live from the Society Details dropdowns
+            # (legal_regime_refresh). It is its own container so that re-rendering does not reset the radios further down this step.
+            html.Div(id="sw-legal-regime-live", children=legal_regime_live(society_id, state, constitution)),
+            html.Hr(),
+            html.H6([html.I(className="fas fa-sliders-h me-2"), "Central Act Settings"], className="text-primary mt-3 mb-2"),
+            html.P("The Central Acts below apply to every society whatever you answer; nothing here is a choice. What depends on your society's facts is whether a duty "
+                   "under them has been triggered (a GST registration threshold, TDS on payments you make). All answers default to Yes; "
+                   "answer No only on your CA's advice. TDS = No hides the TAN & TDS Rates step and GST = No hides the GSTIN & GST Rate step:", className="text-muted small mb-3"),
+            dbc.Row([
+                dbc.Col([_label("Income Tax — TAN Required?"), yes_no("sw-central-it-tan", "central_it_tan")], width=6),
+                dbc.Col([_label("TDS Applicable?"), yes_no("sw-central-tds", "central_tds")], width=6),
+            ]),
+            dbc.Row([
+                dbc.Col([_label("GST Applicable?"), yes_no("sw-central-gst", "central_gst")], width=6),
+                dbc.Col([_label("RERA - is the project RERA-registered? (handover rules only)"), yes_no("sw-central-rera", "central_rera")], width=6),
+            ]),
+            html.H6("Operational Laws (Yes / No)", className="text-primary mt-4 mb-2"),
+            html.P("These decide whether the employment and security-agency laws are In-active or Locked in the table below and in Annex A. Default No.", className="text-muted small mb-2"),
+            dbc.Row([
+                dbc.Col([_label("Does the society have employees?"), yes_no("sw-central-employees", "has_employees")], width=6),
+                dbc.Col([_label("Does the society engage a security agency?"), yes_no("sw-central-security-agency", "has_security_agency")], width=6),
+            ]),
+            html.Hr(),
+            html.H6([html.I(className="fas fa-landmark me-2"), "Central Acts (Layer 0 - apply to every society, not a choice)",
+                     dbc.Badge("informational", color="secondary", pill=True, className="ms-2", style={"fontSize": "10px"})], className="text-primary mt-3 mb-2"),
+            html.P("Nothing in this table is entered or chosen here. The figures themselves go on the TAN & TDS Rates and GSTIN & GST Rate steps.", className="text-muted small mb-2"),
+            _central_acts_banner(),
+            dbc.Alert([
+                html.Strong("Verification: ", className="me-1"),
+                "Master Settings → RWA Compliance verifies every Central Act, Central Rule and Bye-law, and every State Act, State Rule and Model Bye-law, listed in the table below. "
+                "A Treasurer or an Auditor opens the source text and records the notification number, date and opinion reference there; the row then turns ",
+                verification_badge(True), " and its name links to the source text. A ", verification_badge(False),
+                " row is shown for information only and never drives enforcement. Confirm the applicable law with your advocate — nothing here is a legal opinion.",
+            ], color="info", className="py-2 mt-3", style={"fontSize": "12.5px"}),
+            html.Hr(),
+            html.H6("Legal Hierarchy (Precedence Order)", className="text-primary mt-4 mb-2"),
+            html.P("Highest level first. This page is part of the Agreement. It is sealed as Annex A and signed by the office-bearers.", className="text-muted small mb-2"),
+            dbc.Table([
+                html.Thead(html.Tr([
+                    html.Th("Level", style={"fontSize": "11px", "width": "190px"}),
+                    html.Th("Name", style={"fontSize": "11px"}),
+                    html.Th("Status", style={"fontSize": "11px", "width": "120px"}),
+                ])),
+                html.Tbody(id="sw-legal-hierarchy-body", children=hierarchy_rows),
+            ], bordered=True, hover=True, size="sm", style={"fontSize": "12px"}),
+            html.Div([legal_status_badge("locked"), " fixed by law, applies to every society · ",
+                      legal_status_badge("inactive"), " listed, but not triggered by your Yes/No answers (or superseded) · ",
+                      legal_status_badge("provisional"), " not final until adopted · ",
+                      legal_status_badge("normal"), " day-to-day governance"], className="small text-muted mt-2"),
+        ]
+    elif category == "TAN & TDS Rates":
+        from database.seed import tds_wizard_rows
+        s_tan = ""
+        if society_id:
+            row = db._execute("SELECT tan_number FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            if row:
+                s_tan = row.get("tan_number") or ""
+        inputs = [
+            _render_banner("TAN & TDS Rates", "Enter the TAN and the TDS rates your CA advises. Section, payee type and nature are listed for you; the standard rate is shown as a hint only."),
+            pending_ca_banner("TDS rates and thresholds"),
+            _label("TAN Number"),
+            dbc.Input(id="sw-society-tan", type="text", placeholder="Enter TAN...", value=s_tan, className="mb-4"),
+            _label("TDS Effective Date"),
+            html.Div(dcc.DatePickerSingle(
+                id="sw-tds-effective-date",
+                date=str(fy_start_date()),
+                display_format="YYYY-MM-DD"
+            ), className="mb-4"),
+            html.Hr(),
+            html.H6("TDS Rates", className="text-primary mb-3"),
+            dbc.Alert("Tax Year 2026-27 onward: file under the Income-tax Act, 2025 section numbers. "
+                      "The 1961 Act numbers still apply to income up to 31 Mar 2026.", color="info",
+                      className="py-2", style={"fontSize": "12.5px"}),
+            dbc.Row([
+                dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Download template (xlsx)"],
+                                   id="onb-tds-template", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(dcc.Upload(id="onb-tds-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload filled xlsx"],
+                                   color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".xlsx"), md="auto"),
+                dbc.Col(dcc.Download(id="onb-tds-download"), md="auto"),
+            ], className="g-2 mb-2"),
+            dcc.Store(id="onb-tds-pending", data=None),
+            html.Div(id="onb-tds-preview", className="mb-2"),
+            dbc.Button("Apply to form", id="onb-tds-apply", color="primary", size="sm", disabled=True, n_clicks=0, className="mb-3"),
+        ]
+        
+        header = html.Div([
+            _th("Section", "Income Tax Act section the TDS is deducted under (e.g. 194C contractors, 194J professionals)."),
+            _th("Discriminator", "Sub-category inside a section (for example payee type). Fixed by the seed data."),
+            _th("Nature of Income", "Description of the payment this row covers. Editable."),
+            _th("Rate (%)", "TDS rate when the payee has a PAN."),
+            _th("No Pan (%)", "Higher rate when the payee has no PAN (Sec. 206AA, typically 20%)."),
+            _th("Single Bill (₹)", "A single bill above this amount attracts TDS."),
+            _th("Aggregate (₹)", "TDS applies once total payments to a payee in the financial year exceed this."),
+        ], className="sw-grid-row sw-tds-grid sw-grid-head")
+
+        rows = []
+        for idx, item in enumerate(tds_wizard_rows()):
+            section, discriminator, nature, rate, rate_no_pan, single_bill, agg_bill = item[:7]  # seed rows also carry eff_from / act_version / section_2025
+            rows.append(html.Div([
+                html.Div(dbc.Input(id={"type": "tds-section", "index": idx}, value=section, readonly=True, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-discriminator", "index": idx}, value=discriminator or "", readonly=True, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-nature", "index": idx}, value=nature, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-rate", "index": idx}, type="number", value=None, placeholder=str(rate), step=0.1, min=0, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-rate-no-pan", "index": idx}, type="number", value=None, placeholder=str(rate_no_pan), step=0.1, min=0, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-single-bill", "index": idx}, type="number", value=None, placeholder=str(single_bill), min=0, size="sm")),
+                html.Div(dbc.Input(id={"type": "tds-agg-bill", "index": idx}, type="number", value=None, placeholder=str(agg_bill), min=0, size="sm")),
+            ], className="sw-grid-row sw-tds-grid"))
+        inputs.append(html.Div([header] + rows, className="sw-hscroll"))
+
+        return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
+    elif category == "GSTIN & GST Rate":
+        s_gstin = ""
+        if society_id:
+            row = db._execute("SELECT gstin FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            if row:
+                s_gstin = row.get("gstin") or ""
+        turnover_row = db._execute(
+            "SELECT value FROM state_compliance_thresholds "
+            "WHERE threshold_key = 'gst_turnover_lakh' AND is_active = TRUE LIMIT 1",
+            fetch_one=True,
+        )
+        exempt_row = db._execute(
+            "SELECT value FROM state_compliance_thresholds "
+            "WHERE threshold_key = 'gst_per_member_monthly' AND is_active = TRUE LIMIT 1",
+            fetch_one=True,
+        )
+        turnover_val = (turnover_row or {}).get("value", 20.0)
+        exempt_val = (exempt_row or {}).get("value", 7500.0)
+        readonly_style = {"opacity": "0.7", "backgroundColor": "#e9ecef"}
+        return elements + [
+            _render_banner("GSTIN & GST Rate", "Enter the GSTIN and the GST rates your CA advises. Turnover/exemption limits below are statutory constants maintained by Master, not editable per-society."),
+            pending_ca_banner("GSTIN and GST rates"),
+            _label("GSTIN"),
+            dbc.Input(id="sw-society-gstin", type="text", placeholder="Enter GSTIN...", value=s_gstin, className="mb-4"),
+            html.Hr(),
+            html.H6("GST Rates", className="text-primary mb-2"),
+            _label("CGST Rate (%)"),
+            dbc.Input(id="sw-cgst", type="number", value=None, placeholder="e.g. 9 - as advised by CA", className="mb-3", step=0.1, min=0),
+            _label("SGST Rate (%)"),
+            dbc.Input(id="sw-sgst", type="number", value=None, placeholder="e.g. 9 - as advised by CA", className="mb-3", step=0.1, min=0),
+            _label("Annual Turnover Limit for GST (Lakhs)"),
+            dbc.Input(type="number", value=turnover_val, className="mb-3", readonly=True, style=readonly_style),
+            _label("Monthly Exemption Limit (₹ per member)"),
+            dbc.Input(type="number", value=exempt_val, className="mb-3", readonly=True, style=readonly_style),
+        ]
+    elif category == "Apartment Charges":
+        s_amt, s_rate, s_due, s_cost, s_budget = 0.0, 0.0, 1, 0.0, 0.0
+        s_billing_basis = "undivided_interest"        # society default; apartments can override at enrolment
+        s_int = DEFAULT_INTEREST_RATE_PCT
+        if society_id:
+            row = db._execute("SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct, billing_basis, project_construction_cost, common_expense_budget_monthly FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
+            if row:
+                s_amt, s_rate, s_due = row.get("apt_maintenance_amount", 0.0) or 0.0, row.get("apt_maintenance_rate", 0.0) or 0.0, row.get("apt_due_day", 1) or 1
+                s_billing_basis = row.get("billing_basis") or "undivided_interest"
+                s_cost = row.get("project_construction_cost") or 0.0
+                s_budget = row.get("common_expense_budget_monthly") or 0.0
+                s_int = row.get("apt_interest_pct") if row.get("apt_interest_pct") is not None else s_int
+        citation = [html.Small(INTEREST_CASE_CITATION, className="text-muted d-block mb-3")] if INTEREST_CASE_CITATION else []
+        return elements + [
+            _render_banner("Apartment Charges", "Set the SOCIETY DEFAULT charges, billing day and late-payment interest. "
+                           "Sinking and Repair funds are set on the next step (Funds)."),
+            dbc.Alert([html.I(className="fas fa-info-circle me-2"),
+                       "These are the society defaults. Apartments can differ: an individual apartment can be given its own billing basis and amounts when you enrol it."],
+                      color="info", className="py-2 mb-3", style={"fontSize": "12.5px"}),
+            html.H6("Part A: Society defaults (all optional, fill what you know)", className="text-primary mb-2"),
+            dbc.Row([
+                dbc.Col([_label("Construction Cost of Project (₹)"), dbc.Input(id="sw-apt-cost", type="number", value=s_cost, min=0, step=1, className="mb-3")], width=3),
+                dbc.Col([_label("Monthly Common-Expense Budget (₹)"), dbc.Input(id="sw-apt-budget", type="number", value=s_budget, min=0, step=1, className="mb-3")], width=3),
+                dbc.Col([_label("Default Rate per sq ft (₹)"), dbc.Input(id="sw-apt-rate", type="number", value=s_rate, min=0, step=0.01, className="mb-3")], width=3),
+                dbc.Col([_label("Default Fixed Amount (₹)"), dbc.Input(id="sw-apt-amt", type="number", value=s_amt, min=0, step=1, className="mb-3")], width=3),
+            ]),
+            html.H6("Part B: Maintenance Billing Basis (society default)", className="text-primary mb-2"),
+            dbc.Row([dbc.Col([_label("Maintenance Billing Basis"), dbc.Select(id="sw-apt-billing-basis", options=BILLING_BASIS_OPTIONS, value=s_billing_basis, className="mb-2")], width=8)]),
+            html.Div(id="sw-apt-basis-hint", children=basis_hint(s_billing_basis)),
+            html.Hr(),
+            dbc.Row([
+                dbc.Col([_label("Billing Due Day"), dbc.Input(id="sw-apt-due", type="number", value=s_due, min=1, max=31, step=1, className="mb-3")], width=4),
+            ]),
+            dbc.Row([dbc.Col([_label("Charges Interest Rate (% per month)"),
+                              dbc.Input(id="sw-apt-interest", type="number", value=s_int if s_int is not None else "", min=0, step=0.01, className="mb-1", placeholder="Set by General Body resolution"),
+                              html.Small("UP Model Bye-Laws 2011, bye-law 46(a): the rate is set by General Body resolution. " + INTEREST_RATE_NOTE, className="text-muted d-block mb-1")] + citation, width=8)]),
+            html.P("After enrolment, each flat needs its undivided-interest %. Area share is used until you enter the Declaration figures.", className="text-muted small"),
+        ]
+    elif category == "Funds":
+        from app.services import regime_rules_admin as rra
+        from app.dash_apps.pages.setup_wizard import fund_plan, fund_flags
+        from app.services.statutory_rules import fund_rules_for_state
+        s_sink, s_repair = None, None          # no default: blank until the society enters the resolved rate
+        if society_id:
+            row = db._execute("SELECT apt_sinking_fund_rate, apt_repair_fund_rate FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
+            if row:
+                s_sink, s_repair = row.get("apt_sinking_fund_rate") or None, row.get("apt_repair_fund_rate") or None
+        fp = fund_plan(society_id, state, constitution=constitution)
+        ff = fund_flags(society_id, state, constitution=constitution)
+        fund_rules = fund_rules_for_state(state)
+        try:
+            pol = rra.list_society_policies(society_id) if society_id else {}
+        except Exception:
+            pol = {}
+        cards = []
+
+        def policy_select(key, lock_regime_label=None):
+            label, clause, choices = rra.POLICY_SPECS[key]
+            st = pol.get(key) or {"value": choices[0][0], "active": False, "proposed": None}
+            shown = st["proposed"] or st["value"]
+            opts = []
+            for v, lbl in choices:
+                if v == "regime_default":
+                    lbl = f"Regime default: {FUND_MODE_LABELS.get(f['regime_mode'], f['regime_mode']) if key.endswith('collection') else FUND_BASIS_LABELS.get(f['regime_basis'], 'per sq ft of apartment area')}"
+                opts.append({"label": lbl, "value": v})
+            return html.Div([
+                _label(label),
+                dbc.Select(id={"type": "sw-pol-choice", "key": key}, size="sm", options=opts, value=shown, className="mb-1"),
+                html.Small([dbc.Badge("Active (resolution on file)", color="success") if st["active"] and not st["proposed"]
+                            else dbc.Badge("Provisional", color="warning", text_color="dark"),
+                            html.Span(id={"type": "sw-pol-msg", "key": key}, className="text-muted ms-2")], className="d-block mb-2"),
+            ])
+
+        _dp = pol.get("levy_depreciation_fund") or {}
+        dep_opted = (_dp.get("proposed") or _dp.get("value")) == "yes"
+        for fund_key, fund_info in UP_AOA_FUNDS.items():
+            name = fund_info["name"]
+            rate_applicable = fund_info["rate_applicable"]
+            if fund_key == "depreciation":
+                if fp["regime"] != "UP_AOA_2010":
+                    continue            # the Depreciation Fund and its parameters exist only in the UP pack
+                # Opt-in only: the percentage / basis / rate are regime parameters (Legal rules), not a per-flat rate here.
+                cards.append(dbc.Card([
+                    dbc.CardHeader([html.Strong(name + "  "), dbc.Badge("Not statutory", color="secondary", pill=True)]),
+                    dbc.CardBody([_fund_status_badges(fund_info, opted=dep_opted),
+                                  html.Small(fund_info["description"], className="text-muted d-block mb-2"),
+                                  _fund_facts_block(fund_info),
+                                  html.Small(f"Not statutory: not prescribed by {fp['regime']}. An optional society policy, adopted by General Body resolution only.",
+                                             className="text-muted d-block mb-2"),
+                                  policy_select("levy_depreciation_fund"),
+                                  html.Small("Percentage, basis and rate are regime parameters (Legal rules > depreciation_fund_*), "
+                                             "not a per-flat rate asked here.", className="text-muted d-block")]),
+                ], className="mb-3 shadow-sm"))
+                continue
+            # Check if sinking/repair is statutory for this state
+            is_statutory = fund_info["statutory"]
+            if fund_key in ("sinking", "repair"):
+                is_statutory = fund_rules[fund_key]["mode"] == "statutory"
+
+            # Get stored rate and plan for voluntary funds
+            if fund_key == "sinking":
+                stored_rate = s_sink
+                f = fp["plan"]["sinking"]
+            elif fund_key == "repair":
+                stored_rate = s_repair
+                f = fp["plan"]["repair"]
+            else:
+                stored_rate = 0.0
+                f = {"statutory": is_statutory, "mode": "none", "basis": "per_sq_ft", "min_pct": None, "regime_mode": "none", "regime_basis": "per_sq_ft"}
+
+            rate_value = stored_rate or None
+
+            if is_statutory:
+                # Statutory funds - show locked info
+                body = [
+                    _fund_status_badges(fund_info),
+                    html.Small(fund_info["description"], className="text-muted d-block mb-2"),
+                    _fund_facts_block(fund_info),
+                ]
+                if not rate_applicable:
+                    body.append(html.Small("No recurring rate — this fund is not billed monthly.", className="text-info d-block"))
+                # For statutory funds with rate (like MH sinking/repair), show rate info
+                if rate_applicable and fund_key in ("sinking", "repair"):
+                    min_pct = fund_rules[fund_key].get("min_pct")
+                    if min_pct:
+                        body.append(html.Small(f"Statutory minimum: {min_pct}% of construction cost per year", className="text-warning d-block mb-2"))
+                    body.append(html.Div([
+                        html.Div(_label(fund_rate_label(f.get("basis", "per_sq_ft"))), id=f"sw-fund-{fund_key}-rate-label"),
+                        dbc.Input(id=f"sw-apt-{fund_key}", type="number", value=rate_value, min=0, step="any", className="mb-1", disabled=True),
+                    ], id=f"sw-fund-{fund_key}-rate-wrap", style={"display": "block"}))
+                    body.append(html.Small("Rate fixed by state statute — cannot be changed.", className="text-muted d-block"))
+            else:
+                # Voluntary funds - show policy choices
+                levy_key, cm_key, bp_key = f"levy_{fund_key}_fund", f"{fund_key}_fund_collection", f"{fund_key}_fund_basis"
+                show_collect = {} if (f.get("levy") == "yes" or f.get("mode") != "none") else {"display": "none"}
+                body = [
+                    _fund_status_badges(fund_info, opted=(f.get("levy") == "yes"), fund_key=fund_key),
+                    html.Small(fund_info["description"], className="text-muted d-block mb-2"),
+                    _fund_facts_block(fund_info),
+                    html.Small(f"Not prescribed by {fp['regime']}. Optional: the society decides, by General Body resolution.", className="text-muted d-block mb-2"),
+                    policy_select(levy_key),
+                    html.Div(policy_select(cm_key), id=f"sw-fund-{fund_key}-collect-wrap", style=show_collect),
+                    html.Div(policy_select(bp_key), id=f"sw-fund-{fund_key}-basis-wrap", style={} if f.get("mode") == "on_bill" else {"display": "none"}),
+                ]
+
+            if rate_applicable and not is_statutory:
+                body.append(html.Div([
+                    html.Div(_label(fund_rate_label(f.get("basis", "per_sq_ft"))), id=f"sw-fund-{fund_key}-rate-label"),
+                    dbc.Input(id=f"sw-apt-{fund_key}", type="number", value=rate_value, min=0, step="any", className="mb-1",
+                              placeholder="Rate resolved by the General Body (no default, no cap)"),
+                ], id=f"sw-fund-{fund_key}-rate-wrap", style={} if f.get("mode") == "on_bill" else {"display": "none"}))
+                body.append(html.Small(fund_hint(f, fp["regime"]), id=f"sw-fund-{fund_key}-hint", className="text-muted d-block"))
+
+            cards.append(dbc.Card([
+                dbc.CardHeader(html.Strong(name)),
+                dbc.CardBody(body),
+            ], className="mb-3 shadow-sm"))
+
+        return elements + [
+            _render_banner("Funds", "Funds this society holds: the prescribed ones (IFMS Corpus, Major Repair Fund, Reserve Fund) and any optional fund it opts into (Sinking, Repair & Maintenance, Depreciation). Optional funds stay provisional until the General Body resolution is on file."),
+            dbc.Alert([html.I(className="fas fa-info-circle me-2"),
+                       "Statutory = fixed by the Act, Rules or a Regulation. Model Bye-Law (prescribed) = fixed by the 2011 Model Bye-Laws once adopted; a departure needs 2/3rd of owners and the competent authority's prior approval (bye-law 58). Optional - Provisional = the society's choice by General Body resolution; the choice stays provisional until the resolution is recorded (Settings > Society governance). 'Provisional - verify' marks a rate that was not checked against the gazetted text."],
+                      color="info", className="py-2 mb-3", style={"fontSize": "12.5px"}),
+            *cards,
+            *([_fund_register_card(fp, s_sink, s_repair, dep_opted), _billing_channels_card(), _ifms_slab_card()] if fp["regime"] == "UP_AOA_2010" else []),
+        ]
+    elif category == "Vendor Charges":
+        s_v1, s_v7, s_v30 = DEFAULT_VENDOR_1DAY, DEFAULT_VENDOR_7DAY, DEFAULT_VENDOR_1MTH
+        if society_id:
+            row = db._execute("SELECT vendor_1day, vendor_7day, vendor_1mth FROM ven_charges_fines_basis WHERE society_id = :id AND ven_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
+            if row:
+                s_v1 = row.get("vendor_1day") or DEFAULT_VENDOR_1DAY
+                s_v7 = row.get("vendor_7day") or DEFAULT_VENDOR_7DAY
+                s_v30 = row.get("vendor_1mth") or DEFAULT_VENDOR_1MTH
+        return elements + [
+            _render_banner("Vendor Charges", f"Set default vendor pass charges. Pre-filled: 1 Day ₹{DEFAULT_VENDOR_1DAY}, 7 Days ₹{DEFAULT_VENDOR_7DAY}, 1 Month ₹{DEFAULT_VENDOR_1MTH}."),
+            dbc.Row([dbc.Col([_label("Vendor Pass (1 Day) ₹"), dbc.Input(id="sw-ven-1day", type="number", value=s_v1, step=1, className="mb-3")]), dbc.Col([_label("Vendor Pass (7 Days) ₹"), dbc.Input(id="sw-ven-7day", type="number", value=s_v7, step=1, className="mb-3")]), dbc.Col([_label("Vendor Pass (1 Month) ₹"), dbc.Input(id="sw-ven-1mth", type="number", value=s_v30, step=1, className="mb-3")])])
+        ]
+    elif category == "Accounts Heads":
+        s_calc = str(fy_start_date())
+        if society_id:
+            row = db._execute("SELECT calc_start_date FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
+            if row and row.get("calc_start_date"): s_calc = str(row["calc_start_date"])
+        from database.seed import ACCOUNTS
+        inputs = [
+            _render_banner("Accounts Settings", "Configure accounting start date and Payment QR Code."),
+            html.P([html.B("Note: "), "The seeded account 'SBI A/c - Society' is set as your society's primary bank account. Every non-cash receipt and payment is booked to it, so the Society's payment QR code must belong to this bank. If your society banks elsewhere, change the primary bank account after setup (Admin portal, 'Settings' tab, 'Account' KPI)."], className="sw-note-red mb-3"),
+            _label("Payment QR Code Image"),
+            _render_image_capture_control("society", "pay_qr", _imgs.get("pay_qr"), society_id),
+            _label("Accounting/Calculation Start Date"),
+            dcc.DatePickerSingle(id="sw-calc-start-date", date=s_calc, display_format='YYYY-MM-DD', className="mb-4 d-block"),
+            html.Hr(),
+            html.H6("All Accounts (Seeded)", className="text-primary mb-3"),
+        ]
+        header = html.Div([
+            _th("ID"), _th("Tab"), _th("Name"),
+            _th("Dr/Cr", "drcr_account — whether the account normally carries a debit or credit balance."),
+            _th("BF?", "has_bf — whether this account can carry a brought-forward opening balance."),
+            _th("Depr?", "is_depreciable — whether depreciation is charged on this account."),
+            _th("Depr %", "depreciation_percent — annual depreciation rate (100 = not depreciated)."),
+        ], className="sw-grid-row sw-acc-grid sw-grid-head")
+
+        # Group (sort) by parent_account_id (acc[4])
+        sorted_accounts = sorted(ACCOUNTS, key=lambda x: (x[4] if x[4] is not None else -1, x[0]))
+        rows = []
+        for acc in sorted_accounts:
+            # acc mapping: 0=id, 1=header, 2=tab, 3=name, 4=parent, 5=drcr, 6=has_bf, 7=depr_percent
+            is_depreciable = acc[7] < 100 if acc[7] is not None else False
+            rows.append(html.Div([
+                html.Div(str(acc[0]), className="small text-muted"),
+                html.Div(str(acc[2] or ""), className="small text-muted"),
+                html.Div(str(acc[3] or ""), className="small fw-bold"),
+                html.Div(str(acc[5] or ""), className="small text-muted"),
+                html.Div("Yes" if acc[6] else "No", className="small text-muted"),
+                html.Div("Yes" if is_depreciable else "No", className="small text-muted"),
+                html.Div(f"{acc[7]}%" if acc[7] is not None else "", className="small text-muted"),
+            ], className="sw-grid-row sw-acc-grid"))
+        inputs.append(html.Div([header] + rows, className="sw-hscroll"))
+        return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
+    elif category == "Brought Forward":
+        s_fy = fy_start_year()
+        if society_id:
+            row = db._execute("SELECT financial_year FROM brought_forward WHERE society_id = :id LIMIT 1", {"id": society_id}, fetch_one=True)
+            if row: s_fy = row.get("financial_year") or s_fy
+        # Values already saved in the wizard draft: the inputs below must show them, otherwise revisiting this step
+        # shows zeros and the next Next/Previous saves an empty row list over the saved Brought Forward.
+        _saved_bf = {}
+        if society_id:
+            try:
+                from app.services import onboarding_service as _ob_bf
+                _bf_draft = (_ob_bf.load_draft(society_id).get("brought_forward")) or {}
+                _saved_bf = {int(r["acc_id"]): r for r in (_bf_draft.get("rows") or []) if r.get("acc_id") is not None}
+                if _bf_draft.get("fy"):
+                    s_fy = _bf_draft["fy"]
+            except Exception:                                              # noqa: BLE001 - never break the render
+                _saved_bf = {}
+
+        def _saved_amt(acc_id):
+            try:
+                return float(Decimal(str((_saved_bf.get(acc_id) or {}).get("bf_amount") or 0)))
+            except Exception:                                              # noqa: BLE001
+                return 0.0
+        from database.seed import ACCOUNTS
+
+        # UP AOA labels for the equity / fund accounts. The fund rows come from the shared fund catalogue
+        # (status, rate and applicability); the rest are plain accounts with a fixed label.
+        UP_AOA_FUND_LABELS = {
+            3100: "Capital Account / Share Capital (entrance fee \u20b91,000 + share)",
+            3240: "Gifts Received",
+            3250: "Provisions",
+            3260: "Gifts Given",
+        }
+        from app.services.up_aoa_fund_catalog import active_keys as _active_keys
+        _fp = _fund_plan_fn(society_id, state, constitution=constitution)
+        from app.services import regime_rules_admin as _rra
+        _modes = {k: _fp["plan"][k]["mode"] for k in ("sinking", "repair")}
+        _modes["depreciation"] = "fy_close" if _rra.policy_intent(society_id, "levy_depreciation_fund") == "yes" else "none"
+        _held = _active_keys(_modes)
+        _up = _fp["regime"] == "UP_AOA_2010"
+
+        # Same shape as the Balance Sheet: Assets (Dr) on the left,
+        # Liabilities + Equity/Reserves (Cr) on the right, each as a parent -> child tree.
+        children = {}
+        for acc in ACCOUNTS:
+            children.setdefault(acc[4], []).append(acc)
+        for kids in children.values():
+            kids.sort(key=lambda a: a[0])
+
+        def _fi_for(acc_id):
+            return _bf_fund_info(acc_id, _held, _up)
+
+        def _has_bf(acc):
+            if acc[6]:
+                _f = _fi_for(acc[0])
+                if _f and _f["hidden"]:      # an optional fund the society has not opted into
+                    return any(_has_bf(c) for c in children.get(acc[0], []))
+                return True
+            return any(_has_bf(c) for c in children.get(acc[0], []))
+
+        def _get_aoa_label(acc_id, default_name):
+            """Get UP AOA label for fund accounts, fallback to default name."""
+            _fi = _fi_for(acc_id)
+            if _fi and _fi["label"]:
+                return _fi["label"]
+            return UP_AOA_FUND_LABELS.get(acc_id, default_name) if _up else default_name
+
+        def _render_node(acc, depth):
+            out = []
+            indent = {"paddingLeft": f"{12 + depth * 14}px"}
+            if acc[6]:   # postable account -> amount + remarks inputs (ids unchanged)
+                aoa_label = _get_aoa_label(acc[0], acc[3] or "")
+                _fi = _fi_for(acc[0])
+                _name_kids = [aoa_label]
+                if _fi and _fi["tags"]:   # fund account: status badges (Statutory / Model Bye-Law / Optional - Provisional) + rate hint
+                    _name_kids.append(html.Div([_fund_badge(t, c) for t, c in _fi["tags"]], className="mt-1"))
+                    _name_kids.append(html.Small(_fi["hint"], className="d-block text-muted"))
+                _name_kids.append(html.Small(f"{acc[2] or ''} · {acc[5] or ''}"))
+                out.append(html.Div([
+                    html.Div(_name_kids, className="sw-bf-name"),
+                    dbc.Input(id={"type": "sw-bf-amt", "acc_id": acc[0]}, type="number", value=_saved_amt(acc[0]), step=0.01, min=0, size="sm"),
+                    dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc[0]}, type="text", placeholder="Remarks...", size="sm", className="sw-bf-remarks",
+                              value=(_saved_bf.get(acc[0]) or {}).get("remarks") or None),
+                ], className="sw-bf-row", style={**indent, "paddingRight": "12px"}))
+            else:        # group heading
+                out.append(html.Div(acc[3] or "", className="sw-bf-group", style=indent))
+            for child in children.get(acc[0], []):
+                if _has_bf(child):
+                    out.extend(_render_node(child, depth + 1))
+            return out
+
+        def _side(title, subtitle, root_ids):
+            body = []
+            for rid in root_ids:
+                root = next((a for a in ACCOUNTS if a[0] == rid), None)
+                if root and _has_bf(root):
+                    body.extend(_render_node(root, 0))
+            return html.Div([
+                html.Div([html.Span(title), html.Span(subtitle)], className="sw-bf-side-head"),
+                *body,
+            ], className="sw-bf-side")
+
+        inputs = [
+            _render_banner("Brought Forward", "Enter brought forward (opening balance) amounts for accounts. Values will be saved for the specified Financial Year."),
+            _label("Financial Year (Start Year)"),
+            dbc.Input(id="sw-bf-fy", type="number", value=s_fy, step=1, className="mb-3"),
+            html.Small("Only funds this society holds are listed: the prescribed funds, plus any optional fund it opted into on the Funds step. "
+                       "To carry an opening balance for Sinking or Repair & Maintenance, opt in first.", className="text-muted d-block mb-2"),
+            html.H6("Brought Forward Accounts", className="mt-4 mb-2 text-primary"),
+            dbc.Row([
+                dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Download template (xlsx)"],
+                                   id="onb-bf-template", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(dcc.Upload(id="onb-bf-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload filled xlsx"],
+                                   color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".xlsx"), md="auto"),
+                dbc.Col(dcc.Download(id="onb-bf-download"), md="auto"),
+            ], className="g-2 mb-2"),
+            dcc.Store(id="onb-bf-pending", data=None),
+            html.Div(id="onb-bf-preview", className="mb-2"),
+            dbc.Button("Apply to form", id="onb-bf-apply", color="primary", size="sm", disabled=True, n_clicks=0, className="mb-3"),
+            html.Div([
+                _side("Assets", "Dr", [1000]),
+                _side("Liabilities & Equity", "Cr", [2000, 3000]),
+            ], className="sw-bf-grid"),
+
+            # ── item 10: pending receivables by apartment ─────────────────────────
+            html.Hr(),
+            html.H6("Pending receivables by apartment", className="mt-4 mb-2 text-primary"),
+            html.P("Opening dues carried forward, one row per flat. Type or paste rows into the grid below, or upload an "
+                   "Excel/CSV file. The total must tie to the Sundry Debtors accounts entered above (SDr / SDrCash / SDrDig).",
+                   className="text-muted small mb-2"),
+            dcc.Store(id="onb-receivables-json", data=_saved_receivables(society_id)),
+            dash_table.DataTable(
+                id="onb-recv-grid",
+                columns=[{"id": "flat_number", "name": "Flat no.", "type": "text"},
+                         {"id": "amount", "name": "Value receivable (₹)", "type": "numeric"},
+                         {"id": "overdue_days", "name": "Days overdue", "type": "numeric"},
+                         {"id": "remarks", "name": "Remarks", "type": "text"}],
+                data=_saved_receivables(society_id) or [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}],
+                editable=True, row_deletable=True, page_size=25, sort_action="native",
+                style_table={"overflowX": "auto"},
+                style_cell={"fontSize": "12.5px", "padding": "4px 8px", "textAlign": "left", "minWidth": "90px"},
+                style_header={"fontWeight": "700"},
+                style_cell_conditional=[{"if": {"column_id": "remarks"}, "minWidth": "220px"}],
+            ),
+            dbc.Row([
+                dbc.Col(dbc.Button("+ Add row", id="onb-bf-add-rec", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Template (xlsx)"],
+                                   id="onb-bf-recv-template", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(dcc.Upload(id="onb-bf-recv-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload xlsx / csv"],
+                                               color="secondary", size="sm", outline=True, n_clicks=0),
+                                   multiple=False, accept=".xlsx,.csv"), md="auto"),
+                dbc.Col(dcc.RadioItems(id="onb-recv-mode", value="add", inline=True,
+                                       options=[{"label": " Add to / update existing rows", "value": "add"},
+                                                {"label": " Replace all rows", "value": "replace"}],
+                                       inputStyle={"marginLeft": "10px"}, labelStyle={"fontSize": "12px", "marginRight": "6px"}), md="auto"),
+                dbc.Col(dcc.ConfirmDialogProvider(children=dbc.Button("Clear all", color="danger", size="sm", outline=True, n_clicks=0),
+                                                  id="onb-recv-clear", message="Remove every receivable row from the grid?"), md="auto"),
+                dbc.Col(dcc.Download(id="onb-bf-recv-download"), md="auto"),
+            ], className="g-2 mt-1 align-items-center"),
+            html.Div(id="onb-bf-recv-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
+            html.Div(id="onb-bf-tieout", className="mb-3", style={"fontSize": "12px", "fontWeight": "700"}),
+
+            # ── item 11: reconciliation & evidence ────────────────────────────────
+            html.Hr(),
+            html.H6("Reconciliation & evidence", className="mt-4 mb-2 text-primary"),
+            html.P("Reconcile every bank/cash account that carries a brought-forward balance, and attach the supporting scans "
+                   "(the server computes each file's SHA-256; nobody types a hash).", className="text-muted small mb-2"),
+            dcc.Store(id="onb-reconciliation-json", data=_saved_reconciliation(society_id)),
+            html.Div(id="onb-bf-reconciliation-cards", className="mb-3"),
+            dcc.Upload(id="onb-bf-evidence-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Attach scan"],
+                                               color="secondary", size="sm", outline=True, n_clicks=0),
+                       multiple=False, accept=".pdf,.png,.jpg,.jpeg"),
+            html.Div(id="onb-bf-evidence-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
+        ]
+        return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
+    elif category == "Administrator":
+        return elements + [
+            _render_banner("Administrator & step-up password", "Create this society's step-up password (SIGNING_SECRET). It confirms sensitive actions (QR re-issue, key rotation); the server creates and guards the society's signing keys. The Secretary is seated in the founding-committee stage and signs the Agreement there — no separate Secretary capture is needed here."),
+            _office_bearer_status(society_id),
+            html.Hr(),
+            html.P("Create this society's step-up password.", className="text-danger fw-bold mb-1"),
+            dbc.Alert([
+                html.Strong("What is the step-up password?", style={"fontSize": "13px"}),
+                html.Div("It is a second password that confirms sensitive society actions: re-issuing or revoking QR gate passes and, "
+                         "when enabled, rotating or revoking the society's signing keys. It does not sign anything and it is not a "
+                         "login password. The society's signing keys are created and protected by the server; nobody, including the "
+                         "platform, can read them through this screen.", style={"fontSize": "12px", "marginTop": "4px"}),
+                html.Strong("Who is responsible?", style={"fontSize": "13px", "marginTop": "8px"}),
+                html.Div("The society — jointly the President, Secretary and Treasurer. The administrator sets the first one so setup "
+                         "can finish; within 30 days of going live it must be replaced with a password chosen under the three "
+                         "office-bearers' signatures.", style={"fontSize": "12px", "marginTop": "4px"}),
+                html.Strong("How is it changed?", style={"fontSize": "13px", "marginTop": "8px"}),
+                html.Div("Settings → Society governance → Step-up password → Request change. The new password takes effect only after "
+                         "the serving President, Secretary and Treasurer each approve with their own login password.",
+                         style={"fontSize": "12px", "marginTop": "4px"}),
+                html.Strong("When new office-bearers are elected:", style={"fontSize": "13px", "marginTop": "8px"}),
+                html.Div("the password is not changed automatically, but the society is flagged “step-up password review required” and "
+                         "the new office-bearers are asked to replace it within 7 days, because a former office-bearer may still know it. "
+                         "Former office-bearers cannot approve anything.", style={"fontSize": "12px", "marginTop": "4px"}),
+                html.Strong("If you forget it:", style={"fontSize": "13px", "marginTop": "8px"}),
+                html.Div("it cannot be recovered. Request a change (three approvals).", style={"fontSize": "12px", "marginTop": "4px"}),
+            ], color="info", className="mb-3"),
+            _label("SIGNING_SECRET (Strong Password)"),
+            dbc.Input(id="sw-qr-secret", type="password", required=True, className="mb-3"),
+            _field_feedback("sw-qr-secret-feedback"),
+            _label("Confirm SIGNING_SECRET"),
+            dbc.Input(id="sw-qr-secret-confirm", type="password", required=True, className="mb-3"),
+            _field_feedback("sw-qr-secret-confirm-feedback"),
+        ]
+    elif category == "Instructions":
+        here = os.path.dirname(os.path.abspath(__file__))
+        # A12: show the short admin-facing quick start, not the 170 KB
+        # developer README.
+        readme_path = os.path.abspath(os.path.join(here, "../../../docs/ADMIN_QUICKSTART.md"))
+        
+        readme_txt = ""
+        if os.path.exists(readme_path):
+            with open(readme_path, 'r') as f:
+                readme_txt = f.read()
+
+        return elements + [
+            html.Div([
+                html.H5("EstateHub Instructions", className="text-primary mb-3", style={"display": "inline-block"}),
+                html.A([html.I(className="fas fa-print me-1"), "Print / Open in New Window"], 
+                       href="/print_doc/readme", target="_blank", 
+                       className="btn btn-sm btn-outline-secondary float-end")
+            ], className="mb-2"),
+            html.Div(
+                [dcc.Markdown(readme_txt)],
+                style={"backgroundColor": "#f8f9fa", "padding": "15px", "borderRadius": "5px", "border": "1px solid #ced4da", "marginBottom": "20px"}
+            )
+        ]
+    elif category == "Review":
+        # Filled by a callback (setup_wizard_callbacks.refresh_review) from the live form values when the
+        # admin opens this step. Reading the database here showed defaults, because nothing is saved before Submit.
+        return elements + [_render_banner("Review & Confirm", "Open this step after filling the earlier ones: it shows what you entered.")]
+    elif category == "Agreement":
+        here = os.path.dirname(os.path.abspath(__file__))
+        agreement_path = os.path.abspath(os.path.join(here, "../../../database/AGREEMENT.md"))
+        
+        agreement_txt = ""
+        if os.path.exists(agreement_path):
+            with open(agreement_path, 'r') as f:
+                agreement_txt = f.read()
+
+        return elements + [
+            html.Div([
+                html.H5("EstateHub terms and agreements", className="text-primary mb-3", style={"display": "inline-block"}),
+                html.A([html.I(className="fas fa-print me-1"), "Print Agreement Template"], 
+                       href="/print_doc/agreement", target="_blank", 
+                       className="btn btn-sm btn-outline-secondary float-end")
+            ], className="mb-2"),
+            html.Div(
+                [dcc.Markdown(agreement_txt)],
+                style={"backgroundColor": "#f8f9fa", "padding": "15px", "borderRadius": "5px", "border": "1px solid #ced4da", "marginBottom": "20px"}
+            ),
+            dbc.Alert([html.Strong("This is the standard template, not the signature. "),
+                       "After you submit, the binding Agreement is issued with three annexes (legal regime, this review, and the opening "
+                       "position). The President, Secretary and Treasurer sign it with their own passwords, then the platform signs and "
+                       "your society goes live. Until then nothing is posted to the ledger."], color="info", className="py-2 mb-3",
+                       style={"fontSize": "12.5px"}),
+        ]
+    return []
+
+def get_setup_wizard_layout(society_id=None):
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(
+                [
+                    html.Div([
+                        dbc.ModalTitle("EstateHub First-Time Setup Wizard", style={"fontWeight": "bold", "color": "#fff", "marginBottom": "2px"}),
+                        html.Div(
+                            "Jurisdiction-aware for Indian RWAs/CHS/AOAs — state-specific statutory rules apply automatically once your State is set (see Society Details)",
+                            style={"color": "#ffffffcc", "fontSize": "11px"}
+                        ),
+                    ]),
+                    html.Button(
+                        html.I(className="fas fa-times"),
+                        id="sw-close-btn",
+                        style={"background": "none", "border": "none", "color": "#fff", "fontSize": "1.5rem", "cursor": "pointer"}
+                    )
+                ],
+                close_button=False,
+                style={"background": "linear-gradient(135deg,#667eea 0%,#764ba2 100%)", "borderBottom": "none", "display": "flex", "justifyContent": "space-between"}
+            ),
+            dbc.ModalBody(
+                # One shell for every step: [sidebar] [content] [Acts & Rules].
+                # Each column = pinned header | scrolling body (| pinned footer),
+                # so nothing shifts between categories (see assets/setup_wizard.css).
+                html.Div(className="sw-shell", children=[
+
+                    # ── Column 1: sidebar ──────────────────────────────────
+                    html.Div(className="sw-col sw-col-nav", children=[
+                        html.Div(className="sw-col-head", children=[
+                            html.H3([html.I(className="fas fa-magic me-2"), "Setup Wizard"],
+                                    style={"color": "#667eea", "fontWeight": "bold", "fontSize": "1.5rem"}),
+                        ]),
+                        html.Div(className="sw-col-body", children=[
+                            dbc.Nav(
+                                [
+                                    dbc.NavLink(
+                                        [html.I(className=f"{CATEGORY_ICONS.get(cat, 'fas fa-circle')} me-2"), step_label(cat)],
+                                        active=True if i == 0 else False,
+                                        id={"type": "sw-nav-item", "index": i},
+                                        href="#",
+                                        style={"borderRadius": "8px", "marginBottom": "5px"}
+                                    )
+                                    for i, cat in enumerate(CATEGORIES)
+                                ],
+                                vertical=True,
+                                pills=True,
+                                id="sw-nav-menu"
+                            ),
+                        ]),
+                    ]),
+
+                    # ── Column 2: step content ─────────────────────────────
+                    html.Div(className="sw-col sw-col-content", children=[
+                        html.Div(className="sw-col-head", children=[
+                            html.H4(id="sw-category-title", children=step_label(CATEGORIES[0]), style={"fontWeight": "bold"}),
+                        ]),
+                        html.Div(id="sw-category-content", className="sw-col-body", children=[
+                            html.Div(
+                                render_category_content(cat, society_id),
+                                id={"type": "sw-step-container", "index": i},
+                                style={"display": "block" if i == 0 else "none"}
+                            ) for i, cat in enumerate(CATEGORIES)
+                        ]),
+                        html.Div(className="sw-col-foot", children=[
+                            html.Div(id="sw-error-msg", style={"color": "red", "marginBottom": "8px"}),
+                            html.Div(
+                                [
+                                    dbc.Button("Previous", id="sw-btn-prev", color="secondary", className="me-2", disabled=True, style={"display": "inline-block"}),
+                                    dbc.Button("Next", id="sw-btn-next", color="primary", className="me-2", style={"display": "inline-block"}),
+                                    dbc.Button("Submit Setup", id="sw-btn-submit", color="success", style={"display": "none"}),
+                                    # dbc.Spinner accepts no `style` (any dbc version), which crashed the whole wizard
+                                    # layout; the id and style live on a wrapper the submit callback toggles.
+                                    html.Span(
+                                        dbc.Spinner(type="border", size="sm", color="success"),
+                                        id="sw-submit-spinner",
+                                        style={"display": "none", "marginLeft": "8px"},
+                                    ),
+                                ],
+                                style={"textAlign": "right", "display": "flex", "justifyContent": "flex-end", "alignItems": "center"}
+                            ),
+                        ]),
+                    ]),
+
+                    # ── Column 3: Acts & Rules ─────────────────────────────
+                    html.Div(className="sw-col sw-col-rules", children=[
+                        html.Div(className="sw-col-head", children=[
+                            html.H5([html.I(className="fas fa-book me-2"), "Acts & Rules"], style={"fontWeight": "bold", "color": "#2c3e50"}),
+                            html.Small(id="sw-rules-subtitle", children=rules_subtitle(CATEGORIES[0], society_id), className="text-muted"),
+                        ]),
+                        html.Div(id="sw-compliance-rules-panel", className="sw-col-body",
+                                 children=build_rules_panel(CATEGORIES[0], society_id),
+                                 style={"fontSize": "12.5px", "color": "#3a4a5c"}),
+                    ]),
+                ]),
+                id="setup-wizard-modal-body",
+                style={
+                    "--login-bg": "url(/static/assets/EH_bk.jpg)",
+                    "backgroundSize": "cover",
+                    "backgroundPosition": "center",
+                    "minHeight": "650px",
+                }
+            ),
+            dcc.Store(id="sw-current-step", data=0),
+            dcc.Store(id="sw-society-id", data=society_id)
+        ],
+        id="setup-wizard-modal",
+        is_open=True,
+        size="xl",
+        fullscreen=True,
+        centered=True,
+        backdrop="static",
+        keyboard=False
+    )

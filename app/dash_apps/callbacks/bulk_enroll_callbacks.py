@@ -1,0 +1,861 @@
+# app/dash_apps/callbacks/bulk_enroll_callbacks.py
+"""
+Bulk Enroll — Excel Upload for Apartments / Vendors / Security / Users / Assets
+==============================================================
+Adds a "Bulk Enroll" button next to "New" on the Admin/Enroll list
+cards (list_apartments, list_vendors, list_security, etc.).
+
+WHY APARTMENTS NEED email + password
+--------------------------------------
+The gate-pass / QR system identifies every entity through its domain-table id:
+  • generate_static_qr_code() encodes apartments.id / vendors.id / security_staff.id
+  • validate_qr_code() looks up users.linked_id to find the owner login row
+  • The apartment owner portal login also uses the users row.
+
+Without a users row there is:
+  - No QR / gate pass (validate_qr_code returns "User not found")
+  - No owner-portal login
+  - No push notifications / receivables link to the owner
+
+So all three are enrolled in the same order: domain row first (apartments
+/ vendors / security_staff), then users row with linked_id set inline.
+Domain-row-first means a failed users insert (duplicate email, etc.) rolls
+back the domain row too, rather than leaving an orphan with no login.
+`id` returned by fn_apartments_list / fn_vendors_list / fn_security_list
+is always the domain table's own id — never users.id (see
+estatehub.sql for the vendor/security part of this).
+
+Upload column contract (header row required, case-insensitive, extra columns ignored):
+
+  apartments : flat_number*, email*, password*, owner_name, mobile, apartment_size
+  vendors    : email*, password*, name*, business_name, service_type, mobile
+  security   : email*, password*, name*, mobile, shift, salary_per_shift
+  (* = required)
+
+Each row is auto-committed independently. A bad row (missing required
+field, duplicate email/flat, DB constraint violation) is skipped and
+reported without rolling back rows already committed earlier in the file.
+"""
+from __future__ import annotations
+
+from app.security.password_policy import validate_password
+import base64
+import io
+import pandas as pd
+from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
+
+from app.services import onboarding_service as ob
+
+from dash import Input, Output, State, ALL, ctx, no_update, html, dcc
+from dash.exceptions import PreventUpdate
+import dash_bootstrap_components as dbc
+from werkzeug.security import generate_password_hash
+
+from database.db_manager import db
+from app.security.guards import require_session
+from app.security.audit_context import (
+    get_current_user_id,
+    get_current_user_role,
+    get_current_society_id,
+)
+from app.utils.ux_toasts import error_toast
+
+# Defense-in-depth cap: a huge Excel file (accidental or malicious) would otherwise
+# trigger unbounded serial INSERTs with no upper bound.
+MAX_BULK_ROWS = 500
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXCEL CONTRACT PER ENTITY
+# ══════════════════════════════════════════════════════════════════════════════
+_BULK_TEMPLATES: dict[str, dict] = {
+    "apartments": {
+        "label": "Apartments (Owners)",
+        # email + password are required so a users row can be created for
+        # the owner — enabling QR gate pass, portal login and notifications.
+        "columns": [
+            "flat_number", "email", "password",
+            "owner_name", "mobile", "apartment_size",
+        ],
+        "required": ["flat_number", "email", "password"],
+        "notes": (
+            "email and password are required to create the owner's login "
+            "account, which is needed for the gate-pass QR code and the "
+            "owner portal."
+        ),
+    },
+    "vendors": {
+        "label": "Vendors",
+        "columns": [
+            "email", "password", "name", "business_name",
+            "service_type", "mobile",
+        ],
+        "required": ["email", "password", "name"],
+        "notes": (
+            "business_name defaults to name when omitted. "
+            "email and password create the vendor login account."
+        ),
+    },
+    "security": {
+        "label": "Security Staff",
+        "columns": [
+            "email", "password", "name",
+            "mobile", "shift", "salary_per_shift",
+        ],
+        "required": ["email", "password", "name"],
+        "notes": (
+            "email and password create the guard's login account, "
+            "which is required for the on-duty toggle and gate QR."
+        ),
+    },
+    "apartment_users": {
+        "label": "Apartment Users",
+        "columns": [
+            "flat_number", "email", "password",
+            "name", "user_type", "adult_confirmed",
+        ],
+        "required": ["flat_number", "email", "password", "name"],
+        "notes": (
+            "user_type can be owner, family, tenant, or visitor. "
+            "This creates additional logins tied to an existing apartment. "
+            "Logins are for adults only: for family, tenant or visitor write adult_confirmed = yes to confirm the person is 18 or over. "
+            "No date of birth, ID proof or photo is asked for here (DPDP: collect only what the purpose needs)."
+        ),
+    },
+    "assets": {
+        "label": "Assets",
+        "columns": [
+            "asset_name", "company_name", "asset_sno",
+            "purchase_date", "purchase_value",
+        ],
+        "required": ["asset_name", "purchase_date", "purchase_value"],
+        "notes": (
+            "Depreciation rate defaults to 100%. "
+            "purchase_date must be in YYYY-MM-DD format."
+        ),
+    },
+}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# UI HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _instructions_for(entity: str) -> html.Div:
+    meta = _BULK_TEMPLATES[entity]
+    req  = ", ".join(meta["required"])
+    return html.Div([
+        html.P(
+            f"Upload an Excel (.xlsx) file to enroll multiple {meta['label'].lower()} at once.",
+            className="mb-1",
+            style={"fontWeight": "600", "fontSize": "13px"},
+        ),
+        html.P(
+            f"Required columns: {req}.",
+            className="mb-1",
+            style={"fontSize": "12px", "color": "#de5c52"},
+        ),
+        html.P(
+            meta["notes"],
+            className="mb-2",
+            style={"fontSize": "12px", "color": "#7d8ea3"},
+        ),
+        html.P(
+            "Download the template below to see all supported columns. "
+            "Extra columns in your file are silently ignored.",
+            style={"fontSize": "11px", "color": "#aaa"},
+        ),
+    ])
+
+
+def _friendly_error(e: Exception) -> str:
+    """Readable reason for a failed row; never leaks SQL/driver text to the screen."""
+    import logging
+    logging.getLogger(__name__).warning("bulk enroll row failed: %s", e)
+    msg = str(e)
+    for marker in ("\nCONTEXT:", "\nDETAIL:", "\nHINT:", "\nLINE "):
+        msg = msg.split(marker)[0]
+    msg = msg.strip()
+    low = msg.lower()
+    if "duplicate key" in low or "unique constraint" in low:
+        return "A record with the same unique value (email or flat number) already exists."
+    if "violates" in low or "constraint" in low or "does not exist" in low or "syntax" in low:
+        return "This row could not be saved - please check its values."
+    return msg or "This row could not be saved."
+
+
+def _existing_email_status(email: str, sid: int, role: str) -> str | None:
+    """'same' = already enrolled in this society with this role (leave untouched);
+    'other' = email belongs to a different society/role; None = free."""
+    row = db._execute(
+        "SELECT society_id, role FROM users WHERE lower(email) = %s", (email,), fetch_one=True)
+    if not row:
+        return None
+    return "same" if (row.get("society_id") == sid and row.get("role") == role) else "other"
+
+
+def _render_results(results: dict, filename: str) -> html.Div:
+    success = results["success"]
+    failed  = results["failed"]
+    skipped = results.get("skipped", [])
+    children = []
+    if success:
+        children.append(html.Div([
+            html.I(className="fas fa-check-circle me-2",
+                   style={"color": "#17976e"}),
+            f"{success} row(s) enrolled successfully from \u00ab{filename}\u00bb.",
+        ], style={"color": "#17976e", "fontWeight": "600",
+                  "marginBottom": "6px"}))
+    if skipped:
+        children.append(html.Div(
+            f"{len(skipped)} row(s) already enrolled - left unchanged "
+            "(nothing was overwritten).",
+            style={"color": "#7d8ea3", "fontWeight": "600", "marginTop": "6px"},
+        ))
+    if failed:
+        children.append(html.Div(
+            f"{len(failed)} row(s) need correction. Fix them in your file and upload it again; "
+            "rows that were already enrolled will not be changed.",
+            style={"color": "#de5c52", "fontWeight": "600", "marginTop": "8px"},
+        ))
+        body = []
+        for item in failed:
+            row_i, reason = item[0], item[1]
+            label = item[2] if len(item) > 2 else ""
+            body.append(html.Tr([html.Td(str(row_i)), html.Td(label), html.Td(reason)]))
+        children.append(html.Div(
+            dbc.Table(
+                [html.Thead(html.Tr([html.Th("Row"), html.Th("Flat / Email"), html.Th("What to fix")])),
+                 html.Tbody(body)],
+                bordered=True, size="sm", striped=True,
+                style={"fontSize": "12px"},
+            ),
+            style={"maxHeight": "320px", "overflowY": "auto"},
+        ))
+    if not children:
+        children.append(html.Div("No rows processed.",
+                                  style={"color": "#7d8ea3"}))
+    return html.Div(children)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXCEL PARSER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _parse_upload(contents: str, filename: str) -> list[dict]:
+    """
+    Decode a dcc.Upload `contents` string (data URI) into a list of
+    lowercase-keyed row dicts using pandas to parse Excel.
+    """
+    _content_type, content_string = contents.split(",", 1)
+    decoded = base64.b64decode(content_string)
+    name = (filename or "").lower()
+    
+    if name.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(io.BytesIO(decoded))
+    else:
+        raise ValueError("Only Excel (.xlsx, .xls) files are supported.")
+        
+    df.columns = [(str(c) or "").strip().lower() for c in df.columns]
+    
+    # Drop completely empty rows
+    df.dropna(how='all', inplace=True)
+    
+    rows = []
+    for _, row in df.iterrows():
+        clean = {
+            k: str(v).strip() if pd.notna(v) else ""
+            for k, v in row.items()
+        }
+        rows.append(clean)
+    return rows
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TYPE COERCIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _safe_int(v, default: int = 0) -> int:
+    try:
+        return int(float(v)) if v not in (None, "") else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(v):
+    """A rupee amount from a spreadsheet cell, as a Decimal (the name is kept for its callers); None when blank or not a number."""
+    try:
+        return money(v) if v not in (None, "") else None
+    except ValueError:
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PER-ENTITY BULK INSERT
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _check_required(row: dict, required_cols: list[str]) -> str | None:
+    """Return an error string if any required column is blank, else None."""
+    missing = [c for c in required_cols if not (row.get(c) or "").strip()]
+    return f"Missing required column(s): {', '.join(missing)}" if missing else None
+
+
+def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> dict:
+    """
+    For each Excel row:
+      1. Insert into apartments → get apartments.id
+      2. Insert into users (role='apartment') → get users.id
+      3. Set users.linked_id = apartments.id
+
+    This is the ONLY order that gives the owner:
+      • A gate-pass QR (encoded as apartments.id → fn_evaluate_gate_pass uses
+        apartments.id directly)
+      • An owner-portal login
+      • Push-notification / receivables linkage
+
+    If step 1 succeeds but steps 2-3 fail, the orphaned apartments row is
+    cleaned up so the flat_number slot is freed for the next attempt.
+    """
+    required = _BULK_TEMPLATES["apartments"]["required"]
+    success  = 0
+    failed: list[tuple] = []
+    skipped: list[tuple] = []
+
+    # A3: enforce the same plan apartment cap as single-add. Rows beyond the
+    # remaining slots are reported as failed rather than silently inserted.
+    from app.services.plan_limits import remaining_apartment_slots
+    slots_left, _plan, _limit = remaining_apartment_slots(sid)
+
+    for i, row in enumerate(rows, start=2):   # row 1 = header
+        err = _check_required(row, required)
+        if err:
+            failed.append((i, err, str(row.get("email") or "")))
+            continue
+
+        _em = str(row.get("email") or "").strip().lower()
+        _st = _existing_email_status(_em, sid, "apartment")
+        if _st == "same":
+            skipped.append((i, "Already enrolled - left unchanged", _em))
+            continue
+        if _st == "other":
+            failed.append((i, "This email is already used by another account", _em))
+            continue
+
+        if slots_left <= 0:
+            failed.append((i, f"Society plan '{_plan}' limit reached ({_limit} apartments)"))
+            continue
+
+        flat     = row["flat_number"].strip()
+        email    = row["email"].strip().lower()
+        password = row["password"].strip()
+
+        _pw_err = validate_password(password)
+        if _pw_err:
+            failed.append((i, _pw_err, _em))
+            continue
+
+        try:
+            with db._conn() as conn:
+                cur = conn.cursor()
+                # NOTE (2026-09 bugfix, unrelated to the admin-only created_by/
+                # updated_by removal elsewhere in this file): apartments has
+                # never had a created_by column — this insert previously
+                # referenced it anyway, which would throw "column does not
+                # exist" on every bulk apartment enrollment.
+                cur.execute(
+                    "INSERT INTO apartments"
+                    "(society_id, flat_number, owner_name, mobile, apartment_size, "
+                    "alt_mobile, alt_address, owner_photo, id_proof, apt_calc_start_date, active) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+                    (
+                        sid,
+                        flat,
+                        row.get("owner_name") or None,
+                        row.get("mobile")     or None,
+                        _safe_int(row.get("apartment_size")),
+                        row.get("alt_mobile") or None,
+                        row.get("alt_address") or None,
+                        row.get("owner_photo") or None,
+                        row.get("id_proof") or None,
+                        row.get("apt_calc_start_date") or None,
+                    ),
+                )
+                apt_r = cur.fetchone()
+                apt_id = apt_r["id"] if apt_r else None
+                if not apt_id:
+                    raise Exception("Apartment insert failed")
+
+                cur.execute(
+                    "INSERT INTO users"
+                    "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
+                    "VALUES (%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
+                    (sid, email, generate_password_hash(password), apt_id, user_id),
+                )
+        except Exception as e:
+            failed.append((i, _friendly_error(e), _em))
+            continue
+
+        success += 1
+        slots_left -= 1
+        # Item 10: link any pending opening receivable for this flat (idempotent).
+        try:
+            ob.link_opening_receivable(sid, apt_id, flat)
+        except Exception:                                          # noqa: BLE001 - enrolment stands even if linking fails
+            print(f"could not link opening receivable for flat {flat} in society {sid}")
+
+    if success:
+        try:   # Plan v3 2.8: keep flats' undivided-interest shares summing to 100% (unless typed from the Declaration)
+            from app.services.up_aoa_actions import fill_after_enrolment
+            fill_after_enrolment(sid)
+        except Exception as exc:
+            print(f"undivided-interest fill after enrolment skipped: {exc}")
+    return {"success": success, "failed": failed, "skipped": skipped}
+
+
+def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dict:
+    """
+    For each Excel row:
+      1. Insert into vendors
+      2. Insert into users (role='vendor', linked_id=vendors.id set inline)
+      If step 2 fails, roll back the vendors row so the row can be retried
+      cleanly rather than leaving an orphan with no login — same reasoning
+      as apartments above, and matches fn_vendors_list.id = vendors.id
+      (vendors.id / security_staff.id) rather than users.id.
+    """
+    required = _BULK_TEMPLATES["vendors"]["required"]
+    success  = 0
+    failed: list[tuple] = []
+    skipped: list[tuple] = []
+
+    for i, row in enumerate(rows, start=2):
+        err = _check_required(row, required)
+        if err:
+            failed.append((i, err, str(row.get("email") or "")))
+            continue
+
+        _em = str(row.get("email") or "").strip().lower()
+        _st = _existing_email_status(_em, sid, "vendor")
+        if _st == "same":
+            skipped.append((i, "Already enrolled - left unchanged", _em))
+            continue
+        if _st == "other":
+            failed.append((i, "This email is already used by another account", _em))
+            continue
+
+        email    = row["email"].strip().lower()
+        password = row["password"].strip()
+        name     = row["name"].strip()
+        biz_name = (row.get("business_name") or name or email).strip()
+
+        _pw_err = validate_password(password)
+        if _pw_err:
+            failed.append((i, _pw_err, _em))
+            continue
+
+        try:
+            with db._conn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO vendors"
+                    "(society_id, business_name, name, service_type, mobile, service_description, "
+                    "photo, logo, license, active, pan_number, gstin) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s,%s) RETURNING id",
+                    (
+                        sid,
+                        biz_name,
+                        name,
+                        row.get("service_type") or None,
+                        row.get("mobile")       or None,
+                        row.get("service_description") or None,
+                        row.get("photo") or None,
+                        row.get("logo") or None,
+                        row.get("license") or None,
+                        row.get("pan_number") or None,
+                        row.get("gstin") or None,
+                    ),
+                )
+                ven_r = cur.fetchone()
+                ven_id = ven_r["id"] if ven_r else None
+                if not ven_id:
+                    raise Exception("Vendor record insert failed")
+
+                cur.execute(
+                    "INSERT INTO users"
+                    "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
+                    "VALUES (%s,%s,%s,'vendor','password',%s,%s)",
+                    (sid, email, generate_password_hash(password), ven_id, user_id),
+                )
+        except Exception as e:
+            failed.append((i, _friendly_error(e), _em))
+            continue
+
+        success += 1
+
+    return {"success": success, "failed": failed, "skipped": skipped}
+
+
+def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> dict:
+    """
+    For each Excel row:
+      1. Insert into security_staff
+      2. Insert into users (role='security', linked_id=security_staff.id set inline)
+      If step 2 fails, roll back the security_staff row — same reasoning as
+      vendors/apartments above.
+    """
+    required = _BULK_TEMPLATES["security"]["required"]
+    success  = 0
+    failed: list[tuple] = []
+    skipped: list[tuple] = []
+
+    for i, row in enumerate(rows, start=2):
+        err = _check_required(row, required)
+        if err:
+            failed.append((i, err, str(row.get("email") or "")))
+            continue
+
+        _em = str(row.get("email") or "").strip().lower()
+        _st = _existing_email_status(_em, sid, "security")
+        if _st == "same":
+            skipped.append((i, "Already enrolled - left unchanged", _em))
+            continue
+        if _st == "other":
+            failed.append((i, "This email is already used by another account", _em))
+            continue
+
+        email    = row["email"].strip().lower()
+        password = row["password"].strip()
+        name     = row["name"].strip()
+
+        _pw_err = validate_password(password)
+        if _pw_err:
+            failed.append((i, _pw_err, _em))
+            continue
+
+        try:
+            with db._conn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO security_staff"
+                    "(society_id, name, mobile, shift, salary_per_shift, joining_date, photo, id_proof, active) "
+                    "VALUES (%s,%s,%s,%s,%s,CURRENT_DATE,%s,%s,TRUE) RETURNING id",
+                    (
+                        sid,
+                        name,
+                        row.get("mobile")            or None,
+                        row.get("shift")             or None,
+                        _safe_float(row.get("salary_per_shift")),
+                        row.get("photo") or None,
+                        row.get("id_proof") or None,
+                    ),
+                )
+                sec_r = cur.fetchone()
+                sec_id = sec_r["id"] if sec_r else None
+                if not sec_id:
+                    raise Exception("Security staff record insert failed")
+
+                cur.execute(
+                    "INSERT INTO users"
+                    "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
+                    "VALUES (%s,%s,%s,'security','password',%s,%s)",
+                    (sid, email, generate_password_hash(password), sec_id, user_id),
+                )
+        except Exception as e:
+            failed.append((i, _friendly_error(e), _em))
+            continue
+
+        success += 1
+
+    return {"success": success, "failed": failed, "skipped": skipped}
+
+
+def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None) -> dict:
+    required = _BULK_TEMPLATES["apartment_users"]["required"]
+    success  = 0
+    failed: list[tuple] = []
+    skipped: list[tuple] = []
+
+    for i, row in enumerate(rows, start=2):
+        err = _check_required(row, required)
+        if err:
+            failed.append((i, err, str(row.get("email") or "")))
+            continue
+
+        _em = str(row.get("email") or "").strip().lower()
+        _st = _existing_email_status(_em, sid, "apartment")
+        if _st == "same":
+            skipped.append((i, "Already enrolled - left unchanged", _em))
+            continue
+        if _st == "other":
+            failed.append((i, "This email is already used by another account", _em))
+            continue
+
+        flat     = row["flat_number"].strip()
+        email    = row["email"].strip().lower()
+        password = row["password"].strip()
+        name     = row["name"].strip()
+        user_type = row.get("user_type", "family").strip().lower()
+        if user_type not in ("owner", "family", "tenant", "visitor"):
+            user_type = "family"
+        # V5.12 minimisation: the platform holds records of adults only, and asks for no age beyond this one confirmation.
+        if user_type != "owner" and str(row.get("adult_confirmed") or "").strip().lower() not in ("yes", "y", "true", "1"):
+            failed.append((i, "Logins are for adults only. Confirm the person is 18 or over with adult_confirmed = yes.", _em))
+            continue
+
+        _pw_err = validate_password(password)
+        if _pw_err:
+            failed.append((i, _pw_err, _em))
+            continue
+
+        try:
+            with db._conn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT id FROM apartments WHERE society_id=%s AND flat_number=%s",
+                    (sid, flat)
+                )
+                apt_r = cur.fetchone()
+                if not apt_r:
+                    raise Exception(f"Apartment '{flat}' not found")
+                apt_id = apt_r["id"]
+                
+                cur.execute(
+                    "INSERT INTO users (society_id, email, password_hash, role, login_method, linked_id, name, user_type, created_by) "
+                    "VALUES (%s,%s,%s,'apartment','password',%s,%s,%s,%s)",
+                    (sid, email, generate_password_hash(password), apt_id, name, user_type, user_id),
+                )
+            success += 1
+        except Exception as e:
+            failed.append((i, _friendly_error(e), _em))
+
+    return {"success": success, "failed": failed, "skipped": skipped}
+
+def _bulk_insert_assets(rows: list[dict], sid: int, user_id: int = None) -> dict:
+    required = _BULK_TEMPLATES["assets"]["required"]
+    success  = 0
+    failed: list[tuple[int, str]] = []
+
+    for i, row in enumerate(rows, start=2):
+        err = _check_required(row, required)
+        if err:
+            failed.append((i, err))
+            continue
+
+        try:
+            db._execute(
+                "INSERT INTO assets"
+                "(society_id, asset_name, company_name, asset_sno, purchase_date, purchase_value, depreciation_rate) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    sid,
+                    row["asset_name"].strip(),
+                    row.get("company_name") or None,
+                    row.get("asset_sno") or None,
+                    row["purchase_date"].strip(),
+                    _safe_float(row["purchase_value"]),
+                    100.00,
+                ),
+            )
+            success += 1
+        except Exception as e:
+            failed.append((i, f"Asset insert failed: {e}"))
+
+    return {"success": success, "failed": failed}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CALLBACKS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def register_bulk_enroll_callbacks(app):
+
+    # ── 1. Open modal ────────────────────────────────────────────────────────────
+    @app.callback(
+        Output("bulk-enroll-modal",       "is_open"),
+        Output("bulk-enroll-entity-store","data"),
+        Output("bulk-enroll-modal-title", "children"),
+        Output("bulk-enroll-instructions","children"),
+        Output("bulk-enroll-result",      "children"),
+        Output("bulk-enroll-upload",      "contents"),
+        Input({"type": "btn-bulk-enroll", "entity": ALL}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def open_bulk_enroll_modal(n_clicks_list):
+        if not ctx.triggered or not any(n_clicks_list):
+            raise PreventUpdate
+        trig_id = ctx.triggered_id
+        entity  = trig_id.get("entity") if isinstance(trig_id, dict) else None
+        if entity not in _BULK_TEMPLATES:
+            raise PreventUpdate
+        meta  = _BULK_TEMPLATES[entity]
+        title = f"Bulk Enroll — {meta['label']}"
+        return True, entity, title, _instructions_for(entity), "", None
+
+    # ── 2. Close modal ────────────────────────────────────────────────────────────
+    @app.callback(
+        Output("bulk-enroll-modal", "is_open", allow_duplicate=True),
+        Input("close-bulk-enroll-modal", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def close_bulk_enroll_modal(n_clicks):
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
+    # ── 3. Download template ──────────────────────────────────────────────────
+    @app.callback(
+        Output("bulk-enroll-template-download", "data"),
+        Input("bulk-enroll-template-btn",       "n_clicks"),
+        State("bulk-enroll-entity-store",       "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def download_bulk_enroll_template(n_clicks, entity):
+        if not n_clicks or entity not in _BULK_TEMPLATES:
+            raise PreventUpdate
+        cols = _BULK_TEMPLATES[entity]["columns"]
+        df = pd.DataFrame(columns=cols)
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False)
+        
+        return dcc.send_bytes(
+            output.getvalue(), filename=f"{entity}_bulk_enroll_template.xlsx"
+        )
+
+    @app.callback(
+        Output("bulk-enroll-file-feedback", "children"),
+        Input("bulk-enroll-upload", "contents"),
+        State("bulk-enroll-upload", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def validate_bulk_enroll_file(contents, filename):
+        if not contents:
+            return ""
+        if not str(filename or "").lower().endswith((".xlsx", ".xls")):
+            return "Choose an Excel .xlsx or .xls file."
+        return ""
+
+    # ── 4. Process Excel upload → bulk insert → refresh list ────────────────────────
+    @app.callback(
+        Output("bulk-enroll-result",        "children",   allow_duplicate=True),
+        Output("drilldown-store",           "data",       allow_duplicate=True),
+        Output("drill-content",             "children",   allow_duplicate=True),
+        Output("drill-breadcrumb",          "children",   allow_duplicate=True),
+        Output("profile-action-trigger",    "data",       allow_duplicate=True),
+        Input("bulk-enroll-upload",         "contents"),
+        State("bulk-enroll-upload",         "filename"),
+        State("bulk-enroll-entity-store",   "data"),
+        State("auth-store",                 "data"),
+        State("drilldown-store",            "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def process_bulk_enroll_upload(contents, filename, entity, auth, store):
+        if not contents or entity not in _BULK_TEMPLATES:
+            raise PreventUpdate
+
+        # ── SECURITY: the "Bulk Enroll" button is only rendered when
+        # `"new" in allowed` for apartments/vendors/security (see
+        # renderers.py), which is admin-only per _PORTAL_PERMS — but
+        # that's a UI-only check. role/society_id/actor_id below come
+        # from the server-side Flask-Login session (see
+        # app/security/audit_context.py), never from `auth` (auth-store,
+        # a Dash dcc.Store living in browser localStorage, editable via
+        # devtools). @require_session above already guarantees a valid
+        # session exists on this request, so there's no auth-store
+        # fallback left here — an editable client value has no path to
+        # override role/tenant scoping for this write.
+        _actor_role = get_current_user_role()
+        if _actor_role not in ("admin", "master"):
+            return (
+                html.Div("You don't have permission to do that.", style={"color": "#de5c52"}),
+                no_update, no_update, no_update, no_update,
+            )
+
+        sid = get_current_society_id()
+        if not sid:
+            return (
+                html.Div("Not authenticated.", style={"color": "#de5c52"}),
+                no_update, no_update, no_update, no_update,
+            )
+
+        actor_id = get_current_user_id()
+
+        # Action-level authorization (RWA3 WP5 enrollment): the legacy portal
+        # gate above stays; the capability + tenant check is added on top.
+        # A platform operator (no society) can never reach this write.
+        from app.security.authorization import Cap
+        from app.security.service_guard import blocks, check
+        if blocks(check(Cap.ENROLLMENT_COMMIT, "enrollment_batch", target_society_id=sid)):
+            return (
+                html.Div("You don't have permission to do that.", style={"color": "#de5c52"}),
+                no_update, no_update, no_update, no_update,
+            )
+
+        try:
+            rows = _parse_upload(contents, filename)
+        except Exception as e:
+            return (
+                html.Div(error_toast(e, "Unable to read this file. Please try again.")["message"], style={"color": "#de5c52"}),
+                no_update, no_update, no_update, no_update,
+            )
+
+        if not rows:
+            return (
+                html.Div("The upload has no data rows.", style={"color": "#e59620"}),
+                no_update, no_update, no_update, no_update,
+            )
+
+        if len(rows) > MAX_BULK_ROWS:
+            return (
+                html.Div(
+                    f"Too many rows ({len(rows)}) — split into batches of "
+                    f"{MAX_BULK_ROWS} or fewer.",
+                    style={"color": "#de5c52"},
+                ),
+                no_update, no_update, no_update, no_update,
+            )
+
+        if entity == "apartments":
+            results = _bulk_insert_apartments(rows, sid, actor_id)
+        elif entity == "vendors":
+            results = _bulk_insert_vendors(rows, sid, actor_id)
+        elif entity == "apartment_users":
+            results = _bulk_insert_apartment_users(rows, sid, actor_id)
+        elif entity == "assets":
+            results = _bulk_insert_assets(rows, sid, actor_id)
+        else:   # security
+            results = _bulk_insert_security(rows, sid, actor_id)
+
+        # Secret-free audit: counts and the entity kind only - never row
+        # contents, which carry names, phones and (initial) credentials.
+        from app.security.service_guard import audit_event
+        audit_event("enrollment.commit", "enrollment_batch", None,
+                    after={"entity": entity, "filename": filename or "upload.xlsx",
+                           "rows": len(rows), "success": results["success"],
+                           "failed": len(results["failed"])},
+                    permission_used=Cap.ENROLLMENT_COMMIT)
+        result_ui = _render_results(results, filename or "upload.xlsx")
+
+        # Refresh the underlying list card so new rows appear immediately.
+        from .drilldown_callbacks import _render_current
+        store = dict(store or {})
+        store["refresh"] = True
+        content, breadcrumb, _db_err = _render_current(store, auth)
+
+        n_ok   = results["success"]
+        n_fail = len(results["failed"])
+        n_same = len(results.get("skipped", []))
+        toast_type = (
+            "success" if n_ok and not n_fail else
+            "warning" if n_ok else
+            "error"
+        )
+        toast = {"_toast": {
+            "type":    toast_type,
+            "message": (f"Bulk enroll: {n_ok} added, {n_same} already enrolled (unchanged), "
+                        f"{n_fail} need correction."),
+        }}
+        return result_ui, store, content, breadcrumb, toast

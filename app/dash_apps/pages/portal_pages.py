@@ -1,0 +1,1996 @@
+# app/dash_apps/pages/portal_pages.py
+"""
+ALL 5 PORTAL PAGE LAYOUTS — single source of truth.
+v3 additions:
+  Admin:     new tabs — Receivables, payables, Assets
+  Apartment: new tab  — Receivables (read-only own dues)
+  Vendor:    new tab  — Receivables (read-only own pass/charges)
+  Security:  new tab  — payables    (read-only own salary rows)
+  All portals: Verify button on Receivables/payables is admin-only
+               (enforced in renderers.py via _PORTAL_PERMS)
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import date
+
+import dash_bootstrap_components as dbc
+from dash import dcc, html
+
+from app.dash_apps.pages.card_catalogue import DEFAULT_LAYOUTS
+
+
+def _manual_qr_card(scope: str, **kwargs):
+    """Thin wrapper around qr_callbacks.render_manual_qr_card — imported
+    lazily (not at module top) since qr_callbacks.py is a callbacks module,
+    and portal_pages.py is imported early during page-layout construction;
+    a top-level import here risks a circular-import ordering issue."""
+    from app.dash_apps.callbacks.qr_callbacks import render_manual_qr_card
+    return render_manual_qr_card(scope, **kwargs)
+
+
+
+
+
+_C = {
+    "master":    "#c96a19",
+    "admin":     "#1859b8",
+    "apartment": "#18794e",
+    "vendor":    "#b98a07",
+    "security":  "#b63b3b",
+    "accountant": "#7c3aed",
+    "supervisor": "#ea580c",
+    "staff":     "#ffffff",
+    "auditor":   "#dc2626",
+}
+
+# Single source of truth for KPI card sizing. `auto-fit` + a CAPPED max track
+# width keeps every card the same width whether a tab shows 1 KPI or 8 — a lone
+# KPI no longer stretches to full width, and a crowded tab no longer shrinks
+# cards below the floor. Paired with the fixed `.kpi-card` height in style.css
+# so every KPI tile is identical across all tabs / all portals.
+KPI_GRID_COLS = "repeat(auto-fit, minmax(190px, 215px))"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# INTERNAL HELPERS
+# ════════════════════════════════════════════════════════════════════════════
+
+def _kpi(card_id: str, icon: str, color: str, label: str, subtitle: str = "",
+         value: str = "—") -> html.Div:
+    return html.Div(
+        html.Div(
+            [
+                html.Div(style={
+                    "position": "absolute", "left": 0, "top": 0, "bottom": 0,
+                    "width": "7px", "background": color, "borderRadius": "7px 0 0 7px",
+                }),
+                html.Div("⠿", className="dnd-handle", style={
+                    "position": "absolute", "top": "6px", "right": "8px",
+                    "fontSize": "12px", "color": "#ddd", "cursor": "grab", "userSelect": "none",
+                }),
+                html.I(className=f"fas {icon}", style={
+                    "color": color, "fontSize": "20px", "marginBottom": "8px", "display": "block",
+                }),
+                html.Div(value, id={"type": "kpi-value", "card_id": card_id}, style={
+                    "fontSize": "24px", "fontWeight": "800", "color": "#15304f", "lineHeight": "1",
+                }),
+                html.Div(label, style={
+                    "fontSize": "11px", "fontWeight": "600", "color": "#7d8ea3",
+                    "marginTop": "4px", "textTransform": "uppercase", "letterSpacing": "0.4px",
+                }),
+                html.Div(subtitle, style={"fontSize": "10px", "color": "#aaa", "marginTop": "2px"})
+                    if subtitle else None,
+                html.Div(
+                    html.I(className="fas fa-arrow-right", style={"fontSize": "9px", "color": color}),
+                    style={"position": "absolute", "bottom": "8px", "right": "12px", "opacity": "0.5"},
+                ),
+            ],
+            id={"type": "kpi-card-div", "card_id": card_id},
+            n_clicks=0,
+            title=f"Click to drill into {label}",
+            style={
+                "position": "relative",
+                "background": (
+                    f"linear-gradient(135deg, {color}80 0%, {color}00 20%), "
+                    "linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,251,255,0.9))"
+                ),
+                "border": "1px solid rgba(255,255,255,0.68)", "borderRadius": "16px",
+                "padding": "18px 14px 14px 18px", "cursor": "pointer",
+                "boxShadow": "0 8px 24px rgba(15,23,42,0.07)",
+                "transition": "transform 0.16s ease, box-shadow 0.16s ease",
+                "minHeight": "106px", "backdropFilter": "blur(10px)", "overflow": "hidden",
+            },
+        ),
+        className="kpi-card",
+    )
+
+
+def _is_white(color: str) -> bool:
+    return str(color).strip().lower() in ("#fff", "#ffffff", "white")
+
+
+def _page_title(icon: str, color: str, title: str, sub: str = "") -> html.Div:
+    white = _is_white(color)   # the Staff theme: a white badge needs a dark glyph and an edge to be visible
+    return html.Div([
+        html.Div(
+            html.I(className=f"fas {icon}", style={"color": "#475569" if white else "#fff", "fontSize": "17px"}),
+            style={
+                "width": "42px", "height": "42px", "borderRadius": "12px",
+                "background": "#ffffff" if white else f"linear-gradient(135deg,{color},{color}99)",
+                "border": "1.5px solid #cbd5e1" if white else "none",
+                "display": "flex", "alignItems": "center", "justifyContent": "center",
+                "marginRight": "14px", "flexShrink": "0",
+            },
+        ),
+        html.Div([
+            html.H4(title, className="mb-0", style={"fontWeight": "800", "color": "#15304f", "fontSize": "18px"}),
+            html.Small(sub, style={"color": "#aaa", "fontSize": "12px"}) if sub else None,
+        ]),
+    ], style={"display": "flex", "alignItems": "center", "marginBottom": "22px"})
+
+
+def _sec_hdr(title: str, sub: str = "", icon: str = "fa-layer-group") -> html.Div:
+    return html.Div([
+        html.I(className=f"fas {icon} me-2", style={"color": "#7d8ea3", "fontSize": "13px"}),
+        html.Span(title, style={"fontWeight": "700", "fontSize": "14px", "color": "#15304f"}),
+        html.Small(f"  — {sub}", style={"color": "#bbb", "fontSize": "11px"}) if sub else None,
+    ], style={"display": "flex", "alignItems": "center", "marginBottom": "14px", "marginTop": "2px"})
+
+
+def _kpi_row(*kpis, cols: str = KPI_GRID_COLS) -> html.Div:
+    return html.Div(
+        list(kpis), id="kpi-row", className="kpi-row",
+        style={"gridTemplateColumns": cols, "marginBottom": "20px"},
+    )
+
+
+def _kpi_from_id(card_id: str, value: str = "—") -> html.Div:
+    """
+    Render a single _kpi() card purely from a card_id, pulling icon/color/
+    title/group straight from KPI_CARDS metadata (card_catalogue.py) instead
+    of needing them hardcoded at each call site. This is what makes
+    _kpi_row_dynamic() below possible — any saved Customize layout is just
+    a list of card_ids, so we need to be able to render an arbitrary one
+    without the caller having supplied its display metadata inline.
+    """
+    from app.dash_apps.pages.card_catalogue import KPI_CARDS
+    cfg = KPI_CARDS.get(card_id, {})
+    return _kpi(
+        card_id,
+        cfg.get("icon", "fa-chart-bar"),
+        cfg.get("color", "#3498db"),
+        cfg.get("title", card_id),
+        cfg.get("group", ""),
+        value=value,
+    )
+
+
+_PORTAL_TO_ROLE = {
+    "master": "master", "admin": "admin", "owner": "apartment",
+    "vendor": "vendor", "security": "security",
+}
+
+
+def _kpi_row_dynamic(portal: str, tab: str, sid, *default_kpi_ids: str,
+                      cols: str = KPI_GRID_COLS, entity_id=None) -> html.Div:
+    """
+    THE FIX for "customization isn't working": the Customize tab's Save
+    button (customize_callbacks.py's save_layout()) has always correctly
+    written {"active": [...], "available": [...]} to
+    Dashboard_settings[key=f"dashboard_layout_{portal}_{tab}"] — but nothing
+    anywhere ever read it back. Every real dashboard tab rendered a
+    hardcoded, static list of _kpi(...) calls regardless of what was saved,
+    so Customize was a fully-functional dead end.
+
+    This helper is the read side: given the portal+tab this row belongs to,
+    it looks up the saved layout for the current society and renders THAT
+    ordered card_id list if one exists, falling back to DEFAULT_LAYOUTS
+    (the single source of truth in card_catalogue.py) for this portal+tab
+    otherwise. No KPI ids are hardcoded at the call site — every tab reads
+    its default set straight from DEFAULT_LAYOUTS[portal][tab].
+
+    Usage:
+        _kpi_row_dynamic("admin", "dashboard", sid, cols=...)
+    (the KPI card_ids come from DEFAULT_LAYOUTS automatically via
+    _kpi_from_id; icon/color/title/group are pulled from KPI_CARDS).
+
+    entity_id: the viewing apartment/vendor/security id, when known (e.g.
+    owner_portal_page already receives apt_id). Used only to seed
+    personalised cards (kpi_my_pending_dues etc.) from cache at render time;
+    generic cards seed correctly regardless since they don't need it — see
+    resolve_seed_kpi_value()'s docstring for why this matters (fixes KPIs
+    rendering blank on a cache-hit tab switch, since the DOM no longer has
+    to start at "—" and wait for the callback to overwrite it).
+    """
+    if not default_kpi_ids:
+        default_kpi_ids = tuple(DEFAULT_LAYOUTS.get(portal, {}).get(tab, []))
+    ids = list(default_kpi_ids)
+    if sid:
+        try:
+            from database.db_manager import db
+            row = db._execute(
+                "SELECT value FROM Dashboard_settings WHERE society_id=%s AND key=%s",
+                (sid, f"dashboard_layout_{portal}_{tab}"),
+                fetch_one=True,
+            )
+            if row and row.get("value"):
+                from app.dash_apps.pages.card_catalogue import KPI_CARDS
+                parsed = json.loads(row["value"])
+                saved = [c for c in parsed.get("active", []) if c in KPI_CARDS]
+                if saved:
+                    ids = saved
+        except Exception as e:
+            print(f"_kpi_row_dynamic layout load error ({portal}/{tab}): {e}")
+
+    role = _PORTAL_TO_ROLE.get(portal, portal)
+    try:
+        from app.dash_apps.callbacks.card_catalogue_callbacks import (
+            resolve_seed_kpi_value,
+        )
+        seeded = {
+            cid: resolve_seed_kpi_value(sid, role, cid, entity_id) for cid in ids
+        }
+    except Exception as e:
+        print(f"_kpi_row_dynamic KPI cache seed error ({portal}/{tab}): {e}")
+        seeded = {}
+
+    return _kpi_row(
+        *[_kpi_from_id(cid, value=seeded.get(cid) or "Loading…") for cid in ids],
+        cols=cols,
+    )
+
+
+def _drill_panel() -> html.Div:
+    return html.Div(
+        [
+            html.Div(id="drill-breadcrumb"),
+            dcc.Loading(
+                html.Div(
+                    id="drill-content",
+                    children=html.Div([
+                        html.I(className="fas fa-hand-pointer fa-2x mb-3",
+                               style={"color": "rgba(29,116,216,0.18)"}),
+                        html.P("Click any KPI card above to explore →",
+                               className="text-muted", style={"fontSize": "13px"}),
+                    ], className="text-center", style={"padding": "6px 2px"}),
+                ),
+                type="circle", color="#1d74d8",
+            ),
+        ],
+        style={
+            "background": "rgba(255,255,255,0.55)", "backdropFilter": "blur(2px)",
+            "border": "2px solid rgba(255,255,255,0.6)", "borderRadius": "2px",
+            "padding": "2px", "boxShadow": "0 2px 6px rgba(15,23,42,0.06)",
+            "minHeight": "500px",
+        },
+    )
+
+
+def _divider() -> html.Hr:
+    return html.Hr(style={"margin": "20px 0", "opacity": "0.12"})
+
+
+_RWA_COMPLIANCE_UP_DDL = """CREATE TABLE IF NOT EXISTS legal_instrument_catalog (
+    id SERIAL PRIMARY KEY,
+    regime_code VARCHAR(30) NOT NULL REFERENCES legal_regime_profiles (code) ON DELETE CASCADE,
+    instrument_type VARCHAR(30) NOT NULL CHECK (
+        instrument_type IN ('Act','Rules','Bye-laws','Notification','Central Act','Central Rules')
+    ),
+    title VARCHAR(300) NOT NULL,
+    enactment_year INT,
+    issuing_authority VARCHAR(150),
+    applicability TEXT,
+    key_provisions TEXT NOT NULL,
+    source_reference TEXT NOT NULL,
+    display_order INT NOT NULL DEFAULT 100,
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active','superseded','draft')),
+    last_verified_on DATE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_legal_instrument UNIQUE (regime_code, title, enactment_year)
+);
+CREATE INDEX IF NOT EXISTS idx_legal_instrument_catalog_regime ON legal_instrument_catalog (regime_code);"""
+
+_TYPE_BADGE_COLOR = {
+    "Act": "primary", "Central Act": "info", "Rules": "secondary",
+    "Central Rules": "info", "Bye-laws": "warning", "Notification": "dark",
+}
+
+
+def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False) -> html.Div:
+    """
+    Master Portal → 'RWA Compliance (UP)' tab.
+
+    Renders the tabulated Acts/Rules/Bye-laws/Notifications governing RWAs
+    (Apartment Owners' Associations) in Uttar Pradesh, gathered by web
+    research into legal_instrument_catalog (regime UP_AOA_2010) — a child
+    table of the existing legal_regime_profiles jurisdiction system.
+
+    role / embedded: the same informational view is shown on the master, admin and owner portals
+    (embedded=True drops the page title when it is a tab inside Settings). Only role == 'master' gets
+    'Edit a catalog entry'; its callbacks are master-only on the server regardless of what is rendered.
+
+    This table is new: on a database that hasn't had it integrated yet, the
+    query below raises (relation does not exist), and rather than a raw
+    500 we show the exact steps + SQL to push it live from Master Settings
+    → KPI Inspector → "Integrate to DB", without needing a deploy.
+    """
+    from database.db_manager import db
+    from app.dash_apps.pages.master_rules_page import catalog_edit_form
+    from app.dash_apps.pages.governance_guide import render_governance_guide
+
+    try:
+        rows = db._execute(
+            """SELECT instrument_type, title, enactment_year, issuing_authority,
+                      applicability, key_provisions, source_reference, status, last_verified_on
+               FROM legal_instrument_catalog
+               WHERE regime_code = 'UP_AOA_2010'
+               ORDER BY display_order""",
+            (), fetch_all=True,
+        ) or []
+    except Exception:
+        rows = None  # table not integrated yet — show setup instructions instead
+
+    def _title():
+        return None if embedded else _page_title(
+            "fa-gavel", c, "RWA Compliance (UP)",
+            "Acts, Rules & Bye-laws governing RWAs / Apartment Owners' Associations in Uttar Pradesh")
+
+    if rows is None and role != "master":
+        return html.Div([_title(), dbc.Alert("The legal instrument catalog has not been set up yet. "
+                                             "Please contact the platform administrator.", color="warning"),
+                         render_governance_guide()],
+                        className="portal-page")
+
+    if rows is None:
+        return html.Div([
+            _title(),
+            dbc.Alert([
+                html.H6([html.I(className="fas fa-database me-2"), "Not integrated yet"],
+                        className="alert-heading", style={"fontWeight": "700"}),
+                html.P("legal_instrument_catalog doesn't exist on this database yet. Push it live with no "
+                       "deploy needed:", style={"fontSize": "13px", "marginBottom": "8px"}),
+                html.Ol([
+                    html.Li("Master Portal → Settings → KPI Inspector tab.", style={"fontSize": "13px"}),
+                    html.Li("Paste the CREATE TABLE statement below into \"SQL Query (editable)\".",
+                            style={"fontSize": "13px"}),
+                    html.Li([html.Code("Integrate to DB"), " — creates the table (safe to re-run, uses "
+                             "CREATE TABLE IF NOT EXISTS)."], style={"fontSize": "13px"}),
+                    html.Li(["Then seed the rows: run ", html.Code("python database/seed.py"),
+                             " once against this database (calls seed_legal_instrument_catalog(), idempotent "
+                             "on regime+title+year), or paste individual ",
+                             html.Code("INSERT INTO legal_instrument_catalog ..."),
+                             " statements from ", html.Code("database/seed.py"),
+                             "'s LEGAL_INSTRUMENTS_UP_AOA list into the same box and Integrate to DB again."],
+                            style={"fontSize": "13px"}),
+                ], style={"marginBottom": "8px", "paddingLeft": "20px"}),
+            ], color="warning", className="mb-3 shadow-sm"),
+            dbc.Textarea(value=_RWA_COMPLIANCE_UP_DDL, readOnly=True, rows=20,
+                         style={"fontSize": "11px", "fontFamily": "monospace", "backgroundColor": "#f5f7fa",
+                                "border": "1px solid #cdd5df", "borderRadius": "8px", "color": "#2c3e50"}),
+        ], className="portal-page")
+
+    groups: dict[str, list] = {}
+    for r in rows:
+        groups.setdefault(r["instrument_type"], []).append(r)
+
+    sections = []
+    for itype, items in groups.items():
+        sections.append(html.H6(
+            [dbc.Badge(itype, color=_TYPE_BADGE_COLOR.get(itype, "light"), className="me-2"),
+             f"{len(items)} instrument{'s' if len(items) != 1 else ''}"],
+            style={"marginTop": "18px", "marginBottom": "8px", "fontWeight": "700", "color": "#15304f"},
+        ))
+        rows_html = []
+        for r in items:
+            year = f" ({r['enactment_year']})" if r.get("enactment_year") else ""
+            rows_html.append(html.Tr([
+                html.Td([html.Strong(r["title"] + year, style={"fontSize": "12px"}),
+                         html.Br(),
+                         html.Small(r.get("issuing_authority") or "", className="text-muted")],
+                        style={"maxWidth": "260px"}),
+                html.Td(html.Small(r.get("applicability") or "—"), style={"fontSize": "11px", "maxWidth": "220px"}),
+                html.Td(html.Small(r["key_provisions"]), style={"fontSize": "11px", "maxWidth": "380px"}),
+                html.Td(dbc.Badge(r["status"], color="success" if r["status"] == "active" else "secondary",
+                                  pill=True), style={"fontSize": "10px"}),
+                html.Td(html.Small(r.get("source_reference") or "—", className="text-muted"),
+                        style={"fontSize": "10px", "maxWidth": "220px"}),
+            ]))
+        sections.append(dbc.Table([
+            html.Thead(html.Tr([
+                html.Th("Instrument", style={"fontSize": "11px"}),
+                html.Th("Applicability", style={"fontSize": "11px"}),
+                html.Th("Key Provisions", style={"fontSize": "11px"}),
+                html.Th("Status", style={"fontSize": "11px"}),
+                html.Th("Source", style={"fontSize": "11px"}),
+            ])),
+            html.Tbody(rows_html),
+        ], bordered=True, hover=True, responsive=True, size="sm", style={"fontSize": "12px"}))
+
+    last_verified = max((r.get("last_verified_on") for r in rows if r.get("last_verified_on")), default=None)
+
+    if role == "master":
+        footer = [
+            html.Small(
+                "To add a new instrument, add it to LEGAL_INSTRUMENTS_UP_AOA in database/seed.py and re-run the seed. "
+                "Raw INSERT/UPDATE on this table through Integrate to DB is blocked.", className="text-muted"),
+            # 'Edit a catalog entry' — master only. Its save callback also writes mrl-toast / mrl-body, so both
+            # must exist on this page (mrl-body is a hidden sink; the rules tables live on the AOA Rule Editor).
+            html.Div(id="mrl-toast", className="mt-3"),
+            html.Div(id="mrl-body", style={"display": "none"}),
+            catalog_edit_form(),
+        ]
+    else:
+        footer = [html.Small("Informational. Changes to this catalog are made by the platform administrator.",
+                             className="text-muted")]
+
+    return html.Div([
+        _title(),
+        _sec_hdr(f"{len(rows)} statutory instruments — UP_AOA_2010 regime",
+                 f"last verified {last_verified}" if last_verified else "verification date not recorded",
+                 "fa-scroll"),
+        html.Div(sections),
+        render_governance_guide(),
+        html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
+        *footer,
+    ], className="portal-page")
+
+
+def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = False) -> html.Div:
+    """
+    Master Portal → 'RWA Compliance- INDIA' tab.
+
+    Mirrors 'RWA Compliance (UP)' but lists the Central Acts / Central Rules (statutory laws)
+    that apply to every Indian RWA / Apartment Owners' Association, gathered into
+    legal_instrument_catalog (regime CENTRAL). Central instruments carry an `applies_when`
+    condition (e.g. central_rera, central_gst, central_it_tan, has_employees, has_security_agency,
+    always, info) so each society sees which central laws actually bind it.
+
+    role / embedded: only role == 'master' gets 'Edit a catalog entry'; its callbacks are
+    master-only on the server regardless of what is rendered.
+    """
+    from database.db_manager import db
+    from app.dash_apps.pages.master_rules_page import catalog_edit_form
+    from app.dash_apps.pages.governance_guide import render_governance_guide
+
+    try:
+        rows = db._execute(
+            """SELECT id, instrument_type, title, enactment_year, issuing_authority,
+                      applicability, key_provisions, source_reference, status, last_verified_on,
+                      verification, source_url, notification_no, verifier_role
+               FROM legal_instrument_catalog
+               WHERE regime_code = 'CENTRAL'
+                 AND instrument_type IN ('Central Act', 'Central Rules')
+               ORDER BY display_order""",
+            (), fetch_all=True,
+        ) or []
+    except Exception:
+        rows = None  # table not integrated yet — show setup instructions instead
+
+    def _title():
+        return None if embedded else _page_title(
+            "fa-gavel", c, "RWA Compliance- INDIA",
+            "Central Acts & Rules (statutory laws) applying to every Indian RWA / Apartment Owners' Association")
+
+    if rows is None and role != "master":
+        return html.Div([_title(), dbc.Alert("The legal instrument catalog has not been set up yet. "
+                                             "Please contact the platform administrator.", color="warning"),
+                         render_governance_guide()],
+                        className="portal-page")
+
+    if rows is None:
+        return html.Div([
+            _title(),
+            dbc.Alert([
+                html.H6([html.I(className="fas fa-database me-2"), "Not integrated yet"],
+                        className="alert-heading", style={"fontWeight": "700"}),
+                html.P("legal_instrument_catalog doesn't exist on this database yet. Push it live with no "
+                       "deploy needed:", style={"fontSize": "13px", "marginBottom": "8px"}),
+                html.Ol([
+                    html.Li("Master Portal → Settings → KPI Inspector tab.", style={"fontSize": "13px"}),
+                    html.Li("Paste the CREATE TABLE statement below into \"SQL Query (editable)\".",
+                            style={"fontSize": "13px"}),
+                    html.Li([html.Code("Integrate to DB"), " — creates the table (safe to re-run, uses "
+                             "CREATE TABLE IF NOT EXISTS)."], style={"fontSize": "13px"}),
+                    html.Li(["Then seed the rows: run ", html.Code("python database/seed.py"),
+                             " once against this database (calls seed_legal_instrument_catalog(), idempotent "
+                             "on regime+title+year), or paste individual ",
+                             html.Code("INSERT INTO legal_instrument_catalog ..."),
+                             " statements from ", html.Code("database/seed.py"),
+                             "'s LEGAL_INSTRUMENTS_CENTRAL list into the same box and Integrate to DB again."],
+                            style={"fontSize": "13px"}),
+                ], style={"marginBottom": "8px", "paddingLeft": "20px"}),
+            ], color="warning", className="mb-3 shadow-sm"),
+            dbc.Textarea(value=_RWA_COMPLIANCE_UP_DDL, readOnly=True, rows=20,
+                         style={"fontSize": "11px", "fontFamily": "monospace", "backgroundColor": "#f5f7fa",
+                                "border": "1px solid #cdd5df", "borderRadius": "8px", "color": "#2c3e50"}),
+        ], className="portal-page")
+
+    groups: dict[str, list] = {}
+    for r in rows:
+        groups.setdefault(r["instrument_type"], []).append(r)
+
+    sections = []
+    for itype, items in groups.items():
+        sections.append(html.H6(
+            [dbc.Badge(itype, color=_TYPE_BADGE_COLOR.get(itype, "light"), className="me-2"),
+             f"{len(items)} instrument{'s' if len(items) != 1 else ''}"],
+            style={"marginTop": "18px", "marginBottom": "8px", "fontWeight": "700", "color": "#15304f"},
+        ))
+        rows_html = []
+        for r in items:
+            year = f" ({r['enactment_year']})" if r.get("enactment_year") else ""
+            applies = r.get("applicability") or "—"
+            verified = r.get("verification") == "verified"
+            if verified:
+                v_cell = [dbc.Badge("Verified", color="success", pill=True),
+                          html.Br(), html.Small(f"{r.get('last_verified_on') or ''} · {r.get('verifier_role') or ''}", className="text-muted"),
+                          html.Br(), html.A(html.Small(r.get("notification_no") or "source"), href=r.get("source_url"), target="_blank", rel="noopener")]
+            else:
+                v_cell = [dbc.Badge("Unverified", color="secondary", pill=True)]
+            cells = [
+                html.Td([html.Strong(r["title"] + year, style={"fontSize": "12px"}),
+                         html.Br(),
+                         html.Small(r.get("issuing_authority") or "", className="text-muted")],
+                        style={"maxWidth": "260px"}),
+                html.Td(html.Small(applies, style={"fontSize": "11px", "maxWidth": "220px"})),
+                html.Td(html.Small(r["key_provisions"]), style={"fontSize": "11px", "maxWidth": "380px"}),
+                html.Td(dbc.Badge(r["status"], color="success" if r["status"] == "active" else "secondary",
+                                  pill=True), style={"fontSize": "10px"}),
+                html.Td(html.Small(r.get("source_reference") or "—", className="text-muted"),
+                        style={"fontSize": "10px", "maxWidth": "220px"}),
+                html.Td(v_cell, style={"fontSize": "10px", "minWidth": "110px"}),
+            ]
+            if role == "master":      # master only: tick it, give its notification number and source link
+                if verified:
+                    cells.append(html.Td(html.Small("—", className="text-muted")))
+                else:
+                    cells.append(html.Td([
+                        dbc.Checkbox(id={"type": "civ-sel", "id": r["id"]}, value=False, label="Verify"),
+                        dbc.Input(id={"type": "civ-notif", "id": r["id"]}, placeholder="Notification no.", size="sm", className="mt-1",
+                                  style={"fontSize": "11px"}),
+                        dbc.Input(id={"type": "civ-url", "id": r["id"]}, placeholder="https:// source text", size="sm", className="mt-1",
+                                  style={"fontSize": "11px"}),
+                    ], style={"minWidth": "200px"}))
+            rows_html.append(html.Tr(cells))
+        sections.append(dbc.Table([
+            html.Thead(html.Tr([
+                html.Th("Instrument", style={"fontSize": "11px"}),
+                html.Th("Applicability", style={"fontSize": "11px"}),
+                html.Th("Key Provisions", style={"fontSize": "11px"}),
+                html.Th("Status", style={"fontSize": "11px"}),
+                html.Th("Source", style={"fontSize": "11px"}),
+                html.Th("Verification", style={"fontSize": "11px"}),
+                *([html.Th("Verify (master)", style={"fontSize": "11px"})] if role == "master" else []),
+            ])),
+            html.Tbody(rows_html),
+        ], bordered=True, hover=True, responsive=True, size="sm", style={"fontSize": "12px"}))
+
+    n_unverified = sum(1 for r in rows if r.get("verification") != "verified")
+    verify_panel = html.Div()
+    if role == "master" and n_unverified:
+        verify_panel = dbc.Card(dbc.CardBody([
+            html.H6(f"Verify Central instruments ({n_unverified} unverified)", style={"fontSize": "14px"}),
+            html.P("Tick the instruments you have checked, enter each one's notification number and the https:// link to its text, "
+                   "then give one opinion reference (advocate or CA) and the date that covers them all. All or nothing: if any ticked "
+                   "row is incomplete, nothing is verified. Editing a verified entry later sends it back to unverified.",
+                   style={"fontSize": "12px", "color": "#777"}),
+            dbc.Row([
+                dbc.Col(dbc.Input(id="civ-opinion", placeholder="Opinion reference (advocate or CA)", size="sm"), md=5),
+                dbc.Col(dbc.Input(id="civ-date", type="date", size="sm", value=date.today().isoformat(), max=date.today().isoformat()), md=3),
+                dbc.Col([dbc.Button("Tick all unverified", id="civ-all", color="secondary", outline=True, size="sm", n_clicks=0, className="me-2"),
+                         dbc.Button("Verify ticked", id="civ-verify", color="primary", size="sm", n_clicks=0)], md=4),
+            ], className="g-2"),
+            html.Div(id="civ-msg", style={"fontSize": "12px", "marginTop": "8px"}),
+        ]), className="mt-3 mb-2", style={"borderRadius": "10px"})
+
+    last_verified = max((r.get("last_verified_on") for r in rows if r.get("last_verified_on")), default=None)
+
+    if role == "master":
+        footer = [
+            html.Small(
+                "To add a new instrument, add it to LEGAL_INSTRUMENTS_CENTRAL in database/seed.py and re-run the seed. "
+                "Raw INSERT/UPDATE on this table through Integrate to DB is blocked.", className="text-muted"),
+            # 'Edit a catalog entry' — master only. Its save callback also writes mrl-toast / mrl-body, so both
+            # must exist on this page (mrl-body is a hidden sink; the rules tables live on the AOA Rule Editor).
+            html.Div(id="mrl-toast", className="mt-3"),
+            html.Div(id="mrl-body", style={"display": "none"}),
+            catalog_edit_form(regime_code="CENTRAL"),
+        ]
+    else:
+        footer = [html.Small("Informational. Changes to this catalog are made by the platform administrator.",
+                             className="text-muted")]
+
+    return html.Div([
+        _title(),
+        _sec_hdr(f"{len(rows)} central statutory instruments — CENTRAL regime",
+                 f"last verified {last_verified}" if last_verified else "verification date not recorded",
+                 "fa-scroll"),
+        verify_panel,
+        html.Div(sections),
+        render_governance_guide(),
+        html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
+        *footer,
+    ], className="portal-page")
+
+
+def _governance_summary(role: str, sid):
+    from app.dash_apps.pages.governance_settings import render_governance_summary
+    return render_governance_summary(role, sid)
+
+
+def _governance_tabs(role: str, sid):
+    """Settings → RWA Compliance (UP) | Rules | Society By-laws | Meetings & Resolutions (admin / owner)."""
+    from app.dash_apps.pages.governance_settings import render_governance_tabs
+    return render_governance_tabs(role, sid, _C["admin" if role == "admin" else "apartment"])
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# MASTER PORTAL
+# ════════════════════════════════════════════════════════════════════════════
+
+def master_portal_page(active_tab="dashboard", sid=None) -> html.Div:
+    c = _C["master"]
+    _PORTAL_OPTS = [
+        {"label": "Admin",     "value": "admin"},
+        {"label": "Master",    "value": "master"},
+        {"label": "Apartment", "value": "apartment"},
+        {"label": "Vendor",    "value": "vendor"},
+        {"label": "Security",  "value": "security"},
+    ]
+    if active_tab == "onboarding":
+        from app.dash_apps.pages.onboarding_page import master_queue
+        return master_queue()
+
+    if active_tab == "rwa-compliance-india":
+        return _rwa_compliance_india_page(c)
+
+    if active_tab == "rwa-compliance-up":
+        return _rwa_compliance_up_page(c)
+
+    if active_tab == "aoa-rules":
+        from app.dash_apps.pages.master_rules_page import render_master_rules_page
+        return render_master_rules_page()
+
+    if active_tab == "master-settings":
+        import dash
+        app_obj = dash.get_app()
+        failed_cbs = getattr(app_obj, "_failed_callbacks", [])
+        
+        failed_alert = None
+        if failed_cbs:
+            alert_items = [html.Li(f"{f['module']}: {f['error']}", style={"fontSize": "13px"}) for f in failed_cbs]
+            failed_alert = dbc.Alert(
+                [
+                    html.H6([html.I(className="fas fa-exclamation-triangle me-2"), "Callback Registration Failures"], className="alert-heading", style={"fontWeight": "700"}),
+                    html.P("The following callback modules failed to register at startup. Related features will be broken:", style={"fontSize": "13px", "marginBottom": "8px"}),
+                    html.Ul(alert_items, className="mb-0")
+                ],
+                color="danger",
+                className="mb-4 shadow-sm",
+                style={"border": "1px solid #f5c2c7"}
+            )
+
+        return html.Div([
+            _page_title("fa-crown", c, "Master Settings"),
+            failed_alert,
+            _sec_hdr("Platform Configuration", "inspect and configure portals", "fa-cog"),
+            dbc.Tabs(
+                id="master-inspector-tabs",
+                active_tab="inspector-kpi",
+                children=[
+                    dbc.Tab(tab_id="inspector-kpi", label="KPI Inspector", children=[
+                        html.Div([
+                            dbc.Row([
+                                dbc.Col([dbc.Label("Portal", style={"fontSize":"12px","fontWeight":"600"}),
+                                         dcc.Dropdown(id="customize-portal-select", options=_PORTAL_OPTS,
+                                                      value="admin", clearable=False, style={"fontSize":"13px"})], width=4),
+                                dbc.Col([dbc.Label("Tab", style={"fontSize":"12px","fontWeight":"600"}),
+                                         dcc.Dropdown(id="customize-tab-select", options=[], placeholder="Select tab…",
+                                                      clearable=True, style={"fontSize":"13px"})], width=4),
+                                dbc.Col([dbc.Label("KPI", style={"fontSize":"12px","fontWeight":"600"}),
+                                         dcc.Dropdown(id="customize-kpi-select", options=[], placeholder="Select KPI…",
+                                                      clearable=True, style={"fontSize":"13px"})], width=4),
+                            ], className="mb-3"),
+                            html.Hr(style={"margin": "12px 0"}),
+                            dbc.Row([
+                                dbc.Col([
+                                    dbc.Label([html.I(className="fas fa-code me-1"), "SQL Query (editable)"],
+                                              style={"fontSize":"12px","fontWeight":"700","color":"#15304f"}),
+                                    dbc.Textarea(id="customize-kpi-sql", placeholder="Select a KPI to load its SQL…",
+                                                 rows=13,
+                                                 style={"fontSize":"11px","fontFamily":"monospace","backgroundColor":"#f5f7fa",
+                                                        "border":"1px solid #cdd5df","borderRadius":"8px","color":"#2c3e50","resize":"vertical"}),
+                                    html.Div([
+                                        dbc.Button([html.I(className="fas fa-play me-1"), "Test SQL"],
+                                                   id="kpi-test-sql-btn", color="success", size="sm",
+                                                   style={"borderRadius":"8px","fontWeight":"600"}),
+                                        dbc.Button([html.I(className="fas fa-file-export me-1"), "Export .sql"],
+                                                   id="kpi-export-sql-btn", color="secondary", size="sm",
+                                                   style={"borderRadius":"8px"}),
+                                        dbc.Button([html.I(className="fas fa-database me-1"), "Integrate to DB"],
+                                                   id="kpi-integrate-sql-btn", color="warning", size="sm",
+                                                   style={"borderRadius":"8px","fontWeight":"600"}),
+                                        dcc.Download(id="kpi-export-download"),
+                                    ], style={"display":"flex","gap":"6px","marginTop":"8px","flexWrap":"wrap"}),
+                                    dcc.Loading(html.Div(id="kpi-test-result", style={"marginTop":"8px"}), type="circle"),
+                                    html.Div(id="kpi-export-result"),
+                                    html.Div(id="kpi-integrate-result"),
+                                ], width=6),
+                                dbc.Col([
+                                    dbc.Label([html.I(className="fas fa-info-circle me-1"), "KPI Metadata"],
+                                              style={"fontSize":"12px","fontWeight":"700","color":"#15304f"}),
+                                    dcc.Loading(
+                                        html.Div(id="customize-kpi-metadata",
+                                                 children="Select a KPI to view metadata",
+                                                 style={"fontSize":"11px","backgroundColor":"#f5f7fa","border":"1px solid #cdd5df",
+                                                        "borderRadius":"8px","padding":"12px","minHeight":"340px",
+                                                        "maxHeight":"500px","overflowY":"auto","color":"#2c3e50"}),
+                                        type="default",
+                                    ),
+                                    html.Div(id="customize-entity-reference", style={"marginTop":"10px"}),
+                                ], width=6),
+                            ], className="mb-3"),
+                            html.Hr(style={"margin": "12px 0"}),
+                            dbc.Row([
+                                dbc.Col(html.H6([html.I(className="fas fa-stethoscope me-2"), "KPI Health Check (Audit)"],
+                                               style={"color":"#15304f","fontWeight":"700"}), width="auto"),
+                                dbc.Col([dbc.Button([html.I(className="fas fa-play me-2"), "Run KPI Audit"],
+                                                   id="run-kpi-audit-btn", color="primary", size="sm",
+                                                   style={"borderRadius":"8px","fontWeight":"600"})],
+                                        width="auto", className="ms-auto"),
+                            ], align="center", className="mb-3"),
+                            html.Div(id="kpi-audit-summary",
+                                     children=html.Small("Click 'Run KPI Audit' to test all KPI queries.",
+                                                         className="text-muted"),
+                                     className="mb-3"),
+                            dcc.Loading(
+                                html.Div(dbc.Table([
+                                    html.Thead(html.Tr([
+                                        html.Th("", style={"width":"34px"}),
+                                        html.Th("Card ID",   style={"fontSize":"11px"}),
+                                        html.Th("Title",     style={"fontSize":"11px"}),
+                                        html.Th("Params",    style={"fontSize":"11px","textAlign":"center"}),
+                                        html.Th("Format",    style={"fontSize":"11px"}),
+                                        html.Th("Status",    style={"fontSize":"11px"}),
+                                        html.Th("Raw value", style={"fontSize":"11px"}),
+                                        html.Th("Formatted", style={"fontSize":"11px"}),
+                                        html.Th("ms",        style={"fontSize":"11px"}),
+                                    ])),
+                                    html.Tbody(id="kpi-audit-table",
+                                               children=[html.Tr(html.Td("Click Run KPI Audit", colSpan=9,
+                                                                         className="text-center text-muted",
+                                                                         style={"fontSize":"12px","padding":"20px"}))]),
+                                ], bordered=True, hover=True, responsive=True, size="sm",
+                                   style={"fontSize":"12px"}),
+                                style={"overflowX":"auto","maxHeight":"40vh","overflowY":"auto"}),
+                                type="circle",
+                            ),
+                        ], style={"marginTop": "20px"}),
+                    ]),
+                    dbc.Tab(tab_id="inspector-list", label="List Inspector", children=[
+                        html.Div([
+                            dbc.Row([
+                                dbc.Col([dbc.Label("List", style={"fontSize": "12px", "fontWeight": "600"}),
+                                         dcc.Dropdown(id="list-inspector-select", options=[],
+                                                      placeholder="Select list…", clearable=True,
+                                                      style={"fontSize": "13px"})], width=6),
+                                dbc.Col([dbc.Label("Triggered by KPI", style={"fontSize": "12px", "fontWeight": "600"}),
+                                         dcc.Dropdown(id="list-inspector-kpi-select", options=[],
+                                                      placeholder="Select KPI…", clearable=True,
+                                                      style={"fontSize": "13px"})], width=6),
+                            ], className="mb-3"),
+                            html.Hr(style={"margin": "12px 0"}),
+                            dbc.Row([
+                                dbc.Col([
+                                    dbc.Label([html.I(className="fas fa-info-circle me-1"), "List Details"],
+                                              style={"fontSize": "12px", "fontWeight": "700", "color": "#15304f"}),
+                                    dcc.Loading(
+                                        html.Div(id="list-inspector-details",
+                                                 children="Select a list to inspect",
+                                                 style={"fontSize": "11px", "backgroundColor": "#f5f7fa",
+                                                        "border": "1px solid #cdd5df", "borderRadius": "8px",
+                                                        "padding": "12px", "minHeight": "340px",
+                                                        "maxHeight": "640px", "overflowY": "auto", "color": "#2c3e50"}),
+                                        type="default",
+                                    ),
+                                ], width=5),
+                                dbc.Col([
+                                    dbc.Label([html.I(className="fas fa-code me-1"), "List SQL (editable)"],
+                                              style={"fontSize": "12px", "fontWeight": "700", "color": "#15304f"}),
+                                    dbc.Textarea(id="list-inspector-sql", placeholder="Select a list to load its SQL…",
+                                                 rows=9,
+                                                 style={"fontSize": "11px", "fontFamily": "monospace",
+                                                        "backgroundColor": "#f5f7fa", "border": "1px solid #cdd5df",
+                                                        "borderRadius": "8px", "color": "#2c3e50", "resize": "vertical"}),
+                                    html.Div([
+                                        dbc.Button([html.I(className="fas fa-play me-1"), "Load"],
+                                                   id="list-inspector-load-btn", color="success", size="sm",
+                                                   style={"borderRadius": "8px", "fontWeight": "600"}),
+                                        dbc.Button([html.I(className="fas fa-file-export me-1"), "Export .sql"],
+                                                   id="list-inspector-export-btn", color="secondary", size="sm",
+                                                   style={"borderRadius": "8px"}),
+                                        dcc.Download(id="list-inspector-export-download"),
+                                    ], style={"display": "flex", "gap": "6px", "marginTop": "8px", "flexWrap": "wrap"}),
+                                    dcc.Loading(
+                                        html.Div(id="list-inspector-load-result", style={"marginTop": "8px"}),
+                                        type="circle",
+                                    ),
+                                    html.Hr(style={"margin": "12px 0"}),
+                                    dbc.Label([html.I(className="fas fa-table me-1"), "Result (list box)"],
+                                              style={"fontSize": "12px", "fontWeight": "700", "color": "#15304f"}),
+                                    html.Div(id="list-inspector-result-box",
+                                             children=html.Small("Click 'Load' to display the list rows.",
+                                                                 className="text-muted"),
+                                             style={"fontSize": "11px", "backgroundColor": "#fff",
+                                                    "border": "1px solid #cdd5df", "borderRadius": "8px",
+                                                    "padding": "10px", "minHeight": "160px",
+                                                    "maxHeight": "360px", "overflowY": "auto",
+                                                    "fontFamily": "monospace", "whiteSpace": "pre-wrap",
+                                                    "color": "#2c3e50"}),
+                                ], width=7),
+                            ], className="mb-3"),
+                            html.Hr(style={"margin": "12px 0"}),
+                            dbc.Row([
+                                dbc.Col(html.H6([html.I(className="fas fa-stethoscope me-2"), "List Audit"],
+                                               style={"color":"#15304f","fontWeight":"700"}), width="auto"),
+                                dbc.Col([dbc.Button([html.I(className="fas fa-play me-2"), "Run List Audit"],
+                                                   id="run-list-audit-btn", color="primary", size="sm",
+                                                   style={"borderRadius":"8px","fontWeight":"600"})],
+                                        width="auto", className="ms-auto"),
+                            ], align="center", className="mb-3"),
+                            html.Div(id="list-audit-summary",
+                                     children=html.Small("Click 'Run List Audit' to verify all lists.",
+                                                         className="text-muted"),
+                                     className="mb-3"),
+                            dcc.Loading(
+                                html.Div(dbc.Table([
+                                    html.Thead(html.Tr([
+                                        html.Th("", style={"width":"34px"}),
+                                        html.Th("List ID",   style={"fontSize":"11px"}),
+                                        html.Th("Status",    style={"fontSize":"11px"}),
+                                        html.Th("Rows",      style={"fontSize":"11px"}),
+                                        html.Th("ms",        style={"fontSize":"11px"}),
+                                    ])),
+                                    html.Tbody(id="list-audit-table",
+                                               children=[html.Tr(html.Td("Click Run List Audit", colSpan=5,
+                                                                         className="text-center text-muted",
+                                                                         style={"fontSize":"12px","padding":"20px"}))]),
+                                ], bordered=True, hover=True, responsive=True, size="sm",
+                                   style={"fontSize":"12px"}),
+                                style={"overflowX":"auto","maxHeight":"40vh","overflowY":"auto"}),
+                                type="circle",
+                            ),
+                        ], style={"marginTop": "20px"}),
+                    ]),
+                    dbc.Tab(tab_id="inspector-form", label="Form Inspector", children=[
+                        html.Div([
+                            dbc.Row([
+                                dbc.Col([dbc.Label("Form", style={"fontSize": "12px", "fontWeight": "600"}),
+                                         dcc.Dropdown(id="form-inspector-select", options=[],
+                                                      placeholder="Select form…", clearable=True,
+                                                      style={"fontSize": "13px"})], width=6),
+                            ], className="mb-3"),
+                            html.Hr(style={"margin": "12px 0"}),
+                            dbc.Row([
+                                dbc.Col([
+                                    dbc.Label([html.I(className="fas fa-info-circle me-1"), "Form Details"],
+                                              style={"fontSize": "12px", "fontWeight": "700", "color": "#15304f"}),
+                                    dcc.Loading(
+                                        html.Div(id="form-inspector-details",
+                                                 children="Select a form to inspect",
+                                                 style={"fontSize": "11px", "backgroundColor": "#f5f7fa",
+                                                        "border": "1px solid #cdd5df", "borderRadius": "8px",
+                                                        "padding": "12px", "minHeight": "340px",
+                                                        "maxHeight": "640px", "overflowY": "auto", "color": "#2c3e50"}),
+                                        type="default",
+                                    ),
+                                ], width=5),
+                                dbc.Col([
+                                    dbc.Label([html.I(className="fas fa-desktop me-1"), "Form Preview"],
+                                              style={"fontSize": "12px", "fontWeight": "700", "color": "#15304f"}),
+                                    dcc.Loading(
+                                        html.Div(id="form-inspector-preview",
+                                                 children=html.Small("Select a form to preview.",
+                                                                     className="text-muted"),
+                                                 style={"fontSize": "11px", "backgroundColor": "#fff",
+                                                        "border": "1px solid #cdd5df", "borderRadius": "8px",
+                                                        "padding": "10px", "minHeight": "340px",
+                                                        "maxHeight": "640px", "overflowY": "auto",
+                                                        "color": "#2c3e50"}),
+                                        type="circle",
+                                    ),
+                                ], width=7),
+                            ], className="mb-3"),
+                            html.Hr(style={"margin": "12px 0"}),
+                            dbc.Row([
+                                dbc.Col(html.H6([html.I(className="fas fa-stethoscope me-2"), "Form Audit"],
+                                               style={"color":"#15304f","fontWeight":"700"}), width="auto"),
+                                dbc.Col([dbc.Button([html.I(className="fas fa-play me-2"), "Run Form Audit"],
+                                                   id="run-form-audit-btn", color="primary", size="sm",
+                                                   style={"borderRadius":"8px","fontWeight":"600"})],
+                                        width="auto", className="ms-auto"),
+                            ], align="center", className="mb-3"),
+                            html.Div(id="form-audit-summary",
+                                     children=html.Small("Click 'Run Form Audit' to verify all forms render properly.",
+                                                         className="text-muted"),
+                                     className="mb-3"),
+                            dcc.Loading(
+                                html.Div(dbc.Table([
+                                    html.Thead(html.Tr([
+                                        html.Th("", style={"width":"34px"}),
+                                        html.Th("Form ID",   style={"fontSize":"11px"}),
+                                        html.Th("Status",    style={"fontSize":"11px"}),
+                                        html.Th("ms",        style={"fontSize":"11px"}),
+                                    ])),
+                                    html.Tbody(id="form-audit-table",
+                                               children=[html.Tr(html.Td("Click Run Form Audit", colSpan=4,
+                                                                         className="text-center text-muted",
+                                                                         style={"fontSize":"12px","padding":"20px"}))]),
+                                ], bordered=True, hover=True, responsive=True, size="sm",
+                                   style={"fontSize":"12px"}),
+                                style={"overflowX":"auto","maxHeight":"40vh","overflowY":"auto"}),
+                                type="circle",
+                            ),
+                        ], style={"marginTop": "20px"}),
+                    ]),
+                ],
+                style={"marginBottom": "20px"},
+            ),
+        ], className="portal-page")
+
+    if active_tab == "tests":
+        return master_tests_page(c)
+
+    return html.Div([
+        _page_title("fa-crown", c, "Societies", "Manage all societies on this platform"),
+        _sec_hdr("Platform Overview", "click any card to drill down", "fa-chart-bar"),
+        _kpi_row_dynamic(
+            "master", "dashboard", sid,
+            cols=KPI_GRID_COLS,
+        ),
+        _divider(), _drill_panel(),
+    ], className="portal-page")
+
+
+def _categorize_test(name: str) -> str:
+    """Categorize test files by semantic purpose."""
+    n = name.lower()
+    if "plan_v3" in n or "plan_v4" in n or "gold_standard" in n:
+        return "Plan Mapping (Gold Standard v3/v4)"
+    if n.endswith("_live.py"):
+        return "Live/Postgres Integration"
+    if any(k in n for k in ["auth", "identity", "role", "guard", "security", "authorization", "authorization_core"]):
+        return "Security & Authorization"
+    if any(k in n for k in ["ledger", "accounting", "money", "fy_lock", "tie_out", "voucher", "cash_voucher", "balance"]):
+        return "Accounting & Ledger"
+    if any(k in n for k in ["gst", "itc", "tds", "tax", "26as", "ais", "turnover"]):
+        return "GST & Tax"
+    if any(k in n for k in ["audit", "compliance", "ratif", "certificate", "anchor", "signing", "document_sign", "verif"]):
+        return "Audit, Compliance & Govt"
+    if any(k in n for k in ["committee", "govern", "bye", "aoa", "poll", "election"]):
+        return "Governance & Committee"
+    if any(k in n for k in ["fund", "expense", "payment", "dispute", "receiv", "payable", "withdrawal", "approv"]):
+        return "Fund & Payments"
+    if any(k in n for k in ["workflow", "alert", "push", "qr", "notification", "job", "schedule"]):
+        return "Operations & Workflow"
+    if any(k in n for k in ["wizard", "setup", "enrol", "onboard"]):
+        return "Setup/Onboarding"
+    if any(k in n for k in ["callback", "page", "portal", "render", "drill"]):
+        return "UI/Pages/Callbacks"
+    if any(k in n for k in ["schema", "migration", "db", "config", "conftest", "fixture"]):
+        return "Infra/DB/Fixtures"
+    return "Other"
+
+
+def _discover_tests():
+    """List discoverable test files under the project test/ directory with categories."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[3]  # app/dash_apps/pages/ -> project root
+    test_dir = root / "test"
+    tests = []
+    if test_dir.is_dir():
+        for f in sorted(test_dir.glob("test_*.py")):
+            name = f.name
+            cat = _categorize_test(name)
+            tests.append({"name": name, "file": name, "category": cat})
+    order = [
+        "Plan Mapping (Gold Standard v3/v4)",
+        "Live/Postgres Integration",
+        "Security & Authorization",
+        "Accounting & Ledger",
+        "GST & Tax",
+        "Audit, Compliance & Govt",
+        "Governance & Committee",
+        "Fund & Payments",
+        "Operations & Workflow",
+        "Setup/Onboarding",
+        "UI/Pages/Callbacks",
+        "Infra/DB/Fixtures",
+        "Other",
+    ]
+
+    def key(x):
+        try:
+            return (order.index(x["category"]), x["name"])
+        except ValueError:
+            return (len(order), x["name"])
+
+    tests.sort(key=key)
+    return tests
+
+
+def master_tests_page(c) -> html.Div:
+    """Master portal Tests tab — list test files with Run buttons + output pane."""
+    tests = _discover_tests()
+    rows = []
+    current_cat = None
+    for t in tests:
+        cat = t.get("category", "Other")
+        if cat != current_cat:
+            current_cat = cat
+            rows.append(
+                html.Tr([
+                    html.Td(
+                        html.Div([
+                            html.I(className="fas fa-folder-open me-2", style={"color": "#c96a19"}),
+                            html.Span(cat, style={"fontSize": "11px", "fontWeight": "700", "color": "#15304f"}),
+                        ]),
+                        colSpan=4,
+                        style={"backgroundColor": "#f8f9fa", "padding": "6px 10px"},
+                    )
+                ])
+            )
+        rows.append(
+            html.Tr([
+                html.Td(t["name"], style={"fontSize": "12px", "fontWeight": "600", "color": "#15304f", "paddingLeft": "18px"}),
+                html.Td(t["file"], style={"fontSize": "11px", "color": "#666", "fontFamily": "monospace"}),
+                html.Td(
+                    dbc.Button(
+                        "Run",
+                        id={"type": "run-test-btn", "test": t["file"]},
+                        n_clicks=0,
+                        color="primary", size="sm",
+                        style={"borderRadius": "6px", "fontSize": "11px", "fontWeight": "600"},
+                    ),
+                    style={"textAlign": "center"},
+                ),
+                html.Td(
+                    html.Span("Pending", id={"type": "test-status", "test": t["file"]},
+                              style={"fontSize": "11px", "color": "#999"}),
+                    style={"textAlign": "center"},
+                ),
+            ])
+        )
+
+    return html.Div([
+        _page_title("fa-flask", c, "Tests", "Run platform test suites from the master portal"),
+        _sec_hdr("Test Suites", "click Run to execute a test file; output appears below", "fa-flask"),
+        dbc.Row([
+            dbc.Col(
+                dbc.Button("Run All", id="run-all-tests-btn", n_clicks=0,
+                           color="success", size="sm",
+                           style={"borderRadius": "6px", "fontWeight": "600"}),
+                width="auto",
+            ),
+        ], className="mb-2"),
+        html.Hr(style={"margin": "8px 0 14px 0"}),
+        dbc.Table([
+            html.Thead(html.Tr([
+                html.Th("Test", style={"fontSize": "11px", "fontWeight": "700"}),
+                html.Th("File", style={"fontSize": "11px", "fontWeight": "700"}),
+                html.Th("Action", style={"fontSize": "11px", "fontWeight": "700"}),
+                html.Th("Status", style={"fontSize": "11px", "fontWeight": "700"}),
+            ])),
+            html.Tbody(id="tests-table-body", children=rows),
+        ], bordered=True, hover=True, responsive=True, size="sm",
+           style={"fontSize": "12px", "marginBottom": "20px"}) if rows else html.Div(
+            "No test files found.", className="text-muted text-center"),
+        _sec_hdr("Output", "stdout/stderr from the selected test run", "fa-terminal"),
+        dcc.Loading(
+            html.Div(
+                id="tests-output",
+                children=html.Small("No test has been run yet.", className="text-muted"),
+                style={"fontSize": "12px", "fontFamily": "monospace",
+                       "backgroundColor": "#f5f7fa", "border": "1px solid #cdd5df",
+                       "borderRadius": "8px", "padding": "12px", "minHeight": "260px",
+                       "maxHeight": "520px", "overflowY": "auto", "whiteSpace": "pre-wrap",
+                       "color": "#2c3e50"},
+            ),
+            type="circle", color="#c96a19",
+        ),
+        dcc.Store(id="tests-list-store", data=tests),
+        # Run All driver (see master_tests_callbacks.py): the Interval is paused
+        # while a test runs; the Stores carry the queue and the current file.
+        dcc.Interval(id="tests-run-interval", interval=400, disabled=True),
+        dcc.Store(id="tests-run-queue"),
+        dcc.Store(id="tests-run-current"),
+    ], className="portal-page")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ADMIN PORTAL
+# ════════════════════════════════════════════════════════════════════════════
+
+def admin_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
+    c = _C["admin"]
+
+    # ── Dashboard ────────────────────────────────────────────────────────────
+    if active_tab == "dashboard":
+        return html.Div([
+            _page_title("fa-user-shield", c, "Admin Dashboard"),
+            _sec_hdr("Society Overview", "click any KPI to drill down"),
+            _kpi_row_dynamic(
+                "admin", "dashboard", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Enrolled ───────────────────────────────────────────────────────────────
+    if active_tab == "enrolled":
+        return html.Div([
+            _page_title("fa-user-plus", c, "Enrolled Members",
+                        "apartments · vendors · security · accountants · supervisors · staff · committee"),
+            _kpi_row_dynamic(
+                "admin", "enrolled", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Registers: read-only statutory / governance registers (tenants, loans, transfers, filings ...) ─────
+    if active_tab == "registers":
+        return html.Div([
+            _page_title("fa-book-open", c, "Registers", "tenants · loans · transfers · admissions · filings · flags"),
+            _kpi_row_dynamic(
+                "admin", "registers", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Team Logins: create / disable / reset Accountant, Supervisor, Staff, Auditor logins ──────────────────
+    if active_tab == "team":
+        from app.dash_apps.pages.team_page import team_tab
+        return html.Div([
+            _page_title("fa-id-badge", c, "Team Logins", "accountant · supervisor · staff · auditor"),
+            team_tab("admin", sid),
+        ], className="portal-page")
+
+    # ── Financials (NEW) ────────────────────────────────────────────────────────
+    if active_tab == "financials":
+        return html.Div([
+            _page_title("fa-book", c, "Financials", "All financial transactions and accounts"),
+            _kpi_row_dynamic(
+                "admin", "financials", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Events ────────────────────────────────────────────────────────────────
+    if active_tab == "events":
+        return html.Div([
+            _page_title("fa-calendar-alt", c, "Events"),
+            _kpi_row_dynamic(
+                "admin", "events", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Concerns ─────────────────────────────────────────────────────────────
+    if active_tab == "concerns":
+        return html.Div([
+            _page_title("fa-hand-point-up", c, "Concerns"),
+            _kpi_row_dynamic(
+                "admin", "concerns", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Polls ──────────────────────────────────────────────────────────
+    # NOTE (2026-08): "create_poll"/"poll_detail"/"poll_results" tabs
+    # removed — they were dead-end duplicates of this "polls"/"admin_polls"
+    # tab left over from before Poll was migrated to the generic drill
+    # panel. New/View/Edit/Delete/Declare Results/Close now all happen
+    # inline here via the KPI -> List -> Profile flow, same as
+    # Concerns/Events; nothing in the app links to those tabs anymore.
+    if active_tab in ("polls", "admin_polls"):
+        c = _C["master"]
+        return html.Div([
+            html.Div([
+                _page_title("fa-poll", c, "Polls", "View and vote in community polls"),
+            ], style={"display": "flex", "alignItems": "flex-start", "justifyContent": "space-between"}),
+            _kpi_row_dynamic("admin", "polls", sid, cols=KPI_GRID_COLS),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Assets (NEW) ──────────────────────────────────────────────────────────
+    if active_tab == "assets":
+        return html.Div([
+            _page_title("fa-boxes", c, "Asset Register",
+                        "buy / sell assets — creates expense or receipt automatically"),
+            _kpi_row_dynamic(
+                "admin", "assets", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Channels ──────────────────────────────────────────────────────────────
+    if active_tab in ("channels", "admin_channels"):
+        return html.Div([
+            _page_title("fa-bullhorn", c, "Alert Channels", "School Bus, Taxi, Visitor channels & Subscriber status"),
+            _kpi_row_dynamic("admin", "channels", sid, cols=KPI_GRID_COLS),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Settings ──────────────────────────────────────────────────────────────
+    if active_tab == "settings":
+        return html.Div([
+            _page_title("fa-cog", c, "Settings", "accounts · charge rates · society governance"),
+            _governance_summary("admin", sid),
+            _kpi_row_dynamic(
+                "admin", "settings", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+            _divider(),
+            _governance_tabs("admin", sid),
+        ], className="portal-page")
+
+    if active_tab == "evaluate_pass":
+        return _evaluate_pass_page(sid=sid)
+
+    if active_tab == "customize":
+        from app.dash_apps.pages.portal_pages import _customize_page
+        return _customize_page(c)
+
+    return html.Div([
+        _page_title("fa-th-large", c, active_tab.replace("_", " ").title()),
+        _drill_panel(),
+    ], className="portal-page")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# OWNER (APARTMENT) PORTAL
+# ════════════════════════════════════════════════════════════════════════════
+
+def owner_portal_page(active_tab: str = "dashboard", sid=None, apt_id=None) -> html.Div:
+    c = _C["apartment"]
+
+    if active_tab == "dashboard":
+        return html.Div([
+            _page_title("fa-home", c, "Owner Dashboard"),
+            _sec_hdr("My Account", "click any card to view details"),
+            _kpi_row_dynamic(
+                "owner", "dashboard", sid,
+                cols=KPI_GRID_COLS,
+                entity_id=apt_id,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("members", "owner_members", "owner-members"):
+        return html.Div([
+            _page_title("fa-users", c, "Members", "directory of flat owners and residents"),
+            _kpi_row_dynamic("owner", "members", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Financials ────────────────────────────────────────────────────────
+    if active_tab == "financials":
+        return html.Div([
+            _page_title("fa-book", c, "Financials", "Cashbook, bills, and charges"),
+            _kpi_row_dynamic(
+                "owner", "financials", sid,
+                cols=KPI_GRID_COLS,
+                entity_id=apt_id,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Receivables tab (apartment dues) ──────────────────────────────────
+    if active_tab in ("receivables", "owner_dues"):
+        return html.Div([
+            _page_title("fa-hand-holding-usd", c, "Bills Due", "monthly maintenance + interest"),
+            _kpi_row_dynamic(
+                "owner", "receivables", sid,
+                cols=KPI_GRID_COLS,
+                entity_id=apt_id,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "owner_receipts":
+        return html.Div([
+            _page_title("fa-file-invoice-dollar", c, "Bills Paid", "payments received / verified"),
+            _kpi_row_dynamic(
+                "owner", "owner_receipts", sid,
+                cols=KPI_GRID_COLS,
+                entity_id=apt_id,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("cashbook", "owner_cashbook"):
+        return html.Div([
+            _page_title("fa-book", c, "Cashbook"),
+            _kpi_row_dynamic(
+                "owner", "cashbook", sid,
+                cols=KPI_GRID_COLS,
+                entity_id=apt_id,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("charges", "owner_charges"):
+        return html.Div([
+            _page_title("fa-file-invoice", c, "Charges"),
+            _kpi_row_dynamic(
+                "owner", "charges", sid,
+                cols=KPI_GRID_COLS,
+                entity_id=apt_id,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("events", "owner_events"):
+        return html.Div([
+            _page_title("fa-calendar-alt", c, "Events"),
+            _kpi_row_dynamic("owner", "events", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "concerns":
+        return html.Div([
+            _page_title("fa-hand-point-up", c, "Concerns"),
+            _kpi_row_dynamic("owner", "concerns", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── Polls ──────────────────────────────────────────────────
+    if active_tab in ("polls", "owner_polls"):
+        c = _C["master"]
+        return html.Div([
+            html.Div([
+                _page_title("fa-poll", c, "Polls", "View and vote in community polls"),
+            ], style={"display": "flex", "alignItems": "flex-start", "justifyContent": "space-between"}),
+            _kpi_row_dynamic("owner", "polls", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "poll_detail":
+        # Dead-end duplicate of "polls"/"owner_polls" above — see the
+        # note at the admin-portal "polls" tab. Kept as a redirect-style
+        # fallback rather than removed outright, since older push
+        # notification payloads may still reference this tab_id.
+        return html.Div([
+            _page_title("fa-poll", c, "Polls"),
+            _kpi_row_dynamic("owner", "polls", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("channels", "owner_channels", "owner-channels"):
+        return html.Div([
+            _page_title("fa-bullhorn", c, "Alert Channels", "Subscribe to School Bus, Taxi & Visitor alerts"),
+            _kpi_row_dynamic("owner", "channels", sid, cols=KPI_GRID_COLS, entity_id=apt_id),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("settings", "owner_settings"):
+        return html.Div([
+            _page_title("fa-cog", c, "My Profile & Settings"),
+            _governance_summary("apartment", sid),
+            _kpi_row_dynamic(
+                "owner", "settings", sid,
+                cols=KPI_GRID_COLS,
+                entity_id=apt_id,
+            ),
+            _divider(), _drill_panel(),
+            _divider(),
+            _governance_tabs("apartment", sid),
+        ], className="portal-page")
+
+    return html.Div([
+        _page_title("fa-th-large", c, active_tab.replace("_", " ").title()),
+        _drill_panel(),
+    ], className="portal-page")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# VENDOR PORTAL
+# ════════════════════════════════════════════════════════════════════════════
+
+def vendor_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
+    c = _C["vendor"]
+
+    if active_tab == "dashboard":
+        return html.Div([
+            _page_title("fa-briefcase", c, "Vendor Dashboard"),
+            _kpi_row_dynamic(
+                "vendor", "dashboard", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "financials":
+        return html.Div([
+            _page_title("fa-book", c, "Financials", "Cashbook, payments, and charges"),
+            _kpi_row_dynamic(
+                "vendor", "financials", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "passes":
+        return html.Div([
+            _page_title("fa-id-card", c, "My Passes", "active and expired passes"),
+            _kpi_row_dynamic(
+                "vendor", "passes", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "vendor_receipts":
+        return html.Div([
+            _page_title("fa-file-invoice-dollar", c, "Bills Paid", "payments received / verified"),
+            _kpi_row_dynamic(
+                "vendor", "receipts", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("cashbook", "vendor_cashbook"):
+        return html.Div([
+            _page_title("fa-book", c, "My Cashbook"),
+            _kpi_row_dynamic(
+                "vendor", "cashbook", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "concerns":
+        return html.Div([
+            _page_title("fa-hand-point-up", c, "My Concerns"),
+            _kpi_row_dynamic("vendor", "concerns", sid, cols=KPI_GRID_COLS),
+            # QR / manual lookup — jump straight to a concern by its QR code
+            # (e.g. printed at the site of the issue) or by typing its code
+            # (e.g. "1-CON-13") manually. Concerns only, no gate-pass Entry/
+            # Exit chrome — vendors aren't scanning people through a gate
+            # here. Modular: this is the same render_manual_qr_card /
+            # validate_manual_qr_scoped building block Pass Evaluation uses
+            # (scope="pass_evaluation" there), just scoped separately so the
+            # two never collide.
+            _manual_qr_card(
+                "vendor_concern_lookup",
+                title="Find a Concern",
+                subtitle="scan or type a concern's QR code to open it",
+                placeholder="e.g. 1-CON-13",
+                color=c,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("charges", "vendor_charges"):
+        return html.Div([
+            _page_title("fa-file-invoice", c, "My Charges"),
+            _kpi_row_dynamic(
+                "vendor", "charges", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("events", "vendor_events"):
+        return html.Div([
+            _page_title("fa-calendar-alt", c, "Events"),
+            _kpi_row_dynamic("vendor", "events", sid, cols=KPI_GRID_COLS),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("settings", "vendor_settings"):
+        return html.Div([
+            _page_title("fa-cog", c, "My Settings"),
+            _kpi_row_dynamic("vendor", "settings", sid, cols=KPI_GRID_COLS),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    return html.Div([
+        _page_title("fa-th-large", c, active_tab.replace("_", " ").title()),
+        _drill_panel(),
+    ], className="portal-page")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# SECURITY PORTAL
+# ════════════════════════════════════════════════════════════════════════════
+
+def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.Div:
+    c = _C["security"]
+
+    if active_tab == "pass_evaluation":
+        return _evaluate_pass_page(sid=sid)
+
+    if active_tab == "attendance":
+        return html.Div([
+            _page_title("fa-clock", c, "Attendance", "clock in/out for your shift"),
+            dbc.Card(
+                dbc.CardBody([
+                    html.Div(id="attendance-status", children=[
+                        html.I(className="fas fa-clock fa-2x mb-2", style={"color": "#95a5a6"}),
+                        html.H5("Not clocked in"),
+                    ], style={"textAlign": "center", "marginBottom": "16px"}),
+                    html.Div([
+                        dbc.Button("Clock In", id="clock-in-btn", n_clicks=0,
+                                    color="success", className="me-2"),
+                        dbc.Button("Clock Out", id="clock-out-btn", n_clicks=0,
+                                    color="danger"),
+                    ], style={"textAlign": "center"}),
+                ]),
+                style={"maxWidth": "360px", "margin": "0 auto"},
+            ),
+        ], className="portal-page")
+
+    if active_tab == "dashboard":
+        return html.Div([
+            _page_title("fa-users", c, "All Users", "registered members"),
+            _kpi_row_dynamic(
+                "security", "dashboard", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # ── payables tab (security's own salary rows — read-only) ─────────────
+    if active_tab in ("payables", "security_payables"):
+        return html.Div([
+            _page_title("fa-user-clock", c, "My Salary", "per-shift payroll — read only"),
+            _kpi_row_dynamic(
+                "security", "payables", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    # "financials" tab removed (2026-08) — its only card was the
+    # society-wide FY Closing Report, pulled from Security entirely (see
+    # card_catalogue.py). Security's own Cashbook tab below is unaffected.
+
+    if active_tab in ("cashbook", "security_cashbook"):
+        return html.Div([
+            _page_title("fa-book", c, "Cashbook"),
+            _kpi_row_dynamic(
+                "security", "cashbook", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "security_receipt":
+        return html.Div([
+            _page_title("fa-plus-circle", c, "New Receipt", "collect cash at gate"),
+            _kpi_row_dynamic("security", "security_receipt", sid, cols=KPI_GRID_COLS),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "security_receipts":
+        return html.Div([
+            _page_title("fa-receipt", c, "My Receipts", "your collected receipts"),
+            _kpi_row_dynamic("security", "security_receipts", sid, cols=KPI_GRID_COLS),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "security_events":
+        return html.Div([
+            _page_title("fa-calendar-alt", c, "Events"),
+            _kpi_row_dynamic("security", "events", sid, cols=KPI_GRID_COLS),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "security_concerns":
+        return html.Div([
+            _page_title("fa-hand-point-up", c, "My Concerns"),
+            _kpi_row_dynamic("security", "concerns", sid, cols=KPI_GRID_COLS),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab == "security_channels":
+        return html.Div([
+            _page_title("fa-bullhorn", c, "Alert Channels", "School Bus, Taxi, Visitor channels & Subscriber status"),
+            _kpi_row_dynamic("security", "security_channels", sid, cols=KPI_GRID_COLS),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    if active_tab in ("settings", "security_settings"):
+        return html.Div([
+            _page_title("fa-cog", c, "My Settings"),
+            _kpi_row_dynamic(
+                "security", "settings", sid,
+                cols=KPI_GRID_COLS,
+            ),
+            _divider(), _drill_panel(),
+        ], className="portal-page")
+
+    return html.Div([
+        _page_title("fa-th-large", c, active_tab.replace("_", " ").title()),
+        _drill_panel(),
+    ], className="portal-page")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# GATE PASS EVALUATION PAGE  (security portal, unchanged structure)
+# ════════════════════════════════════════════════════════════════════════════
+
+def _evaluate_pass_page(sid=None) -> html.Div:
+    return html.Div([
+        _page_title("fa-qrcode", "#1859b8", "Gate Pass Evaluation",
+                    "Entry IN / Exit OUT — fn_evaluate_gate_pass drives pass/fail reason"),
+        _kpi_row_dynamic(
+            "security", "pass_evaluation", sid,
+            cols=KPI_GRID_COLS,
+        ),
+        _divider(),
+        html.Div(id="gate-alert-toast"),
+        html.Div(id="gate-alerts-refresh"),
+        _divider(),
+        html.Div([
+            # ── Left: Scanner ──────────────────────────────────────────────
+            html.Div(
+                dbc.Card([
+                    dbc.CardHeader(html.Div([
+                        html.I(className="fas fa-camera me-2", style={"color": "#1859b8"}),
+                        html.Strong("QR Scanner"),
+                        dbc.Badge("LIVE", color="success", className="ms-2", style={"fontSize": "9px"}),
+                    ], style={"display": "flex", "alignItems": "center"}),
+                    style={"padding": "10px 14px"}),
+                    dbc.CardBody([
+                        dcc.Input(id="qr-scan-input", style={"display": "none"}),
+                        dcc.Input(id="qr-scan-mode",  style={"display": "none"}),
+                        html.Button(id="qr-validate-btn", n_clicks=0, style={"display": "none"}),
+                        html.Div(id="qr-result", style={"minHeight": "60px"}),
+                        html.Hr(style={"margin": "10px 0"}),
+                        html.Div(
+                            id="qr-camera-container",
+                            style={"position": "relative", "borderRadius": "10px",
+                                   "overflow": "hidden", "background": "#1a1a2e",
+                                   "marginBottom": "10px", "minHeight": "60px"},
+                            children=[
+                                html.Video(id="qr-video", autoPlay=True, muted=True, style={
+                                    "width": "100%", "maxHeight": "300px",
+                                    "objectFit": "cover", "display": "none",
+                                    "borderRadius": "10px",
+                                }),
+                                html.Canvas(id="qr-canvas", style={"display": "none"}),
+                                html.Div(id="qr-scanline", style={"display": "none"}),
+                                html.Div(id="qr-corners", style={"display": "none"}),
+                            ],
+                        ),
+                        html.Small(id="qr-scan-status", children="Camera off",
+                                   style={"color": "#aaa", "fontSize": "11px",
+                                          "display": "block", "textAlign": "center",
+                                          "marginBottom": "10px"}),
+                        html.Div([
+                            dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Entry IN"],
+                                       id="qr-entry-start-btn", color="success", size="sm",
+                                       style={"flex": "1"}, n_clicks=0),
+                            dbc.Button([html.I(className="fas fa-sign-out-alt me-1"), "Exit OUT"],
+                                       id="qr-exit-start-btn", color="danger", size="sm",
+                                       style={"flex": "1"}, n_clicks=0),
+                        ], style={"display": "flex", "gap": "6px", "marginBottom": "6px"}),
+                        html.Div([
+                            dbc.Button([html.I(className="fas fa-microchip me-1"), "Scan NFC (Patrol)"],
+                                       id="scan-nfc-btn", color="primary", size="sm",
+                                       style={"flex": "1"}, n_clicks=0),
+                        ], style={"display": "flex", "gap": "6px", "marginBottom": "6px"}),
+                        html.Div([
+                            dbc.Button([html.I(className="fas fa-stop me-1"), "Stop"],
+                                       id="qr-entry-stop-btn", color="secondary", size="sm",
+                                       outline=True, style={"display": "none", "flex": "1"},
+                                       n_clicks=0),
+                            dbc.Button([html.I(className="fas fa-stop me-1"), "Stop"],
+                                       id="qr-exit-stop-btn", color="secondary", size="sm",
+                                       outline=True, style={"display": "none", "flex": "1"},
+                                       n_clicks=0),
+                            dbc.Button([html.I(className="fas fa-sync-alt me-1"), "Flip"],
+                                       id="qr-switch-btn", color="info", size="sm", outline=True,
+                                       style={"display": "none"}, n_clicks=0),
+                            dbc.Button([html.I(className="fas fa-lightbulb me-1"), "Light"],
+                                       id="qr-torch-btn", color="warning", size="sm", outline=True,
+                                       style={"display": "none"}, n_clicks=0),
+                        ], style={"display": "flex", "gap": "6px", "flexWrap": "wrap"}),
+                        html.Hr(style={"margin": "10px 0"}),
+                        html.Div([
+                            dbc.Button([html.I(className="fas fa-exclamation-triangle me-1"), "EMERGENCY"],
+                                       id="emergency-btn", color="danger", size="sm",
+                                       style={"flex": "1", "fontWeight": "700"}, n_clicks=0),
+                            dbc.Button([html.I(className="fas fa-phone me-1"), "Call Admin"],
+                                       id="call-admin-btn", color="primary", size="sm",
+                                       style={"flex": "0"}, n_clicks=0),
+                        ], style={"display": "flex", "gap": "6px"}),
+                    ], style={"padding": "14px"}),
+                ], style={"borderRadius": "18px", "boxShadow": "0 10px 28px rgba(24,89,184,0.1)"}),
+                style={"flex": "1 1 320px", "minWidth": "280px"},
+            ),
+            # ── Right: Recent Scans ────────────────────────────────────────
+            html.Div(
+                dbc.Card([
+                    dbc.CardHeader(html.Div([
+                        html.I(className="fas fa-history me-2", style={"color": "#7d8ea3"}),
+                        html.Strong("Recent Scans"),
+                    ], style={"display": "flex", "alignItems": "center"}),
+                    style={"padding": "10px 14px"}),
+                    dbc.CardBody(
+                        dbc.ListGroup(
+                            id="qr-recent-scans",
+                            children=[dbc.ListGroupItem(
+                                "No scans yet", className="text-muted text-center",
+                                style={"fontSize": "11px", "padding": "10px"},
+                            )],
+                            flush=True,
+                            style={"maxHeight": "520px", "overflowY": "auto"},
+                        ),
+                        style={"padding": "8px"},
+                    ),
+                ], style={"borderRadius": "18px", "boxShadow": "0 10px 28px rgba(0,0,0,0.06)"}),
+                style={"flex": "1 1 280px", "minWidth": "240px"},
+            ),
+        ], style={"display": "flex", "gap": "20px", "flexWrap": "wrap"}),
+
+        # ── Manual QR Entry — paste/type a QR payload without the camera ──────
+        # Modular (render_manual_qr_card, qr_callbacks.py) — this exact
+        # widget is also used on the Vendor portal's Concerns tab
+        # (scope="vendor_concern_lookup") via the single pattern-matched
+        # validate_manual_qr_scoped callback. scope="pass_evaluation" here
+        # keeps ids distinct from that instance and any others.
+        _manual_qr_card("pass_evaluation", subtitle="paste a QR payload if the camera isn't available"),
+
+        # Call admin modal
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Contact Admin"), close_button=True),
+            dbc.ModalBody(html.Div(id="admin-phone-display", className="text-center")),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="close-call-modal", color="secondary", n_clicks=0)
+            ),
+        ], id="call-admin-modal", centered=True, size="sm"),
+    ], className="portal-page")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# CUSTOMIZE TAB  (admin only — unchanged structure, minor icon update)
+# ════════════════════════════════════════════════════════════════════════════
+
+def _customize_page(c: str) -> html.Div:
+    _PORTAL_OPTS = [
+        {"label": "Admin",     "value": "admin"},
+        {"label": "Master",    "value": "master"},
+        {"label": "Apartment", "value": "apartment"},
+        {"label": "Vendor",    "value": "vendor"},
+        {"label": "Security",  "value": "security"},
+    ]
+    return html.Div([
+        html.Div([
+            html.Div(html.I(className="fas fa-cog", style={"color": "#fff", "fontSize": "17px"}),
+                     style={"width": "42px", "height": "42px", "borderRadius": "12px",
+                            "background": f"linear-gradient(135deg,{c},{c}99)",
+                            "display": "flex", "alignItems": "center",
+                            "justifyContent": "center", "marginRight": "14px", "flexShrink": "0"}),
+            html.Div([
+                html.H4("Customize Dashboard", className="mb-0",
+                        style={"fontWeight": "800", "color": "#15304f", "fontSize": "18px"}),
+                html.Small("Layout Editor",
+                           style={"color": "#aaa", "fontSize": "12px"}),
+            ]),
+        ], style={"display": "flex", "alignItems": "center", "marginBottom": "22px"}),
+        dbc.Tabs(
+            id="customize-sub-tabs",
+            active_tab="customize-layout",
+            children=[
+                dbc.Tab(tab_id="customize-layout", label="Layout Editor", children=[
+                    html.Div([
+                        html.Div([
+                            html.Div([
+                                html.I(className="fas fa-filter me-2", style={"color": c}),
+                                html.Strong("Select Dashboard to Edit"),
+                            ], style={"display": "flex", "alignItems": "center",
+                                      "padding": "10px 14px",
+                                      "background": f"linear-gradient(135deg,{c}15,{c}08)"}),
+                            html.Div([
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Label("Portal", style={"fontSize": "12px", "fontWeight": "600"}),
+                                        dcc.Dropdown(id="layout-portal-select", options=_PORTAL_OPTS,
+                                                     value="admin", clearable=False, style={"fontSize": "13px"}),
+                                    ], width=4),
+                                    dbc.Col([
+                                        dbc.Label("Tab", style={"fontSize": "12px", "fontWeight": "600"}),
+                                        dcc.Dropdown(id="layout-tab-select", options=[], value=None,
+                                                     placeholder="Select tab…", clearable=True,
+                                                     style={"fontSize": "13px"}),
+                                    ], width=4),
+                                    dbc.Col([
+                                        dbc.Label("Actions", style={"fontSize": "12px", "fontWeight": "600"}),
+                                        html.Div([
+                                            dbc.Button([html.I(className="fas fa-save me-1"), "Save"],
+                                                       id="save-layout-btn", color="primary", size="sm",
+                                                       className="me-2", style={"borderRadius": "8px", "fontWeight": "600"}),
+                                            dbc.Button([html.I(className="fas fa-undo me-1"), "Reset"],
+                                                       id="reset-layout-btn", color="light", size="sm",
+                                                       style={"borderRadius": "8px"}),
+                                        ], style={"display": "flex", "gap": "6px", "marginTop": "4px"}),
+                                    ], width=4),
+                                ]),
+                                 html.Div(id="layout-status-msg", className="mt-2"),
+                                 dbc.Row([
+                                     dbc.Col([
+                                         dbc.Label("Find a card", html_for="layout-palette-search",
+                                                   style={"fontSize": "12px", "fontWeight": "600"}),
+                                         dcc.Input(
+                                             id="layout-palette-search",
+                                             type="search",
+                                             placeholder="Search the KPI palette…",
+                                             debounce=True,
+                                             style={"fontSize": "13px"},
+                                         ),
+                                     ], width=6),
+                                     dbc.Col([
+                                         dbc.Label("Filter by group", html_for="layout-group-filter",
+                                                   style={"fontSize": "12px", "fontWeight": "600"}),
+                                         dcc.Dropdown(
+                                             id="layout-group-filter",
+                                             options=[],
+                                             value=None,
+                                             placeholder="All groups",
+                                             clearable=True,
+                                             style={"fontSize": "13px"},
+                                         ),
+                                     ], width=6),
+                                 ], className="mt-3", style={"padding": "0 2px"}),
+                            ], style={"padding": "12px 14px"}),
+                        ], className="mb-3"),
+                        html.Div([
+                            html.Div([
+                                html.I(className="fas fa-th-large me-2", style={"color": c}),
+                                html.Strong("Active Dashboard"),
+                                html.Small(" — drag KPIs here",
+                                           style={"color": "#999", "fontSize": "11px", "marginLeft": "6px"}),
+                                dbc.Badge("0 / 12 active", id="active-count-badge",
+                                          color="primary", className="ms-auto",
+                                          style={"fontSize": "11px"}),
+                            ], style={"display": "flex", "alignItems": "center",
+                                      "padding": "10px 14px",
+                                      "background": f"linear-gradient(135deg,{c}15,{c}08)"}),
+                            html.Div(
+                                html.Div(id="dnd-active-zone",
+                                         children=[html.Div(
+                                             [html.I(className="fas fa-arrow-down me-2"),
+                                              "Drag KPI cards here from the palette below"],
+                                             style={"color": "#ccc", "fontSize": "13px",
+                                                    "textAlign": "center", "padding": "30px"},
+                                         )],
+                                         style={"display": "grid",
+                                                 "gridTemplateColumns": KPI_GRID_COLS,
+                                                "gap": "12px", "minHeight": "120px", "padding": "10px",
+                                                 "border": "2px dashed #dee2e6", "borderRadius": "10px",
+                                                "background": "rgba(248,251,255,0.6)"}),
+                                style={"padding": "14px"},
+                            ),
+                        ], className="mb-3"),
+                        html.Div([
+                            html.Div([
+                                html.I(className="fas fa-grip-horizontal me-2", style={"color": "#7d8ea3"}),
+                                html.Strong("KPI Palette"),
+                            ], style={"display": "flex", "alignItems": "center",
+                                      "padding": "10px 14px",
+                                      "background": "linear-gradient(135deg,#7d8ea312,#7d8ea308)"}),
+                            html.Div(
+                                html.Div(style={"maxHeight": "52vh", "overflowY": "auto", "padding": "4px 0"},
+                                         children=[html.Div(id="dnd-palette-zone",
+                                                            children=[html.Div(
+                                                                "Select a portal and tab above to load KPIs",
+                                                                style={"color": "#ccc", "fontSize": "13px",
+                                                                       "textAlign": "center", "padding": "30px"})],
+                                                            style={"display": "grid",
+                                                                   "gridTemplateColumns": KPI_GRID_COLS,
+                                                                   "gap": "12px", "padding": "6px",
+                                                                   "minHeight": "80px"})]),
+                                style={"padding": "8px"},
+                            ),
+                        ], className="mb-3"),
+                    ], style={"marginTop": "20px"}),
+                ]),
+            ],
+            style={"marginBottom": "20px"},
+        ),
+    ], className="portal-page")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# SOCIETY-EMPLOYEE PORTALS: Accountant (purple), Supervisor (orange), Staff (white), Auditor (red)
+#
+# Each tab is a KPI row (DEFAULT_LAYOUTS[portal][tab] in card_catalogue.py) plus the shared drill-down panel.
+# What a role may DO inside the drill-down is decided server-side by renderers._PORTAL_PERMS (and, for the
+# capability policy, app/security/authorization.py) - not by what these pages show.
+# ════════════════════════════════════════════════════════════════════════════
+
+# portal -> tab -> (icon, title, subtitle)
+_EMPLOYEE_TABS = {
+    "accountant": {
+        "dashboard":  ("fa-th-large", "Accountant Dashboard", "money in, money out, cash at hand"),
+        "receipts":   ("fa-receipt", "Receipts", "collections - you prepare, the Treasurer / Admin verifies"),
+        "expenses":   ("fa-file-invoice", "Expenses", "payments you prepare for approval"),
+        "dues":       ("fa-hand-holding-usd", "Dues", "receivables and payables (read-only)"),
+        "cashbook":   ("fa-book", "Cashbook", "cash and bank movements"),
+        "financials": ("fa-balance-scale", "Financials", "FY closing report and the 6 statements"),
+        "taxrates":   ("fa-percent", "TDS & GST", "edit and confirm the society's TDS and GST rates"),
+    },
+    "supervisor": {
+        "dashboard": ("fa-th-large", "Supervisor Dashboard", "gate, security staff and open issues"),
+        "gate":      ("fa-shield-alt", "Gate & Security", "who is on duty, gate logs, shift roster"),
+        "users":     ("fa-users", "Users", "security staff, vendors and apartments (read-only)"),
+        "concerns":  ("fa-hand-point-up", "Concerns", "open and unresolved concerns"),
+        "events":    ("fa-calendar-alt", "Events", "upcoming events and tickets"),
+        "channels":  ("fa-bullhorn", "Alert Channels", "bus, taxi and visitor alerts"),
+    },
+    "staff": {
+        "dashboard": ("fa-th-large", "Staff Dashboard", "what is going on today"),
+        "concerns":  ("fa-hand-point-up", "Concerns", "open concerns (read-only)"),
+        "events":    ("fa-calendar-alt", "Events", "upcoming events (read-only)"),
+    },
+    "auditor": {
+        "books":      ("fa-book", "Books", "cash, bank and ledger - read-only"),
+        "receipts":   ("fa-receipt", "Receipts", "receipts and receivables - read-only"),
+        "expenses":   ("fa-file-invoice", "Expenses", "expenses and payables - read-only"),
+        "financials": ("fa-balance-scale", "Financials", "FY closing report and the 6 statements"),
+    },
+}
+
+
+def _employee_tab_page(portal: str, tab: str, sid) -> html.Div:
+    c = _C[portal]
+    tabs = _EMPLOYEE_TABS[portal]
+    icon, title, sub = tabs.get(tab) or tabs.get("dashboard") or next(iter(tabs.values()))
+    tab = tab if tab in tabs else next(iter(tabs))
+    return html.Div([
+        _page_title(icon, c, title, sub),
+        _kpi_row_dynamic(portal, tab, sid, cols=KPI_GRID_COLS),
+        _divider(), _drill_panel(),
+    ], className="portal-page")
+
+
+def accountant_portal_page(active_tab="dashboard", sid=None):
+    if active_tab == "taxrates":
+        # The CA edits and confirms the TDS / GST figures here (see app/services/tax_rate_service.py). No KPI row.
+        from app.dash_apps.pages.tax_rates_page import tax_rates_page
+        from app.security.audit_context import get_current_society_id
+        c = _C["accountant"]
+        icon, title, sub = _EMPLOYEE_TABS["accountant"]["taxrates"]
+        return html.Div([_page_title(icon, c, title, sub),
+                         tax_rates_page("accountant", get_current_society_id() or sid, c)], className="portal-page")
+    return _employee_tab_page("accountant", active_tab, sid)
+
+
+def supervisor_portal_page(active_tab="dashboard", sid=None):
+    return _employee_tab_page("supervisor", active_tab, sid)
+
+
+def staff_portal_page(active_tab="dashboard", sid=None):
+    return _employee_tab_page("staff", active_tab, sid)
+
+
+def auditor_portal_page(active_tab="dashboard", sid=None):
+    """'dashboard' is the Verify page (live read-only checks); the other tabs are view-only drill-downs."""
+    if active_tab in _EMPLOYEE_TABS["auditor"]:
+        return _employee_tab_page("auditor", active_tab, sid)
+    from app.dash_apps.pages.auditor_page import render_auditor_body
+    return render_auditor_body(sid, _C["auditor"], _page_title)

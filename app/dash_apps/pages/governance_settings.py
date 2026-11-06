@@ -1,0 +1,265 @@
+# app/dash_apps/pages/governance_settings.py
+"""
+Settings -> governance tabs for the Admin and Owner portals.
+
+    RWA Compliance (UP) | Rules | Society By-laws | Meetings & Resolutions
+
+Everything here is scoped to the signed-in user's own society, resolved from the SERVER-side session
+(never the browser's auth-store). Owners get a read-only view. Admins additionally get the forms that the
+service layer (app.services.regime_rules_admin._require_writer) lets a society admin submit for their own
+society: cash-limit mode, a decision on a non-statute rule (Rules -> Edit), provisional bye-law choice, record meeting, record resolution.
+
+Master-only and therefore never rendered here: Edit a catalog entry and Change a rule (a rule value is
+regime-wide). Bye-law adoption, meetings and resolutions are edited by the society's ADMIN only (master has no
+such tabs). A provisional bye-law choice is activated automatically when a matching passed resolution is
+recorded, so there is no separate "link" step.
+
+Component ids are prefixed `gov-` so Master's `mrl-` callbacks (platform-gated) never see them.
+"""
+from __future__ import annotations
+
+from dash import dcc, html
+import dash_bootstrap_components as dbc
+
+from app.dash_apps.pages import master_rules_page as mrp
+from app.security.audit_context import get_current_society_id
+from app.services import regime_rules_admin as rra
+
+P = "gov"
+
+
+def _note(text: str):
+    return html.Div(text, style={"fontSize": "12px", "color": "#666", "padding": "10px 12px", "marginTop": "16px",
+                                 "background": "#f6f8fb", "border": "1px solid #e1e7ef", "borderRadius": "8px"})
+
+
+ORDER_NOTE = ("Order matters: save the choice first, then record the resolution. "
+              "An older resolution can't activate a newer choice.")
+
+
+def _order_note():
+    return html.Div([html.I(className="fas fa-info-circle me-2"), html.Strong(ORDER_NOTE)],
+                    style={"fontSize": "12px", "padding": "10px 12px", "marginTop": "16px", "background": "#fff8e1",
+                           "border": "1px solid #ffe08a", "borderRadius": "8px"})
+
+
+def _no_society():
+    return html.Div("No society is linked to your account.", className="text-muted p-3")
+
+
+def rules_body(society_id, can_edit: bool = False) -> list:
+    return mrp.render_rules_sections(society_id, can_edit=can_edit)
+
+
+def bye_body(society_id) -> list:
+    return mrp.render_bye_laws_sections(society_id) + mrp.render_policy_section(society_id)
+
+
+def mtg_body(society_id, can_execute: bool = False) -> list:
+    # Only the society's admin gets Execute buttons; owners see the pending list read-only.
+    return (mrp.render_meetings_sections(society_id)
+            + mrp.render_enactment_section(society_id, P, can_execute=can_execute))
+
+
+def policy_choice_ui(society_id, policy_key):
+    """(options, value, info) for the Record Policy Choice form: choices of that setting, the current/pending
+    one pre-selected, and a note on which clause's resolution activates it."""
+    spec = rra.POLICY_SPECS.get(policy_key)
+    if not spec:
+        return [{"label": "Select a setting first", "value": "", "disabled": True}], None, None
+    label, clause, choices = spec
+    try:
+        st = rra.list_society_policies(society_id).get(policy_key, {})
+    except Exception:
+        st = {}
+    names = dict(choices)
+    now = names.get(st.get("value"), st.get("value"))
+    pend = names.get(st.get("proposed")) if st.get("proposed") else None
+    lines = [html.Div([html.Strong(label, style={"fontSize": "12px"})]),
+             html.Div(f"Controlled by bye-law {clause} — {rra.clause_title(clause)}. It becomes active when you record a "
+                      f"passed 'Set Society Policy' resolution naming {clause}.", style={"fontSize": "12px"}),
+             html.Div(f"In force now: {now or 'default'}" + (f"  ·  pending: {pend}" if pend else ""),
+                      style={"fontSize": "12px", "color": "#666"})]
+    if policy_key.startswith("droppable_"):
+        lines.append(html.Div("Which clauses can legally be dropped is a legal call - confirm with an advocate.",
+                              style={"fontSize": "11px", "color": "#b26a00"}))
+    info = html.Div(lines, style={"padding": "10px 12px", "background": "#f6f8fb", "border": "1px solid #e1e7ef",
+                                  "borderRadius": "8px"})
+    return [{"label": text, "value": val} for val, text in choices], (st.get("proposed") or st.get("value")), info
+
+
+def bye_choice_ui(society_id, clause_id, layer):
+    """(options, value) for the guided bye-law form. Only choices the rules allow are enabled."""
+    if not clause_id:
+        return [{"label": "Select a clause first", "value": "", "disabled": True}], None
+    info = rra.clause_rules(society_id, clause_id)
+    layer = int(layer or 1)
+    if layer != 1:
+        return [{"label": "Adopt with variation  (a society policy / board decision is always a variation of an adopted clause)",
+                 "value": "adopted_with_variation"}], "adopted_with_variation"
+    opts = [
+        {"label": "Adopt as-is  (the clause applies exactly as notified)", "value": "adopted_as_is"},
+        {"label": "Adopt with variation  (you write the wording)", "value": "adopted_with_variation",
+         "disabled": info["fixed"]},
+        {"label": ("Not adopted  — not allowed: the Act/Rules enforce this clause" if info["locked"]
+                   else "Not adopted  (non-statutory clauses only)"),
+         "value": "not_adopted", "disabled": info["locked"]},
+    ]
+    if info["fixed"]:
+        opts[1]["label"] = "Adopt with variation  — not allowed: this clause says the Act prevails"
+    return opts, "adopted_as_is"
+
+
+def bye_choice_panel(clause_id, layer, status):
+    """(info children, show_variation_box) for the current selection."""
+    if not clause_id or not status:
+        return None, False
+    title = rra.clause_title(clause_id)
+    src = rra.model_bye_laws_source()
+    link = (html.A("Read the notified Model Bye-Laws", href=src["url"], target="_blank", rel="noopener noreferrer")
+            if src["url"] else html.Span("Refer to the notified Model Bye-Laws"))
+    ref = html.Div([link, html.Span(f" — {src['reference']}", className="text-muted")], style={"fontSize": "11px"})
+    head = html.Div([html.Strong(f"{clause_id} — {title}", style={"fontSize": "12px"})])
+    if status == "adopted_as_is":
+        body = html.Div("The society adopts this clause exactly as notified. Nothing to type.", style={"fontSize": "12px"})
+    elif status == "adopted_with_variation":
+        body = html.Div("Write your wording below. It must be a tightening; it cannot loosen the Model Bye-Law."
+                        if int(layer or 1) != 1 else
+                        "Write the wording the society adopts in place of the model clause (below).", style={"fontSize": "12px"})
+    else:
+        body = html.Div("The society does not adopt this clause. Because it departs from the Model Bye-Laws, it needs a "
+                        "General Body resolution of type Not Adopt Model Bye-Law Clause (2/3 of all votes, provisional) and a "
+                        "reference to a written advocate's opinion. It stays provisional until that resolution is recorded.",
+                        style={"fontSize": "12px"})
+    box = html.Div([head, body, ref], style={"padding": "10px 12px", "background": "#f6f8fb",
+                                              "border": "1px solid #e1e7ef", "borderRadius": "8px"})
+    return box, status == "adopted_with_variation"
+
+
+def render_governance_summary(role: str, sid):
+    """Strip shown at the TOP of Settings so the governance section (further down) is easy to find."""
+    society_id = get_current_society_id() or sid
+    try:
+        society_id = int(society_id) if society_id else None
+    except (TypeError, ValueError):
+        society_id = None
+    if not society_id:
+        return None
+    snap = rra.governance_snapshot(society_id)
+    last = snap["last_meeting"]
+    last_txt = last.strftime("%d %b %Y") if hasattr(last, "strftime") else (str(last) if last else "none recorded")
+    pend = snap["pending_choices"]
+    try:
+        from app.services import committee_service as _cs
+        mc = _cs.summary(society_id)
+        mc_txt = f"{mc['seated']} seated" + (f" · vacant: {', '.join(mc['vacant_core'])}" if mc["vacant_core"] else "")
+        mc_warn = bool(mc["vacant_core"])
+    except Exception:
+        mc_txt, mc_warn = "unavailable", False
+
+    def _stat(label, value, warn=False):
+        return html.Div([html.Div(label, style={"fontSize": "11px", "color": "#666"}),
+                         html.Div(value, style={"fontSize": "15px", "fontWeight": "700",
+                                                "color": "#b26a00" if warn else "inherit"})],
+                        style={"marginRight": "28px"})
+
+    verb = "record meetings and resolutions, adopt bye-laws and appoint the Managing Committee" if role == "admin" else "view your society's bye-laws, meetings and resolutions"
+    return html.Div([
+        html.Div([html.I(className="fas fa-gavel me-2"), html.Strong("Society governance")], style={"marginBottom": "6px"}),
+        html.Div([_stat("Last meeting", last_txt),
+                  _stat("Choices awaiting a resolution", str(pend), warn=pend > 0),
+                  _stat("Pending enactments", str(snap["pending_enactments"]), warn=snap["pending_enactments"] > 0),
+                  _stat("Managing Committee", mc_txt, warn=mc_warn)],
+                 style={"display": "flex", "flexWrap": "wrap", "marginBottom": "6px"}),
+        html.Small(f"Scroll down past the cards below to the Society governance tabs, where you can {verb}.",
+                   className="text-muted"),
+    ], style={"padding": "12px 14px", "margin": "8px 0 14px", "background": "#f6f8fb",
+              "border": "1px solid #e1e7ef", "borderRadius": "8px"})
+
+
+def render_governance_tabs(role: str, sid, color: str = "#1859b8"):
+    """role: 'admin' (own-society forms) or 'apartment' (read-only). sid is only a fallback: the society
+    comes from the server session."""
+    from app.dash_apps.pages.portal_pages import _rwa_compliance_up_page
+
+    is_admin = role == "admin"
+    society_id = get_current_society_id() or sid
+    try:
+        society_id = int(society_id) if society_id else None
+    except (TypeError, ValueError):
+        society_id = None
+
+    compliance = _rwa_compliance_up_page(color, role=role, embedded=True)
+    if not society_id:
+        scoped = [_no_society()]
+        return _wrap(role, compliance, scoped, scoped, scoped, scoped)
+
+    # ── Rules ───────────────────────────────────────────────────────────────
+    try:
+        cur_mode = rra.society_cash_mode(society_id)
+    except Exception:
+        cur_mode = None
+    rules = [html.Div(rules_body(society_id, can_edit=is_admin), id=f"{P}-body")]
+    if is_admin:
+        rules.append(mrp.render_rule_decision_form(society_id, P))
+        rules.append(mrp.cash_limit_form(P, current_mode=cur_mode))
+        rules.append(_note("Statute figures and platform policies apply to every society on the regime, so Master changes "
+                           "them centrally. You will see a new value here once it takes effect."))
+    else:
+        rules.append(mrp._section("Cash-limit enforcement", "How cash payments above the limit are handled in your society.",
+                                  html.Div(cur_mode or "regime default", style={"fontSize": "13px", "fontWeight": "600"})))
+
+    # ── Society By-laws ─────────────────────────────────────────────────────
+    bye = [html.Div(bye_body(society_id), id=f"{P}-bye-body")]
+    if is_admin:
+        bye.append(_order_note())
+        bye.append(mrp.render_bye_laws_form(society_id, P))
+        bye.append(mrp.render_policy_form(society_id, P))
+
+    # ── Meetings & Resolutions ──────────────────────────────────────────────
+    mtg = [html.Div(mtg_body(society_id, can_execute=is_admin), id=f"{P}-mtg-body")]
+    if is_admin:
+        mtg.append(mrp.render_meeting_form(society_id, P))
+        mtg.append(mrp.render_resolution_form(society_id, P))
+        mtg.append(_order_note())
+        mtg.append(_note("When you record a PASSED resolution naming a clause, the matching provisional bye-law choice is "
+                         "activated automatically (decision type, quorum and meeting body are checked). Record the "
+                         "meeting first, then the resolution."))
+
+    # ── Managing Committee ──────────────────────────────────────────────────
+    from app.dash_apps.pages.committee_page import committee_tab
+    committee = committee_tab(role, society_id)
+
+    # -- TDS & GST Rates: only for those who may edit them (CA / Treasurer / Secretary-if-no-Treasurer), plus a
+    #    read-only view for the Admin. Everyone else gets no tab.
+    from app.dash_apps.pages.tax_rates_page import tax_rates_tab
+    tax = tax_rates_tab(role, society_id)
+
+    # -- Adviser Decisions (read by everyone in the society; filled in by the admin / Secretary / Treasurer) and
+    #    GST Accounts (the CA / Treasurer / Secretary, read-only for the Admin).
+    from app.dash_apps.pages.adviser_page import adviser_tab
+    from app.dash_apps.pages.gst_accounts_page import gst_accounts_tab
+    adviser = adviser_tab(role, society_id)
+    gst_accounts = gst_accounts_tab(role, society_id)
+
+    return _wrap(role, compliance, rules, bye, mtg, committee, tax, adviser, gst_accounts)
+
+
+def _wrap(role, compliance, rules, bye, mtg, committee, tax=None, adviser=None, gst_accounts=None):
+    head = [html.H5("Society governance", id="society-governance", style={"fontWeight": "700", "marginTop": "8px"})]
+    if role != "admin":
+        head.append(html.Small("Read-only view for your society.", className="text-muted"))
+    return html.Div([
+        *head,
+        html.Div(id=f"{P}-toast"),
+        dcc.Tabs(id=f"{P}-tabs", value="tab-rwa", children=[
+            dcc.Tab(label="RWA Compliance (UP)", value="tab-rwa", children=html.Div(compliance)),
+            dcc.Tab(label="Rules", value="tab-rules", children=html.Div(rules)),
+            dcc.Tab(label="Society By-laws", value="tab-bye", children=html.Div(bye)),
+            dcc.Tab(label="Meetings & Resolutions", value="tab-mtg", children=html.Div(mtg)),
+            dcc.Tab(label="Managing Committee", value="tab-committee", children=html.Div(committee)),
+            *([dcc.Tab(label="TDS & GST Rates", value="tab-tax-rates", children=html.Div(tax))] if tax is not None else []),
+            *([dcc.Tab(label="Adviser Decisions", value="tab-adviser", children=html.Div(adviser))] if adviser is not None else []),
+            *([dcc.Tab(label="GST Accounts", value="tab-gst-accounts", children=html.Div(gst_accounts))] if gst_accounts is not None else []),
+        ]),
+    ])
