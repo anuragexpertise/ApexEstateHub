@@ -4235,6 +4235,7 @@ DECLARE
     v_pass_expiry DATE;
     v_on_duty     BOOLEAN;
     v_active      BOOLEAN;
+    v_code        VARCHAR(3);
 BEGIN
     IF p_role = 'apartment' THEN
         v_overdue := fn_apartment_overdue_outstanding(p_entity_id);
@@ -4272,15 +4273,35 @@ BEGIN
                 ('Pass valid until ' || v_pass_expiry::TEXT)::TEXT, 0::NUMERIC(15,2);
         END IF;
 
-    ELSIF p_role = 'security' THEN
+    -- Society employees (2026-11): the pass is status Active AND duty OnDuty, nothing else.
+    --   Status  = the record is active (security_staff.active for a guard, users.active for a team login).
+    --   Duty    = an open gate_access row (clocked in, no time_out yet); that row is also the attendance record.
+    --   Entity  = security_staff.id for a guard, users.id for accountant / supervisor / staff, which is what
+    --             gate_access.entity_id holds for each (see app/services/employee_attendance.py).
+    -- Status is checked first so a deactivated employee who is still clocked in is refused as inactive,
+    -- not waved through as on duty.
+    ELSIF p_role IN ('security', 'accountant', 'supervisor', 'staff') THEN
+        IF p_role = 'security' THEN
+            v_code := 'SEC';
+            SELECT ss.active INTO v_active FROM security_staff ss WHERE ss.id = p_entity_id;
+        ELSE
+            v_code := CASE p_role WHEN 'accountant' THEN 'ACC' WHEN 'supervisor' THEN 'SPV' ELSE 'STF' END;
+            SELECT u.active INTO v_active FROM users u WHERE u.id = p_entity_id AND u.role = p_role;
+        END IF;
+
+        IF v_active IS NOT TRUE THEN
+            RETURN QUERY SELECT FALSE, 'Account is inactive'::TEXT, 0::NUMERIC(15,2);
+            RETURN;
+        END IF;
+
         SELECT EXISTS(
             SELECT 1 FROM gate_access
-            WHERE entity_id = p_entity_id AND role = 'SEC' AND time_out IS NULL
+            WHERE entity_id = p_entity_id AND role = v_code AND time_out IS NULL
         ) INTO v_on_duty;
         IF NOT v_on_duty THEN
             RETURN QUERY SELECT FALSE, 'Not currently on duty'::TEXT, 0::NUMERIC(15,2);
         ELSE
-            RETURN QUERY SELECT TRUE, 'On duty'::TEXT, 0::NUMERIC(15,2);
+            RETURN QUERY SELECT TRUE, 'Active and on duty'::TEXT, 0::NUMERIC(15,2);
         END IF;
 
     ELSE
@@ -4288,6 +4309,58 @@ BEGIN
             ('Unknown role: ' || COALESCE(p_role,'NULL'))::TEXT, 0::NUMERIC(15,2);
     END IF;
 END;
+$$;
+
+-- ── Employee attendance register (2026-11) ────────────────────────────────────────────────────────────────────
+-- Accountant (ACC), Supervisor (SPV), Staff (STF) and Security (SEC) are the society's own employees, so every
+-- clock-in / clock-out is an attendance record. There is no second table to keep in step: duty IS an open
+-- gate_access row, and this function rolls those rows up to one line per person per day. A clock-in from any path
+-- (the attendance QR, the security portal's clock buttons, a gate scan) is therefore in the register automatically.
+--
+--   minutes_on_duty counts CLOSED sessions only, so someone who forgot to clock out is not credited with hours that
+--                   keep growing; still_on_duty flags that open session so it can be corrected.
+--   A shift is dated by the day it STARTED, so a night shift stays on one line.
+--   p_from / p_to default to the last 31 days. Society scoping is here, not left to the caller.
+-- LANGUAGE sql (not plpgsql): RETURNS TABLE columns here share names with gate_access columns, which in plpgsql is
+-- the variable-collision that broke fn_gst_summary_fy and fn_compute_rcm_liability earlier; sql has no such clash.
+CREATE OR REPLACE FUNCTION fn_employee_attendance(
+    p_society_id INT,
+    p_from       DATE DEFAULT NULL,
+    p_to         DATE DEFAULT NULL
+)
+RETURNS TABLE(
+    attendance_date DATE,
+    role_code       VARCHAR,
+    entity_id       INT,
+    employee_name   TEXT,
+    first_in        TIMESTAMP,
+    last_out        TIMESTAMP,
+    sessions        INT,
+    minutes_on_duty INT,
+    still_on_duty   BOOLEAN
+)
+LANGUAGE sql STABLE AS $$
+    SELECT g.time_in::DATE,
+           g.role::VARCHAR,
+           g.entity_id,
+           COALESCE(CASE WHEN g.role = 'SEC' THEN ss.name ELSE u.name END,
+                    u.email, 'Employee #' || g.entity_id)::TEXT,
+           MIN(g.time_in),
+           MAX(g.time_out),
+           COUNT(*)::INT,
+           COALESCE(SUM(EXTRACT(EPOCH FROM (g.time_out - g.time_in)) / 60)
+                    FILTER (WHERE g.time_out IS NOT NULL), 0)::INT,
+           BOOL_OR(g.time_out IS NULL)
+      FROM gate_access g
+      LEFT JOIN security_staff ss
+             ON g.role = 'SEC' AND ss.id = g.entity_id AND ss.society_id = g.society_id
+      LEFT JOIN users u
+             ON g.role IN ('ACC', 'SPV', 'STF') AND u.id = g.entity_id AND u.society_id = g.society_id
+     WHERE g.society_id = p_society_id
+       AND g.role IN ('ACC', 'SPV', 'STF', 'SEC')
+       AND g.time_in::DATE BETWEEN COALESCE(p_from, CURRENT_DATE - 31) AND COALESCE(p_to, CURRENT_DATE)
+     GROUP BY g.time_in::DATE, g.role, g.entity_id, ss.name, u.name, u.email
+     ORDER BY 1 DESC, 4, 2;
 $$;
 
 -- SECTION 3C: NOC ELIGIBILITY

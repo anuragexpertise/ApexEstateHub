@@ -38,6 +38,33 @@ _ALIASES = {
     "masteradmin": MASTER_ROLE,
 }
 
+# ── Role CODES ─────────────────────────────────────────────────────────────────────────────────────────────────────
+# The short tags carried in a gate-pass QR ("<society>-<CODE>-<entity>") and in gate_access.role. Each maps to the
+# session role above. Document / object codes (RPT, EXP, NOC, ...) are not people and live in qr_service.
+ROLE_CODES: dict[str, str] = {
+    "ADM": "admin",
+    "APT": "apartment",
+    "VND": "vendor",
+    "SEC": "security",
+    "ACC": "accountant",
+    "SPV": "supervisor",
+    "STF": "staff",
+    "ADT": "auditor",
+    "ADV": "adviser",
+    "MST": MASTER_ROLE,
+}
+CODE_FOR_ROLE: dict[str, str] = {role: code for code, role in ROLE_CODES.items()}
+
+# The society's own employees. Their gate pass is decided by two facts: status Active AND duty OnDuty. Duty is an
+# open gate_access row (clocked in, not yet out), so every clock-in/out is also an attendance record.
+EMPLOYEE_CODES: tuple[str, ...] = ("ACC", "SPV", "STF", "SEC")
+EMPLOYEE_ROLES: tuple[str, ...] = tuple(ROLE_CODES[c] for c in EMPLOYEE_CODES)
+
+# Reviewers and the platform operator. Not tied to one society or one person: the code is "0-<CODE>-None" and the
+# gate always passes it. Active/duty do not apply.
+ALWAYS_PASS_CODES: tuple[str, ...] = ("ADT", "ADV", "MST")
+
+
 # Landing page per session role. Single source for the login redirect and the
 # JWT refresh redirect (previously copy-pasted in login_callbacks.py + routes/auth.py).
 PORTAL_HOME: dict[str, str] = {

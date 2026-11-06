@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 from io import BytesIO
 import qrcode
+from app.security.roles import ALWAYS_PASS_CODES
 from database.db_manager import db
 
 # ── SECURITY (2026-08, revised 2026-09): signed QR codes for the "print
@@ -90,11 +91,18 @@ _QR_VERSIONED_ROLES = {
 }
 
 # ADM is signable too, but its qr_version isn't a single flat lookup — see
-# _current_qr_version's ADM branch below. Deliberately no "MST" entry:
-# master is a platform-level onboarding role with no society_id of its own
-# (see auth_service.py) and no gate/entity identity to represent — it has
-# no QR code at all, by design, not as an oversight.
-_QR_SIGNABLE_ROLES = set(_QR_VERSIONED_ROLES) | {"ADM"}
+# _current_qr_version's ADM branch below.
+#
+# ACC / SPV / STF (accountant, supervisor, staff) have no table of their own: the person IS a users row, so the pass
+# is keyed on users.id and versioned on users.qr_version, the same counter an admin with no flat falls back to. They
+# are signed for the same reason SEC is: a printed employee pass must not be forgeable by counting up user ids.
+_QR_USER_ROLES = {"ACC": "accountant", "SPV": "supervisor", "STF": "staff"}
+_QR_TEAM_ROLE_NAMES = frozenset(_QR_USER_ROLES.values())
+
+# ADT / ADV / MST (auditor, adviser, master) are deliberately NOT signable. They are platform/reviewer passes with
+# no society and no entity — "0-ADT-None" — and the gate always passes them (see _platform_pass). They carry no
+# qr_version because there is no row to version.
+_QR_SIGNABLE_ROLES = set(_QR_VERSIONED_ROLES) | {"ADM"} | set(_QR_USER_ROLES)
 
 
 def _qr_sign(secret: str, society_id: int, role_code: str, entity_id: int, qr_version: int) -> str:
@@ -169,6 +177,15 @@ def _current_qr_version(role_code: str, entity_id: int):
             return None
         apt_version = row.get("apt_qr_version")
         return apt_version if apt_version is not None else row.get("user_qr_version")
+
+    if role_code in _QR_USER_ROLES:
+        # The role is part of the lookup, so a users.id that belongs to a different kind of login has no version
+        # here and its "ACC" code can never validate.
+        row = db._execute(
+            "SELECT qr_version FROM users WHERE id=%s AND role=%s",
+            (entity_id, _QR_USER_ROLES[role_code]), fetch_one=True,
+        )
+        return (row or {}).get("qr_version")
 
     table = _QR_VERSIONED_ROLES.get(role_code)
     if not table:
@@ -256,6 +273,16 @@ def revoke_and_reissue(
             if admin_row.get("apt_id") is not None
             else ("users", entity_id)
         )
+    elif role_code in _QR_USER_ROLES:
+        # Accountant / supervisor / staff: the pass rides on the login's own users.qr_version. Scoped to this
+        # society and to the right kind of login, so one society's admin cannot reissue another's employee pass.
+        owned = db._execute(
+            "SELECT id FROM users WHERE id=%s AND role=%s AND society_id=%s",
+            (entity_id, _QR_USER_ROLES[role_code], society_id), fetch_one=True,
+        )
+        if not owned:
+            raise ValueError(f"No {_QR_USER_ROLES[role_code]} login with id={entity_id} in this society")
+        table, pk = "users", entity_id
     else:
         table = _QR_VERSIONED_ROLES.get(role_code)
         if not table:
@@ -298,6 +325,14 @@ ROLE_CODE_MAP = {
     "APT": "apartment",  # Apartment / Owner
     "VND": "vendor",
     "SEC": "security",
+    # Society employees (2026-11): gate pass = status Active AND duty OnDuty.
+    "ACC": "accountant",
+    "SPV": "supervisor",
+    "STF": "staff",
+    # Reviewers and the platform operator: "0-<CODE>-None", always PASS.
+    "ADT": "auditor",
+    "ADV": "adviser",
+    "MST": "master",
     "VST": "visitor",
     "EVT": "event_ticket",
     "PTL": "patrol_location",
@@ -319,6 +354,12 @@ ROLE_CODE_MAP_REV = {
     "apartment": "APT",
     "vendor": "VND",
     "security": "SEC",
+    "accountant": "ACC",
+    "supervisor": "SPV",
+    "staff": "STF",
+    "auditor": "ADT",
+    "adviser": "ADV",
+    "master": "MST",
     "visitor": "VST",
     "event_ticket": "EVT",
     "patrol_location": "PTL",
@@ -337,6 +378,9 @@ def parse_qr_payload(qr_data: str) -> dict:
     Legacy (unsigned) format: <society_id>-<ROLE_CODE>-<entity_id>
     Signed format (2026-08+, versioned/signable roles only): adds
     -<qr_version>-<sig>.
+    Platform format (auditor / adviser / master): exactly "0-ADT-None",
+    "0-ADV-None" or "0-MST-None" — society 0, no entity, never signed. "None"
+    is accepted nowhere else, and these three codes accept nothing but it.
     Signature verification itself happens in validate_qr_code, not here —
     this function only parses the string into its parts.
     """
@@ -349,11 +393,24 @@ def parse_qr_payload(qr_data: str) -> dict:
 
         society_id = int(parts[0])
         role_code = parts[1].upper()
-        entity_id = int(parts[2])
 
         role = ROLE_CODE_MAP.get(role_code, "unknown")
         if role == "unknown":
             return {"error": f"Unknown role code: {role_code}"}
+
+        if role_code in ALWAYS_PASS_CODES:
+            if len(parts) != 3 or society_id != 0 or parts[2].lower() != "none":
+                return {"error": f"Invalid {role_code} code. Expected: 0-{role_code}-None"}
+            return {
+                "society_id": 0,
+                "role_code": role_code,
+                "role": role,
+                "entity_id": None,
+                "qr_version": None,
+                "sig": None,
+            }
+
+        entity_id = int(parts[2])
 
         result = {
             "society_id": society_id,
@@ -950,6 +1007,13 @@ def resolve_entity_for_reissue(role_code: str, entity_id: int, society_id: int,
             )
             return {"label": row["location_name"]} if row else {"error": not_found_msg}
 
+        if role_code in _QR_USER_ROLES:
+            row = db._execute(
+                f"SELECT name FROM users WHERE id=%s AND role=%s AND society_id=%s{date_clause}",
+                (entity_id, _QR_USER_ROLES[role_code], society_id) + date_params, fetch_one=True,
+            )
+            return {"label": row["name"]} if row else {"error": not_found_msg}
+
         if role_code in ("APT", "VND", "SEC"):
             role_name = ROLE_CODE_MAP.get(role_code)
             row = db._execute(
@@ -1010,11 +1074,19 @@ def generate_time_qr(society_id: int):
 
 def validate_attendance_qr(issued_at: int, society_id: int, security_user_id: int = None) -> dict:
     """
-    Validate a time-boxed ATD QR and toggle the SCANNING guard's own duty
+    Validate a time-boxed ATD QR and toggle the SCANNING employee's own duty
     status (clock in if not on duty, clock out if already on duty).
-    `security_user_id` must be the scanning guard's own users.id, taken
-    from their authenticated session — not an audit-only field here.
+    `security_user_id` must be the scanner's own users.id, taken from their
+    authenticated session — not an audit-only field here. (The name predates
+    the other employee roles; it is the id of whoever is clocking themselves
+    in: a guard, accountant, supervisor or staff member.)
+
+    A deactivated employee cannot clock in: attendance is for people still
+    employed. Clocking OUT is always allowed, so nobody is left "on duty"
+    because their account was switched off mid-shift.
     """
+    from app.services import employee_attendance as ea
+
     now = int(time.time())
     age = now - issued_at
 
@@ -1023,40 +1095,57 @@ def validate_attendance_qr(issued_at: int, society_id: int, security_user_id: in
     if age < -5:  # small clock-skew allowance
         return {"status": "FAIL", "reason": "QR not yet valid", "gate_action": "deny"}
     if not security_user_id:
-        return {"status": "FAIL", "reason": "Attendance QR must be scanned from a logged-in security account", "gate_action": "deny"}
+        return {"status": "FAIL", "reason": "Attendance QR must be scanned from a logged-in employee account", "gate_action": "deny"}
 
-    user_row = db._execute(
-        "SELECT id, linked_id FROM users WHERE id=%s AND society_id=%s AND role='security'",
-        (security_user_id, society_id), fetch_one=True,
-    )
-    if not user_row or not user_row.get("linked_id"):
-        return {"status": "FAIL", "reason": "Attendance QR can only be scanned by security staff", "gate_action": "deny"}
+    emp = ea.resolve_employee(society_id, security_user_id)
+    if not emp:
+        return {"status": "FAIL", "reason": "Attendance QR can only be scanned by the society's own employees", "gate_action": "deny"}
 
-    staff_id = user_row["linked_id"]  # security_staff.id — matches gate_access.entity_id
+    entity_id = emp["entity_id"]  # security_staff.id for a guard, users.id otherwise — matches gate_access.entity_id
 
-    open_row = db._execute(
-        """SELECT id FROM gate_access
-           WHERE society_id=%s AND entity_id=%s AND role='SEC' AND time_out IS NULL
-           ORDER BY time_in DESC LIMIT 1""",
-        (society_id, staff_id), fetch_one=True,
-    )
-
-    if open_row:
-        db._execute("UPDATE gate_access SET time_out=NOW(), updated_by=%s WHERE id=%s",
-                    (security_user_id, open_row["id"]))
-        action, msg = "clock_out", "Clocked out"
-    else:
-        db._execute(
-            """INSERT INTO gate_access (society_id, role, entity_id, time_in, created_by)
-               VALUES (%s, 'SEC', %s, NOW(), %s)""",
-            (society_id, staff_id, security_user_id),
+    if not emp["active"]:
+        on_duty = db._execute(
+            "SELECT 1 AS x FROM gate_access WHERE society_id=%s AND entity_id=%s AND role=%s AND time_out IS NULL",
+            (society_id, entity_id, emp["code"]), fetch_one=True,
         )
-        action, msg = "clock_in", "Clocked in"
+        if not on_duty:
+            return {"status": "FAIL", "reason": "This account is inactive — contact the society admin", "gate_action": "deny"}
+
+    action = ea.toggle_duty(society_id, emp["code"], entity_id, security_user_id)
+    msg = "Clocked in" if action == "clock_in" else "Clocked out"
 
     return {
         "status": "PASS", "action": action,
-        "user": {"id": staff_id, "role": "security", "society_id": society_id},
+        "user": {"id": entity_id, "role": emp["role"], "society_id": society_id},
         "message": msg, "gate_action": "allow",
+    }
+
+
+_PLATFORM_LABEL = {"ADT": "Auditor", "ADV": "Adviser", "MST": "Master"}
+
+
+def _platform_pass(role_code: str, role: str, gate_society_id) -> dict:
+    """Gate result for an auditor / adviser / master pass: always PASS.
+
+    These passes are "0-ADT-None", "0-ADV-None" and "0-MST-None": no society, no person, nothing to look up, so there
+    is nothing that could fail — no status, no duty, no dues. parse_qr_payload has already insisted on the exact
+    shape. There is deliberately no database access here.
+
+    The pass is unsigned, so anyone who knows the three-part text can present it. That is the specified behaviour;
+    a signature would need a platform-level key because there is no society key to use (society 0).
+    """
+    label = _PLATFORM_LABEL[role_code]
+    return {
+        "status": "PASS",
+        "user": {
+            "id": None,
+            "name": label,
+            "role": role,
+            "society_id": gate_society_id or 0,
+            "flat_number": "",
+        },
+        "message": f"{label} access granted",
+        "gate_action": "allow",
     }
 
 
@@ -1073,6 +1162,11 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
         qr_society_id = parsed["society_id"]
         role = parsed["role"]
         entity_id = parsed["entity_id"]
+
+        # Auditor / adviser / master: society 0, no entity, always PASS. Checked BEFORE the society test below,
+        # because these passes belong to no society and so must be accepted at every society's gate.
+        if parsed["role_code"] in ALWAYS_PASS_CODES:
+            return _platform_pass(parsed["role_code"], role, society_id)
 
         if society_id and qr_society_id != society_id:
             return {"status": "FAIL", "reason": "QR not valid for this society", "gate_action": "deny"}
@@ -1097,6 +1191,12 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
                     or not hmac.compare_digest(sig, expected_sig)
                 ):
                     return {"status": "FAIL", "reason": "Invalid or revoked QR code", "gate_action": "deny"}
+            elif role_code in _QR_USER_ROLES:
+                # Accountant / supervisor / staff passes are new: no unsigned ones were ever printed, so there is
+                # no transition window to honour. Without this a typed "<society>-ACC-<id>" would skip signing
+                # altogether and only need a guessable users.id.
+                return {"status": "FAIL", "reason": "This pass is not signed — ask the admin to reissue it",
+                        "gate_action": "deny"}
             # else: legacy unsigned code for a versioned role — accepted
             # during the reprint transition window. Once every existing
             # apartment/vendor/security pass has been reprinted with a
@@ -1169,14 +1269,29 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
                 (entity_id, qr_society_id),
                 fetch_one=True,
             )
+        elif role in _QR_TEAM_ROLE_NAMES:
+            # Accountant / supervisor / staff. The role is part of the lookup, so an "ACC" code pointing at some
+            # other kind of login finds nothing. users.active is NOT filtered here: an inactive employee must
+            # reach fn_evaluate_gate_pass and be refused with the reason, not vanish as "User not found".
+            user_row = db._execute(
+                """SELECT u.id, u.name, u.email, u.role, u.society_id, u.linked_id
+                   FROM users u
+                   WHERE u.id = %s AND u.role = %s AND u.society_id = %s""",
+                (entity_id, role, qr_society_id),
+                fetch_one=True,
+            )
         else:
             user_row = None
 
         if not user_row:
             return {"status": "FAIL", "reason": "User not found", "gate_action": "deny"}
 
+        # A team login's gate id is its own users.id (gate_access.entity_id); every other person role resolves
+        # through linked_id to its own table.
+        is_team_login = role in _QR_TEAM_ROLE_NAMES
+
         base_user = {
-            "id": user_row["linked_id"] or user_row["id"],
+            "id": user_row["id"] if is_team_login else (user_row["linked_id"] or user_row["id"]),
             "name": user_row.get("name", role.title()),
             "email": user_row.get("email"),
             "role": user_row["role"],
@@ -1192,7 +1307,7 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
                 "gate_action": "allow",
             }
 
-        gate_entity_id = user_row.get("linked_id") or user_row["id"]
+        gate_entity_id = user_row["id"] if is_team_login else (user_row.get("linked_id") or user_row["id"])
         if role == "apartment":
             flat = db._execute(
                 "SELECT flat_number FROM apartments WHERE id = %s",
