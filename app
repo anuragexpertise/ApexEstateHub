@@ -1,0 +1,1 @@
+/home/at/.local/share/kilo/worktree-pool/apexestatehub-6558b5125eb5/repeated-pufferfish/app
