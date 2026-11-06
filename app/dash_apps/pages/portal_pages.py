@@ -494,12 +494,14 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
                             style={"fontSize": "13px"}),
                     html.Li([html.Code("Integrate to DB"), " — creates the table (safe to re-run, uses "
                              "CREATE TABLE IF NOT EXISTS)."], style={"fontSize": "13px"}),
-                    html.Li(["Then seed the rows: run ", html.Code("python database/seed.py"),
-                             " once against this database (calls seed_legal_instrument_catalog(), idempotent "
-                             "on regime+title+year), or paste individual ",
+                    html.Li(["Then load the catalogue: ", html.Code("python database/migrate.py"),
+                             " (or ", html.Code("python database/seed.py"), ") installs ",
+                             html.Code("database/legal_reference.py"), " on this database — idempotent on "
+                             "regime+title+year. To add rows by hand, the catalogue is the ",
+                             html.Code("INSTRUMENTS"), " list in ", html.Code("database/legal_reference.py"),
+                             "; paste its ",
                              html.Code("INSERT INTO legal_instrument_catalog ..."),
-                             " statements from ", html.Code("database/seed.py"),
-                             "'s LEGAL_INSTRUMENTS_CENTRAL list into the same box and Integrate to DB again."],
+                             " statements into the same box and Integrate to DB again."],
                             style={"fontSize": "13px"}),
                 ], style={"marginBottom": "8px", "paddingLeft": "20px"}),
             ], color="warning", className="mb-3 shadow-sm"),
@@ -591,7 +593,8 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
     if role == "master":
         footer = [
             html.Small(
-                "To add a new instrument, add it to LEGAL_INSTRUMENTS_CENTRAL in database/seed.py and re-run the seed. "
+                "To add a new instrument, add it to INSTRUMENTS in database/legal_reference.py and run "
+                "python database/migrate.py (or python database/seed.py) to install it. "
                 "Raw INSERT/UPDATE on this table through Integrate to DB is blocked.", className="text-muted"),
             # 'Edit a catalog entry' — master only. Its save callback also writes mrl-toast / mrl-body, so both
             # must exist on this page (mrl-body is a hidden sink; the rules tables live on the AOA Rule Editor).
