@@ -23769,6 +23769,19 @@ CREATE TABLE onboarding_events (
 
 -- law catalog: applies_when + topic are declared inline in CREATE TABLE legal_instrument_catalog.
 
+-- Researched but UNCHECKED source leads, loaded by database/legal_reference.py. Kept apart from notification_no / source_url
+-- on purpose: those mean "someone opened the text and checked it" (see ck_instrument_verified_complete and
+-- fn_verify_instrument). A candidate is only a starting point for the verifier; it is never shown as the instrument's link
+-- and never counts as verification. candidate_checked_on is when the lead was researched, not when it was verified.
+ALTER TABLE legal_instrument_catalog
+ADD COLUMN candidate_notification_no VARCHAR(255),
+ADD COLUMN candidate_source_url TEXT CHECK (
+    candidate_source_url IS NULL
+    OR candidate_source_url ~* '^https?://'
+),
+ADD COLUMN candidate_note TEXT,
+ADD COLUMN candidate_checked_on DATE;
+
 -- pseudo-regime CENTRAL (central laws applying to every society)
 INSERT INTO
     legal_regime_profiles (

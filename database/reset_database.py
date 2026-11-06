@@ -18,7 +18,8 @@ Steps:
          1) Run Schema only
          2) Run Schema & seed
          3) None — leave blank database
-    4. (unless "None") Execute estatehub.sql, optionally seed, then verify
+    4. (unless "None") Execute estatehub.sql, load the legal reference data (database/legal_reference.py: the Acts /
+       Rules / Bye-laws catalogue, on EVERY install), optionally seed the demo society (database/seed.py), then verify
        tables/functions/views
 
 estatehub.sql declares no IF NOT EXISTS / DROP IF EXISTS guards, so it is
@@ -175,6 +176,17 @@ def seed_connect():
         connect_timeout=20,
         options="-c lock_timeout=15000 -c statement_timeout=180000",
     )
+
+
+def run_legal_reference_install():
+    """Mechanism 1: load the legal reference data (regime profiles + Acts / Rules / Bye-laws catalogue) on its own
+    connection, in its own transaction. Runs for 'schema' and 'seed' alike; the demo seed is a separate step."""
+    from legal_reference import install
+    ref_conn = seed_connect()
+    try:
+        install(ref_conn)
+    finally:
+        ref_conn.close()
 
 
 def run_seed_demo_data(conn):
@@ -366,6 +378,8 @@ def main():
             return
 
         execute_sql_file(conn, sql_file)
+
+        run_legal_reference_install()       # every install, whether or not the demo society is seeded
 
         if action == "seed":
             # run_seed_demo_data() commits and closes `conn` itself (same

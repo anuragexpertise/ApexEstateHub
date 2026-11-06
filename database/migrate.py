@@ -8,8 +8,12 @@ database (any error rolls everything back); a database that already has tables i
 
     python3 database/reset_database.py --yes --after seed
 
-    python3 database/migrate.py            # schema only
-    python3 database/migrate.py --seed     # schema + demo data
+    python3 database/migrate.py            # schema + legal reference data (every install)
+    python3 database/migrate.py --seed     # ... + the demo society
+
+Two separate mechanisms load data after the schema:
+    1. legal_reference.py  the Acts / Rules / Bye-laws catalogue and regime profiles. Platform data, loaded on EVERY install.
+    2. seed.py             the demo society. Only with --seed.
 """
 import argparse
 import os
@@ -49,6 +53,14 @@ def main() -> None:
         conn.close()
         sys.exit(f"Schema install failed and was rolled back: {exc}")
     print("Schema installed.")
+
+    from legal_reference import install as install_legal_reference
+    try:
+        install_legal_reference(conn)       # commits; the schema is already committed, so a failure here leaves it in place
+    except Exception as exc:
+        conn.close()
+        sys.exit(f"Legal reference data failed (schema is installed; fix and run "
+                 f"`python3 database/legal_reference.py`): {exc}")
 
     if args.seed:
         from seed import run_seed
