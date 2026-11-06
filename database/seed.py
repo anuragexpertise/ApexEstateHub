@@ -32,7 +32,7 @@ EstateHub — comprehensive demo/seed data.
       them the STCG/LTCG and STCL/LTCL disposal cases all collapse to
       short-term;
     * every statutory/compliance effective_from in STATE_COMPLIANCE_THRESHOLDS
-      and LEGAL_REGIME_PROFILES, which are the real commencement dates of Acts,
+      and the regime profiles in legal_reference.py, which are the real commencement dates of Acts,
       Rules and circulars and must not be back-dated to the seed's window.
 
   audit_seed_invariants() re-checks both ends of the window against the rows
@@ -1165,17 +1165,8 @@ def seed_state_compliance_thresholds(cur, conn):
         print(f"  ✓ State compliance thresholds seeded ({inserted} new rows)")
 
 
-# UP_AOA_2010 and GENERIC come from the scheme packs (schemes/*.toml); only schemes without a pack yet are listed here.
-# (code, state_code, name, primary_law, rules_version, model_bye_laws_version, effective_from, effective_to,
-#  status, source_reference, constitution)
-LEGAL_REGIME_PROFILES = [
-    ("MH_COOP_1965", "MH", "Maharashtra Co-operative Housing Society",
-     "Maharashtra Co-operative Societies Act, 1960",
-     "Maharashtra Co-operative Societies Rules, 1961",
-     "Model Bye-Laws for Housing Societies",
-     "1962-01-26", None, "draft",
-     "MCS Act 1960; MCS Rules 1961; Model Bye-Laws", "COOP"),
-]
+# Legal regime profiles and the Acts / Rules / Bye-laws catalogue are platform reference data, not demo data:
+# they live in database/legal_reference.py and are installed by migrate.py / reset_database.py.
 
 STATUTORY_HEADS_UP_AOA = [
     ("UP_AOA_2010", "IFMS_CORPUS", None, "Liabilities", "Interest-Free Maintenance Security Corpus", 10, True,
@@ -1224,214 +1215,6 @@ STATUTORY_HEADS_UP_AOA = [
 ]
 
 
-LEGAL_INSTRUMENTS_UP_AOA = [
-    # (regime_code, instrument_type, title, enactment_year, issuing_authority,
-    #  applicability, key_provisions, source_reference, display_order, status)
-    ("UP_AOA_2010", "Act",
-     "Uttar Pradesh Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010",
-     2010, "Government of Uttar Pradesh",
-     "Buildings with 4+ apartments (freehold or leasehold), excluding shopping malls and multiplexes",
-     "Primary statute for apartment ownership in UP. Sec 3 defines common areas/limited common areas/promoter; "
-     "Sec 12 requires promoter's Declaration of layout; Sec 14 mandates formation of an Association of Apartment "
-     "Owners (joint promoter+owner responsibility) and its Bye-laws for managing common areas/facilities; "
-     "Sec 18/20 govern common expenses and common profits.",
-     "UP Act 16 of 2010 (India Code / PRS Legislative Research)", 10, "active"),
-    ("UP_AOA_2010", "Rules",
-     "Uttar Pradesh Apartment Rules, 2011",
-     2011, "Government of Uttar Pradesh",
-     "Same scope as the 2010 Act",
-     "Complete procedural code under the Act: Sec 2 defines 'Competent Authority' as the Development Authority "
-     "Vice-Chairman (or District Collector where none exists); prescribes Forms/Annexures for the Declaration "
-     "(common areas, limited common areas, independent areas) and Deed of Apartment; sets out amendment and "
-     "violation-complaint procedures.",
-     "Notified 16 Nov 2011 in the UP Gazette", 20, "active"),
-    ("UP_AOA_2010", "Bye-laws",
-     "Model Bye-Laws for Uttar Pradesh Apartment Owners' Associations, 2011",
-     2011, "Government of Uttar Pradesh (under Sec 14(6) of the 2010 Act)",
-     "Every registered Apartment Owners' Association (AOA) in UP",
-     "Governs internal AOA administration — membership, Board of Management, general body/AGM procedure, "
-     "voting rights, common seal, and the financial framework: common expenses, Reserve Fund "
-     "(bye-laws 3(1)(d), 46), share capital (bye-laws 5, 46), staff benefits (bye-law 3(1)(h)), the 1/2% "
-     "transfer fee to the major-repair fund and No Dues deemed grant (bye-law 39), statements/audit (bye-law 49). Bye-law 55: "
-     "the Act prevails wherever a bye-law conflicts with it. Amendment needs approval by owners of at least "
-     "2/3rd of the units AND the competent authority's prior approval (Bye-law 58) — an AOA cannot simply amend and file bye-laws without this.",
-     "Notified 16 Nov 2011 under Sec 14(6); interpreted in Olive Country Apartment Owners Association vs "
-     "State of UP, WP No. 12110/2013, Allahabad HC, 14-11-2013", 30, "active"),
-    ("UP_AOA_2010", "Notification",
-     "UP RERA General Regulations 2019 - Regulation 47 as amended: Interest Free Maintenance Security (IFMS)",
-     2026, "Uttar Pradesh Real Estate Regulatory Authority",
-     "Promoters collecting interest-free maintenance security (IFMS) on projects in Uttar Pradesh; the corpus passes "
-     "to the Association / RWA at handover of the common areas",
-     "Notification 7098/U.P. RERA/Regulation/2026-27 dated 13.07.2026 sets project-wise IFMS rates; the promoter "
-     "collects the IFMS at registration of the deed into a separate scheduled-bank account and invests it at the "
-     "highest FD rate; at handover the whole corpus and a unit-wise statement go to the RWA; spend is limited to "
-     "operation, maintenance, repair and replacement of common areas; the RWA keeps separate books and a CA audit "
-     "reported to the AGM within three months. Rates and unit (sq ft vs sq m) reported inconsistently - "
-     "PROVISIONAL until checked against the notification text.",
-     "Reported by Business Standard (16 Jul 2026), India TV (20 Aug 2026), Zeus Law newsletter (Aug 2026); "
-     "notification text not yet read. Builds on UP Apartment Act 2010 s.14(5) proviso.", 35, "active"),
-    ("UP_AOA_2010", "Act",
-     "Societies Registration Act, 1860 (as applicable in Uttar Pradesh)",
-     1860, "Government of India / adapted by UP",
-     "RWAs/AOAs choosing registration as a society rather than (or in addition to) an AOA under the 2010 Act "
-     "— minimum 7 members in UP",
-     "Central registration statute administered in UP by the Registrar of Firms, Societies & Chits. Requires "
-     "a Memorandum of Association (name, address, objects, governing-body members) and Rules & Regulations "
-     "(membership, meeting procedure, managing-committee roles). Registration is valid 5 years and must be "
-     "renewed within one month of expiry; a public notice with an objection window precedes approval.",
-     "UP Societies Registration Rules, 1976 govern the UP-specific procedure", 40, "active"),
-    ("UP_AOA_2010", "Rules",
-     "Uttar Pradesh Societies Registration Rules, 1976",
-     1976, "Government of Uttar Pradesh",
-     "Societies (including RWAs) registering under the 1860 Act in UP",
-     "State procedural rules for the 1860 Act in UP: application format to the Deputy Registrar, required "
-     "annexures, the public-notice/objection window (15-30 days, at the Registrar's discretion), and annual "
-     "return/renewal filing.",
-     "UP Society Registration Rules, 1976", 50, "active"),
-]
-
-
-LEGAL_INSTRUMENTS_CENTRAL = [
-    # (regime_code, instrument_type, title, enactment_year, issuing_authority,
-    #  applicability, key_provisions, source_reference, display_order, status, applies_when)
-    ("CENTRAL", "Central Act",
-     "Real Estate (Regulation and Development) Act, 2016 (RERA)",
-     2016, "Government of India",
-     "Promoters and Associations of Allottees for any RERA-registered project (enforced by state RERA authorities)",
-     "Sec 11(4)(e): promoter must enable formation of the Association within 3 months of a majority of "
-     "allottees booking units. Sec 11(4)(a)/(g): promoter remains responsible for obligations and outgoings "
-     "(taxes, water/electricity, maintenance) until conveyance/handover.",
-     "RERA Act, 2016 (Central Act 16 of 2016)", 70, "active", "central_rera"),
-    ("CENTRAL", "Central Act",
-     "Central Goods and Services Tax Act, 2017",
-     2017, "Government of India",
-     "Societies/AOAs collecting maintenance from members; exemption threshold applies per member",
-     "Notification No. 12/2017-CT (Rate) exempts RWA maintenance contributions up to ₹7,500 per month per "
-     "member from GST; registration required once aggregate turnover crosses the GST threshold.",
-     "CGST Act 2017; Notification No. 12/2017-Central Tax (Rate)", 90, "active", "central_gst"),
-    ("CENTRAL", "Central Act",
-     "Income-tax Act, 1961",
-     1961, "Government of India",
-     "RWAs/AOAs assessing surplus from member contributions; applies to tax years up to 2025-26",
-     "Superseded by the Income-tax Act, 2025 from 1 Apr 2026. Still applies to income earned up to 31 Mar 2026 "
-     "and to pending proceedings under the doctrine of mutuality.",
-     "Income-tax Act, 1961 (repealed w.e.f. 1 Apr 2026)", 100, "superseded", "central_it_tan"),
-    ("CENTRAL", "Central Act",
-     "Income-tax Act, 2025",
-     2025, "Government of India",
-     "RWAs/AOAs assessing income from tax year 2026-27 onward",
-     "Replaces the Income-tax Act, 1961 from 1 Apr 2026. TDS sections are renumbered (Ss. 392-397). Both "
-     "1961 and 2025 section numbers are shown during the transition.",
-     "Income-tax Act, 2025 (as assented)", 105, "active", "central_it_tan"),
-    ("CENTRAL", "Central Act",
-     "Digital Personal Data Protection Act, 2023",
-     2023, "Government of India",
-     "Every society: it is the Data Fiduciary for members', tenants', vendors', guards' and staff data; the Platform Operator is its Data Processor",
-     "Notice and consent for processing, purpose limitation, security safeguards, breach intimation, retention "
-     "limits, rights of the Data Principal and a grievance officer. The Agreement's Annex D records the "
-     "Fiduciary/Processor roles and sub-processors.",
-     "Digital Personal Data Protection Act, 2023 (Central Act 22 of 2023)", 110, "active", "always"),
-    ("CENTRAL", "Central Rules",
-     "Digital Personal Data Protection Rules, 2025",
-     2025, "Ministry of Electronics and Information Technology",
-     "Every society and the Platform Operator, in phases from the November 2025 notification",
-     "Operational rules for notice, consent, security safeguards, breach intimation, retention and children's data. "
-     "Commencement is phased (consent managers from 13 Nov 2026; most duties from May 2027). EstateHub applies the "
-     "duties early and the Agreement says so. Exact dates to be confirmed by an advocate.",
-     "DPDP Rules, 2025 (notified 13 Nov 2025)", 111, "active", "always"),
-    ("CENTRAL", "Central Act",
-     "Information Technology Act, 2000",
-     2000, "Government of India",
-     "Electronic records, electronic signatures and cyber offences; governs the Agreement as an electronic contract",
-     "s.3A and the Second Schedule (electronic signature), s.4 to s.10A (electronic records and contracts), "
-     "cyber offences and penalties.",
-     "Information Technology Act, 2000 (Central Act 21 of 2000)", 120, "active", "always"),
-    ("CENTRAL", "Central Act",
-     "Indian Contract Act, 1872",
-     1872, "Government of India",
-     "Validity of the Agreement between the Society and the Platform Operator",
-     "Offer, acceptance, consideration, capacity and free consent.",
-     "Indian Contract Act, 1872 (Central Act 9 of 1872)", 125, "active", "always"),
-    ("CENTRAL", "Central Act",
-     "Indian Stamp Act, 1899",
-     1899, "Government of India",
-     "Stamp duty on the Agreement, at the rate in the State schedule; e-stamping where available",
-     "Duty is payable per the State schedule for the instrument. Rate to be confirmed by an advocate.",
-     "Indian Stamp Act, 1899 (as applied and amended in the State)", 130, "active", "always"),
-    ("CENTRAL", "Central Rules",
-     "Central Goods and Services Tax Rules, 2017",
-     2017, "Government of India",
-     "Societies registered or liable to register under GST",
-     "Registration, invoicing, returns and reverse-charge procedure for societies that are GST-registered.",
-     "CGST Rules, 2017", 91, "active", "central_gst"),
-    ("CENTRAL", "Central Act",
-     "Integrated Goods and Services Tax Act, 2017",
-     2017, "Government of India",
-     "Inter-State supplies; relevant where a society buys or sells across a State border",
-     "Place of supply and IGST levy on inter-State supplies.",
-     "IGST Act, 2017", 92, "active", "central_gst"),
-    ("CENTRAL", "Central Act",
-     "Private Security Agencies (Regulation) Act, 2005",
-     2005, "Government of India",
-     "Societies that engage security guards through an agency",
-     "A security agency must be licensed; the society should engage only a licensed agency.",
-     "Private Security Agencies (Regulation) Act, 2005 (Central Act 29 of 2005)", 140, "active", "has_security_agency"),
-    ("CENTRAL", "Central Act",
-     "Code on Social Security, 2020",
-     2020, "Government of India",
-     "Societies that employ staff: provident fund, ESI and gratuity thresholds (in force 21 Nov 2025)",
-     "Replaces the EPF Act, 1952 and the ESI Act, 1948. Rules of the Centre and State are still being notified; "
-     "to be confirmed.",
-     "Code on Social Security, 2020", 150, "active", "has_employees"),
-    ("CENTRAL", "Central Act",
-     "Code on Wages, 2019",
-     2019, "Government of India",
-     "Societies that employ staff: minimum wages, timely payment and bonus (in force 21 Nov 2025)",
-     "Replaces the Payment of Wages Act, 1936 and the Minimum Wages Act, 1948.",
-     "Code on Wages, 2019", 151, "active", "has_employees"),
-    ("CENTRAL", "Central Act",
-     "Bharatiya Sakshya Adhiniyam, 2023",
-     2023, "Government of India",
-     "Admissibility of electronic records, including the signed Agreement and the ledger anchor",
-     "s.63 sets the conditions for electronic records as evidence. Replaced the Indian Evidence Act, 1872.",
-     "Bharatiya Sakshya Adhiniyam, 2023", 160, "active", "info"),
-]
-
-
-def _pack_regime_profiles():
-    """Profiles of the schemes that have a pack (single source: schemes/*.toml)."""
-    import os
-    import sys
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    from schemes.loader import load_all
-    return [(sc.code, sc.state_code, sc.name, sc.primary_law, sc.rules_version, sc.model_bye_laws_version,
-             sc.effective_from.isoformat(), None, sc.status, sc.source_reference, sc.constitution)
-            for sc in load_all()]
-
-
-def seed_legal_regime_profiles(cur, conn):
-    inserted = 0
-    for (code, state_code, name, primary_law, rules_version, model_bye_laws_version,
-         eff_from, eff_to, status, source_ref, constitution) in _pack_regime_profiles() + LEGAL_REGIME_PROFILES:
-        row = _one(cur, "SELECT 1 FROM legal_regime_profiles WHERE code=%s", (code,))
-        if row:
-            continue
-        cur.execute(
-            """INSERT INTO legal_regime_profiles
-               (code, state_code, constitution, name, primary_law, rules_version, model_bye_laws_version,
-                effective_from, effective_to, status, source_reference)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (code, state_code, constitution, name, primary_law, rules_version, model_bye_laws_version,
-             eff_from, eff_to, status, source_ref),
-        )
-        conn.commit()
-        inserted += 1
-    if inserted:
-        print(f"  ✓ Legal regime profiles seeded ({inserted} new rows)")
-
-
 def seed_statutory_head_catalog(cur, conn):
     inserted = 0
     for (regime_code, head_code, parent_head_code, statement_section, label,
@@ -1455,46 +1238,16 @@ def seed_statutory_head_catalog(cur, conn):
         print(f"  ✓ Statutory head catalog seeded ({inserted} new rows)")
 
 
-def seed_legal_instrument_catalog(cur, conn):
-    """
-    Populate legal_instrument_catalog from LEGAL_INSTRUMENTS_UP_AOA and
-    LEGAL_INSTRUMENTS_CENTRAL — tabulated Acts/Rules/Bye-laws/Notifications.
-    Idempotent on (regime_code, title, enactment_year), matching the
-    uq_legal_instrument constraint.
-    """
-    all_rows = LEGAL_INSTRUMENTS_UP_AOA + LEGAL_INSTRUMENTS_CENTRAL
-    inserted = 0
-    for row in all_rows:
-        regime_code, instrument_type, title, enactment_year, issuing_authority, \
-            applicability, key_provisions, source_reference, display_order, status = row[:10]
-        applies_when = row[10] if len(row) > 10 else "always"
-        r = _one(cur,
-            "SELECT 1 FROM legal_instrument_catalog WHERE regime_code=%s AND title=%s AND enactment_year=%s",
-            (regime_code, title, enactment_year))
-        if r:
-            continue
-        cur.execute(
-            """INSERT INTO legal_instrument_catalog
-               (regime_code, instrument_type, title, enactment_year, issuing_authority,
-                applicability, key_provisions, source_reference, display_order, status,
-                applies_when, last_verified_on)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, CURRENT_DATE)""",
-            (regime_code, instrument_type, title, enactment_year, issuing_authority,
-             applicability, key_provisions, source_reference, display_order, status,
-             applies_when),
-        )
-        conn.commit()
-        inserted += 1
-    # Verified links only. The UP Act link is the India Code entry already used in KPI_RULE_LINKS above.
-    # Rules / Bye-laws have no verified URL yet: leave NULL (the wizard shows plain text, no link).
-    cur.execute(
-        """UPDATE legal_instrument_catalog SET source_url = %s
-           WHERE regime_code = 'UP_AOA_2010' AND instrument_type = 'Act' AND source_url IS NULL""",
-        ("https://www.indiacode.nic.in/handle/123456789/1962",),
-    )
+def seed_legal_reference(cur, conn):
+    """Law is platform reference data (database/legal_reference.py), installed by migrate.py and reset_database.py
+    on EVERY install. This call only keeps `python database/seed.py` safe on its own; on an installed database it is a
+    no-op. It never marks anything verified."""
+    from database import legal_reference
+    out = legal_reference.seed_all(cur)
     conn.commit()
-    if inserted:
-        print(f"  ✓ Legal instrument catalog seeded ({inserted} new rows)")
+    if out["inserted"] or out["profiles_inserted"]:
+        print(f"  ✓ Legal reference data installed by the demo seed ({out['inserted']} instruments, "
+              f"{out['profiles_inserted']} regime profiles)")
 
 
 def seed_society_legal_regime(cur, conn, society_id: int):
@@ -3256,6 +3009,7 @@ def _run_seed_unguarded(conn):
     print("  │        ⚠  BLOCK-COA — requires migration 001 + 002       │")
     print("  └─────────────────────────────────────────────────────────┘")
 
+    seed_legal_reference(cur, conn)     # no-op after migrate.py / reset_database.py; keeps seed.py runnable alone
     society_id = seed_society(cur, conn)
     n = seed_accounts(cur, conn, society_id)
     print(f"  ✓ Accounts: {n} created (skipped existing)")
@@ -3281,8 +3035,6 @@ def _run_seed_unguarded(conn):
     seed_tds_section_rates(cur, conn, society_id)
     seed_kpi_rule_links(cur, conn)
     seed_state_compliance_thresholds(cur, conn)
-    seed_legal_regime_profiles(cur, conn)
-    seed_legal_instrument_catalog(cur, conn)
     seed_decision_types(cur, conn)
     seed_statutory_head_catalog(cur, conn)
     seed_account_statutory_mappings(cur, conn, society_id)
