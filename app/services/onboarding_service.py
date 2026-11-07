@@ -2100,8 +2100,27 @@ def society_phase(society_id: int) -> str | None:
     return (r or {}).get("onboarding_phase")
 
 
+def relink_pending_for_existing_flats(society_id: int) -> int:
+    """Link every 'pending_link' receivable whose flat is already an apartment (matched ignoring case, spaces and
+    hyphens). Heals flats enrolled by a path that did not link (e.g. the single Add on the Enrolled tab). Idempotent."""
+    rows = _rows("""SELECT p.flat_number AS pf, a.id AS apt_id
+                      FROM opening_receivables_pending p
+                      JOIN apartments a ON a.society_id = p.society_id
+                       AND regexp_replace(lower(a.flat_number), '[[:space:]-]', '', 'g') = regexp_replace(lower(p.flat_number), '[[:space:]-]', '', 'g')
+                     WHERE p.society_id=%s AND p.status='pending_link'""", (society_id,)) or []
+    linked = 0
+    for r in rows:
+        try:
+            if link_opening_receivable(society_id, r["apt_id"], r["pf"]):
+                linked += 1
+        except Exception:                                              # noqa: BLE001 - leave it pending, never block the page
+            log.exception("could not link the opening receivable for flat %s in society %s", r["pf"], society_id)
+    return linked
+
+
 def enrollment_blockers(society_id: int) -> list[str]:
     """Item 15 completion rule (b): no opening receivable may still be waiting for its flat."""
+    relink_pending_for_existing_flats(society_id)
     n = _row("SELECT COUNT(*) AS n, COALESCE(SUM(amount),0) AS amt FROM opening_receivables_pending "
              "WHERE society_id=%s AND status='pending_link'", (society_id,)) or {}
     out = []

@@ -5117,6 +5117,17 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         except Exception as e:
             return False, f"User account creation failed (rolled back): {_clean_pg_error(e)}", None
 
+        try:        # same two follow-ups as bulk enrolment: opening receivable for this flat, undivided-interest shares
+            from app.services import onboarding_service as _ob
+            _ob.link_opening_receivable(sid, apt_id, flat)
+        except Exception:                                              # noqa: BLE001 - enrolment stands; the Hub re-links later
+            logging.getLogger(__name__).exception("could not link opening receivable for flat %s in society %s", flat, sid)
+        try:
+            from app.services.up_aoa_actions import fill_after_enrolment
+            fill_after_enrolment(sid)
+        except Exception:                                              # noqa: BLE001
+            logging.getLogger(__name__).exception("undivided-interest fill after enrolment skipped for society %s", sid)
+
         _move_temp_images("apartment", apt_id, sid, d)
         return True, f"Apartment '{flat}' created", apt_id
 

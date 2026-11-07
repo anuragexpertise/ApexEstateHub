@@ -400,7 +400,8 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
         try:
             ob.link_opening_receivable(sid, apt_id, flat)
         except Exception:                                          # noqa: BLE001 - enrolment stands even if linking fails
-            print(f"could not link opening receivable for flat {flat} in society {sid}")
+            import logging
+            logging.getLogger(__name__).exception("could not link opening receivable for flat %s in society %s", flat, sid)
 
     if success:
         try:   # Plan v3 2.8: keep flats' undivided-interest shares summing to 100% (unless typed from the Declaration)
