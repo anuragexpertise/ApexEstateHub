@@ -302,11 +302,14 @@ def register_card_catalogue_callbacks(app):
         Input("portal-content-store", "data"),
         Input("auth-store", "data"),
         State({"type": "kpi-value", "card_id": ALL}, "id"),
-        State("kpi-row", "style"),
+        # drilldown-store, not State("kpi-row", "style"): kpi-row exists only on the dashboard page, so on the Hub, Enrolled
+        # and other pages the missing State raised a ReferenceError in the browser. The row is hidden exactly when the
+        # drill stack is deeper than one level, which this store carries.
+        State("drilldown-store", "data"),
         State("url", "pathname"),
     )
     @require_session
-    def refresh_kpi_values(_refresh_clicks, _content_store, auth_data, kpi_ids, kpi_row_style, pathname):
+    def refresh_kpi_values(_refresh_clicks, _content_store, auth_data, kpi_ids, drill_store, pathname):
         print("refresh_kpi_values triggered by:", ctx.triggered_id, "kpi_ids:", kpi_ids)
         manual_refresh = ctx.triggered_id == "hdr-refresh-kpi-btn"
         icon_class = "fas fa-rotate"  # always reset the spin once we're done
@@ -315,8 +318,7 @@ def register_card_catalogue_callbacks(app):
             raise PreventUpdate
 
         # Skip refresh entirely when KPIs are hidden (e.g. in drill-down mode).
-        kpi_row_style = kpi_row_style or {}
-        if kpi_row_style.get("display") == "none":
+        if len((drill_store or {}).get("stack") or []) > 1:
             raise PreventUpdate
 
         if not auth_data or not auth_data.get("authenticated"):
