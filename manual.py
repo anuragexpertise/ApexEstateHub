@@ -9,7 +9,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from pathlib import Path
 import textwrap, re
 
-out = Path(__file__).resolve().parent / "ApexEstateHub_Marketing_Brochure_Print_Ready.pdf"
+out = Path(__file__).resolve().parent / "EstateHub_Marketing_Brochure_Print_Ready.pdf"
 W, H = A4
 NAVY  = HexColor("#0F2B46")
 BLUE  = HexColor("#1D70F7")
@@ -167,7 +167,7 @@ class Hero(Flowable):
                  ("STAFF", TEAL), ("AUDITOR", BLUE), ("ADVISER", PURPLE)]
         bx = 10 * mm; by = 6 * mm
         c.setFillColor(NAVY); c.setFont("Helvetica-Bold", 7.5)
-        c.drawString(10 * mm, by + 22 * mm, "ONE LOGIN  •  FIVE ROLE-SCOPED PORTALS  •  ONE SOURCE OF TRUTH")
+        c.drawString(10 * mm, by + 22 * mm, "ONE LOGIN  •  TEN ROLE-SCOPED PORTALS  •  ONE SOURCE OF TRUTH")
         c.setStrokeColor(NAVY)
         for i, (lab, col) in enumerate(roles):
             rx = bx + (i % 5) * 33 * mm; ry = by + (i // 5) * 11 * mm
@@ -194,7 +194,7 @@ def footer(c, doc):
     c.saveState()
     c.setFillColor(BLUE); c.rect(0, H - 2.6 * mm, W, 2.6 * mm, fill=1, stroke=0)
     c.setFillColor(MUTED); c.setFont("Helvetica", 6.4)
-    c.drawString(16 * mm, 7.5 * mm, "ApexEstateHub  •  The Complete Society Management Platform  •  Marketing Brochure v1.0")
+    c.drawString(16 * mm, 7.5 * mm, "EstateHub  •  The Complete Society Management Platform  •  Marketing Brochure v1.0")
     c.setFillColor(NAVY); c.setFont("Helvetica-Bold", 6.6)
     c.drawRightString(W - 16 * mm, 7.5 * mm, str(doc.page))
     c.restoreState()
@@ -202,12 +202,12 @@ def footer(c, doc):
 doc = SimpleDocTemplate(str(out), pagesize=A4,
                         leftMargin=16 * mm, rightMargin=16 * mm,
                         topMargin=14 * mm, bottomMargin=16 * mm,
-                        title="ApexEstateHub — Marketing Brochure", author="ApexEstateHub")
+                        title="EstateHub — Marketing Brochure", author="EstateHub")
 S = []
 
 # ============================ COVER ============================
 S += [Spacer(1, 6 * mm),
-      P("ApexEstateHub", "CoverT"),
+      P("EstateHub", "CoverT"),
       P("The Complete Society Management Platform", "CoverSub"),
       Spacer(1, 2 * mm),
       Hero(),
@@ -231,7 +231,7 @@ S += [Spacer(1, 6 * mm),
 S += sect("1", "Executive Summary",
           "Society administration should not depend on manual registers, scattered WhatsApp messages, "
           "Excel workbooks and the memory of one or two committee members.")
-S += [P("ApexEstateHub brings the operational back office into one browser-based platform. It combines "
+S += [P("EstateHub brings the operational back office into one browser-based platform. It combines "
         "automated receivables, double-entry cashbook, bank reconciliation, secure signed QR gate access, "
         "complaints, events, polls, NOCs, assets, reports and resident self-service — all without page reloads."),
       Spacer(1, 3 * mm),
