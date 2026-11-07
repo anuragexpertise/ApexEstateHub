@@ -17,7 +17,7 @@ generate_vapid_keys.py
 *.log
 *.diff
 *.patch
-*.xlsx
+#*.xlsx
 # conversation.xlsx is app content (per-Category "friendly message" copy
 # read by app/dash_apps/pages/setup_wizard.py's load_conversation_data),
 # not generated/exported data — it must ship with the repo or the Setup
