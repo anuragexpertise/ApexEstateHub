@@ -1,21 +1,21 @@
 email,password,name,business_name,service_type,mobile
-Vendor1@rra.com,Vendor1@2024,Vendor1,Anokha Barber,Barber,989711001
-Vendor2@rra.com,Vendor2@2024,Biilo,Billo Barber,Barber,989711002
-Vendor3@rra.com,Vendor3@2024,Vendor3,BN 3,Carpenter,989711003
-Vendor4@rra.com,Vendor4@2024,Vendor4,BN 4,Carpenter,989711004
-Vendor5@rra.com,Vendor5@2024,Vendor5,BN 5,DeliveryAgent,989711005
-Vendor6@rra.com,Vendor6@2024,Vendor6,BN 6,Delivery Agent,989711006
-Vendor7@rra.com,Vendor7@2024,Vendor7,BN 7,Electrician,989711007
-Vendor8@rra.com,Vendor8@2024,Vendor8,BN 8,Electrician,989711008
-Vendor9@rra.com,Vendor9@2024,Vendor9,BN 9,Flowerist,989711009
-Vendor10@rra.com,Vendor10@2024,Vendor10,BN 10,Flowerist,989711010
-Vendor11@rra.com,Vendor11@2024,Vendor11,BN 11,Gardener,989711011
-Vendor12@rra.com,Vendor12@2024,Vendor12,BN 12,Garderner,989711012
-Vendor13@rra.com,Vendor13@2024,Vendor13,BN 13,HVAC,989711013
-Vendor14@rra.com,Vendor14@2024,Vendor14,BN 14,HVAC,989711014
-Vendor15@rra.com,Vendor15@2024,Vendor15,BN 15,Plumber,989711015
-Vendor16@rra.com,Vendor16@2024,Vendor16,BN 16,Plumber,989711016
-Vendor17@rra.com,Vendor17@2024,Vendor17,BN 17,House Help,989711017
-Vendor18@rra.com,Vendor18@2024,Vendor18,BN 18,House Help,989711018
-Vendor19@rra.com,Vendor19@2024,Vendor19,BN 19,Internet,989711019
-Vendor20@rra.com,Vendor20@2024,Vendor20,BN 20,Internet,989711020
+Vendor1@rra.com,Vendor1@2024,Anuj,Anokha Barber,Barber,989711001
+Vendor2@rra.com,Vendor2@2024,Bilo,Bilo Barber,Barber,989711002
+Vendor3@rra.com,Vendor3@2024,Pappu,Dream Furniture,Carpenter,989711003
+Vendor4@rra.com,Vendor4@2024,Vinod,Kings Furniture,Carpenter,989711004
+Vendor5@rra.com,Vendor5@2024,Babloo,Amazon,DeliveryAgent,989711005
+Vendor6@rra.com,Vendor6@2024,Kalia,Swiggy,Delivery Agent,989711006
+Vendor7@rra.com,Vendor7@2024,Raju,Jagmag Electrical,Electrician,989711007
+Vendor8@rra.com,Vendor8@2024,Ravi,Sunder Electrical,Electrician,989711008
+Vendor9@rra.com,Vendor9@2024,Prabha,Blossom Decorations,Flowerist,989711009
+Vendor10@rra.com,Vendor10@2024,Firoz,Nice Decoration,Flowerist,989711010
+Vendor11@rra.com,Vendor11@2024,Ahmed,Ahmed Khan,Gardener,989711011
+Vendor12@rra.com,Vendor12@2024,Rakesh,Rakesh Landscaping,Garderner,989711012
+Vendor13@rra.com,Vendor13@2024,Anil Bhai,Anil Refrigeration,HVAC,989711013
+Vendor14@rra.com,Vendor14@2024,Ram swaroop,Bindu Refrigeration,HVAC,989711014
+Vendor15@rra.com,Vendor15@2024,Jindal,Leakproof Works,Plumber,989711015
+Vendor16@rra.com,Vendor16@2024,Abhinav,Abhinav Housings,Plumber,989711016
+Vendor17@rra.com,Vendor17@2024,Vidhya,UrbanClap,House Help,989711017
+Vendor18@rra.com,Vendor18@2024,Sunita,Sunita Maid Service,House Help,989711018
+Vendor19@rra.com,Vendor19@2024,Amber,High Wings,Internet,989711019
+Vendor20@rra.com,Vendor20@2024,Ashitosh,Unique Connections,Internet,989711020
