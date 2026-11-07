@@ -704,16 +704,17 @@ def register_qr_callbacks(app):
             # ADM branch, which resolves the version from
             # apartments.qr_version when linked_id is present, or
             # users.qr_version otherwise.
-            _gen_entity_id = server_user_id if server_role == 'admin' else server_linked_id
-            src, payload = generate_static_qr_code(
-                _gen_entity_id,
-                server_role,
-                server_society_id,
-            )
+            # Which id goes in the code depends on the role (see generate_own_qr_code): users.id for an admin and
+            # for the team logins (accountant / supervisor / staff), the linked row for apartment / vendor /
+            # security, and "0-<CODE>-None" for auditor / adviser / master. It used to be linked_id for everyone
+            # but admin, which drew "1-ACC-None" for a team login and "1-ADT-None" for an auditor.
+            from app.services.qr_service import generate_own_qr_code, parse_qr_payload
+            src, payload = generate_own_qr_code(server_role, server_user_id, server_linked_id, server_society_id)
+            _parsed = parse_qr_payload(payload) if src else {}
             entity_store = {
-                'entity_id': _gen_entity_id,
+                'entity_id': _parsed.get('entity_id'),
                 'role': server_role,
-                'society_id': server_society_id,
+                'society_id': _parsed.get('society_id', server_society_id),
                 'name': auth_data.get('name', 'User') if auth_data else 'User',
             }
         elif ctx.triggered_id == 'profile-action-trigger' \
@@ -842,6 +843,10 @@ def register_qr_callbacks(app):
         # and visitor is handled by the two-actor alert flow below — neither
         # should write a (bogus) ADM 'admin' gate_access row.
         GATE_PERSON_ROLES = ("apartment", "vendor", "security", "admin")
+        # The other society employees. Their attendance is the clock-in/out record (employee_attendance.py): an ENTRY
+        # scan writes nothing (a PASS already means they are clocked in) and an EXIT scan clocks them out, as it
+        # already does for security.
+        GATE_EMPLOYEE_ROLES = ("accountant", "supervisor", "staff")
 
         # ════════════════════════════════════════════════════════
         # INFORMATIONAL ROLES (concern/receipt/expense/asset): lookup-only,
@@ -1009,6 +1014,10 @@ def register_qr_callbacks(app):
                 except Exception as e:
                     print(f"Gate exit log error: {e}")
                     gate_msg = "🔴 EXIT (log failed)"
+            elif role in GATE_EMPLOYEE_ROLES and result.get("status") == "PASS" and user_id:
+                from app.services import employee_attendance as _ea
+                gate_msg = "🔴 EXITED (clocked out)" if _ea.clock_out(
+                    society_id, user_id, scanning_user_id)[0] else "🔴 EXITED"
             elif role == "event_ticket":
                 gate_msg = "🔴 TICKET SCAN (EXIT)"
             elif role == "patrol_location":
