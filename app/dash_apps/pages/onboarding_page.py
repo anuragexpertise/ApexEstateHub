@@ -728,7 +728,7 @@ def job_view(sid: int, job_id: str):
     """Store + Interval + bar. The Interval polls onboarding_jobs by id; a page refresh rebuilds this for a running job."""
     return html.Div([
         dcc.Store(id={"type": f"{P}-jobid", "sid": sid}, data=job_id),
-        dcc.Interval(id={"type": f"{P}-jobpoll", "sid": sid}, interval=700, n_intervals=0),
+        dcc.Interval(id={"type": f"{P}-jobpoll", "sid": sid}, interval=1500, n_intervals=0),
         html.Div(dbc.Progress(value=5, striped=True, animated=True, label="Starting", style={"height": "20px"}),
                  id={"type": f"{P}-jobbar", "sid": sid}),
     ])
