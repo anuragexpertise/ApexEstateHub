@@ -12,6 +12,7 @@ yet active. Because of that every callback decides for itself, from the SERVER s
 import base64
 import io
 import json
+import logging
 import time
 
 import dash_bootstrap_components as dbc
@@ -23,6 +24,8 @@ from app.security.audit_context import get_current_society_id, get_current_user_
 from app.security.guards import require_session
 from app.services import document_signing as ds
 from app.services import onboarding_service as ob
+
+log = logging.getLogger(__name__)
 
 P = op.P
 
@@ -682,7 +685,11 @@ def register_onboarding_callbacks(app):
         if s[2] != "master" and s[0] != sid:
             return no_update, True
         from app.services import onboarding_jobs as jobs
-        job = jobs.get(job_id, society_id=sid)
+        try:
+            job = jobs.get(job_id, society_id=sid)
+        except Exception:                                              # noqa: BLE001 - a transient DB error must not 500 every tick
+            log.exception("job poll failed for job %s", job_id)
+            return no_update, no_update
         if not job:
             return _alert("That job was not found.", False), True
         if job["status"] == "done":

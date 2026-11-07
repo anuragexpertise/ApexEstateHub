@@ -20,6 +20,7 @@ import os
 import re
 import time
 import logging
+import threading
 from contextlib import contextmanager
 from urllib.parse import quote, urlsplit
 
@@ -151,6 +152,12 @@ class DatabaseManager:
             # demands it. maxconn must stay >= minconn.
             _min = max(1, int(os.getenv("DB_POOL_MIN", "4")))
             _max = max(_min, int(os.getenv("DB_POOL_MAX", "10")))
+            # psycopg2's pool never blocks: getconn() raises "connection pool exhausted" the instant all maxconn are
+            # out. Dash fires bursts of concurrent callbacks (polls + a worker job), so callers queue on this
+            # semaphore instead of failing. One slot per pooled connection; created once and kept across rebuilds.
+            if getattr(self, "_slots", None) is None:
+                self._slots = threading.BoundedSemaphore(_max)
+                self._slot_wait = float(os.getenv("DB_POOL_WAIT", "20"))
             self._pool = pool.ThreadedConnectionPool(
                 minconn=_min,
                 maxconn=_max,
@@ -179,25 +186,44 @@ class DatabaseManager:
     def _conn(self):
         if self._pool is None:
             self._init_pool()
-        if self._pool is None:
+        p = self._pool                      # the pool this connection comes from; putconn must go back to the same one
+        if p is None:
             raise RuntimeError(
                 "Database connection pool unavailable"
                 + (f" ({self._last_error})" if self._last_error else "")
             )
 
-        _t_get0 = time.monotonic()
-        conn = self._pool.getconn()
-        _get_elapsed = time.monotonic() - _t_get0
-        if _get_elapsed > 0.5:
-            print(f"    ↳ getconn() took {_get_elapsed:.2f}s (new/blocked connection)")
+        if not self._slots.acquire(timeout=self._slot_wait):
+            raise RuntimeError(
+                f"Database busy: no free connection after {self._slot_wait:.0f}s "
+                "(a connection is being held too long - check for long transactions)"
+            )
+        conn = None
+        broken = False
         try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
+            _t_get0 = time.monotonic()
+            conn = p.getconn()
+            _get_elapsed = time.monotonic() - _t_get0
+            if _get_elapsed > 0.5:
+                print(f"    ↳ getconn() took {_get_elapsed:.2f}s (new/blocked connection)")
+            try:
+                yield conn
+                conn.commit()
+            except Exception as exc:
+                broken = isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError))
+                try:
+                    conn.rollback()
+                except Exception:
+                    broken = True
+                raise
         finally:
-            self._pool.putconn(conn)
+            if conn is not None:
+                try:
+                    # A dead/stale connection is discarded on its own; the rest of the pool stays usable.
+                    p.putconn(conn, close=bool(broken or conn.closed))
+                except Exception:
+                    log.exception("could not return a connection to the pool")
+            self._slots.release()
 
     # ── public execute ────────────────────────────────────────────────────────
 
@@ -247,11 +273,10 @@ class DatabaseManager:
 
             except psycopg2.OperationalError as exc:
                 _elapsed = time.monotonic() - _t0
-                # Stale pooled connection — rebuild pool once
+                # Stale connection: _conn() already discarded it, so the retry gets a fresh one. The pool is NOT torn down
+                # (that orphaned every in-flight connection and made other threads' putconn() fail).
                 if attempt < retries:
                     print(f"⚠️  DB operational error (attempt {attempt + 1}, {_elapsed:.2f}s elapsed): {exc}")
-                    self._pool = None
-                    self._init_pool()
                     time.sleep(0.5)
                 else:
                     print(f"  ❌ DB query failed after {retries} retries ({_elapsed:.2f}s on final attempt): {exc}")
