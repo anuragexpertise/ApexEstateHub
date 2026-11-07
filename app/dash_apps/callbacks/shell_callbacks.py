@@ -113,16 +113,17 @@ _SEARCH_TAB_ROUTES = {
         "dashboard": "/dashboard/accountant-portal", "receipts": "/dashboard/accountant-receipts",
         "expenses": "/dashboard/accountant-expenses", "dues": "/dashboard/accountant-dues",
         "cashbook": "/dashboard/accountant-cashbook", "financials": "/dashboard/accountant-financials",
-        "taxrates": "/dashboard/accountant-taxrates",
+        "taxrates": "/dashboard/accountant-taxrates", "attendance": "/dashboard/accountant-attendance",
     },
     "supervisor": {
         "dashboard": "/dashboard/supervisor-portal", "gate": "/dashboard/supervisor-gate",
         "users": "/dashboard/supervisor-users", "concerns": "/dashboard/supervisor-concerns",
         "events": "/dashboard/supervisor-events", "channels": "/dashboard/supervisor-channels",
+        "attendance": "/dashboard/supervisor-attendance",
     },
     "staff": {
         "dashboard": "/dashboard/staff-portal", "concerns": "/dashboard/staff-concerns",
-        "events": "/dashboard/staff-events",
+        "events": "/dashboard/staff-events", "attendance": "/dashboard/staff-attendance",
     },
     "adviser": {"dashboard": "/dashboard/adviser-portal"},
     "auditor": {
@@ -418,10 +419,10 @@ _PATH_LABELS = {
     "security-receipt":   "New Receipt",
     "security-users":    "Users",
     "accountant-portal": "Dashboard", "accountant-receipts": "Receipts", "accountant-expenses": "Expenses",
-    "accountant-dues": "Dues", "accountant-cashbook": "Cashbook", "accountant-financials": "Financials", "accountant-taxrates": "TDS & GST",
+    "accountant-dues": "Dues", "accountant-cashbook": "Cashbook", "accountant-financials": "Financials", "accountant-taxrates": "TDS & GST", "accountant-attendance": "Attendance",
     "supervisor-portal": "Dashboard", "supervisor-gate": "Gate & Security", "supervisor-users": "Users",
-    "supervisor-concerns": "Concerns", "supervisor-events": "Events", "supervisor-channels": "Channels",
-    "staff-portal": "Dashboard", "staff-concerns": "Concerns", "staff-events": "Events",
+    "supervisor-concerns": "Concerns", "supervisor-events": "Events", "supervisor-channels": "Channels", "supervisor-attendance": "Attendance",
+    "staff-portal": "Dashboard", "staff-concerns": "Concerns", "staff-events": "Events", "staff-attendance": "Attendance",
     "adviser-portal": "Adviser", "auditor-portal": "Verify", "auditor-books": "Books", "auditor-receipts": "Receipts",
     "auditor-expenses": "Expenses", "auditor-financials": "Financials",
 }
@@ -615,6 +616,7 @@ def _portal_content(role, society_id, pathname, auth=None):
             "cashbook"   if "/accountant-cashbook"   in p else
             "financials" if "/accountant-financials" in p else
             "taxrates"   if "/accountant-taxrates"   in p else
+            "attendance" if "/accountant-attendance" in p else
             "dashboard"
         )
         return accountant_portal_page(tab, sid=society_id)
@@ -625,6 +627,7 @@ def _portal_content(role, society_id, pathname, auth=None):
             "concerns" if "/supervisor-concerns" in p else
             "events"   if "/supervisor-events"   in p else
             "channels" if "/supervisor-channels" in p else
+            "attendance" if "/supervisor-attendance" in p else
             "dashboard"
         )
         return supervisor_portal_page(tab, sid=society_id)
@@ -632,6 +635,7 @@ def _portal_content(role, society_id, pathname, auth=None):
         tab = (
             "concerns" if "/staff-concerns" in p else
             "events"   if "/staff-events"   in p else
+            "attendance" if "/staff-attendance" in p else
             "dashboard"
         )
         return staff_portal_page(tab, sid=society_id)

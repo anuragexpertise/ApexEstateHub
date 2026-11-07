@@ -474,7 +474,35 @@ def generate_static_qr_code(entity_id: int, role: str, society_id: int):
     """
     Wrapper for user/apartment static QR generation using updated format.
     """
-    role_code = ROLE_CODE_MAP_REV.get(role, "APT")
+    role_code = ROLE_CODE_MAP_REV.get(role)
+    if role_code is None:
+        # Used to fall back to "APT", which drew a code for the wrong kind of person.
+        return None, f"No gate pass is issued for the {role or 'unknown'} role."
+    if role_code in ALWAYS_PASS_CODES:
+        # No entity to encode: the auditor / adviser / master code is only ever shown to its own holder.
+        return None, f"The {role} pass is not minted for someone else; it is shown on the holder's own avatar."
+    if not entity_id or not society_id:
+        return None, "No gate pass is linked to this login."
+    return generate_qr_code(society_id, role_code, entity_id)
+
+
+def generate_own_qr_code(role: str, user_id, linked_id, society_id):
+    """
+    The logged-in user's OWN gate pass (header avatar). Returns (img_src, payload) or (None, reason).
+
+    Which id goes in the code depends on the role, and getting it wrong draws a code that names nobody:
+      auditor / adviser / master        "0-<CODE>-None"; no society, no person (the gate always passes it)
+      admin, accountant/supervisor/staff  users.id    (a team login has no table of its own)
+      apartment / vendor / security       users.linked_id  (apartments.id / vendors.id / security_staff.id)
+    """
+    role_code = ROLE_CODE_MAP_REV.get(role)
+    if role_code is None:
+        return None, f"No gate pass is issued for the {role or 'unknown'} role."
+    if role_code in ALWAYS_PASS_CODES:
+        return generate_qr_code(0, role_code, None)
+    entity_id = user_id if (role == "admin" or role in _QR_TEAM_ROLE_NAMES) else linked_id
+    if not entity_id or not society_id:
+        return None, "No gate pass is linked to this login."
     return generate_qr_code(society_id, role_code, entity_id)
 
 

@@ -675,65 +675,25 @@ def register_security_callbacks(app):
 
         button_id = ctx.triggered[0]['prop_id'].split('.')[0]
 
-        # Attendance is a security guard clocking THEMSELVES in/out — role
-        # must be 'security', not just "authenticated". staff_id below is
-        # get_current_linked_id(), i.e. security_staff.id resolved from
-        # the DB row backing the session, not the auth-store "security_id"
-        # field a tampered client could set to any other guard's id.
-        role = get_current_user_role() or ""
-        if role != "security":
-            return no_update, {"type": "error", "message": "Only security staff can clock in/out."}
+        # Dash also fires this callback once when the Attendance tab OPENS (both buttons are newly mounted, so both
+        # "changed"), even with prevent_initial_call. Without this check that mount call counted as a Clock In: opening
+        # the page put the employee on duty with no click. A real click always leaves a positive n_clicks.
+        if not (clock_in_clicks if button_id == "clock-in-btn" else clock_out_clicks):
+            return no_update, no_update
 
+        # An employee (security, accountant, supervisor or staff) clocking THEMSELVES in/out. Who they are comes from
+        # the DB row behind the session (get_current_*), never the auth-store a tampered client could set to any
+        # other employee's id. employee_attendance resolves guard vs team login and enforces Active.
+        from app.services import employee_attendance as ea
+        from app.dash_apps.pages.attendance_panel import attendance_status_block
         society_id = get_current_society_id()
         user_id = get_current_user_id()
-        staff_id = get_current_linked_id()
-        if not user_id or not society_id or not staff_id:
+        if not user_id or not society_id:
             return no_update, {"type": "error", "message": "Session expired — please log in again"}
 
-        now_str = datetime.now().strftime("%I:%M %p")
-
-        if button_id == "clock-in-btn":
-            already_in = db._execute(
-                """SELECT id FROM gate_access
-                   WHERE society_id = %s AND entity_id = %s AND role = 'SEC'
-                     AND time_out IS NULL
-                   ORDER BY time_in DESC LIMIT 1""",
-                (society_id, staff_id), fetch_one=True
-            )
-            if already_in:
-                return no_update, {"type": "error", "message": "Already clocked in — clock out first"}
-
-            db._execute(
-                """INSERT INTO gate_access (society_id, role, entity_id, time_in, created_by)
-                   VALUES (%s, 'SEC', %s, NOW(), %s)""",
-                (society_id, staff_id, user_id)
-            )
-            return html.Div([
-                html.I(className="fas fa-clock fa-2x mb-2", style={"color": "#2ecc71"}),
-                html.H5("Clocked In"),
-                html.Small(now_str)
-            ]), {"type": "success", "message": "Clocked in successfully"}
-
-        else:
-            updated = db._execute(
-                """UPDATE gate_access SET time_out = NOW(), updated_by = %s
-                   WHERE id = (
-                       SELECT id FROM gate_access
-                       WHERE society_id = %s AND entity_id = %s AND role = 'SEC'
-                         AND time_out IS NULL
-                       ORDER BY time_in DESC LIMIT 1
-                   )
-                   RETURNING id""",
-                (user_id, society_id, staff_id), fetch_one=True
-            )
-            if not updated:
-                return no_update, {"type": "error", "message": "You're not clocked in"}
-
-            return html.Div([
-                html.I(className="fas fa-clock fa-2x mb-2", style={"color": "#e74c3c"}),
-                html.H5("Clocked Out"),
-                html.Small(now_str)
-            ]), {"type": "success", "message": "Clocked out successfully"}
+        ok, msg = (ea.clock_in if button_id == "clock-in-btn" else ea.clock_out)(society_id, user_id, user_id)
+        return (attendance_status_block(society_id, user_id),
+                {"type": "success" if ok else "error", "message": msg})
 
     # ── 6. Owner Approve/Deny Gate Alert ─────────────────────────────────
     @app.callback(

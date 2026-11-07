@@ -1515,6 +1515,16 @@ def vendor_portal_page(active_tab: str = "dashboard", sid=None) -> html.Div:
     ], className="portal-page")
 
 
+def _attendance_tab(color: str, sid) -> html.Div:
+    """Clock in / out page, shared by the security, accountant, supervisor and staff portals."""
+    from app.dash_apps.pages.attendance_panel import attendance_panel
+    from app.security.audit_context import get_current_society_id, get_current_user_id
+    return html.Div([
+        _page_title("fa-clock", color, "Attendance", "clock in/out for your shift"),
+        attendance_panel(color, get_current_society_id() or sid, get_current_user_id()),
+    ], className="portal-page")
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # SECURITY PORTAL
 # ════════════════════════════════════════════════════════════════════════════
@@ -1526,24 +1536,7 @@ def security_portal_page(active_tab: str = "pass_evaluation", sid=None) -> html.
         return _evaluate_pass_page(sid=sid)
 
     if active_tab == "attendance":
-        return html.Div([
-            _page_title("fa-clock", c, "Attendance", "clock in/out for your shift"),
-            dbc.Card(
-                dbc.CardBody([
-                    html.Div(id="attendance-status", children=[
-                        html.I(className="fas fa-clock fa-2x mb-2", style={"color": "#95a5a6"}),
-                        html.H5("Not clocked in"),
-                    ], style={"textAlign": "center", "marginBottom": "16px"}),
-                    html.Div([
-                        dbc.Button("Clock In", id="clock-in-btn", n_clicks=0,
-                                    color="success", className="me-2"),
-                        dbc.Button("Clock Out", id="clock-out-btn", n_clicks=0,
-                                    color="danger"),
-                    ], style={"textAlign": "center"}),
-                ]),
-                style={"maxWidth": "360px", "margin": "0 auto"},
-            ),
-        ], className="portal-page")
+        return _attendance_tab(c, sid)
 
     if active_tab == "dashboard":
         return html.Div([
@@ -1972,6 +1965,8 @@ def _employee_tab_page(portal: str, tab: str, sid) -> html.Div:
 
 
 def accountant_portal_page(active_tab="dashboard", sid=None):
+    if active_tab == "attendance":
+        return _attendance_tab(_C["accountant"], sid)
     if active_tab == "taxrates":
         # The CA edits and confirms the TDS / GST figures here (see app/services/tax_rate_service.py). No KPI row.
         from app.dash_apps.pages.tax_rates_page import tax_rates_page
@@ -1984,10 +1979,14 @@ def accountant_portal_page(active_tab="dashboard", sid=None):
 
 
 def supervisor_portal_page(active_tab="dashboard", sid=None):
+    if active_tab == "attendance":
+        return _attendance_tab(_C["supervisor"], sid)
     return _employee_tab_page("supervisor", active_tab, sid)
 
 
 def staff_portal_page(active_tab="dashboard", sid=None):
+    if active_tab == "attendance":
+        return _attendance_tab(_C["staff"], sid)
     return _employee_tab_page("staff", active_tab, sid)
 
 

@@ -100,6 +100,7 @@ ROLE_CONFIG = {
             {"label": "Cashbook",   "href": "/dashboard/accountant-cashbook",   "icon": "fa-book"},
             {"label": "Financials", "href": "/dashboard/accountant-financials", "icon": "fa-balance-scale"},
             {"label": "TDS & GST",  "href": "/dashboard/accountant-taxrates",   "icon": "fa-percent"},
+               {"label": "Attendance", "href": "/dashboard/accountant-attendance", "icon": "fa-clock"},
         ],
     },
     "supervisor": {
@@ -113,6 +114,7 @@ ROLE_CONFIG = {
             {"label": "Concerns",        "href": "/dashboard/supervisor-concerns", "icon": "fa-hand-point-up"},
             {"label": "Events",          "href": "/dashboard/supervisor-events",   "icon": "fa-calendar-alt"},
             {"label": "Channels",        "href": "/dashboard/supervisor-channels", "icon": "fa-bullhorn"},
+               {"label": "Attendance",      "href": "/dashboard/supervisor-attendance", "icon": "fa-clock"},
         ],
     },
     "staff": {
@@ -126,6 +128,7 @@ ROLE_CONFIG = {
             {"label": "Dashboard", "href": "/dashboard/staff-portal",   "icon": "fa-th-large"},
             {"label": "Concerns",  "href": "/dashboard/staff-concerns", "icon": "fa-hand-point-up"},
             {"label": "Events",    "href": "/dashboard/staff-events",   "icon": "fa-calendar-alt"},
+               {"label": "Attendance", "href": "/dashboard/staff-attendance", "icon": "fa-clock"},
         ],
     },
     "adviser": {

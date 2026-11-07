@@ -78,6 +78,63 @@ def toggle_duty(society_id: int, code: str, entity_id: int, actor_user_id: int |
     return "clock_in"
 
 
+def _open_shift(society_id: int, code: str, entity_id: int):
+    return db._execute(
+        "SELECT id, time_in FROM gate_access WHERE society_id=%s AND entity_id=%s AND role=%s AND time_out IS NULL "
+        "ORDER BY time_in DESC LIMIT 1", (society_id, entity_id, code), fetch_one=True)
+
+
+def clock_in(society_id: int, user_id: int, actor_user_id: int | None = None) -> tuple[bool, str]:
+    """Start a shift for the employee behind `user_id` (a users.id). Returns (ok, message).
+
+    Refuses a login that is not one of this society's employees, a deactivated employee (they cannot clock in, as
+    with the attendance QR), and a second open shift. One statement, so two quick clicks cannot open two rows."""
+    emp = resolve_employee(society_id, user_id)
+    if not emp:
+        return False, "Only the society's own employees keep attendance."
+    if not emp["active"]:
+        return False, "This account is inactive; contact the society admin."
+    row = db._execute(
+        """INSERT INTO gate_access (society_id, role, entity_id, time_in, created_by)
+           SELECT %s, %s, %s, NOW(), %s
+            WHERE NOT EXISTS (SELECT 1 FROM gate_access
+                               WHERE society_id=%s AND entity_id=%s AND role=%s AND time_out IS NULL)
+        RETURNING id""",
+        (society_id, emp["code"], emp["entity_id"], actor_user_id or user_id,
+         society_id, emp["entity_id"], emp["code"]), fetch_one=True)
+    return (True, "Clocked in") if row else (False, "Already clocked in. Clock out first.")
+
+
+def clock_out(society_id: int, user_id: int, actor_user_id: int | None = None) -> tuple[bool, str]:
+    """End the open shift of the employee behind `user_id`. Returns (ok, message). Allowed even when the account
+    has been deactivated, so nobody is left on duty because their login was switched off mid-shift."""
+    emp = resolve_employee(society_id, user_id)
+    if not emp:
+        return False, "Only the society's own employees keep attendance."
+    row = db._execute(
+        """UPDATE gate_access SET time_out = NOW(), updated_by = %s
+            WHERE id = (SELECT id FROM gate_access
+                         WHERE society_id=%s AND entity_id=%s AND role=%s AND time_out IS NULL
+                         ORDER BY time_in DESC LIMIT 1)
+        RETURNING id""",
+        (actor_user_id or user_id, society_id, emp["entity_id"], emp["code"]), fetch_one=True)
+    return (True, "Clocked out") if row else (False, "You are not clocked in.")
+
+
+def my_attendance(society_id: int, user_id: int, limit: int = 8) -> dict | None:
+    """What the employee's own Attendance page shows: current duty and the latest shifts (newest first).
+    {'on_duty_since': datetime|None, 'shifts': [{time_in, time_out}], 'active': bool}; None if not an employee."""
+    emp = resolve_employee(society_id, user_id)
+    if not emp:
+        return None
+    open_row = _open_shift(society_id, emp["code"], emp["entity_id"])
+    shifts = db._execute(
+        "SELECT time_in, time_out FROM gate_access WHERE society_id=%s AND entity_id=%s AND role=%s "
+        "ORDER BY time_in DESC LIMIT %s", (society_id, emp["entity_id"], emp["code"], int(limit)),
+        fetch_all=True) or []
+    return {"on_duty_since": open_row["time_in"] if open_row else None, "shifts": shifts, "active": emp["active"]}
+
+
 def attendance_register(society_id: int, date_from: date | None = None, date_to: date | None = None) -> list[dict]:
     """Daily attendance for every employee of the society, one row per person per day, oldest day last.
 

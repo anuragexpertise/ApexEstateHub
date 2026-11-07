@@ -1465,13 +1465,15 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
     if entity == "attendance":
         extra_sql, extra_params = "", []
         if sec_id:
-            extra_sql = " AND g.entity_id=%s"
+            # sec_id is a security_staff.id: pin the role, or an accountant whose users.id has the same number matches too
+            extra_sql = " AND g.entity_id=%s AND g.role='SEC'"
             extra_params.append(sec_id)
         return (
-            "SELECT g.*, COALESCE(s.name,'') AS staff_name "
+            "SELECT g.*, COALESCE(s.name, u.name, '') AS staff_name "
             "FROM gate_access g "
             "LEFT JOIN security_staff s ON s.id=g.entity_id AND g.role='SEC' "
-            "WHERE g.society_id=%s AND g.role='SEC'" + extra_sql +
+            "LEFT JOIN users u ON u.id=g.entity_id AND g.role IN ('ACC','SPV','STF') "
+            "WHERE g.society_id=%s AND g.role IN ('SEC','ACC','SPV','STF')" + extra_sql +
             " ORDER BY g.time_in DESC LIMIT %s OFFSET %s",
             tuple([sid] + extra_params + [page_size, offset]),
         )
@@ -2245,7 +2247,7 @@ def load_list(
         if entity == "attendance":
             extra_sql, extra_params = "", []
             if sec_id:
-                extra_sql = " AND g.entity_id=%s"
+                extra_sql = " AND g.entity_id=%s AND g.role='SEC'"
                 extra_params.append(sec_id)
             
             shift_time_in_to = filters.get("shift_time_in_to")
@@ -2264,16 +2266,17 @@ def load_list(
                 extra_params.append(shift_time_out_to)
 
             rows = db._execute(
-                "SELECT g.*, COALESCE(s.name,'') AS entity_name "
+                "SELECT g.*, COALESCE(s.name, u.name, '') AS entity_name "
                 "FROM gate_access g "
                 "LEFT JOIN security_staff s ON s.id=g.entity_id AND g.role='SEC' "
-                "WHERE g.society_id=%s AND g.role='SEC'" + extra_sql +
+                "LEFT JOIN users u ON u.id=g.entity_id AND g.role IN ('ACC','SPV','STF') "
+                "WHERE g.society_id=%s AND g.role IN ('SEC','ACC','SPV','STF')" + extra_sql +
                 " ORDER BY g.time_in DESC LIMIT %s OFFSET %s",
                 [sid] + extra_params + [page_size, offset], fetch_all=True,
             ) or []
             cnt = db._execute(
                 "SELECT COUNT(*) AS n FROM gate_access g "
-                "WHERE g.society_id=%s AND g.role='SEC'" + extra_sql,
+                "WHERE g.society_id=%s AND g.role IN ('SEC','ACC','SPV','STF')" + extra_sql,
                 [sid] + extra_params, fetch_one=True,
             )
             return rows, int((cnt or {}).get("n", len(rows)))
