@@ -555,8 +555,9 @@ def _enrollment_counts(society_id: int) -> dict:
 
 def _stage_enrollment(society_id: int, role: str | None):
     counts = _enrollment_counts(society_id)
+    ob.relink_pending_for_existing_flats(society_id)
     pend = ob.db._execute("SELECT flat_number, amount FROM opening_receivables_pending WHERE society_id=%s AND status='pending_link' ORDER BY flat_number",
-                          (society_id,)) or []
+                          (society_id,), fetch_all=True) or []
     is_admin = role == "admin"
     kids = [html.H6("Stage 5: Enrollment"),
             html.Div("Enrol owners, vendors and guards from the Enrolled tab (bulk enrolment is there too). Their portals stay closed until you mark "
@@ -568,6 +569,7 @@ def _stage_enrollment(society_id: int, role: str | None):
                                ", ".join(str(r["flat_number"]) for r in pend[:30]) + (" …" if len(pend) > 30 else "")],
                               color="warning", className="py-2", style={"fontSize": "12.5px"}))
     if is_admin:
+        kids.append(dcc.Link(dbc.Button("Open the Enrolled tab", color="primary", size="sm", className="mb-2"), href="/dashboard/enrolled"))
         kids += [dbc.Checkbox(id=f"{P}-enrol-later", label="I will enrol the rest later", value=False, className="mb-1"),
                  dbc.Input(id=f"{P}-enrol-later-reason", placeholder="Reason (10 characters or more)", size="sm",
                            style={"maxWidth": "420px", "marginBottom": "8px"}),

@@ -1051,12 +1051,15 @@ def register_shell_callbacks(app):
         # admin's home shows the Hub (Stages 5-7) until onboarding is complete; every other admin tab stays usable.
         from app.security.setup_guard import society_portal_state, admin_in_onboarding
         _pstate = society_portal_state(society_id, role) if role != "master" else "open"
-        _hub_home = admin_in_onboarding(society_id, role) and (pathname or "/") in ("/", "/dashboard", "/dashboard/", "/admin", "/admin/", "/setup-wizard")
+        _hub_home = admin_in_onboarding(society_id, role) and (pathname or "/").rstrip("/") in ("", "/dashboard", "/admin", "/setup-wizard", "/dashboard/admin-portal")
         if _pstate == "enrollment_lock" or _hub_home:
             return (
                 (_enrollment_lock_content() if _pstate == "enrollment_lock" else _setup_pending_content(role)),
                 {"rendered": True, "ts": time.time()},
-                [],
+                # The admin keeps the sidebar while the Hub is home: Stage 5 sends them to the Enrolled tab, which would
+                # otherwise be unreachable. Resident roles stay locked out (no nav) until enrollment is complete.
+                (_make_nav_items(role, society_id, pathname, verified_auth.get("user_type"))
+                 if (_hub_home and _pstate != "enrollment_lock") else []),
                 _breadcrumb(pathname),
                 "", {},
                 email.split("@")[0].title() if email else "User",
