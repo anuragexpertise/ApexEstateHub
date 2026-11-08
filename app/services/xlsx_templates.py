@@ -29,15 +29,7 @@ def build_tds_template(rows: list[dict]) -> bytes:
     ws = wb.active
     ws.title = "TDS Rates"
     headers = [
-        "section",
-        "section_2025",
-        "discriminator",
-        "reference_rate",
-        "nature_of_income",
-        "rate",
-        "rate_no_pan",
-        "single_bill_threshold",
-        "annual_aggregate_threshold",
+        "section","section_2025","discriminator","reference_rate","nature_of_income","effective_start_date","rate","rate_no_pan","single_bill_threshold","annual_aggregate_threshold"
     ]
     ws.append(headers)
     for c in range(1, len(headers) + 1):
@@ -50,15 +42,12 @@ def build_tds_template(rows: list[dict]) -> bytes:
         ws.cell(row=r, column=3, value=item.get("discriminator") or "").protection = Protection(locked=True)
         ws.cell(row=r, column=4, value=item.get("reference_rate") or "").protection = Protection(locked=True)
         ws.cell(row=r, column=5, value=item.get("nature_of_income") or "")
-        ws.cell(row=r, column=6, value="")
-        ws.cell(row=r, column=7, value="")
-        ws.cell(row=r, column=8, value="")
-        ws.cell(row=r, column=9, value="")
+        ws.cell(row=r, column=6, value=item.get("effective_start_date") or "")
+        ws.cell(row=r, column=7, value=""); ws.cell(row=r, column=8, value=""); ws.cell(row=r, column=9, value=""); ws.cell(row=r, column=10, value="")
         for c in (1, 2, 3, 4):
             ws.cell(row=r, column=c).fill = locked_fill
     dv = DataValidation(type="decimal", operator="between", formula1="0", formula2="100", allow_blank=True)
-    dv.add("F2:I500")
-    ws.add_data_validation(dv)
+    dv.add("G2:J500"); ws.add_data_validation(dv)
     ws.freeze_panes = "A2"
 
     # Header sheet
@@ -69,7 +58,7 @@ def build_tds_template(rows: list[dict]) -> bytes:
     # Instructions
     wi = wb.create_sheet("Instructions")
     wi.append(["Notes"])
-    wi.append(["Rates are pending the CA's confirmation; leave a rate blank if TDS does not apply to that row."])
+    wi.append(["Rates are pending the CA's confirmation; leave a rate blank if TDS does not apply to that row. Signed by CA; signed scan should be uploaded in EstateHub (server SHA-256). effective_start_date supports individual rate changes."])
     wi.append(["Tax Year 2026-27 onward: file under the Income-tax Act, 2025 section numbers where applicable."])
     wi.append(["Only .xlsx is accepted. Numbers must be >= 0."])
 
@@ -100,12 +89,12 @@ def build_bf_template(rows: list[dict], fy: int | None = None) -> bytes:
     ws.freeze_panes = "A2"
 
     wh = wb.create_sheet("Header")
-    wh.append(["financial_year"])
-    wh.append([fy or ""])
+    wh.append(["financial_year","as_on_date"])
+    wh.append([fy or "", "YYYY-MM-DD"])
 
     wi = wb.create_sheet("Instructions")
     wi.append(["Notes"])
-    wi.append(["Match on account_id; do not change locked columns."])
+    wi.append(["Match on account_id; do not change locked columns. As-on date may be mid-year (not necessarily financial-year start). Attach bank/deposit/cash account statements for the same As-on date."])
     wi.append(["Blank = 0. Amounts must be >= 0."])
 
     buf = io.BytesIO()
