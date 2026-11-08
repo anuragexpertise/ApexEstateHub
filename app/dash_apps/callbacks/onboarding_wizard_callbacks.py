@@ -566,16 +566,31 @@ def register_onboarding_wizard_callbacks(app):
         return dcc.send_bytes(pr.build_template(clean, known), "pending_receivables_template.xlsx")
 
     # ── pending receivables: paper signing evidence workflow ──────────────────────
-    def _ev_badge(sid, purpose, acc_id=None):
+    def _ev_alert(st):
+        """Status of the latest signed scan: stored+linked, stale (entries changed after signing), unlinked, or none."""
         from app.services import paper_evidence as pe
-        st = pe.evidence_status(sid, purpose, acc_id) if sid else {}
-        if st.get("evidenced"):
-            return dbc.Alert([html.I(className="fas fa-check-circle me-2"),
-                              f"Signed scan stored: {st.get('filename') or 'scan'} | SHA-256 {str(st.get('sha256') or '')[:16]}…"],
-                             color="success", className="py-1 mb-0", style={"fontSize":"12px"})
-        return html.Div("No signed scan uploaded yet.", className="text-muted small")
+        colour, text = pe.status_line(st or {})
+        if colour == "muted":
+            return html.Div(text, className="text-muted small")
+        icon = {"success": "fa-check-circle", "warning": "fa-exclamation-triangle", "info": "fa-info-circle"}[colour]
+        return dbc.Alert([html.I(className=f"fas {icon} me-2"), text], color=colour, className="py-1 mb-0",
+                         style={"fontSize": "12px"})
 
-    _recv_evidence_badge = lambda sid: _ev_badge(sid, "pending_receivables")
+    def _ev_badge(sid, purpose, acc_id=None, current_snapshot=None):
+        from app.services import paper_evidence as pe
+        st = pe.evidence_status(sid, purpose, acc_id, current_snapshot) if sid else {}
+        return _ev_alert(st)
+
+    def _recv_parts(rows, sid, fy=None):
+        """(clean rows, errors, headers, body, signers, meta lines) of the receivables document: used by BOTH the print and
+        the stale check, so the snapshot hash is computed from the very same lines."""
+        from app.services import pending_receivables as pr
+        clean, errors = pr.clean_rows(rows or [], ob.known_flat_numbers(sid))
+        hdr = ["Flat no.", "Value receivable (₹)", "Days overdue", "Remarks"]
+        body = [[r["flat_number"], f"{Decimal(r['amount']):,.2f}", "" if r["overdue_days"] is None else str(r["overdue_days"]), r.get("remarks") or ""] for r in clean]
+        body.append(["TOTAL", f"{pr.total(clean):,.2f}", "", f"{len(clean)} apartment(s)"])
+        meta = [f"Total receivables: ₹{pr.total(clean):,.2f}", "Ties to Sundry Debtors accounts as entered in Brought Forward."]
+        return clean, errors, hdr, body, ["Prepared by", "Treasurer", "Secretary", "President / Auditor"], meta
 
     @app.callback(
         Output("onb-recv-print-dl", "data"),
@@ -590,24 +605,19 @@ def register_onboarding_wizard_callbacks(app):
         if not n:
             return no_update, no_update
         s = _session()
-        if not s or not s[0]:
+        if not s or not s[0] or s[2] != "admin":
             return no_update, no_update
-        from app.services import pending_receivables as pr, paper_evidence as pe
+        from app.services import paper_evidence as pe
         sid = s[0]
         soc = ob.db._execute("SELECT name FROM societies WHERE id=%s", (sid,), fetch_one=True) or {}
-        known = ob.known_flat_numbers(sid)
-        clean, errors = pr.clean_rows(rows or [], known)
+        clean, errors, hdr, body, signers, meta = _recv_parts(rows, sid, fy)
         if errors:
             return no_update, _alert("Fix receivable rows before printing: " + " ".join(errors[:3]), False)
-        hdr = ["Flat no.", "Value receivable (₹)", "Days overdue", "Remarks"]
-        body = [[r["flat_number"], f"{Decimal(r['amount']):,.2f}", "" if r["overdue_days"] is None else str(r["overdue_days"]), r.get("remarks") or ""] for r in clean]
-        body.append(["TOTAL", f"{pr.total(clean):,.2f}", "", f"{len(clean)} apartment(s)"])
-        name, page = pe.printable_html("Pending receivables by apartment", soc.get("name") or f"Society {sid}",
-                                       f"Opening dues / FY {fy}" if fy else "Opening dues",
-                                       hdr, body,
-                                       ["Prepared by", "Treasurer", "Secretary", "President / Auditor"],
-                                       [f"Total receivables: ₹{pr.total(clean):,.2f}", "Ties to Sundry Debtors accounts as entered in Brought Forward."])
-        return dcc.send_string(page, name, type="text/html"), _alert("Printable document generated. Sign, scan, and upload the signed scan.")
+        doc = pe.make_document(sid, "pending_receivables", s[1], "Pending receivables by apartment",
+                               soc.get("name") or f"Society {sid}",
+                               f"Opening dues / FY {fy}" if fy else "Opening dues", hdr, body, signers, meta)
+        return (dcc.send_bytes(doc["data"], doc["filename"]),
+                _alert("Signing PDF generated (Doc ID %s). Print it, sign, scan, and upload the signed scan." % doc["doc_id"]))
 
     @app.callback(
         Output("onb-recv-evidence-status", "children"),
@@ -621,7 +631,7 @@ def register_onboarding_wizard_callbacks(app):
     @require_session
     def recv_scan(_contents, _p, _rows, filename, fy):
         s = _session()
-        if not s or not s[0]:
+        if not s or not s[0] or s[2] != "admin":
             return no_update
         sid, uid, role = s
         from app.services import paper_evidence as pe
@@ -630,11 +640,19 @@ def register_onboarding_wizard_callbacks(app):
                 ev = pe.store_signed_scan(sid, "pending_receivables", uid, filename, ctx.triggered[0]["value"],
                                           {"kind": "pending_receivables", "fy": fy})
                 return dbc.Alert([html.I(className="fas fa-check-circle me-2"),
-                                  f"Signed scan stored. SHA-256: {ev['sha256']} ({ev.get('filename') or filename})"],
+                                  f"{pe.stored_message(ev)} ({ev.get('filename') or filename})"],
                                  color="success", className="py-1 mb-0", style={"fontSize":"12px"})
             except Exception as exc:  # noqa: BLE001
                 return dbc.Alert(str(exc), color="danger", className="py-1 mb-0", style={"fontSize":"12px"})
-        return _recv_evidence_badge(sid)
+        # entries changed after signing? compare the snapshot of the grid as it is now with the one that was signed
+        cur = None
+        try:
+            clean, errs, hdr, body, _sg, meta = _recv_parts(_rows, sid)
+            if not errs:
+                cur = pe.snapshot_hash("pending_receivables", "Pending receivables by apartment", hdr, body, meta)
+        except Exception:  # noqa: BLE001
+            cur = None
+        return _ev_badge(sid, "pending_receivables", None, cur)
 
     # ── item 11: reconciliation cards (driven by the live Brought Forward amounts) ────────────
     @app.callback(
@@ -801,7 +819,7 @@ def register_onboarding_wizard_callbacks(app):
     def bf_print(n,fy,as_on,amts):
         if not n: return no_update,no_update
         s=_session(); 
-        if not s or not s[0]: return no_update,no_update
+        if not s or not s[0] or s[2] != "admin": return no_update,no_update
         from app.services import paper_evidence as pe
         sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
         from database.seed import ACCOUNTS
@@ -817,24 +835,24 @@ def register_onboarding_wizard_callbacks(app):
             else: cr+=amt
             body.append([str(aid),a[2] or '',a[3] or a[1] or '',side,f"{amt:,.2f}"])
         body.append(["","TOTAL","",f"Dr {dr:,.2f}",f"Cr {cr:,.2f}"])
-        name,page=pe.printable_html("Brought Forward Opening Balances",soc.get("name") or f"Society {sid}",
+        doc=pe.make_document(sid,"brought_forward",s[1],"Brought Forward Opening Balances",soc.get("name") or f"Society {sid}",
                                     f"FY {fy or ''} | As-on {as_on or ''}",["Account ID","Tab","Account","Side","Amount"],body,
                                     ["Prepared by","Treasurer","Secretary","Auditor/CA"],
                                     [f"As-on date: {as_on or '—'} (may be mid-year).", "Attach all bank/deposit/cash account statements for the same As-on date as reconciliation evidence."])
-        return dcc.send_string(page,name,type="text/html"), _msg("Brought Forward printable generated. Sign, scan, upload signed scan.","success")
+        return dcc.send_bytes(doc["data"],doc["filename"]), _msg("Signing PDF generated (Doc ID %s). Print, sign, scan, upload the signed scan." % doc["doc_id"],"success")
 
     @app.callback(Output("onb-bf-evidence-status","children"), Input("onb-bf-scan","contents"), Input("onb-bf-print","n_clicks"),
                   State("onb-bf-scan","filename"), State("sw-bf-fy","value"), State("sw-bf-as-on","date"), prevent_initial_call=True)
     @require_session
     def bf_scan(contents,_p,filename,fy,as_on):
         s=_session(); 
-        if not s or not s[0]: return no_update
+        if not s or not s[0] or s[2] != "admin": return no_update
         from app.services import paper_evidence as pe
         sid,uid,_=s
         if ctx.triggered_id=="onb-bf-scan" and contents:
             try:
                 ev=pe.store_signed_scan(sid,"brought_forward",uid,filename,contents,{"fy":fy,"as_on_date":as_on})
-                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), f"Signed scan stored. SHA-256: {ev['sha256']}"], color="success", className="py-1 mb-0", style={"fontSize":"12px"})
+                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), pe.stored_message(ev)], color="success", className="py-1 mb-0", style={"fontSize":"12px"})
             except Exception as exc:
                 return dbc.Alert(str(exc), color="danger", className="py-1 mb-0", style={"fontSize":"12px"})
         return _ev_badge(sid,"brought_forward")
@@ -847,7 +865,7 @@ def register_onboarding_wizard_callbacks(app):
     def apt_print(n,cost,budget,rate,amt,basis,due,interest):
         if not n: return no_update
         s=_session(); 
-        if not s or not s[0]: return no_update
+        if not s or not s[0] or s[2] != "admin": return no_update
         from app.services import paper_evidence as pe
         sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
         hdr=["Field","Value"]; body=[
@@ -857,24 +875,25 @@ def register_onboarding_wizard_callbacks(app):
             ["Maintenance billing basis",str(basis or '')],["Billing due day",str(due or '')],
             ["Interest % per month (simple)",str(interest or '')],
         ]
-        name,page=pe.printable_html("Declaration - Undivided Interest (Part A)",soc.get("name") or f"Society {sid}",
-                                    "Apartment Charges / society defaults",hdr,body,
-                                    ["Prepared by","Treasurer","Secretary","President/Authorized signatory"],
-                                    ["Part A covers Apartment Charges / billing defaults. Obtain signatures, scan, upload signed scan; server computes SHA-256."])
-        return dcc.send_string(page,name,type="text/html")
+        doc=pe.make_document(sid,"declaration_undivided_interest",s[1],"Declaration - Undivided Interest (Part A)",soc.get("name") or f"Society {sid}",
+                             "Apartment Charges / society defaults",hdr,body,
+                             ["Prepared by","Treasurer","Secretary","President/Authorized signatory"],
+                             ["Part A covers Apartment Charges / billing defaults and the apartment-wise undivided interest. Obtain signatures, scan, upload signed scan; server computes SHA-256."],
+                             sections=[pe.apartment_charges_section(sid, budget)])
+        return dcc.send_bytes(doc["data"],doc["filename"])
 
     @app.callback(Output("onb-apt-evidence-status","children"), Input("onb-apt-scan","contents"), Input("onb-apt-print","n_clicks"),
                   State("onb-apt-scan","filename"), prevent_initial_call=True)
     @require_session
     def apt_scan(contents,_p,filename):
         s=_session(); 
-        if not s or not s[0]: return no_update
+        if not s or not s[0] or s[2] != "admin": return no_update
         from app.services import paper_evidence as pe
         sid,uid,_=s
         if ctx.triggered_id=="onb-apt-scan" and contents:
             try:
                 ev=pe.store_signed_scan(sid,"declaration_undivided_interest",uid,filename,contents,{"part":"A","kind":"apartment_charges"})
-                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), f"Signed scan stored. SHA-256: {ev['sha256']}"], color="success", className="py-1 mb-0", style={"fontSize":"12px"})
+                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), pe.stored_message(ev)], color="success", className="py-1 mb-0", style={"fontSize":"12px"})
             except Exception as exc:
                 return dbc.Alert(str(exc), color="danger", className="py-1 mb-0", style={"fontSize":"12px"})
         return _ev_badge(sid,"declaration_undivided_interest")
@@ -1217,7 +1236,7 @@ def _register_xlsx_callbacks(app):
     def tds_print(n, tan, eff, row_eff, secs, discs, rates, npans, singles, aggs):
         if not n: return no_update, no_update
         s=_session()
-        if not s or not s[0]: return no_update, no_update
+        if not s or not s[0] or s[2] != "admin": return no_update, no_update
         from app.services import paper_evidence as pe
         sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
         hdr=["Section","Discriminator","Rate %","No PAN %","Single bill","Aggregate","Effective start"]
@@ -1229,10 +1248,10 @@ def _register_xlsx_callbacks(app):
                          "" if i>=len(singles or []) or singles[i] in (None,"") else str(singles[i]),
                          "" if i>=len(aggs or []) or aggs[i] in (None,"") else str(aggs[i]),
                          (row_eff or {}).get(str(i)) or eff or ""])
-        name,page=pe.printable_html("TDS Rates", soc.get("name") or f"Society {sid}", f"TAN {tan or '—'} | Effective {eff or '—'}",
+        doc=pe.make_document(sid,"tds_rates",s[1],"TDS Rates", soc.get("name") or f"Society {sid}", f"TAN {tan or '—'} | Effective {eff or '—'}",
                                     hdr, body, ["Prepared by","Chartered Accountant (sign)","Treasurer","Secretary"],
                                     ["Signed by CA; rates evidenced by signed scan (server SHA-256). Individual rate changes may use separate effective start dates in upload template."])
-        return dcc.send_string(page,name,type="text/html"), _msg("TDS printable generated. Sign, scan, upload signed scan.","success")
+        return dcc.send_bytes(doc["data"],doc["filename"]), _msg("Signing PDF generated (Doc ID %s). Print, get the CA to sign, scan, upload the signed scan." % doc["doc_id"],"success")
 
     @app.callback(
         Output("onb-tds-evidence-status","children"),
@@ -1243,17 +1262,16 @@ def _register_xlsx_callbacks(app):
     @require_session
     def tds_scan(contents,_p,filename,eff):
         s=_session()
-        if not s or not s[0]: return no_update
+        if not s or not s[0] or s[2] != "admin": return no_update
         sid,uid,_=s
         from app.services import paper_evidence as pe
         if ctx.triggered_id=="onb-tds-scan" and contents:
             try:
                 ev=pe.store_signed_scan(sid,"tds_rates",uid,filename,contents,{"effective_date":eff,"signed_by":"CA"})
-                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), f"Signed scan stored. SHA-256: {ev['sha256']}"], color="success", className="py-1 mb-0", style={"fontSize":"12px"})
+                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), pe.stored_message(ev)], color="success", className="py-1 mb-0", style={"fontSize":"12px"})
             except Exception as exc:
                 return dbc.Alert(str(exc), color="danger", className="py-1 mb-0", style={"fontSize":"12px"})
-        st=pe.evidence_status(sid,"tds_rates")
-        return dbc.Alert([html.I(className="fas fa-check-circle me-2"), f"Signed scan stored. SHA-256: {str(st.get('sha256') or '')[:16]}…"], color="success", className="py-1 mb-0", style={"fontSize":"12px"}) if st.get("evidenced") else html.Div("No signed CA scan uploaded yet.", className="text-muted small")
+        return _ev_alert(pe.evidence_status(sid,"tds_rates"))
 
     # BF template download: exactly the accounts listed on screen ----------------------
     def _acc_meta():

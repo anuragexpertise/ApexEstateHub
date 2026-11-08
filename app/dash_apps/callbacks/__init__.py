@@ -67,6 +67,7 @@ def register_callbacks(app):
         "gst_class_callbacks",           # 13j5. GST Accounts tab (CA / Treasurer / Secretary, own society)
         "auditor_callbacks",             # 13k. Auditor portal (read-only verification)
         "bulk_enroll_callbacks",      # 14. Bulk Enroll
+        "paper_sign_callbacks",       # 14-ps. Paper signing of the bye-laws adoption (Society_bye_laws.xlsx)
         "bank_reconcile_callbacks",   # 14a2. Bank Reconcile
         "assign_to_callbacks",        # 14b. Assign-To
         "concern_bid_callbacks",      # 14c. Concern Bid

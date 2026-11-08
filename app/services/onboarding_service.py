@@ -1108,8 +1108,11 @@ EVIDENCE_PURPOSES = {
 }
 
 def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filename: str,
-                        data: bytes, uploaded_by: int, meta: dict) -> dict:
-    """Store an evidence file; server computes SHA-256. Purpose is checked in Python so old DBs still work."""
+                        data: bytes, uploaded_by: int, meta: dict, *, doc_id: str | None = None,
+                        document_sha256: str | None = None, snapshot_sha256: str | None = None) -> dict:
+    """Store an evidence file; server computes SHA-256. The purpose is checked here AND by the table's CHECK constraint
+    (estatehub.sql / migrations 003). doc_id / document_sha256 / snapshot_sha256 link a signed scan to the document
+    EstateHub generated (paper_evidence.make_document); they are None for evidence that was not generated here."""
     import os as _os
     purpose = (purpose or "").strip()
     if purpose not in EVIDENCE_PURPOSES:
@@ -1132,27 +1135,56 @@ def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filen
         log.exception("could not keep evidence file for society %s", society_id)
         stored = f"{digest}{ext}"
     row = _row("""INSERT INTO onboarding_evidence (society_id, purpose, acc_id, filename, stored_name,
-                    sha256, size_bytes, meta, uploaded_by)
-                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s) RETURNING id""",
+                    sha256, size_bytes, meta, uploaded_by, doc_id, document_sha256, snapshot_sha256)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s) RETURNING id""",
                (society_id, purpose, acc_id, filename, stored, digest, len(data),
-                json.dumps(meta or {}), uploaded_by))
-    return {"id": row["id"], "sha256": digest, "stored_name": stored, "filename": filename}
+                json.dumps(meta or {}), uploaded_by, doc_id, document_sha256, snapshot_sha256))
+    return {"id": row["id"], "sha256": digest, "stored_name": stored, "filename": filename,
+            "doc_id": doc_id, "document_sha256": document_sha256, "snapshot_sha256": snapshot_sha256,
+            "bound": bool(doc_id)}
 
 
 def get_evidence(society_id: int, purpose: str, acc_id: int | None = None) -> list[dict]:
     """Read evidence rows for a purpose (and optional account)."""
     if acc_id is not None:
         return _rows("""SELECT id, purpose, acc_id, filename, stored_name, sha256, size_bytes, meta,
-                               uploaded_by, uploaded_at
+                               doc_id, document_sha256, snapshot_sha256, uploaded_by, uploaded_at
                           FROM onboarding_evidence
                          WHERE society_id=%s AND purpose=%s AND acc_id=%s
                          ORDER BY uploaded_at DESC""",
                      (society_id, purpose, acc_id)) or []
     return _rows("""SELECT id, purpose, acc_id, filename, stored_name, sha256, size_bytes, meta,
-                          uploaded_by, uploaded_at
+                          doc_id, document_sha256, snapshot_sha256, uploaded_by, uploaded_at
                      FROM onboarding_evidence
                     WHERE society_id=%s AND purpose=%s
                     ORDER BY uploaded_at DESC""", (society_id, purpose)) or []
+
+
+def record_document(society_id: int, purpose: str, doc_id: str, snapshot_sha256: str, document_sha256: str,
+                    fmt: str, row_count: int, meta: dict | None, generated_by: int | None,
+                    signing_mode: str = "paper") -> dict:
+    """Remember a document EstateHub generated for signing, so a later signed scan can be bound to it."""
+    if purpose not in EVIDENCE_PURPOSES:
+        raise OnboardingError("Unknown evidence purpose.")
+    row = _row("""INSERT INTO onboarding_documents (society_id, purpose, doc_id, snapshot_sha256, document_sha256, fmt,
+                    row_count, signing_mode, meta, generated_by)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s) RETURNING id""",
+               (society_id, purpose, doc_id, snapshot_sha256, document_sha256, fmt, int(row_count or 0),
+                signing_mode, json.dumps(meta or {}), generated_by))
+    return {"id": row["id"], "doc_id": doc_id}
+
+
+def latest_document(society_id: int, purpose: str, kind: str | None = None, doc_id: str | None = None) -> dict | None:
+    """The newest generated document for a purpose (optionally one `kind` of it, or one exact doc_id)."""
+    sql = """SELECT id, purpose, doc_id, snapshot_sha256, document_sha256, fmt, row_count, signing_mode, meta, generated_at
+               FROM onboarding_documents WHERE society_id=%s AND purpose=%s"""
+    params: list = [society_id, purpose]
+    if doc_id:
+        sql += " AND doc_id=%s"; params.append(doc_id)
+    if kind:
+        sql += " AND meta->>'kind'=%s"; params.append(kind)
+    sql += " ORDER BY generated_at DESC, id DESC LIMIT 1"
+    return _row(sql, tuple(params))
 
 
 # ── stage 3: setup draft submit (merged from setup_wizard.submit_setup_wizard) ──────────────────────────

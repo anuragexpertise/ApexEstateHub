@@ -508,6 +508,27 @@ def _bulk_enroll_modal() -> dbc.Modal:
                         html.Div(id="bulk-enroll-result", className="mt-3"),
                         type="dot",
                     ),
+                    html.Hr(className="my-3"),
+                    html.Div([
+                        html.Strong("Paper sign-off", style={"fontSize": "12.5px"}),
+                        html.Small(
+                            " After the upload, print the enrolment register (no passwords are printed), have it signed, "
+                            "scan it and upload the scan. EstateHub stores the scan's SHA-256 as evidence.",
+                            className="text-muted d-block mb-2", style={"fontSize": "11.5px"}),
+                        dbc.Row([
+                            dbc.Col(dbc.Button([html.I(className="fas fa-print me-2"), "Print register (PDF)"],
+                                               id="bulk-enroll-print", size="sm", outline=True, color="primary",
+                                               n_clicks=0), width="auto"),
+                            dbc.Col(dcc.Upload(id="bulk-enroll-scan",
+                                               children=dbc.Button([html.I(className="fas fa-file-upload me-2"),
+                                                                    "Upload signed scan"], size="sm", outline=True,
+                                                                   color="secondary", n_clicks=0),
+                                               multiple=False, accept=".pdf,.png,.jpg,.jpeg"), width="auto"),
+                        ], className="g-2"),
+                        dcc.Download(id="bulk-enroll-print-dl"),
+                        dcc.Store(id="bulk-enroll-register-store", storage_type="memory", data=None),
+                        html.Div(id="bulk-enroll-evidence-status", className="mt-2", style={"fontSize": "12px"}),
+                    ]),
                 ])
             ),
             dbc.ModalFooter(

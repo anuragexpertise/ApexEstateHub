@@ -568,11 +568,69 @@
     "public": false
   },
   {
+    "id": "callback:bulk_enroll_callbacks.py::bulk_register_print",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
+    "function": "bulk_register_print",
+    "line": 955,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "bulk-enroll-print-dl",
+      "bulk-enroll-evidence-status"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:bulk_enroll_callbacks.py::bulk_register_scan",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
+    "function": "bulk_register_scan",
+    "line": 990,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "bulk-enroll-evidence-status"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:bulk_enroll_callbacks.py::bulk_register_snapshot",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
+    "function": "bulk_register_snapshot",
+    "line": 930,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "bulk-enroll-register-store"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:bulk_enroll_callbacks.py::close_bulk_enroll_modal",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
     "function": "close_bulk_enroll_modal",
-    "line": 699,
+    "line": 751,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -591,7 +649,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
     "function": "download_bulk_enroll_template",
-    "line": 712,
+    "line": 764,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -610,7 +668,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
     "function": "open_bulk_enroll_modal",
-    "line": 681,
+    "line": 733,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -631,7 +689,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
     "function": "process_bulk_enroll_upload",
-    "line": 755,
+    "line": 807,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -654,7 +712,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/bulk_enroll_callbacks.py",
     "function": "validate_bulk_enroll_file",
-    "line": 733,
+    "line": 785,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -673,7 +731,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/card_catalogue_callbacks.py",
     "function": "handle_kpi_side_effects",
-    "line": 766,
+    "line": 768,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -693,7 +751,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/card_catalogue_callbacks.py",
     "function": "refresh_kpi_values",
-    "line": 309,
+    "line": 312,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1324,7 +1382,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "close_fy_with_reserve",
-    "line": 6476,
+    "line": 6490,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1345,7 +1403,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "download_fy_export",
-    "line": 2641,
+    "line": 2643,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1362,7 +1420,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "download_xls",
-    "line": 2791,
+    "line": 2793,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1379,7 +1437,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "download_xlsx",
-    "line": 2457,
+    "line": 2459,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1396,7 +1454,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "expense_tds_autofill",
-    "line": 2513,
+    "line": 2515,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1413,7 +1471,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "expense_tds_pan_banner",
-    "line": 2587,
+    "line": 2589,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1488,7 +1546,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "handle_poll_vote",
-    "line": 2904,
+    "line": 2906,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1511,7 +1569,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "lock_financial_year",
-    "line": 6584,
+    "line": 6598,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1535,7 +1593,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "mark_rcm_gstr_filed",
-    "line": 2834,
+    "line": 2836,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1596,7 +1654,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "select_pass_type",
-    "line": 2862,
+    "line": 2864,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1613,7 +1671,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "update_member_ledger_state",
-    "line": 6432,
+    "line": 6446,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3106,7 +3164,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_adviser_appoint",
-    "line": 535,
+    "line": 541,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3123,7 +3181,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_adviser_sign",
-    "line": 588,
+    "line": 594,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3140,7 +3198,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_back_to_committee",
-    "line": 208,
+    "line": 214,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3159,7 +3217,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_back_to_setup",
-    "line": 783,
+    "line": 793,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3178,7 +3236,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_continue_setup",
-    "line": 224,
+    "line": 230,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3193,11 +3251,79 @@
     "public": false
   },
   {
+    "id": "callback:onboarding_callbacks.py::onb_election_evidence",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
+    "function": "onb_election_evidence",
+    "line": 829,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:onboarding_callbacks.py::onb_election_import",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
+    "function": "onb_election_import",
+    "line": 890,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:onboarding_callbacks.py::onb_election_print",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
+    "function": "onb_election_print",
+    "line": 855,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:onboarding_callbacks.py::onb_election_template",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
+    "function": "onb_election_template",
+    "line": 869,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:onboarding_callbacks.py::onb_enrol_done",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_enrol_done",
-    "line": 726,
+    "line": 736,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3214,7 +3340,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_esign_start",
-    "line": 421,
+    "line": 427,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3231,7 +3357,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_fix",
-    "line": 325,
+    "line": 331,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3250,7 +3376,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_grievance",
-    "line": 268,
+    "line": 274,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3269,7 +3395,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_job_poll",
-    "line": 676,
+    "line": 682,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3286,7 +3412,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_legacy_import",
-    "line": 612,
+    "line": 618,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3303,7 +3429,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_master_esign",
-    "line": 555,
+    "line": 561,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3320,7 +3446,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_master_retry",
-    "line": 767,
+    "line": 777,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3337,7 +3463,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_master_sign",
-    "line": 642,
+    "line": 648,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3354,7 +3480,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_officer_update",
-    "line": 169,
+    "line": 175,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3371,7 +3497,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_open_wizard",
-    "line": 288,
+    "line": 294,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3390,7 +3516,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_phase_next",
-    "line": 746,
+    "line": 756,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3407,7 +3533,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_poll",
-    "line": 460,
+    "line": 466,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3426,7 +3552,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_poll_toggle",
-    "line": 489,
+    "line": 495,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3443,7 +3569,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_prepare",
-    "line": 303,
+    "line": 309,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3462,7 +3588,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_print_agreement",
-    "line": 402,
+    "line": 408,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3479,7 +3605,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_seal",
-    "line": 348,
+    "line": 354,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3496,7 +3622,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_seat",
-    "line": 88,
+    "line": 91,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3513,7 +3639,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_sig_preview",
-    "line": 126,
+    "line": 129,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3530,7 +3656,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_sign",
-    "line": 372,
+    "line": 378,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3547,7 +3673,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_signmode",
-    "line": 508,
+    "line": 514,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3564,7 +3690,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_sync_step_stores",
-    "line": 246,
+    "line": 252,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3580,11 +3706,49 @@
     "public": false
   },
   {
+    "id": "callback:onboarding_wizard_callbacks.py::apt_print",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
+    "function": "apt_print",
+    "line": 865,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "onb-apt-print-dl"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:onboarding_wizard_callbacks.py::apt_scan",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
+    "function": "apt_scan",
+    "line": 888,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "onb-apt-evidence-status"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:onboarding_wizard_callbacks.py::bf_apply",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "bf_apply",
-    "line": 1048,
+    "line": 1377,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3600,11 +3764,31 @@
     "public": false
   },
   {
+    "id": "callback:onboarding_wizard_callbacks.py::bf_print",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
+    "function": "bf_print",
+    "line": 819,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "onb-bf-print-dl",
+      "onb-bf-evidence-feedback"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:onboarding_wizard_callbacks.py::bf_reconciliation_render",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "bf_reconciliation_render",
-    "line": 555,
+    "line": 665,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3623,7 +3807,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "bf_reconciliation_update",
-    "line": 599,
+    "line": 722,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3642,7 +3826,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "bf_recv_download",
-    "line": 539,
+    "line": 559,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3661,7 +3845,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "bf_recv_grid_update",
-    "line": 445,
+    "line": 465,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3681,7 +3865,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "bf_recv_sync",
-    "line": 491,
+    "line": 511,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3697,11 +3881,47 @@
     "public": false
   },
   {
+    "id": "callback:onboarding_wizard_callbacks.py::bf_scan",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
+    "function": "bf_scan",
+    "line": 847,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "onb-bf-evidence-status"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:onboarding_wizard_callbacks.py::bf_statement_template",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
+    "function": "bf_statement_template",
+    "line": 796,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:onboarding_wizard_callbacks.py::bf_template",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "bf_template",
-    "line": 961,
+    "line": 1290,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3720,7 +3940,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "bf_upload",
-    "line": 988,
+    "line": 1317,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3741,7 +3961,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "clear_admin_passwords",
-    "line": 371,
+    "line": 391,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3761,7 +3981,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "legal_regime_refresh",
-    "line": 658,
+    "line": 921,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3777,11 +3997,50 @@
     "public": false
   },
   {
+    "id": "callback:onboarding_wizard_callbacks.py::recv_print",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
+    "function": "recv_print",
+    "line": 604,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "onb-recv-print-dl",
+      "onb-bf-recv-feedback"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:onboarding_wizard_callbacks.py::recv_scan",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
+    "function": "recv_scan",
+    "line": 632,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "onb-recv-evidence-status"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:onboarding_wizard_callbacks.py::tds_apply",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "tds_apply",
-    "line": 930,
+    "line": 1199,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3798,11 +4057,50 @@
     "public": false
   },
   {
+    "id": "callback:onboarding_wizard_callbacks.py::tds_print",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
+    "function": "tds_print",
+    "line": 1236,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "onb-tds-print-dl",
+      "onb-tds-preview"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:onboarding_wizard_callbacks.py::tds_scan",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
+    "function": "tds_scan",
+    "line": 1263,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "onb-tds-evidence-status"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:onboarding_wizard_callbacks.py::tds_template",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "tds_template",
-    "line": 837,
+    "line": 1098,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3821,7 +4119,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "tds_upload",
-    "line": 866,
+    "line": 1127,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3842,7 +4140,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "wizard_finalize",
-    "line": 411,
+    "line": 431,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3862,7 +4160,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "wizard_finalize_toggle",
-    "line": 393,
+    "line": 413,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3882,7 +4180,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "wizard_nav",
-    "line": 306,
+    "line": 326,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3903,7 +4201,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "wizard_render_review",
-    "line": 750,
+    "line": 1013,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3923,7 +4221,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "wizard_rules_panel",
-    "line": 777,
+    "line": 1040,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3944,7 +4242,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "wizard_save_bye_law",
-    "line": 679,
+    "line": 942,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3961,12 +4259,89 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
     "function": "wizard_save_policy",
-    "line": 715,
+    "line": 978,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
     ],
     "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:paper_sign_callbacks.py::adopt_import",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/paper_sign_callbacks.py",
+    "function": "adopt_import",
+    "line": 111,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "adopt-bl-import-status"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:paper_sign_callbacks.py::adopt_print",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/paper_sign_callbacks.py",
+    "function": "adopt_print",
+    "line": 153,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "adopt-bl-print-dl",
+      "adopt-bl-evidence-status"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:paper_sign_callbacks.py::adopt_scan",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/paper_sign_callbacks.py",
+    "function": "adopt_scan",
+    "line": 170,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "adopt-bl-evidence-status"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:paper_sign_callbacks.py::adopt_template",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/paper_sign_callbacks.py",
+    "function": "adopt_template",
+    "line": 91,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "adopt-bl-tpl-dl"
+    ],
     "guards": [
       "require_session"
     ],
@@ -4018,7 +4393,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/privacy_callbacks.py",
     "function": "privacy_accept",
-    "line": 60,
+    "line": 68,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4038,7 +4413,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/privacy_callbacks.py",
     "function": "privacy_breach",
-    "line": 161,
+    "line": 180,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4057,7 +4432,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/privacy_callbacks.py",
     "function": "privacy_erasure",
-    "line": 145,
+    "line": 164,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4076,7 +4451,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/privacy_callbacks.py",
     "function": "privacy_gate",
-    "line": 39,
+    "line": 47,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4096,7 +4471,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/privacy_callbacks.py",
     "function": "privacy_open",
-    "line": 80,
+    "line": 88,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4116,7 +4491,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/privacy_callbacks.py",
     "function": "privacy_publish",
-    "line": 174,
+    "line": 193,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4135,7 +4510,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/privacy_callbacks.py",
     "function": "privacy_raise",
-    "line": 98,
+    "line": 117,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4154,7 +4529,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/privacy_callbacks.py",
     "function": "privacy_respond",
-    "line": 128,
+    "line": 147,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4173,7 +4548,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/privacy_callbacks.py",
     "function": "privacy_reviewed",
-    "line": 189,
+    "line": 208,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4192,7 +4567,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/privacy_callbacks.py",
     "function": "privacy_toggle",
-    "line": 110,
+    "line": 129,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4211,7 +4586,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/qr_callbacks.py",
     "function": "refresh_atd_qr",
-    "line": 772,
+    "line": 775,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4232,7 +4607,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/qr_callbacks.py",
     "function": "render_scans",
-    "line": 1187,
+    "line": 1200,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4251,7 +4626,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/qr_callbacks.py",
     "function": "save_qr_png",
-    "line": 1237,
+    "line": 1250,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4270,7 +4645,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/qr_callbacks.py",
     "function": "show_admin_contact",
-    "line": 1449,
+    "line": 1462,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4290,7 +4665,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/qr_callbacks.py",
     "function": "toggle_qr_modal",
-    "line": 646,
+    "line": 648,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4311,7 +4686,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/qr_callbacks.py",
     "function": "trigger_emergency",
-    "line": 1303,
+    "line": 1316,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4330,7 +4705,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/qr_callbacks.py",
     "function": "validate_manual_qr_scoped",
-    "line": 1076,
+    "line": 1087,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4350,7 +4725,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/qr_callbacks.py",
     "function": "validate_qr_scanned",
-    "line": 805,
+    "line": 808,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4663,7 +5038,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/security_callbacks.py",
     "function": "owner_respond_to_alert",
-    "line": 748,
+    "line": 708,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4723,7 +5098,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "_drill_back",
-    "line": 1583,
+    "line": 1590,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4744,7 +5119,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "_forward_profile_toast",
-    "line": 1378,
+    "line": 1385,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4763,7 +5138,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "_load_notifications",
-    "line": 1391,
+    "line": 1398,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4781,7 +5156,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "_mark_all_read",
-    "line": 1544,
+    "line": 1551,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4800,7 +5175,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "_mark_notification_read",
-    "line": 1482,
+    "line": 1489,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4821,7 +5196,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "_toggle_drill_back",
-    "line": 1567,
+    "line": 1574,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4840,7 +5215,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "_toggle_notifications_dropdown",
-    "line": 1436,
+    "line": 1443,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4860,7 +5235,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "_update_badge",
-    "line": 1525,
+    "line": 1532,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4880,7 +5255,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "back_to_stage1",
-    "line": 808,
+    "line": 812,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4899,7 +5274,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "guard_modal",
-    "line": 769,
+    "line": 773,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4916,7 +5291,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "inject_stage2",
-    "line": 850,
+    "line": 854,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4935,7 +5310,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "load_societies",
-    "line": 673,
+    "line": 677,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4954,7 +5329,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "logout",
-    "line": 911,
+    "line": 915,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4973,7 +5348,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "navigate_global_card_search",
-    "line": 741,
+    "line": 745,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4993,7 +5368,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "open_global_card_search",
-    "line": 719,
+    "line": 723,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -5013,7 +5388,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "restore_from_cookie",
-    "line": 826,
+    "line": 830,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -5032,7 +5407,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "route_page",
-    "line": 944,
+    "line": 948,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -5051,7 +5426,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "show_toast",
-    "line": 1210,
+    "line": 1217,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -5068,7 +5443,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "toggle_master",
-    "line": 896,
+    "line": 900,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -5085,7 +5460,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "toggle_sidebar",
-    "line": 1183,
+    "line": 1190,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -5106,7 +5481,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "transition_to_stage2",
-    "line": 787,
+    "line": 791,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -5125,7 +5500,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/shell_callbacks.py",
     "function": "update_global_card_search",
-    "line": 730,
+    "line": 734,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"

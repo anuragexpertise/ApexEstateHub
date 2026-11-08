@@ -23763,7 +23763,27 @@ CREATE UNIQUE INDEX uq_stepup_open ON stepup_change_requests (society_id)
 WHERE
     status = 'open';
 
--- evidence (bank statement, cash count, audited report, review letter, paper signature)
+-- documents EstateHub generated for paper signing (the UNSIGNED PDF). A signed scan is later bound to one of these
+-- rows, so an auditor can match: data snapshot -> printed document -> signed scan (each with its own SHA-256).
+CREATE TABLE onboarding_documents (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    purpose TEXT NOT NULL,
+    doc_id TEXT NOT NULL, -- printed in the footer of every page
+    snapshot_sha256 CHAR(64) NOT NULL, -- hash of the exact data printed (rows + totals), not of the PDF bytes
+    document_sha256 CHAR(64) NOT NULL, -- hash of the generated PDF bytes
+    fmt VARCHAR(8) NOT NULL DEFAULT 'pdf',
+    row_count INT NOT NULL DEFAULT 0,
+    signing_mode VARCHAR(12) NOT NULL DEFAULT 'paper',
+    meta JSONB NOT NULL DEFAULT '{}',
+    generated_by INT REFERENCES users (id),
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ix_onb_documents_soc ON onboarding_documents (society_id, purpose, generated_at DESC);
+
+-- evidence (bank statement, cash count, audited report, review letter, paper signature, and the signed scans of the
+-- reusable paper-signing workflow). doc_id / document_sha256 / snapshot_sha256 link a scan to the generated document.
 CREATE TABLE onboarding_evidence (
     id SERIAL PRIMARY KEY,
     society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
@@ -23773,7 +23793,21 @@ CREATE TABLE onboarding_evidence (
             'cash_count',
             'audited_report',
             'review_letter',
-            'paper_signature'
+            'paper_signature',
+            'pending_receivables',
+            'tds_rates',
+            'declaration_undivided_interest',
+            'brought_forward',
+            'account_statement',
+            'election_results',
+            'apartment_charges',
+            'bulk_apartments',
+            'bulk_vendors',
+            'bulk_security',
+            'bulk_supervisor',
+            'bulk_staff',
+            'adoption_resolution',
+            'other_paper_evidence'
         )
     ),
     acc_id INT,
@@ -23782,6 +23816,9 @@ CREATE TABLE onboarding_evidence (
     sha256 CHAR(64) NOT NULL,
     size_bytes INT NOT NULL,
     meta JSONB NOT NULL DEFAULT '{}',
+    doc_id TEXT,
+    document_sha256 CHAR(64),
+    snapshot_sha256 CHAR(64),
     uploaded_by INT REFERENCES users (id),
     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

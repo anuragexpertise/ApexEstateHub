@@ -74,6 +74,7 @@ _SETUP_EXEMPT_MODULES = frozenset({
     "agreement_callbacks",
     "onboarding_callbacks",     # the Onboarding Hub is what a not-yet-active society uses; it authorises each action itself
     "onboarding_wizard_callbacks",   # wizard nav/step-save/review must work while setup is incomplete
+    "paper_sign_callbacks",     # bye-laws adoption paper signing lives in the Onboarding Hub; each callback checks admin itself
     "privacy_callbacks",
 })
 _SETUP_EXEMPT_FUNCTIONS = frozenset({
