@@ -566,16 +566,6 @@ def register_onboarding_wizard_callbacks(app):
         return dcc.send_bytes(pr.build_template(clean, known), "pending_receivables_template.xlsx")
 
     # ── pending receivables: paper signing evidence workflow ──────────────────────
-    def _ev_alert(st):
-        """Status of the latest signed scan: stored+linked, stale (entries changed after signing), unlinked, or none."""
-        from app.services import paper_evidence as pe
-        colour, text = pe.status_line(st or {})
-        if colour == "muted":
-            return html.Div(text, className="text-muted small")
-        icon = {"success": "fa-check-circle", "warning": "fa-exclamation-triangle", "info": "fa-info-circle"}[colour]
-        return dbc.Alert([html.I(className=f"fas {icon} me-2"), text], color=colour, className="py-1 mb-0",
-                         style={"fontSize": "12px"})
-
     def _ev_badge(sid, purpose, acc_id=None, current_snapshot=None):
         from app.services import paper_evidence as pe
         st = pe.evidence_status(sid, purpose, acc_id, current_snapshot) if sid else {}
@@ -1082,6 +1072,17 @@ def _dec(v, lo=None, hi=None):
 
 def _msg(text, color):
     return dbc.Alert(text, color=color, className="py-2 mb-2", style={"fontSize": "12.5px"})
+
+
+def _ev_alert(st):
+    """Status of the latest signed scan: stored+linked, stale (entries changed after signing), unlinked, or none."""
+    from app.services import paper_evidence as pe
+    colour, text = pe.status_line(st or {})
+    if colour == "muted":
+        return html.Div(text, className="text-muted small")
+    icon = {"success": "fa-check-circle", "warning": "fa-exclamation-triangle", "info": "fa-info-circle"}[colour]
+    return dbc.Alert([html.I(className=f"fas {icon} me-2"), text], color=colour, className="py-1 mb-0",
+                     style={"fontSize": "12px"})
 
 
 def _register_xlsx_callbacks(app):
