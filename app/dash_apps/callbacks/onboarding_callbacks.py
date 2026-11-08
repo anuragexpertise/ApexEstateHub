@@ -128,33 +128,36 @@ def register_onboarding_callbacks(app):
     @require_session
     def onb_sig_preview(contents_list, filename_list):
         trig = ctx.triggered_id
+        outputs = ctx.outputs_list or []
         if not trig or not isinstance(trig, dict):
-            n = len(contents_list) if contents_list else 1
-            return [no_update] * n
+            return [no_update] * len(outputs)
+
+        # Resolve the uploaded contents/filename for the triggered office.
         office = trig["office"]
         triggered_contents = ctx.triggered[0].get("value") if ctx.triggered else None
         fname = ""
-        for item in (ctx.states_list[0] or []):
-            iid = item.get("id")
-            if isinstance(iid, dict) and iid.get("office") == office and iid.get("field") == "sig":
-                fname = item.get("value") or ""
+        for item, name in zip(ctx.inputs_list[0] or [], filename_list or []):
+            iid = item.get("id") if isinstance(item, dict) else item
+            if isinstance(iid, dict) and iid.get("office") == office:
+                fname = name or ""
                 break
-        n = len(contents_list) if contents_list else 1
-        out = [no_update] * n
-        idx = None
-        for i, c in enumerate(contents_list or []):
-            if c == triggered_contents:
-                idx = i
-                break
-        if idx is None:
-            idx = 0
+
         if triggered_contents:
-            out[idx] = html.Div([
+            preview = html.Div([
                 html.Img(src=triggered_contents, style={"maxWidth": "140px", "maxHeight": "70px",
                                                       "border": "1px solid #c9d2dc", "borderRadius": "4px"}),
                 html.Div(fname, style={"fontSize": "11px", "color": "#667", "marginTop": "2px"})])
         else:
-            out[idx] = html.Div("Signature image selected.", style={"fontSize": "11.5px", "color": "#17976e"})
+            preview = html.Div("Signature image selected.", style={"fontSize": "11.5px", "color": "#17976e"})
+
+        # Return exactly one value per matched output component, in order.
+        out = []
+        for item in outputs:
+            iid = item.get("id") if isinstance(item, dict) else item
+            if isinstance(iid, dict) and iid.get("office") == office:
+                out.append(preview)
+            else:
+                out.append(no_update)
         return out
 
     # ── seated officer Edit details: mobile and/or signature replace ──────────
