@@ -497,7 +497,8 @@ def advisers_section(society_id: int, role: str | None, user_id: int | None) -> 
                 dbc.Button(f"Sign as {mine[0].title()}", id={"type": f"{P}-adv-sign", "id": int(a["id"])},
                            color="success", size="sm", n_clicks=0)])
         elif a["active"]:
-            ctrl = html.Span("signed by " + ", ".join(sorted(signed)) or "—", style=_MUTED)
+            ctrl = html.Span("signed by " + (", ".join(sorted(signed)) or "none yet (awaiting President, Secretary and Treasurer)"),
+                             style=_MUTED)
         cards.append(html.Div([
             html.Strong(f"{a['kind'].title()}: {a['name']}"),
             html.Div(f"firm={a['firm'] or '-'}  membership={a['membership_number'] or '-'}  "
@@ -514,6 +515,10 @@ def advisers_section(society_id: int, role: str | None, user_id: int | None) -> 
             return {"type": f"{P}-adv", "field": f}
         out.append(html.Div([
             html.Strong("Appoint a new adviser"),
+            html.Div("An appointment needs a PASSED General Body resolution (a legacy import does not count). Record the meeting and "
+                     "its attendance and vote registers under Settings → Society governance → Meetings & Resolutions first; every "
+                     "flat needs its undivided-interest percentage for the votes to be weighted. Enter that resolution's number below.",
+                     style=_MUTED),
             dbc.Row([
                 dbc.Col(_field("Role", dbc.Select(id=fid("kind"), size="sm", options=[{"label": a, "value": a} for a in ("auditor", "ca", "advocate")])), md=2),
                 dbc.Col(_field("Name", dbc.Input(id=fid("name"), size="sm", maxLength=100)), md=3),
