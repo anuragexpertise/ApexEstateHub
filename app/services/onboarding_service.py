@@ -359,6 +359,67 @@ def set_grievance_officer(society_id: int, name: str, email: str, phone: str | N
                 (name[:100], e, p, society_id))
 
 
+def _cell_text(v) -> str:
+    """xlsx cells arrive as str/int/float/None; a mobile typed as a number must not become '9876543210.0'."""
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return str(v).strip()
+
+
+def validate_election_rows(rows: list[dict]) -> tuple[dict, list[str]]:
+    """Validate rows parsed from Election Results.xlsx. Returns ({office: cleaned fields}, errors).
+    Pure: nothing is written; the admin still seats each officer (password, signature, minutes) on the hub."""
+    from app.services import committee_service as cs
+    out: dict = {}
+    errors: list[str] = []
+    seen: set = set()
+    for n, r in enumerate(rows or [], start=2):
+        office = _cell_text(r.get("office")).lower().replace(" ", "_")
+        if office not in CORE_OFFICES and office != "grievance_officer":
+            errors.append(f"Row {n}: unknown office '{_cell_text(r.get('office'))}'.")
+            continue
+        if office in seen:
+            errors.append(f"Row {n}: {office.replace('_', ' ')} appears more than once.")
+            continue
+        seen.add(office)
+        label = OFFICE_LABEL.get(office, "Grievance officer")
+        name, email = _cell_text(r.get("name")), cs.clean_email(_cell_text(r.get("email")))
+        mob_raw = _cell_text(r.get("mobile"))
+        phone = cs.clean_phone(mob_raw) if mob_raw else None
+        if not name:
+            errors.append(f"{label}: name is required.")
+        if email is False:
+            errors.append(f"{label}: enter a valid email address.")
+        if phone is False:
+            errors.append(f"{label}: enter a valid mobile number.")
+        rec = {"name": name, "email": email or "", "phone": phone or ""}
+        if office in CORE_OFFICES:
+            flat = _cell_text(r.get("flat_number"))
+            ref = _cell_text(r.get("resolution_ref"))
+            area = _cell_text(r.get("flat_area_sqft"))
+            if not flat:
+                errors.append(f"{label}: flat number is required.")
+            if not mob_raw:
+                errors.append(f"{label}: mobile is required.")
+            if len(ref) < 3:
+                errors.append(f"{label}: give the resolution reference (at least 3 characters).")
+            if area and not re.fullmatch(r"\d+(\.\d+)?", area):
+                errors.append(f"{label}: flat area must be a number.")
+            rec.update({"flat": flat, "size": area, "ref": ref})
+        out[office] = rec
+    for office in CORE_OFFICES + ("grievance_officer",):
+        if office not in seen:
+            errors.append(f"Missing row for {office.replace('_', ' ')}.")
+    core = [out[o] for o in CORE_OFFICES if o in out]
+    flats = [c["flat"].lower() for c in core if c.get("flat")]
+    emails = [c["email"] for c in core if c.get("email")]
+    if len(flats) != len(set(flats)) or len(emails) != len(set(emails)):
+        errors.append("The President, Secretary and Treasurer must be three different people: use a different flat and email for each.")
+    return out, errors
+
+
 # ── stage 4: annexes ──────────────────────────────────────────────────────────────────────────────────────────────
 def declaration(society_id: int) -> dict | None:
     r = _row("SELECT declaration_json, status FROM onboarding_declarations WHERE society_id=%s", (society_id,))

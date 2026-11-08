@@ -131,8 +131,12 @@ def _stage_committee(society_id: int):
                html.Small("Seat officers (or prepare from Election Results.xlsx offline), print this seating summary with signing footer, obtain signatures, scan and upload signed scan. Server computes SHA-256.", className="text-muted d-block mb-2"),
                dbc.Row([
                    dbc.Col(dbc.Button([html.I(className="fas fa-print me-2"), "Print seating summary"], id=f"{P}-election-print", color="primary", size="sm", outline=True, n_clicks=0), md="auto"),
-                   dbc.Col(dcc.Upload(id=f"{P}-election-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed Election Results scan"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg,.xlsx"), md="auto"),
-               ], className="g-2"), dcc.Download(id=f"{P}-election-dl"), html.Div(id=f"{P}-election-status", style={"fontSize":"12.5px","marginTop":"6px"}),
+                   dbc.Col(dcc.Upload(id=f"{P}-election-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed Election Results scan"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
+                   dbc.Col(dbc.Button([html.I(className="fas fa-file-excel me-2"), "Election Results.xlsx template"], id=f"{P}-election-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                   dbc.Col(dcc.Upload(id=f"{P}-election-xlsx", children=dbc.Button([html.I(className="fas fa-table me-2"), "Fill forms from Election Results.xlsx"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".xlsx"), md="auto"),
+               ], className="g-2"), dcc.Download(id=f"{P}-election-dl"), dcc.Download(id=f"{P}-election-tpl-dl"),
+               html.Div(id=f"{P}-election-import-status", style={"fontSize":"12.5px","marginTop":"6px"}),
+               html.Div(id=f"{P}-election-status", style={"fontSize":"12.5px","marginTop":"6px"}),
            ], className="py-2"), className="mb-2"),
            html.Div("The President, Secretary and Treasurer sign the Agreement, so they must hold office first. Each is seated with the "
                     "resolution that elected them and the signed minutes; the file's SHA-256 is kept as evidence. Use a different flat "
