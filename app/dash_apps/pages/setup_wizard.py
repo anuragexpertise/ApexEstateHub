@@ -1644,9 +1644,10 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 dbc.Col(dcc.Download(id="onb-tds-download"), md="auto"),
             ], className="g-2 mb-2"),
             dcc.Store(id="onb-tds-pending", data=None),
+            dcc.Store(id="sw-tds-row-eff", data={}),
             html.Div(id="onb-tds-preview", className="mb-2"),
             dbc.Button("Apply to form", id="onb-tds-apply", color="primary", size="sm", disabled=True, n_clicks=0, className="mb-3"),
-            html.Small("Per-row effective start date (for future/individual changes) can be added in the 'Effective start date' column of the TDS Rates template before upload; current form captures one society effective date.",
+            html.Small("Individual rate changes: fill the 'effective_start_date' column (YYYY-MM-DD) in the TDS Rates template. A blank cell uses the TDS Effective Date above.",
                        className="text-muted d-block mb-2"),
             dbc.Card(dbc.CardBody([
                 html.Strong("Paper signing (TDS rates, CA)", className="d-block mb-1", style={"fontSize":"13px"}),

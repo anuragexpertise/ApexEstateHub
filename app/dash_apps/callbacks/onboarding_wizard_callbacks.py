@@ -95,8 +95,25 @@ def _iso(v):
     return str(v)
 
 
+def _row_date(v):
+    """A per-row effective date from an xlsx cell / stored value -> 'YYYY-MM-DD', None when blank. ValueError if invalid."""
+    if v is None or str(v).strip() == "":
+        return None
+    if hasattr(v, "date") and callable(v.date):
+        return v.date().isoformat()
+    if hasattr(v, "isoformat"):
+        return v.isoformat()[:10]
+    t = str(v).strip()[:10]
+    if not _re.match(r"^\d{4}-\d{2}-\d{2}$", t):
+        raise ValueError("must be a date as YYYY-MM-DD")
+    from datetime import date as _d
+    _d.fromisoformat(t)
+    return t
+
+
 def _tds_rows(form):
     secs, discs = form.get("tds-section") or {}, form.get("tds-discriminator") or {}
+    row_eff = form.get("sw-tds-row-eff") or {}
     rows = []
     for i in sorted(secs):
         row = {"section": secs[i], "discriminator": discs.get(i) or "",
@@ -104,7 +121,8 @@ def _tds_rows(form):
                "rate": _num((form.get("tds-rate") or {}).get(i)),
                "rate_no_pan": _num((form.get("tds-rate-no-pan") or {}).get(i)),
                "single_bill": _num((form.get("tds-single-bill") or {}).get(i)),
-               "annual_aggregate": _num((form.get("tds-agg-bill") or {}).get(i))}
+               "annual_aggregate": _num((form.get("tds-agg-bill") or {}).get(i)),
+               "effective_start_date": row_eff.get(str(i))}
         if any(row[k] is not None for k in ("rate", "rate_no_pan", "single_bill", "annual_aggregate")):
             rows.append(row)          # blank means "not entered": never a silent default (non-negotiable 4)
     return rows
@@ -298,6 +316,7 @@ def register_onboarding_wizard_callbacks(app):
         State({"type": "tds-nature", "index": ALL}, "value"), State({"type": "tds-rate", "index": ALL}, "value"),
         State({"type": "tds-rate-no-pan", "index": ALL}, "value"), State({"type": "tds-single-bill", "index": ALL}, "value"),
         State({"type": "tds-agg-bill", "index": ALL}, "value"),
+        State("sw-tds-row-eff", "data"),
         State({"type": "sw-bf-amt", "acc_id": ALL}, "value"), State({"type": "sw-bf-remarks", "acc_id": ALL}, "value"),
         # saved filenames of the logo / login background / payment QR uploads (hidden inputs, keyed by field)
         State({"type": "form-field-hidden", "entity": "society", "field": ALL}, "value"),
@@ -1131,6 +1150,11 @@ def _register_xlsx_callbacks(app):
                 continue
             item = {"nature": rec.get("nature_of_income")}
             try:
+                item["effective_start_date"] = _row_date(rec.get("effective_start_date"))
+            except ValueError as exc:
+                errors.append(f"Row {n}: effective_start_date {exc}.")
+                continue
+            try:
                 for col, name, hi in (("rate", "rate", _D(100)), ("rate_no_pan", "rate_no_pan", _D(100)),
                                       ("single_bill_threshold", "single", None),
                                       ("annual_aggregate_threshold", "agg", None)):
@@ -1156,7 +1180,9 @@ def _register_xlsx_callbacks(app):
             more = f" (+{len(errors) - 25} more)" if len(errors) > 25 else ""
             return (_msg("Nothing was applied. " + " ".join(shown) + more, "danger"), None, True)
         pending = {"rows": {str(k): v for k, v in matched.items()}, "tan": tan, "effective_date": eff}
-        return (_msg(f"{len(matched)} row(s) matched ({blank} with no rate entered). Press Apply to form, then Next to save.",
+        own = sum(1 for v in matched.values() if v.get("effective_start_date"))
+        return (_msg(f"{len(matched)} row(s) matched ({blank} with no rate entered; {own} with their own effective date, "
+                     f"the rest use the header date). Press Apply to form, then Next to save.",
                      "success"), pending, False)
 
     # TDS apply -> write the grid inputs (does not save; Next saves) -----------------
@@ -1169,6 +1195,7 @@ def _register_xlsx_callbacks(app):
         Output("sw-society-tan", "value", allow_duplicate=True),
         Output("sw-tds-effective-date", "date", allow_duplicate=True),
         Output("onb-tds-apply", "disabled", allow_duplicate=True),
+        Output("sw-tds-row-eff", "data", allow_duplicate=True),
         Input("onb-tds-apply", "n_clicks"),
         State("onb-tds-pending", "data"),
         State({"type": "tds-section", "index": ALL}, "value"),
@@ -1177,7 +1204,7 @@ def _register_xlsx_callbacks(app):
     @require_session
     def tds_apply(n, pending, sections):
         if not n or not pending:
-            return [no_update] * 8
+            return [no_update] * 9
         cnt = len(sections or [])
         outs = {k: [no_update] * cnt for k in ("nature", "rate", "rate_no_pan", "single", "agg")}
         for idx, item in (pending.get("rows") or {}).items():
@@ -1189,8 +1216,10 @@ def _register_xlsx_callbacks(app):
             for k in ("rate", "rate_no_pan", "single", "agg"):
                 if item.get(k) is not None:
                     outs[k][i] = float(item[k])
+        row_eff = {idx: it["effective_start_date"] for idx, it in (pending.get("rows") or {}).items()
+                   if it.get("effective_start_date")}
         return (outs["nature"], outs["rate"], outs["rate_no_pan"], outs["single"], outs["agg"],
-                pending.get("tan") or no_update, pending.get("effective_date") or no_update, True)
+                pending.get("tan") or no_update, pending.get("effective_date") or no_update, True, row_eff)
 
 
     # TDS paper evidence -----------------------------------------------------------
@@ -1200,6 +1229,7 @@ def _register_xlsx_callbacks(app):
         Input("onb-tds-print", "n_clicks"),
         State("sw-society-tan", "value"),
         State("sw-tds-effective-date", "date"),
+        State("sw-tds-row-eff", "data"),
         State({"type":"tds-section","index":ALL}, "value"),
         State({"type":"tds-discriminator","index":ALL}, "value"),
         State({"type":"tds-rate","index":ALL}, "value"),
@@ -1209,7 +1239,7 @@ def _register_xlsx_callbacks(app):
         prevent_initial_call=True,
     )
     @require_session
-    def tds_print(n, tan, eff, secs, discs, rates, npans, singles, aggs):
+    def tds_print(n, tan, eff, row_eff, secs, discs, rates, npans, singles, aggs):
         if not n: return no_update, no_update
         s=_session()
         if not s or not s[0]: return no_update, no_update
@@ -1223,7 +1253,7 @@ def _register_xlsx_callbacks(app):
                          "" if i>=len(npans or []) or npans[i] in (None,"") else str(npans[i]),
                          "" if i>=len(singles or []) or singles[i] in (None,"") else str(singles[i]),
                          "" if i>=len(aggs or []) or aggs[i] in (None,"") else str(aggs[i]),
-                         eff or ""])
+                         (row_eff or {}).get(str(i)) or eff or ""])
         name,page=pe.printable_html("TDS Rates", soc.get("name") or f"Society {sid}", f"TAN {tan or '—'} | Effective {eff or '—'}",
                                     hdr, body, ["Prepared by","Chartered Accountant (sign)","Treasurer","Secretary"],
                                     ["Signed by CA; rates evidenced by signed scan (server SHA-256). Individual rate changes may use separate effective start dates in upload template."])

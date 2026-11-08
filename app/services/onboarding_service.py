@@ -594,6 +594,11 @@ def validate_step(step_key: str, draft: dict, society_id: int) -> list[str]:
                             raise ValueError
                     except (InvalidOperation, ValueError):
                         errors.append(f"TDS row {row.get('section')}: {fld} must be 0-100.")
+            if row.get("effective_start_date"):
+                try:
+                    date.fromisoformat(str(row["effective_start_date"])[:10])
+                except ValueError:
+                    errors.append(f"TDS row {row.get('section')}: effective start date must be YYYY-MM-DD.")
 
     elif step_key == "gst":
         if (draft.get("legal_regime") or {}).get("central_gst") is False:
@@ -793,6 +798,7 @@ def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
             "rate_no_pan": _num_or_none(row.get("rate_no_pan")),
             "single_bill_threshold": _num_or_none(row.get("single_bill_threshold", row.get("single_bill"))),
             "annual_aggregate_threshold": _num_or_none(row.get("annual_aggregate_threshold", row.get("annual_aggregate"))),
+            "effective_start_date": row.get("effective_start_date") or None,
         }
         if twin is not None:
             pair["it2025"] = twin
@@ -871,6 +877,7 @@ def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
         _res = (result or {}).get("result") or ""
         if _res != "OK":
             raise OnboardingError(_res or "Setup could not be saved — please try again.")
+        _apply_tds_row_dates(cur, society_id, _setup_params["tds_effective_date"], tds_rows)
 
 
 def save_annex_inputs(society_id: int, arrears_text: str, bank_agrees: bool, audited_hash: str | None, ca_review_ref: str | None) -> dict:
@@ -1083,6 +1090,37 @@ def get_evidence(society_id: int, purpose: str, acc_id: int | None = None) -> li
 
 
 # ── stage 3: setup draft submit (merged from setup_wizard.submit_setup_wizard) ──────────────────────────
+def _apply_tds_row_dates(cur, society_id: int, header_eff, pairs: list[dict]) -> None:
+    """fn_complete_society_setup writes every TDS row at ONE effective date (the header date). A row that carries its own
+    effective_start_date is moved to it here, on the SAME cursor/transaction, right after that call, so both commit or
+    both roll back. Only the 1961-Act row is moved; the 2025-Act twin keeps its fixed 1-Apr-2026 start.
+    Idempotent: a re-save re-creates the header-dated row, which is merged into the row-dated one and removed."""
+    head = date.fromisoformat(str(header_eff)[:10])
+    for p in pairs or []:
+        raw = p.get("effective_start_date")
+        if not raw:
+            continue
+        eff = date.fromisoformat(str(raw)[:10])
+        if eff == head:
+            continue
+        key = (society_id, p["section"], p.get("discriminator"))
+        find = ("SELECT id FROM tds_section_rates WHERE society_id=%s AND section=%s AND discriminator IS NOT DISTINCT FROM %s "
+                "AND act_version='IT1961' AND effective_from=%s")
+        cur.execute(find, key + (head,))
+        src = cur.fetchone()
+        if not src:
+            continue
+        cur.execute(find, key + (eff,))
+        target = cur.fetchone()
+        if target:
+            cur.execute("""UPDATE tds_section_rates t SET nature_of_income=s.nature_of_income, rate=s.rate, rate_no_pan=s.rate_no_pan,
+                                  single_bill_threshold=s.single_bill_threshold, annual_aggregate_threshold=s.annual_aggregate_threshold
+                             FROM tds_section_rates s WHERE t.id=%s AND s.id=%s""", (target["id"], src["id"]))
+            cur.execute("DELETE FROM tds_section_rates WHERE id=%s", (src["id"],))
+        else:
+            cur.execute("UPDATE tds_section_rates SET effective_from=%s WHERE id=%s", (eff, src["id"]))
+
+
 def submit_setup_draft(society_id: int, actor_id: int, data: dict) -> str:
     """Save the two-phase Setup Wizard draft: posts nothing to the ledger, stores onboarding_declarations,
     creates the society's signing keys + step-up password, and calls fn_complete_society_setup within one
@@ -1226,6 +1264,7 @@ def submit_setup_draft(society_id: int, actor_id: int, data: dict) -> str:
             "annual_aggregate_threshold": row.get("annual_aggregate_threshold")
             if row.get("annual_aggregate_threshold") is not None
             else _num_or_none(data.get("tds_agg_bills") or [], idx),
+            "effective_start_date": row.get("effective_start_date") or None,
         }
         twin = _it2025_twin(item[0], item[1])
         if twin is not None:
@@ -1368,6 +1407,7 @@ def submit_setup_draft(society_id: int, actor_id: int, data: dict) -> str:
             _res = (result or {}).get("result") or ""
             if _res != "OK":
                 raise OnboardingError(_res or "Setup could not be saved — please try again.")
+            _apply_tds_row_dates(cur, society_id, _setup_params["tds_effective_date"], tds_pairs)
     except OnboardingError:
         raise
     except Exception as e:

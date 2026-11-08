@@ -58,7 +58,7 @@ def build_tds_template(rows: list[dict]) -> bytes:
     # Instructions
     wi = wb.create_sheet("Instructions")
     wi.append(["Notes"])
-    wi.append(["Rates are pending the CA's confirmation; leave a rate blank if TDS does not apply to that row. Signed by CA; signed scan should be uploaded in EstateHub (server SHA-256). effective_start_date supports individual rate changes."])
+    wi.append(["Rates are pending the CA's confirmation; leave a rate blank if TDS does not apply to that row. Signed by CA; signed scan should be uploaded in EstateHub (server SHA-256). effective_start_date (YYYY-MM-DD) gives one row its own effective date; leave it blank to use the Header effective_date."])
     wi.append(["Tax Year 2026-27 onward: file under the Income-tax Act, 2025 section numbers where applicable."])
     wi.append(["Only .xlsx is accepted. Numbers must be >= 0."])
 
