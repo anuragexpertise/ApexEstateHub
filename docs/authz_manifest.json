@@ -1,6 +1,4 @@
 {
-  "version": 1,
-  "unclassified_baseline": 126,
   "endpoints": {
     "callback:account_callbacks.py::handle_change_password": {
       "classification": "unclassified"
@@ -46,10 +44,10 @@
       "classification": "unclassified"
     },
     "callback:assign_to_callbacks.py::submit_assignments": {
-      "classification": "action",
       "actions": [
         "concern.assign"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:assign_to_callbacks.py::toggle_assign_view": {
       "classification": "exempt",
@@ -99,6 +97,15 @@
     "callback:bank_reconcile_callbacks.py::process_bank_statement_upload": {
       "classification": "unclassified"
     },
+    "callback:bulk_enroll_callbacks.py::bulk_register_print": {
+      "classification": "legacy-gated"
+    },
+    "callback:bulk_enroll_callbacks.py::bulk_register_scan": {
+      "classification": "legacy-gated"
+    },
+    "callback:bulk_enroll_callbacks.py::bulk_register_snapshot": {
+      "classification": "legacy-gated"
+    },
     "callback:bulk_enroll_callbacks.py::close_bulk_enroll_modal": {
       "classification": "exempt",
       "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
@@ -111,10 +118,10 @@
       "reason": "Returns static registry/option metadata only (no tenant data, no DB access); reviewed RWA3 PR5."
     },
     "callback:bulk_enroll_callbacks.py::process_bulk_enroll_upload": {
-      "classification": "action",
       "actions": [
         "enrollment.commit"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:bulk_enroll_callbacks.py::validate_bulk_enroll_file": {
       "classification": "exempt",
@@ -145,34 +152,34 @@
       "reason": "Pure UI state (modal/visibility/selection reset); reads and writes no server data (reviewed RWA3 PR5)."
     },
     "callback:channel_callbacks.py::toggle_channel_subscription": {
-      "classification": "action",
       "actions": [
         "channel.subscribe"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:committee_callbacks.py::mc_appoint": {
-      "classification": "action",
       "actions": [
         "roles.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:committee_callbacks.py::mc_end_office": {
-      "classification": "action",
       "actions": [
         "roles.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:committee_callbacks.py::mc_pick_flat": {
-      "classification": "action",
       "actions": [
         "roles.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:committee_callbacks.py::mc_pick_user": {
-      "classification": "action",
       "actions": [
         "roles.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:concern_bid_callbacks.py::close_bid_modal": {
       "classification": "exempt",
@@ -192,10 +199,10 @@
       "classification": "unclassified"
     },
     "callback:customize_callbacks.py::integrate_kpi_sql": {
-      "classification": "action",
       "actions": [
         "platform.sql.inspect"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:customize_callbacks.py::layout_tab_options": {
       "classification": "exempt",
@@ -226,10 +233,10 @@
       "classification": "unclassified"
     },
     "callback:customize_kpi_callbacks.py::test_kpi_sql": {
-      "classification": "action",
       "actions": [
         "platform.sql.inspect"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:customize_kpi_callbacks.py::update_kpi_details": {
       "classification": "unclassified"
@@ -242,10 +249,10 @@
       "reason": "Returns static registry/option metadata only (no tenant data, no DB access); reviewed RWA3 PR5."
     },
     "callback:debug_callbacks.py::run_kpi_audit": {
-      "classification": "action",
       "actions": [
         "platform.sql.inspect"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:dispute_callbacks.py::_decide": {
       "classification": "legacy-gated"
@@ -275,26 +282,26 @@
       "classification": "unclassified"
     },
     "callback:drilldown_callbacks.py::handle_form_submit": {
-      "classification": "action",
       "actions": [
         "concern.create",
         "event.ticket.purchase"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:drilldown_callbacks.py::handle_image_upload": {
       "classification": "unclassified"
     },
     "callback:drilldown_callbacks.py::handle_poll_vote": {
-      "classification": "action",
       "actions": [
         "poll.vote"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:drilldown_callbacks.py::lock_financial_year": {
-      "classification": "action",
       "actions": [
         "finance.period.close"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:drilldown_callbacks.py::mark_rcm_gstr_filed": {
       "classification": "unclassified"
@@ -303,10 +310,10 @@
       "classification": "unclassified"
     },
     "callback:drilldown_callbacks.py::route_drilldown": {
-      "classification": "action",
       "actions": [
         "channel.subscribe"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:drilldown_callbacks.py::select_pass_type": {
       "classification": "unclassified"
@@ -332,22 +339,22 @@
       "classification": "unclassified"
     },
     "callback:drillin_callbacks.py::open_pay_dues_bill_modal": {
-      "classification": "action",
       "actions": [
         "finance.self.view"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:drillin_callbacks.py::populate_pay_dues_bill_list": {
-      "classification": "action",
       "actions": [
         "finance.self.view"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:drillin_callbacks.py::select_pay_dues_bill": {
-      "classification": "action",
       "actions": [
         "finance.self.view"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:drillin_callbacks.py::validate_pay_dues_bill_group": {
       "classification": "exempt",
@@ -375,10 +382,10 @@
       "classification": "unclassified"
     },
     "callback:form_inspector_callbacks.py::run_form_audit": {
-      "classification": "action",
       "actions": [
         "platform.sql.inspect"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:fund_management_callbacks.py::confirm_or_cancel_appropriation": {
       "classification": "unclassified"
@@ -480,10 +487,10 @@
       "reason": "Echoes the caller's own submitted text back as a file download; reads no server data; reviewed RWA3 PR5."
     },
     "callback:list_inspector_callbacks.py::load_list_sql": {
-      "classification": "action",
       "actions": [
         "platform.sql.inspect"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:list_inspector_callbacks.py::populate_kpi_options": {
       "classification": "exempt",
@@ -497,16 +504,16 @@
       "classification": "unclassified"
     },
     "callback:list_inspector_callbacks.py::run_list_audit": {
-      "classification": "action",
       "actions": [
         "platform.sql.inspect"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:list_inspector_callbacks.py::run_list_sql": {
-      "classification": "action",
       "actions": [
         "platform.sql.inspect"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:login_callbacks.py::close_forgot_modal": {
       "classification": "exempt",
@@ -547,28 +554,28 @@
       "classification": "legacy-gated"
     },
     "callback:master_rules_callbacks.py::prefill_catalog": {
-      "classification": "action",
       "actions": [
         "platform.rules.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:master_rules_callbacks.py::save_catalog": {
-      "classification": "action",
       "actions": [
         "platform.rules.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:master_rules_callbacks.py::save_rule": {
-      "classification": "action",
       "actions": [
         "platform.rules.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:master_rules_callbacks.py::show_hint": {
-      "classification": "action",
       "actions": [
         "platform.rules.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:master_tests_callbacks.py::run_all_run_one": {
       "classification": "legacy-gated"
@@ -601,6 +608,18 @@
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_continue_setup": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_election_evidence": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_election_import": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_election_print": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_election_template": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_enrol_done": {
@@ -672,7 +691,16 @@
     "callback:onboarding_callbacks.py::onb_sync_step_stores": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_wizard_callbacks.py::apt_print": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::apt_scan": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_wizard_callbacks.py::bf_apply": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::bf_print": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::bf_reconciliation_render": {
@@ -690,6 +718,12 @@
     "callback:onboarding_wizard_callbacks.py::bf_recv_sync": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_wizard_callbacks.py::bf_scan": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::bf_statement_template": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_wizard_callbacks.py::bf_template": {
       "classification": "legacy-gated"
     },
@@ -703,7 +737,19 @@
     "callback:onboarding_wizard_callbacks.py::legal_regime_refresh": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_wizard_callbacks.py::recv_print": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::recv_scan": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_wizard_callbacks.py::tds_apply": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::tds_print": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::tds_scan": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::tds_template": {
@@ -733,11 +779,23 @@
     "callback:onboarding_wizard_callbacks.py::wizard_save_policy": {
       "classification": "legacy-gated"
     },
+    "callback:paper_sign_callbacks.py::adopt_import": {
+      "classification": "legacy-gated"
+    },
+    "callback:paper_sign_callbacks.py::adopt_print": {
+      "classification": "legacy-gated"
+    },
+    "callback:paper_sign_callbacks.py::adopt_scan": {
+      "classification": "legacy-gated"
+    },
+    "callback:paper_sign_callbacks.py::adopt_template": {
+      "classification": "legacy-gated"
+    },
     "callback:poll_callbacks.py::save_poll": {
-      "classification": "action",
       "actions": [
         "poll.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:poll_callbacks.py::toggle_extra_choices": {
       "classification": "exempt",
@@ -950,44 +1008,44 @@
       "classification": "legacy-gated"
     },
     "callback:tax_rate_callbacks.py::tr_add_tds": {
-      "classification": "action",
       "actions": [
         "finance.taxrates.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:tax_rate_callbacks.py::tr_confirm": {
-      "classification": "action",
       "actions": [
         "finance.taxrates.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:tax_rate_callbacks.py::tr_save_gst": {
-      "classification": "action",
       "actions": [
         "finance.taxrates.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:tax_rate_callbacks.py::tr_save_tds": {
-      "classification": "action",
       "actions": [
         "finance.taxrates.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:team_callbacks.py::tm_create": {
-      "classification": "action",
       "actions": [
         "roles.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:team_callbacks.py::tm_generate": {
       "classification": "exempt",
       "reason": "Session-guarded (@require_session). Pure UI helper: shows the role's description / fills a random temporary password into the form; reads and writes no server data."
     },
     "callback:team_callbacks.py::tm_manage": {
-      "classification": "action",
       "actions": [
         "roles.manage"
-      ]
+      ],
+      "classification": "action"
     },
     "callback:team_callbacks.py::tm_role_hint": {
       "classification": "exempt",
@@ -1116,5 +1174,7 @@
     "route:web.py::index": {
       "classification": "unclassified"
     }
-  }
+  },
+  "unclassified_baseline": 126,
+  "version": 1
 }

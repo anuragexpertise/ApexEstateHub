@@ -8,7 +8,7 @@ Settings → Society governance → Meetings & Resolutions.
 """
 from __future__ import annotations
 
-from dash import html
+from dash import dcc, html
 import dash_bootstrap_components as dbc
 
 from app.services import regime_rules_admin as rra
@@ -82,7 +82,35 @@ def render_adoption_panel(society_id: int | None) -> html.Div:
         dbc.Table([html.Thead(html.Tr([html.Th(h, style={"fontSize": "11px"}) for h in ("Setting", "Choice", "Status")])),
                    html.Tbody(fund_pol_rows)], bordered=True, size="sm") if fund_pol_rows else html.Div(),
     ])
+    try:                                # status of the signed scan on file (stored / stale / none)
+        from app.dash_apps.callbacks.paper_sign_callbacks import _status as _scan_status
+        initial_scan_status = _scan_status(society_id)
+    except Exception:                                              # noqa: BLE001
+        initial_scan_status = None
+    paper_card = dbc.Card(dbc.CardBody([
+        html.H6([html.I(className="fas fa-file-signature me-2"), "Adoption of Bye-laws 1-58: paper signing"], className="mb-1"),
+        html.Small("Fill Society_bye_laws.xlsx (download the template, which carries today's choices), upload it to fill the "
+                   "choices below, print the signed list as a PDF, have it signed, then upload the signed scan. The scan's "
+                   "SHA-256 is stored as evidence for the General Body resolution.", className="text-muted d-block mb-2"),
+        dbc.Row([
+            dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Society_bye_laws.xlsx"], id="adopt-bl-tpl",
+                               size="sm", outline=True, color="secondary", n_clicks=0), width="auto"),
+            dbc.Col(dcc.Upload(id="adopt-bl-xlsx", children=dbc.Button([html.I(className="fas fa-file-excel me-2"), "Upload filled xlsx"],
+                                                                       size="sm", outline=True, color="secondary", n_clicks=0),
+                               multiple=False, accept=".xlsx"), width="auto"),
+            dbc.Col(dbc.Button([html.I(className="fas fa-print me-2"), "Print signing PDF"], id="adopt-bl-print",
+                               size="sm", outline=True, color="primary", n_clicks=0), width="auto"),
+            dbc.Col(dcc.Upload(id="adopt-bl-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed scan"],
+                                                                       size="sm", outline=True, color="secondary", n_clicks=0),
+                               multiple=False, accept=".pdf,.png,.jpg,.jpeg"), width="auto"),
+        ], className="g-2"),
+        dcc.Download(id="adopt-bl-tpl-dl"),
+        dcc.Download(id="adopt-bl-print-dl"),
+        html.Div(id="adopt-bl-import-status", className="mt-2", style={"fontSize": "12px"}),
+        html.Div(initial_scan_status, id="adopt-bl-evidence-status", className="mt-2", style={"fontSize": "12px"}),
+    ]), className="mb-3")
     return html.Div([
+        paper_card,
         dbc.Alert([html.I(className="fas fa-scale-balanced me-2"),
                    "Record which Model Bye-Laws 2011 clauses your Association is adopting. These are ",
                    html.Strong("provisional"), " — nothing changes in how EstateHub treats dues, voting, NOC or filings "

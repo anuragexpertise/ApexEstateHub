@@ -47,11 +47,13 @@ opencv-python-headless==5.0.0.93   # headless = no GUI deps, works on servers
 requests==2.34.2
 email-validator==2.3.0
 numpy==2.4.6   # required by opencv
+reportlab==5.0.1   # server-side PDF for the paper-signing workflow (paper_evidence.make_document)
 
 # ── Production ────────────────────────────────────────────────────────────────
 gunicorn==26.2.0
 
 # ── Dev / Test ────────────────────────────────────────────────────────────────
 pytest==9.1.1
+pypdf==5.9.0   # reads back the generated signing PDFs in test/test_paper_sign.py
 sqlparse==0.6.0
 Markdown==3.11

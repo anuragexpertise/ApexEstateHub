@@ -805,6 +805,19 @@ def register_onboarding_callbacks(app):
         return ob.db._execute("SELECT id AS acc_id FROM accounts WHERE society_id=%s AND has_bf=TRUE ORDER BY id", (sid,), fetch_all=True) or []
 
 
+    def _election_parts(sid):
+        """(headers, rows, signers, meta) of the Election Results document - shared by the print and the stale check."""
+        seated=ob.seated_officers(sid)
+        rows=[]
+        for off in ob.CORE_OFFICES:
+            v=seated.get(off) or {}
+            rows.append([ob.OFFICE_LABEL[off], v.get('holder_name') or '', v.get('flat_number') or '', v.get('email') or '', v.get('phone') or '', v.get('resolution_ref') or ''])
+        g=ob.db._execute("SELECT grievance_officer_name,grievance_officer_email,grievance_officer_phone FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
+        rows.append(["Grievance officer", g.get('grievance_officer_name') or '', '', g.get('grievance_officer_email') or '', g.get('grievance_officer_phone') or '', ''])
+        return (["Office","Name","Flat","Email","Mobile","Resolution ref"], rows,
+                ["Returning Officer / Chair","Secretary (minutes)","President","Observer/Auditor"],
+                ["Use with Election Results.xlsx workflow. Upload signed & scanned minutes/results; server computes SHA-256."])
+
     @app.callback(
         Output(f"{P}-election-status", "children"),
         Input(f"{P}-election-scan", "contents"),
@@ -822,11 +835,16 @@ def register_onboarding_callbacks(app):
         if ctx.triggered_id==f"{P}-election-scan" and contents:
             try:
                 ev=pe.store_signed_scan(sid,"election_results",uid,filename,contents,{"kind":"Election Results.xlsx scan"})
-                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), f"Election Results signed scan stored. SHA-256: {ev['sha256']}"], color="success", className="py-1")
+                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), "Election Results: " + pe.stored_message(ev)], color="success", className="py-1")
             except Exception as exc:
                 return dbc.Alert(str(exc), color="danger", className="py-1")
-        st=pe.evidence_status(sid,"election_results")
-        return dbc.Alert([html.I(className="fas fa-check-circle me-2"), f"Stored: {st.get('filename') or ''} SHA-256 {str(st.get('sha256') or '')[:16]}…"], color="success", className="py-1") if st.get("evidenced") else html.Div("No signed Election Results scan uploaded.", className="text-muted small")
+        hdr,rows,_sg,meta=_election_parts(sid)
+        cur=pe.snapshot_hash("election_results","Election Results / Founding Committee Seating",hdr,rows,meta)
+        st=pe.evidence_status(sid,"election_results",current_snapshot=cur)
+        colour,text=pe.status_line(st)
+        if colour=="muted": return html.Div("No signed Election Results scan uploaded.", className="text-muted small")
+        icon={"success":"fa-check-circle","warning":"fa-exclamation-triangle","info":"fa-info-circle"}[colour]
+        return dbc.Alert([html.I(className=f"fas {icon} me-2"), text], color=colour, className="py-1")
 
     @app.callback(
         Output(f"{P}-election-dl","data"),
@@ -836,22 +854,14 @@ def register_onboarding_callbacks(app):
     @require_session
     def onb_election_print(n):
         if not n: return no_update
-        s=_session(); 
+        s=_session()
         if not s or not s[0]: return no_update
         from app.services import paper_evidence as pe
         sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
-        seated=ob.seated_officers(sid)
-        rows=[]
-        for off in ob.CORE_OFFICES:
-            v=seated.get(off) or {}
-            rows.append([ob.OFFICE_LABEL[off], v.get('holder_name') or '', v.get('flat_number') or '', v.get('email') or '', v.get('phone') or '', v.get('resolution_ref') or ''])
-        g=ob.db._execute("SELECT grievance_officer_name,grievance_officer_email,grievance_officer_phone FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
-        rows.append(["Grievance officer", g.get('grievance_officer_name') or '', '', g.get('grievance_officer_email') or '', g.get('grievance_officer_phone') or '', ''])
-        name,page=pe.printable_html("Election Results / Founding Committee Seating", soc.get('name') or f"Society {sid}",
-                                    "President / Secretary / Treasurer / Grievance officer", ["Office","Name","Flat","Email","Mobile","Resolution ref"],
-                                    rows, ["Returning Officer / Chair","Secretary (minutes)","President","Observer/Auditor"],
-                                    ["Use with Election Results.xlsx workflow. Upload signed & scanned minutes/results; server computes SHA-256."])
-        return dcc.send_string(page,name,type="text/html")
+        hdr,rows,signers,meta=_election_parts(sid)
+        doc=pe.make_document(sid,"election_results",s[1],"Election Results / Founding Committee Seating", soc.get('name') or f"Society {sid}",
+                             "President / Secretary / Treasurer / Grievance officer", hdr, rows, signers, meta)
+        return dcc.send_bytes(doc["data"],doc["filename"])
 
     # ── Election Results.xlsx: template download + validated prefill of the seating forms ─────────────────────────
     @app.callback(Output(f"{P}-election-tpl-dl", "data"), Input(f"{P}-election-tpl", "n_clicks"), prevent_initial_call=True)
