@@ -81,8 +81,9 @@ def _office_card(office: str, seated: dict | None, society_id: int | None = None
                                                id=fid("sig"), accept=".png,.jpg,.jpeg,.webp", multiple=False,
                                                children=html.Span("Replace signature", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"}),
                                                style={"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px"})), md=4),
-                                           dbc.Col(dbc.Button("Save", id=fid("save"), color="primary", size="sm", n_clicks=0, style={"fontSize": "12px"}), md=2),
-                                           dbc.Col(html.Div(id=fid("msg"), style={"fontSize": "12px"}), md=2),
+                                           dbc.Col(html.Div(id=fid("sig-preview"), style={"fontSize": "11.5px", "color": "#667", "marginTop": "6px"}), md=2),
+                                           dbc.Col(dbc.Button("Save", id=fid("save"), color="primary", size="sm", n_clicks=0, style={"fontSize": "12px"}), md=1),
+                                           dbc.Col(html.Div(id=fid("msg"), style={"fontSize": "12px"}), md=1),
                                        ], className="g-2")], style={"marginTop": "8px"})],
                         style=_CARD)
 
