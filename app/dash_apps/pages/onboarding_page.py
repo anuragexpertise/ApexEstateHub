@@ -571,6 +571,53 @@ def _enrollment_counts(society_id: int) -> dict:
     return out
 
 
+def declaration_panel(society_id: int, role: str | None):
+    """Stage 5, step 1: the builder's Declaration of undivided interest. General Body votes are weighted by these shares,
+    so Enrollment cannot be completed until they are complete, total 100% and the signed Declaration is on file."""
+    from app.services import undivided_declaration as ud
+    st = ud.status(society_id)
+    ev = st["evidence"]
+    ok = st["balanced"] and bool(ev)
+    is_admin = role == "admin"
+    badges = [dbc.Badge(f"Flats with a share: {st['flats'] - st['missing']} of {st['flats']}", color="light", text_color="dark", className="me-2"),
+              dbc.Badge(f"Total: {st['total_pct'].normalize():f}%", color="success" if st["balanced"] else "danger", className="me-2"),
+              dbc.Badge("Declaration PDF on file" if ev else "Declaration PDF not on file", color="success" if ev else "warning",
+                        text_color=None if ev else "dark")]
+    kids = [html.Div([html.Strong("Builder's Declaration of undivided interest "),
+                      dbc.Badge("done" if ok else "needed", color="success" if ok else "warning", text_color=None if ok else "dark")]),
+            html.Div("Votes at a General Body meeting are weighted by each flat's undivided interest, so every flat needs its "
+                     "share from the Declaration the builder filed, and the shares must total 100%. Download the workbook, fill in "
+                     "Flat No, Area and Undivided-Interest for every flat (also flats not yet enrolled), then upload it with the "
+                     "builder's signed Declaration as a PDF. Nothing is saved unless every row is valid.", style=_MUTED),
+            html.Div(badges, className="my-2")]
+    if ev:
+        m = ev.get("meta") or {}
+        kids.append(html.Div(f"{ev['filename']}  SHA-256 {str(ev['sha256'])[:16]}…  uploaded {ev['uploaded_at']:%d %b %Y}  "
+                             f"({m.get('flats', '?')} flats, {m.get('created', 0)} created, {m.get('updated', 0)} updated)", style=_MUTED))
+    if st["unenrolled"]:
+        kids.append(html.Div(f"{st['unenrolled']} flat(s) have no owner login yet. On the Enrolled tab, Bulk Enroll → Apartments "
+                             "gives a template pre-filled with them; upload it with email, password and the owners' details.", style=_MUTED))
+    if is_admin:
+        up_style = {"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px", "display": "inline-block", "marginRight": "8px"}
+        kids += [
+            dbc.Row([
+                dbc.Col(dbc.Button("Download the workbook", id=f"{P}-decl-template", color="secondary", outline=True, size="sm", n_clicks=0), md=3),
+                dbc.Col(dcc.Upload(id=f"{P}-decl-xlsx", accept=".xlsx", multiple=False, style=up_style,
+                                   children=html.Span("Choose the filled workbook (.xlsx)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
+                dbc.Col(dcc.Upload(id=f"{P}-decl-pdf", accept=".pdf", multiple=False, style=up_style,
+                                   children=html.Span("Choose the signed Declaration (.pdf)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=3),
+                dbc.Col(dbc.Button("Apply Declaration", id=f"{P}-decl-apply", color="primary", size="sm", n_clicks=0), md=2),
+            ], className="g-2 mt-1 align-items-center"),
+            html.Div(id=f"{P}-decl-files", style=_MUTED),
+            dcc.Download(id=f"{P}-decl-download"),
+            html.Div([dbc.Checkbox(id=f"{P}-decl-waive", label="This building has no builder's Declaration", value=False, className="mb-1"),
+                      dbc.Input(id=f"{P}-decl-waive-reason", placeholder=f"Reason ({ud.WAIVER_MIN_CHARS} characters or more); shares then stay as derived from area",
+                                size="sm", style={"maxWidth": "520px"})],
+                     style={"marginTop": "8px", "display": "none" if ev else "block"}),
+        ]
+    return html.Div(kids, style=_CARD)
+
+
 def _stage_enrollment(society_id: int, role: str | None):
     counts = _enrollment_counts(society_id)
     ob.relink_pending_for_existing_flats(society_id)
@@ -580,7 +627,8 @@ def _stage_enrollment(society_id: int, role: str | None):
     kids = [html.H6("Stage 5: Enrollment"),
             html.Div("Enrol owners, vendors and guards from the Enrolled tab (bulk enrolment is there too). Their portals stay closed until you mark "
                      "enrollment complete. Each person accepts the privacy notice at first sign-in.", style=_MUTED),
-            html.Div([dbc.Badge(f"{k}: {v}", color="light", text_color="dark", className="me-2") for k, v in counts.items()], className="my-2")]
+            html.Div([dbc.Badge(f"{k}: {v}", color="light", text_color="dark", className="me-2") for k, v in counts.items()], className="my-2"),
+            declaration_panel(society_id, role)]
     if pend:
         total = sum((r["amount"] for r in pend), 0)
         kids.append(dbc.Alert([html.Strong(f"Opening receivables awaiting enrolment: {len(pend)} flat(s), ₹{total}. "),
