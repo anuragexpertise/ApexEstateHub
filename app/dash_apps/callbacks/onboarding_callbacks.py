@@ -724,22 +724,80 @@ def register_onboarding_callbacks(app):
     )
 
     # ── items 14/15: Stage 5-7 buttons ───────────────────────────────────────
+    # ── stage 5: the builder's Declaration of undivided interest ─────────────
+    @app.callback(
+        Output(f"{P}-decl-download", "data"),
+        Input(f"{P}-decl-template", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_decl_template(n):
+        s = _session()
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update
+        from app.services import undivided_declaration as ud
+        return dcc.send_bytes(ud.template_bytes(s[0]), ud.TEMPLATE_FILENAME)
+
+    @app.callback(
+        Output(f"{P}-decl-files", "children"),
+        Input(f"{P}-decl-xlsx", "filename"), Input(f"{P}-decl-pdf", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_decl_files(xlsx_name, pdf_name):
+        return f"Workbook: {xlsx_name or 'not chosen'}    Signed Declaration: {pdf_name or 'not chosen'}"
+
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input(f"{P}-decl-apply", "n_clicks"),
+        State(f"{P}-decl-xlsx", "contents"), State(f"{P}-decl-xlsx", "filename"),
+        State(f"{P}-decl-pdf", "contents"), State(f"{P}-decl-pdf", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_decl_apply(n, xlsx_c, xlsx_n, pdf_c, pdf_n):
+        s = _session()
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        # Action-level authorization on top of the admin check, as for the bulk enrolment upload (tenant-scoped).
+        from app.security.authorization import Cap
+        from app.security.service_guard import blocks, check
+        if blocks(check(Cap.ENROLLMENT_COMMIT, "enrollment_batch", target_society_id=sid)):
+            return no_update, _alert("You don't have permission to do that.", False), no_update
+        xlsx, pdf = _decode(xlsx_c), _decode(pdf_c)
+        if not xlsx or not pdf:
+            return no_update, _alert("Choose both the filled workbook (.xlsx) and the builder's signed Declaration (.pdf).", False), no_update
+        from app.services import undivided_declaration as ud
+        try:
+            msg = ud.apply(sid, uid, xlsx_n or "", xlsx, pdf_n or "", pdf)
+        except ob.OnboardingError as exc:
+            return no_update, _alert(str(exc), False), no_update
+        except Exception:                                                  # noqa: BLE001
+            log.exception("applying the Declaration failed for society %s", sid)
+            return no_update, _alert("The Declaration could not be saved. Nothing was changed; try again.", False), no_update
+        body, mk = _body(sid, uid, role)
+        return body, _alert(msg), mk
+
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
         Input(f"{P}-enrol-done", "n_clicks"),
         State(f"{P}-enrol-later", "value"), State(f"{P}-enrol-later-reason", "value"),
+        State(f"{P}-decl-waive", "value"), State(f"{P}-decl-waive-reason", "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_enrol_done(n, later, reason):
+    def onb_enrol_done(n, later, reason, waive, waive_reason):
         s = _session()
         if not n or not s or s[2] != "admin" or not s[0]:
             return no_update, no_update, no_update
         sid, uid, role = s
         try:
-            msg = ob.mark_enrollment_complete(sid, uid, reason if later else None)
+            msg = ob.mark_enrollment_complete(sid, uid, reason if later else None, waive_reason if waive else None)
         except ob.OnboardingError as exc:
             return no_update, _alert(str(exc), False), no_update
         body, mk = _body(sid, uid, role)

@@ -610,6 +610,19 @@
     "callback:onboarding_callbacks.py::onb_continue_setup": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_callbacks.py::onb_decl_apply": {
+      "classification": "action",
+      "actions": [
+        "enrollment.commit"
+      ]
+    },
+    "callback:onboarding_callbacks.py::onb_decl_files": {
+      "classification": "exempt",
+      "reason": "Session-guarded UI echo of the two chosen file names; reads and writes no server data."
+    },
+    "callback:onboarding_callbacks.py::onb_decl_template": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_callbacks.py::onb_election_evidence": {
       "classification": "legacy-gated"
     },

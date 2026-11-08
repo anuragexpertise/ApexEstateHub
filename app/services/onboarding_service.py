@@ -2327,25 +2327,30 @@ def relink_pending_for_existing_flats(society_id: int) -> int:
     return linked
 
 
-def enrollment_blockers(society_id: int) -> list[str]:
-    """Item 15 completion rule (b): no opening receivable may still be waiting for its flat."""
+def enrollment_blockers(society_id: int, shares_waiver_reason: str | None = None) -> list[str]:
+    """Item 15 completion rule (b): no opening receivable may still be waiting for its flat. Rule (c): every flat has an
+    undivided-interest share, the shares total 100% and the builder's Declaration is on file (or a reason is given that
+    the building has none), because General Body votes are weighted by those shares."""
     relink_pending_for_existing_flats(society_id)
     n = _row("SELECT COUNT(*) AS n, COALESCE(SUM(amount),0) AS amt FROM opening_receivables_pending "
              "WHERE society_id=%s AND status='pending_link'", (society_id,)) or {}
     out = []
     if int(n.get("n") or 0):
         out.append(f"{n['n']} flat(s) with opening receivables (₹{n['amt']}) are not enrolled yet.")
+    from app.services import undivided_declaration as ud
+    out += ud.blockers(society_id, shares_waiver_reason)
     return out
 
 
-def mark_enrollment_complete(society_id: int, actor_id: int, enrol_later_reason: str | None = None) -> str:
+def mark_enrollment_complete(society_id: int, actor_id: int, enrol_later_reason: str | None = None,
+                             no_declaration_reason: str | None = None) -> str:
     """Stage 5 -> 6. (a) another apartment than the three office-bearers' flats has a login, or the admin gives a
     reason >= 10 chars (audited); (b) no pending_link receivables. Opens the apartment/vendor/security portals."""
     if society_phase(society_id) != "enrollment":
         raise OnboardingError("Enrollment is not the current stage.")
-    blockers = enrollment_blockers(society_id)
+    blockers = enrollment_blockers(society_id, no_declaration_reason)
     if blockers:
-        raise OnboardingError(" ".join(blockers) + " Enrol those flats from the Enrolled tab (bulk enrolment is there too) "
+        raise OnboardingError(" ".join(blockers) + " Fix these (flats on the Enrolled tab, the Declaration below) "
                               "before marking enrollment complete.")
     others = _row("""SELECT COUNT(*) AS n FROM users u
                       WHERE u.society_id=%s AND u.role='apartment'
@@ -2355,7 +2360,11 @@ def mark_enrollment_complete(society_id: int, actor_id: int, enrol_later_reason:
     if not int(others.get("n") or 0) and len(reason) < 10:
         raise OnboardingError("Enrol at least one more apartment, or tick “I will enrol the rest later” with a reason of 10 characters or more.")
     db._execute("UPDATE societies SET onboarding_phase='adoption' WHERE id=%s AND onboarding_phase='enrollment'", (society_id,))
-    _audit(society_id, actor_id, "ENROLLMENT_COMPLETED", "society", society_id, {"enrol_later_reason": reason or None})
+    from app.services import undivided_declaration as ud
+    waived = (not ud.latest_evidence(society_id)) and len((no_declaration_reason or "").strip()) >= ud.WAIVER_MIN_CHARS
+    _audit(society_id, actor_id, "ENROLLMENT_COMPLETED", "society", society_id,
+           {"enrol_later_reason": reason or None,
+            "no_declaration_reason": (no_declaration_reason or "").strip() if waived else None})
     return "Enrollment marked complete. The apartment, vendor and security portals are now open."
 
 

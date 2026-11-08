@@ -80,7 +80,9 @@ _BULK_TEMPLATES: dict[str, dict] = {
         "notes": (
             "email and password are required to create the owner's login "
             "account, which is needed for the gate-pass QR code and the "
-            "owner portal."
+            "owner portal. Flats already created from the builder's Declaration "
+            "(Stage 5) are filled in rather than duplicated: the template comes "
+            "pre-filled with them, and the Declaration's area and share are kept."
         ),
     },
     "vendors": {
@@ -243,6 +245,8 @@ def _render_results(results: dict, filename: str) -> html.Div:
             ),
             style={"maxHeight": "320px", "overflowY": "auto"},
         ))
+    for w in results.get("warnings", [])[:20]:
+        children.append(html.Div(w, style={"color": "#a66b00", "fontSize": "12px", "marginTop": "4px"}))
     if not children:
         children.append(html.Div("No rows processed.",
                                   style={"color": "#7d8ea3"}))
@@ -311,6 +315,19 @@ def _check_required(row: dict, required_cols: list[str]) -> str | None:
     return f"Missing required column(s): {', '.join(missing)}" if missing else None
 
 
+def _find_flat(sid: int, flat: str) -> dict | None:
+    """The society's flat matching this number (ignoring case, spaces and hyphens), with whether it already has an
+    owner login. Flats created from the builder's Declaration exist without a login until this upload fills them."""
+    import re
+    key = re.sub(r"[\s\-]", "", (flat or "").strip().lower())
+    return db._execute(
+        "SELECT a.id, a.flat_number, a.apartment_size, "
+        "       EXISTS (SELECT 1 FROM users u WHERE u.society_id=a.society_id AND u.role='apartment' AND u.linked_id=a.id) AS has_login "
+        "  FROM apartments a WHERE a.society_id=%s AND a.active "
+        "   AND lower(regexp_replace(a.flat_number, '[[:space:]-]', '', 'g')) = %s",
+        (sid, key), fetch_one=True)
+
+
 def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> dict:
     """
     For each Excel row:
@@ -331,11 +348,18 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
     success  = 0
     failed: list[tuple] = []
     skipped: list[tuple] = []
+    warnings: list[str] = []
 
     # A3: enforce the same plan apartment cap as single-add. Rows beyond the
     # remaining slots are reported as failed rather than silently inserted.
     from app.services.plan_limits import remaining_apartment_slots
     slots_left, _plan, _limit = remaining_apartment_slots(sid)
+
+    # While Enrollment is open and the builder's Declaration has set the shares, the Declaration IS the list of flats:
+    # a flat that is not in it would have no share and break the 100% total, so it is refused here.
+    _soc = db._execute("SELECT undivided_interest_basis AS basis, onboarding_phase AS phase FROM societies WHERE id=%s",
+                       (sid,), fetch_one=True) or {}
+    _declared_only = _soc.get("basis") == "declaration" and _soc.get("phase") == "enrollment"
 
     for i, row in enumerate(rows, start=2):   # row 1 = header
         err = _check_required(row, required)
@@ -352,13 +376,21 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
             failed.append((i, "This email is already used by another account", _em))
             continue
 
-        if slots_left <= 0:
-            failed.append((i, f"Society plan '{_plan}' limit reached ({_limit} apartments)"))
-            continue
-
         flat     = row["flat_number"].strip()
         email    = row["email"].strip().lower()
         password = row["password"].strip()
+
+        _have = _find_flat(sid, flat)
+        if _have and _have["has_login"]:
+            failed.append((i, f"Flat {_have['flat_number']} is already enrolled with a different login", _em))
+            continue
+        if not _have and _declared_only:
+            failed.append((i, f"Flat {flat} is not in the builder's Declaration. Upload a corrected Declaration "
+                              "(Stage 5) before enrolling it", _em))
+            continue
+        if not _have and slots_left <= 0:
+            failed.append((i, f"Society plan '{_plan}' limit reached ({_limit} apartments)"))
+            continue
 
         _pw_err = validate_password(password)
         if _pw_err:
@@ -368,46 +400,72 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
         try:
             with db._conn() as conn:
                 cur = conn.cursor()
-                # NOTE (2026-09 bugfix, unrelated to the admin-only created_by/
-                # updated_by removal elsewhere in this file): apartments has
-                # never had a created_by column — this insert previously
-                # referenced it anyway, which would throw "column does not
-                # exist" on every bulk apartment enrollment.
-                cur.execute(
-                    "INSERT INTO apartments"
-                    "(society_id, flat_number, owner_name, mobile, apartment_size, "
-                    "alt_mobile, alt_address, owner_photo, id_proof, apt_calc_start_date, active) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
-                    (
-                        sid,
-                        flat,
-                        row.get("owner_name") or None,
-                        row.get("mobile")     or None,
-                        _safe_int(row.get("apartment_size")),
-                        row.get("alt_mobile") or None,
-                        row.get("alt_address") or None,
-                        row.get("owner_photo") or None,
-                        row.get("id_proof") or None,
-                        row.get("apt_calc_start_date") or None,
-                    ),
-                )
-                apt_r = cur.fetchone()
-                apt_id = apt_r["id"] if apt_r else None
-                if not apt_id:
-                    raise Exception("Apartment insert failed")
+                if _have:
+                    # A flat created from the Declaration: fill in the owner's details and give it a login.
+                    # The Declaration's area and share are authoritative; this file never overwrites them.
+                    _file_area = _safe_int(row.get("apartment_size"))
+                    if _declared_only and _file_area and _have["apartment_size"] and _file_area != _have["apartment_size"]:
+                        warnings.append(f"Flat {_have['flat_number']}: file says {_file_area} sq ft, the Declaration says "
+                                        f"{_have['apartment_size']}; the Declaration was kept.")
+                    cur.execute(
+                        "UPDATE apartments SET owner_name = COALESCE(%s, owner_name), mobile = COALESCE(%s, mobile), "
+                        "alt_mobile = COALESCE(%s, alt_mobile), alt_address = COALESCE(%s, alt_address), "
+                        "owner_photo = COALESCE(%s, owner_photo), id_proof = COALESCE(%s, id_proof), "
+                        "apartment_size = CASE WHEN %s AND apartment_size > 0 THEN apartment_size "
+                        "                      WHEN %s > 0 THEN %s ELSE apartment_size END, "
+                        "updated_at = NOW() WHERE id=%s AND society_id=%s",
+                        (row.get("owner_name") or None, row.get("mobile") or None, row.get("alt_mobile") or None,
+                         row.get("alt_address") or None, row.get("owner_photo") or None, row.get("id_proof") or None,
+                         _soc.get("basis") == "declaration", _file_area, _file_area, _have["id"], sid))
+                    apt_id = _have["id"]
+                    cur.execute(
+                        "INSERT INTO users"
+                        "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
+                        "VALUES (%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
+                        (sid, email, generate_password_hash(password), apt_id, user_id),
+                    )
+                else:
+                    # NOTE (2026-09 bugfix, unrelated to the admin-only created_by/
+                    # updated_by removal elsewhere in this file): apartments has
+                    # never had a created_by column — this insert previously
+                    # referenced it anyway, which would throw "column does not
+                    # exist" on every bulk apartment enrollment.
+                    cur.execute(
+                        "INSERT INTO apartments"
+                        "(society_id, flat_number, owner_name, mobile, apartment_size, "
+                        "alt_mobile, alt_address, owner_photo, id_proof, apt_calc_start_date, active) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
+                        (
+                            sid,
+                            flat,
+                            row.get("owner_name") or None,
+                            row.get("mobile")     or None,
+                            _safe_int(row.get("apartment_size")),
+                            row.get("alt_mobile") or None,
+                            row.get("alt_address") or None,
+                            row.get("owner_photo") or None,
+                            row.get("id_proof") or None,
+                            row.get("apt_calc_start_date") or None,
+                        ),
+                    )
+                    apt_r = cur.fetchone()
+                    apt_id = apt_r["id"] if apt_r else None
+                    if not apt_id:
+                        raise Exception("Apartment insert failed")
 
-                cur.execute(
-                    "INSERT INTO users"
-                    "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
-                    "VALUES (%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
-                    (sid, email, generate_password_hash(password), apt_id, user_id),
-                )
+                    cur.execute(
+                        "INSERT INTO users"
+                        "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
+                        "VALUES (%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
+                        (sid, email, generate_password_hash(password), apt_id, user_id),
+                    )
         except Exception as e:
             failed.append((i, _friendly_error(e), _em))
             continue
 
         success += 1
-        slots_left -= 1
+        if not _have:
+            slots_left -= 1
         # Item 10: link any pending opening receivable for this flat (idempotent).
         try:
             ob.link_opening_receivable(sid, apt_id, flat)
@@ -421,7 +479,7 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
             fill_after_enrolment(sid)
         except Exception as exc:
             print(f"undivided-interest fill after enrolment skipped: {exc}")
-    return {"success": success, "failed": failed, "skipped": skipped}
+    return {"success": success, "failed": failed, "skipped": skipped, "warnings": warnings}
 
 
 def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dict:
@@ -766,6 +824,16 @@ def register_bulk_enroll_callbacks(app):
             raise PreventUpdate
         cols = _BULK_TEMPLATES[entity]["columns"]
         df = pd.DataFrame(columns=cols)
+        if entity == "apartments":
+            # Flats created from the builder's Declaration but without an owner yet: pre-fill flat_number and
+            # apartment_size so the admin only types email, password and the owner's details.
+            sid = get_current_society_id()
+            if sid and get_current_user_role() in ("admin", "master"):
+                from app.services import undivided_declaration as ud
+                todo = ud.declared_unenrolled(int(sid))
+                if todo:
+                    df = pd.DataFrame([{"flat_number": f["flat_number"], "apartment_size": f["apartment_size"] or ""}
+                                       for f in todo], columns=cols)
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
