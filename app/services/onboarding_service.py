@@ -644,6 +644,7 @@ def validate_step(step_key: str, draft: dict, society_id: int) -> list[str]:
         recs = step.get("receivables") or []
         if recs:
             errors.extend(pr.validation_errors(recs, pr.sdr_total(rows), known_flats=known_flat_numbers(society_id)))
+        errors.extend(stale_statement_errors(step.get("as_on_date"), step.get("reconciliation")))
 
     return errors
 
@@ -1021,6 +1022,71 @@ def save_bank_reconciliation(society_id: int, actor_id: int, values: dict) -> di
     db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s",
                 (json.dumps(d), society_id))
     return {"ok": True}
+
+
+def _iso_day(v) -> str | None:
+    """Cell / picker value -> 'YYYY-MM-DD' or None when blank; ValueError when it is not a date."""
+    if v is None or str(v).strip() == "":
+        return None
+    if hasattr(v, "date") and callable(v.date):
+        return v.date().isoformat()
+    if hasattr(v, "isoformat"):
+        return v.isoformat()[:10]
+    t = str(v).strip()[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", t):
+        raise ValueError("not a date")
+    return date.fromisoformat(t).isoformat()
+
+
+def validate_statement_header(rec: dict, acc_id: int, bf_as_on) -> tuple[dict | None, str | None]:
+    """Pure. Check the Header row of an Account Statement.xlsx against the account it was uploaded for and the
+    Brought Forward As-on date. Returns (clean, None) or (None, reason). A different as-on date is REJECTED."""
+    try:
+        bf_day = _iso_day(bf_as_on)
+    except ValueError:
+        bf_day = None
+    if not bf_day:
+        return None, "Rejected: set the As-on date for Brought Forward first, then upload the statement."
+    try:
+        file_acc = int(float(_cell_text(rec.get("account_id")) or 0))
+    except ValueError:
+        file_acc = 0
+    if file_acc != int(acc_id):
+        return None, f"Rejected: this file is for account {file_acc or 'unknown'}, not account {acc_id}. Download the template from this account's card."
+    try:
+        st_day = _iso_day(rec.get("as_on_date"))
+    except ValueError:
+        return None, "Rejected: as_on_date must be a date as YYYY-MM-DD."
+    if not st_day:
+        return None, "Rejected: as_on_date is missing in the statement."
+    if st_day != bf_day:
+        return None, (f"Rejected: the statement is as on {st_day} but Brought Forward is as on {bf_day}. "
+                      f"Upload a statement as on {bf_day}, or change the Brought Forward As-on date.")
+    raw = _cell_text(rec.get("closing_balance"))
+    if not raw:
+        return None, "Rejected: closing_balance is missing."
+    try:
+        bal = money(raw)
+    except (ValueError, ArithmeticError):
+        return None, "Rejected: closing_balance must be a number."
+    if bal < 0:
+        return None, "Rejected: closing_balance must be 0 or more."
+    return {"as_on_date": st_day, "closing_balance": str(bal)}, None
+
+
+def stale_statement_errors(bf_as_on, reconciliation: dict | None) -> list[str]:
+    """Statements/scans recorded against an As-on date that is no longer the Brought Forward As-on date."""
+    try:
+        bf_day = _iso_day(bf_as_on)
+    except ValueError:
+        return []
+    out = []
+    for key, item in (reconciliation or {}).items():
+        on = (item or {}).get("as_on_date")
+        if bf_day and on and str(on)[:10] != bf_day:
+            out.append(f"Account {str(key).replace('bank_', '')}: its statement is as on {str(on)[:10]} but Brought Forward is as on "
+                       f"{bf_day}. Attach a statement as on {bf_day}.")
+    return out
 
 
 def reconciliation_state(book, rec: dict | None) -> dict:

@@ -132,6 +132,34 @@ def build_election_template(rows: list[dict] | None = None) -> bytes:
     return buf.getvalue()
 
 
+STATEMENT_COLUMNS = ["account_id", "account_name", "tab", "as_on_date", "closing_balance"]
+
+
+def build_statement_template(acc: dict, as_on: str | None) -> bytes:
+    """Account Statement.xlsx for ONE bank / deposit / cash account. The as_on_date must equal the Brought Forward As-on date."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Header"
+    ws.append(STATEMENT_COLUMNS)
+    for c in range(1, len(STATEMENT_COLUMNS) + 1):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+    ws.append([acc.get("id"), acc.get("name") or "", acc.get("tab_name") or "", as_on or "YYYY-MM-DD", ""])
+    locked_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    for c in (1, 2, 3):
+        ws.cell(row=2, column=c).fill = locked_fill
+    dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
+    dv.add("E2:E2")
+    ws.add_data_validation(dv)
+    wi = wb.create_sheet("Instructions")
+    wi.append(["Notes"])
+    wi.append(["Fill closing_balance with the balance per the bank / deposit statement or the cash count as on as_on_date."])
+    wi.append(["as_on_date must be the same As-on date as Brought Forward; a statement as on any other date is rejected."])
+    wi.append(["Do not change account_id: the file is only accepted for the account it was downloaded for. Only .xlsx is accepted."])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def parse_upload(contents: str, filename: str, sheet: str, required: list[str], max_rows: int = 500,
                  max_bytes: int = 1_048_576) -> ParseResult:
     # Basic guards

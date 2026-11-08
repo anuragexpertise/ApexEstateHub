@@ -14,7 +14,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import dash_bootstrap_components as dbc
-from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
+from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 
 from app.dash_apps.pages import onboarding_page as op
 from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label, render_review, legal_hierarchy_rows, legal_regime_live
@@ -640,10 +640,11 @@ def register_onboarding_wizard_callbacks(app):
     @app.callback(
         Output("onb-bf-reconciliation-cards", "children"),
         Input({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
+        Input("sw-bf-as-on", "date"),
         State("onb-reconciliation-json", "data"),
     )
     @require_session
-    def bf_reconciliation_render(amts, rec_json):
+    def bf_reconciliation_render(amts, bf_as_on, rec_json):
         s = _session()
         if not s or not s[0]:
             return no_update
@@ -660,10 +661,20 @@ def register_onboarding_wizard_callbacks(app):
             r = rec_json.get(f"bank_{acc_id}") or {}
             stmt = r.get("statement_balance", "")
             st = ob.reconciliation_state(book, r)
+            stale = ob.stale_statement_errors(bf_as_on, {f"bank_{acc_id}": r})
             cards.append(html.Div([
                 dcc.Store(id={"type": "onb-bf-rec-book", "acc_id": acc_id}, data=str(book)),
                 html.Strong(f"{a['tab_name']} · {a['name']}", className="d-block"),
                 html.Small(f"Book balance: ₹{book}", className="text-muted d-block mb-1"),
+                dbc.Row([
+                    dbc.Col(dbc.Button("Statement template (xlsx)", id={"type": "onb-bf-stmt-tpl", "acc_id": acc_id}, size="sm",
+                                       outline=True, color="secondary", n_clicks=0), md="auto"),
+                    dbc.Col(dcc.Upload(id={"type": "onb-bf-stmt-xlsx", "acc_id": acc_id},
+                                       children=dbc.Button("Upload statement (xlsx)", size="sm", outline=True, color="secondary", n_clicks=0),
+                                       multiple=False, accept=".xlsx"), md="auto"),
+                    dcc.Download(id={"type": "onb-bf-stmt-dl", "acc_id": acc_id}),
+                ], className="g-2 mb-1"),
+                *([dbc.Alert(stale[0], color="danger", className="py-1 mb-1", style={"fontSize": "11.5px"})] if stale else []),
                 dbc.Input(id={"type": "onb-bf-rec-stmt", "acc_id": acc_id}, type="number", debounce=True, step=0.01, min=0, size="sm",
                           value=float(money(stmt)) if stmt not in (None, "") else None, placeholder="Balance per bank statement / cash count"),
                 dbc.Input(id={"type": "onb-bf-rec-diff", "acc_id": acc_id}, type="number", size="sm", disabled=True, className="mt-1",
@@ -681,13 +692,16 @@ def register_onboarding_wizard_callbacks(app):
         Output({"type": "onb-bf-rec-status", "acc_id": ALL}, "children"),
         Input({"type": "onb-bf-rec-stmt", "acc_id": ALL}, "value"),
         Input({"type": "onb-bf-evidence", "acc_id": ALL}, "contents"),
+        Input({"type": "onb-bf-stmt-xlsx", "acc_id": ALL}, "contents"),
         State({"type": "onb-bf-evidence", "acc_id": ALL}, "filename"),
         State({"type": "onb-bf-rec-book", "acc_id": ALL}, "data"),
         State("onb-reconciliation-json", "data"),
+        State({"type": "onb-bf-stmt-xlsx", "acc_id": ALL}, "filename"),
+        State("sw-bf-as-on", "date"),
         prevent_initial_call=True,
     )
     @require_session
-    def bf_reconciliation_update(stmts, contents, filenames, books, rec_json):
+    def bf_reconciliation_update(stmts, contents, xlsx_contents, filenames, books, rec_json, xlsx_names, bf_as_on):
         s = _session()
         trig = ctx.triggered_id
         if not s or not s[0] or not isinstance(trig, dict):
@@ -702,6 +716,23 @@ def register_onboarding_wizard_callbacks(app):
         if trig["type"] == "onb-bf-rec-stmt":
             val = stmts[acc_ids.index(trig["acc_id"])] if trig["acc_id"] in acc_ids else None
             item["statement_balance"] = "" if val in (None, "") else str(money(val))
+        elif trig["type"] == "onb-bf-stmt-xlsx":
+            # Per-account statement .xlsx: the as-on date MUST equal the Brought Forward as-on date, else it is rejected.
+            n = acc_ids.index(trig["acc_id"]) if trig["acc_id"] in acc_ids else -1
+            c = xlsx_contents[n] if 0 <= n < len(xlsx_contents or []) else None
+            if not c:
+                return no_update, no_update, no_update
+            res = parse_upload(c, (xlsx_names[n] if n < len(xlsx_names or []) else "") or "", "Header",
+                               ["account_id", "as_on_date", "closing_balance"], max_rows=5)
+            if res.errors or not res.rows:
+                errors[trig["acc_id"]] = "Rejected: " + (" ".join(res.errors) or "the Header sheet is empty.")
+            else:
+                clean, why = ob.validate_statement_header(res.rows[0], int(trig["acc_id"]), bf_as_on)
+                if why:
+                    errors[trig["acc_id"]] = why
+                else:
+                    item.update({"statement_balance": clean["closing_balance"], "as_on_date": clean["as_on_date"],
+                                 "statement_file": (xlsx_names[n] or "")[:120], "statement_source": "xlsx"})
         else:
             n = acc_ids.index(trig["acc_id"]) if trig["acc_id"] in acc_ids else -1
             raw = None
@@ -711,10 +742,15 @@ def register_onboarding_wizard_callbacks(app):
                 raw = base64.b64decode(c.split(",", 1)[1]) if c and "," in c else None
                 if not raw:
                     raise ob.OnboardingError("Attach the scan as a PDF, PNG or JPG.")
-                as_on = (ctx.states_list[3][0].get("value") if len(ctx.states_list)>3 and ctx.states_list[3] else None) if False else None
-                # try to read bf as-on from reconciliation/json not available here; store purpose account_statement
-                ev = ob.store_evidence_file(sid, "account_statement", int(trig["acc_id"]), filenames[n] or "", raw, uid, {"kind":"account_statement","acc_id":int(trig["acc_id"])})
-                item.update({"evidence_id": ev["id"], "sha256": ev["sha256"], "filename": ev["filename"], "purpose":"account_statement"})
+                try:
+                    on = ob._iso_day(bf_as_on)
+                except ValueError:
+                    on = None
+                ev = ob.store_evidence_file(sid, "account_statement", int(trig["acc_id"]), filenames[n] or "", raw, uid,
+                                            {"kind": "account_statement", "acc_id": int(trig["acc_id"]), "as_on_date": on})
+                item.update({"evidence_id": ev["id"], "sha256": ev["sha256"], "filename": ev["filename"], "purpose": "account_statement"})
+                if on:
+                    item["as_on_date"] = on
             except ob.OnboardingError as exc:
                 errors[trig["acc_id"]] = str(exc)
             except Exception:                                            # noqa: BLE001
@@ -725,8 +761,36 @@ def register_onboarding_wizard_callbacks(app):
             r = rec.get(f"bank_{a}") or {}
             st = ob.reconciliation_state(money(book_of.get(a) or 0), r)
             diffs.append(float(st["diff"]) if st["diff"] is not None else None)
-            statuses.append(html.Span(errors[a], className="text-danger") if a in errors else _rec_status(st, r))
+            if a in errors and str(errors[a]).startswith("Rejected"):
+                statuses.append(dbc.Alert(errors[a], color="danger", className="py-1 mb-0", style={"fontSize": "11.5px"}))
+            else:
+                statuses.append(html.Span(errors[a], className="text-danger") if a in errors else _rec_status(st, r))
         return rec, diffs, statuses
+
+    # Per-account statement template: pre-filled with the account and the Brought Forward As-on date ---------------
+    @app.callback(
+        Output({"type": "onb-bf-stmt-dl", "acc_id": MATCH}, "data"),
+        Input({"type": "onb-bf-stmt-tpl", "acc_id": MATCH}, "n_clicks"),
+        State("sw-bf-as-on", "date"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def bf_statement_template(n, bf_as_on):
+        s = _session()
+        trig = ctx.triggered_id
+        if not n or not s or not s[0] or not isinstance(trig, dict):
+            return no_update
+        a = ob._row("SELECT id, name, tab_name FROM accounts WHERE society_id=%s AND id=%s", (s[0], int(trig["acc_id"])))
+        if not a:
+            return no_update
+        try:
+            on = ob._iso_day(bf_as_on)
+        except ValueError:
+            on = None
+        import re as _r
+        from app.services.xlsx_templates import build_statement_template
+        label = _r.sub(r"[^A-Za-z0-9 _-]+", "", f"{a['tab_name']} {a['name']}").strip() or f"account {a['id']}"
+        return dcc.send_bytes(build_statement_template(dict(a), on), f"Account Statement - {label}.xlsx")
 
     # Brought forward paper evidence (overall) ------------------------------------
     @app.callback(
@@ -972,95 +1036,6 @@ def register_onboarding_wizard_callbacks(app):
         state = (picked_state or "").strip() or None      # a State picked on Society Details but not yet saved
         title = rules_subtitle(step_label(cat), sid, state)
         return (True if opened_now else no_update), title, build_rules_panel(cat, sid, state)
-
-    # Brought forward paper evidence (overall) ------------------------------------
-    @app.callback(
-        Output("onb-bf-print-dl","data"), Output("onb-bf-evidence-feedback","children", allow_duplicate=True),
-        Input("onb-bf-print","n_clicks"), State("sw-bf-fy","value"), State("sw-bf-as-on","date"),
-        State({"type":"sw-bf-amt","acc_id":ALL},"value"), prevent_initial_call=True)
-    @require_session
-    def bf_print(n,fy,as_on,amts):
-        if not n: return no_update,no_update
-        s=_session(); 
-        if not s or not s[0]: return no_update,no_update
-        from app.services import paper_evidence as pe
-        sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
-        from database.seed import ACCOUNTS
-        meta={a[0]:a for a in ACCOUNTS}; ids=[d["id"]["acc_id"] for d in (ctx.states_list[2] or [])]
-        body=[]; dr=cr=Decimal(0)
-        for i,aid in enumerate(ids):
-            v=amts[i] if i<len(amts or []) else None
-            if v in (None,"",0,0.0): continue
-            a=meta.get(aid)
-            if not a: continue
-            amt=Decimal(str(v)); side=a[5] or 'Dr'
-            if side=='Dr': dr+=amt
-            else: cr+=amt
-            body.append([str(aid),a[2] or '',a[3] or a[1] or '',side,f"{amt:,.2f}"])
-        body.append(["","TOTAL","",f"Dr {dr:,.2f}",f"Cr {cr:,.2f}"])
-        name,page=pe.printable_html("Brought Forward Opening Balances",soc.get("name") or f"Society {sid}",
-                                    f"FY {fy or ''} | As-on {as_on or ''}",["Account ID","Tab","Account","Side","Amount"],body,
-                                    ["Prepared by","Treasurer","Secretary","Auditor/CA"],
-                                    [f"As-on date: {as_on or '—'} (may be mid-year).", "Attach all bank/deposit/cash account statements for the same As-on date as reconciliation evidence."])
-        return dcc.send_string(page,name,type="text/html"), _msg("Brought Forward printable generated. Sign, scan, upload signed scan.","success")
-
-    @app.callback(Output("onb-bf-evidence-status","children"), Input("onb-bf-scan","contents"), Input("onb-bf-print","n_clicks"),
-                  State("onb-bf-scan","filename"), State("sw-bf-fy","value"), State("sw-bf-as-on","date"), prevent_initial_call=True)
-    @require_session
-    def bf_scan(contents,_p,filename,fy,as_on):
-        s=_session(); 
-        if not s or not s[0]: return no_update
-        from app.services import paper_evidence as pe
-        sid,uid,_=s
-        if ctx.triggered_id=="onb-bf-scan" and contents:
-            try:
-                ev=pe.store_signed_scan(sid,"brought_forward",uid,filename,contents,{"fy":fy,"as_on_date":as_on})
-                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), f"Signed scan stored. SHA-256: {ev['sha256']}"], color="success", className="py-1 mb-0", style={"fontSize":"12px"})
-            except Exception as exc:
-                return dbc.Alert(str(exc), color="danger", className="py-1 mb-0", style={"fontSize":"12px"})
-        return _ev_badge(sid,"brought_forward")
-
-    @app.callback(Output("onb-apt-print-dl","data"), Input("onb-apt-print","n_clicks"),
-                  State("sw-apt-cost","value"), State("sw-apt-budget","value"), State("sw-apt-rate","value"),
-                  State("sw-apt-amt","value"), State("sw-apt-billing-basis","value"), State("sw-apt-due","value"),
-                  State("sw-apt-interest","value"), prevent_initial_call=True)
-    @require_session
-    def apt_print(n,cost,budget,rate,amt,basis,due,interest):
-        if not n: return no_update
-        s=_session(); 
-        if not s or not s[0]: return no_update
-        from app.services import paper_evidence as pe
-        sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
-        hdr=["Field","Value"]; body=[
-            ["Declaration","Undivided Interest - Part A: Apartment Charges / society defaults"],
-            ["Construction cost of project",str(cost or '')],["Monthly common-expense budget",str(budget or '')],
-            ["Default rate per sq ft",str(rate or '')],["Default fixed amount",str(amt or '')],
-            ["Maintenance billing basis",str(basis or '')],["Billing due day",str(due or '')],
-            ["Interest % per month (simple)",str(interest or '')],
-        ]
-        name,page=pe.printable_html("Declaration - Undivided Interest (Part A)",soc.get("name") or f"Society {sid}",
-                                    "Apartment Charges / society defaults",hdr,body,
-                                    ["Prepared by","Treasurer","Secretary","President/Authorized signatory"],
-                                    ["Part A covers Apartment Charges / billing defaults. Obtain signatures, scan, upload signed scan; server computes SHA-256."])
-        return dcc.send_string(page,name,type="text/html")
-
-    @app.callback(Output("onb-apt-evidence-status","children"), Input("onb-apt-scan","contents"), Input("onb-apt-print","n_clicks"),
-                  State("onb-apt-scan","filename"), prevent_initial_call=True)
-    @require_session
-    def apt_scan(contents,_p,filename):
-        s=_session(); 
-        if not s or not s[0]: return no_update
-        from app.services import paper_evidence as pe
-        sid,uid,_=s
-        if ctx.triggered_id=="onb-apt-scan" and contents:
-            try:
-                ev=pe.store_signed_scan(sid,"declaration_undivided_interest",uid,filename,contents,{"part":"A","kind":"apartment_charges"})
-                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), f"Signed scan stored. SHA-256: {ev['sha256']}"], color="success", className="py-1 mb-0", style={"fontSize":"12px"})
-            except Exception as exc:
-                return dbc.Alert(str(exc), color="danger", className="py-1 mb-0", style={"fontSize":"12px"})
-        return _ev_badge(sid,"declaration_undivided_interest")
-
-    print("  ✓ Onboarding wizard callbacks registered")
 
 
 
