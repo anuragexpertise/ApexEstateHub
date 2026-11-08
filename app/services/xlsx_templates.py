@@ -102,6 +102,36 @@ def build_bf_template(rows: list[dict], fy: int | None = None) -> bytes:
     return buf.getvalue()
 
 
+ELECTION_COLUMNS = ["office", "flat_number", "name", "email", "mobile", "flat_area_sqft", "resolution_ref"]
+
+
+def build_election_template(rows: list[dict] | None = None) -> bytes:
+    """Election Results.xlsx: one row each for President, Secretary, Treasurer and the Grievance officer."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Election Results"
+    ws.append(ELECTION_COLUMNS)
+    for c in range(1, len(ELECTION_COLUMNS) + 1):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+    by_office = {str(r.get("office")): r for r in (rows or [])}
+    locked_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    for i, office in enumerate(("president", "secretary", "treasurer", "grievance_officer"), start=2):
+        item = by_office.get(office) or {}
+        ws.cell(row=i, column=1, value=office).fill = locked_fill
+        for c, h in enumerate(ELECTION_COLUMNS[1:], start=2):
+            ws.cell(row=i, column=c, value=item.get(h) or "")
+    ws.freeze_panes = "A2"
+    wi = wb.create_sheet("Instructions")
+    wi.append(["Notes"])
+    wi.append(["Keep the office column as is. President, Secretary and Treasurer need three different flats and three different emails; each needs a mobile and the resolution reference under which they were elected."])
+    wi.append(["The grievance_officer row needs only name, email and (optionally) mobile."])
+    wi.append(["Passwords, signature images and the signed minutes are not taken from this file: add them on each office card, then print, sign, scan and upload the signed Election Results."])
+    wi.append(["Only .xlsx is accepted."])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def parse_upload(contents: str, filename: str, sheet: str, required: list[str], max_rows: int = 500,
                  max_bytes: int = 1_048_576) -> ParseResult:
     # Basic guards

@@ -70,7 +70,7 @@ def evidence_status(society_id: int, purpose: str, acc_id: int | None = None) ->
 
 def _table(headers: list[str], rows: list[list[str]]) -> str:
     th = "".join(f"<th>{escape(str(h))}</th>" for h in headers)
-    body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in rows) or "<tr><td colspan='%d'>(no rows)</td></tr>" % len(headers)
+    body = "".join("<tr>" + "".join(f"<td>{escape('' if c is None else str(c))}</td>" for c in r) + "</tr>" for r in rows) or "<tr><td colspan='%d'>(no rows)</td></tr>" % len(headers)
     return f"<table><thead><tr>{th}</tr></thead><tbody>{body}</tbody></table>"
 
 

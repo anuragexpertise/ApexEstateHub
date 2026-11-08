@@ -853,4 +853,65 @@ def register_onboarding_callbacks(app):
                                     ["Use with Election Results.xlsx workflow. Upload signed & scanned minutes/results; server computes SHA-256."])
         return dcc.send_string(page,name,type="text/html")
 
+    # ── Election Results.xlsx: template download + validated prefill of the seating forms ─────────────────────────
+    @app.callback(Output(f"{P}-election-tpl-dl", "data"), Input(f"{P}-election-tpl", "n_clicks"), prevent_initial_call=True)
+    @require_session
+    def onb_election_template(n):
+        s = _session()
+        if not n or not s or not s[0] or s[2] != "admin":
+            return no_update
+        from app.services import xlsx_templates as xt
+        data = xt.build_election_template()
+        return dcc.send_bytes(data, "Election Results.xlsx")
+
+    _EL_FIELDS = ("flat", "name", "size", "email", "phone", "ref")
+
+    @app.callback(
+        [Output({"type": f"{P}-f", "office": ALL, "field": f}, "value", allow_duplicate=True) for f in _EL_FIELDS],
+        Output(f"{P}-g-name", "value", allow_duplicate=True),
+        Output(f"{P}-g-email", "value", allow_duplicate=True),
+        Output(f"{P}-g-phone", "value", allow_duplicate=True),
+        Output(f"{P}-election-import-status", "children"),
+        Input(f"{P}-election-xlsx", "contents"),
+        State(f"{P}-election-xlsx", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_election_import(contents, filename):
+        outs = ctx.outputs_list or []
+        keep = [[no_update] * len(o) for o in outs[:len(_EL_FIELDS)]]
+        s = _session()
+        if not contents or not s or not s[0]:
+            return (*keep, no_update, no_update, no_update, no_update)
+        if s[2] != "admin":
+            return (*keep, no_update, no_update, no_update, _alert("Only the society's administrator can import the Election Results.", False))
+        from app.services import xlsx_templates as xt
+        res = xt.parse_upload(contents, filename or "", "Election Results", ["office"], max_rows=10)
+        if res.errors:
+            return (*keep, no_update, no_update, no_update, _alert(" ".join(res.errors), False))
+        data, errors = ob.validate_election_rows(res.rows)
+        if errors:
+            return (*keep, no_update, no_update, no_update, _alert("Fix the file and upload it again: " + " ".join(errors), False))
+        seated = ob.seated_officers(s[0])
+        filled = []
+        per_field = []
+        for fname, group in zip(_EL_FIELDS, outs[:len(_EL_FIELDS)]):
+            vals = []
+            for o in group:
+                office = o["id"].get("office")
+                # Never overwrite a seated officer's card (its phone input is the only same-named field there).
+                if office in ob.CORE_OFFICES and not seated.get(office):
+                    v = data[office].get(fname)
+                    vals.append(v if v not in (None, "") else no_update)
+                    if fname == "flat":
+                        filled.append(ob.OFFICE_LABEL[office])
+                else:
+                    vals.append(no_update)
+            per_field.append(vals)
+        g = data["grievance_officer"]
+        note = (("Filled the forms for: " + ", ".join(filled) + ". ") if filled else "Every office is already seated. ") + \
+               "Add each officer's temporary password, signature image and signed minutes, then press Seat. " \
+               "Grievance officer fields are filled; press Save to keep them."
+        return (*per_field, g["name"], g["email"], g["phone"], _alert(note))
+
     print("  ✓ Onboarding callbacks registered")
