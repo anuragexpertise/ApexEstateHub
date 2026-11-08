@@ -118,6 +118,65 @@ def register_onboarding_callbacks(app):
         body, mk = _body(sid, uid, role, view=_committee_view(sid))
         return body, _alert(msg), mk
 
+    # ── Apply Election Results.xlsx: seat every open office in one action ─────────────────────────────────────────────
+    # Plain ids (not pattern-matching): the panel always renders all three offices, so every State below is in the layout.
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input(f"{P}-all-go", "n_clicks"),
+        State(f"{P}-all-xlsx", "contents"), State(f"{P}-all-xlsx", "filename"),
+        State(f"{P}-all-minutes", "contents"), State(f"{P}-all-minutes", "filename"),
+        *[State(f"{P}-all-sig-{o}", "contents") for o in ob.CORE_OFFICES],
+        *[State(f"{P}-all-sig-{o}", "filename") for o in ob.CORE_OFFICES],
+        *[State(f"{P}-all-pw-{o}", "value") for o in ob.CORE_OFFICES],
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_seat_all(n, xlsx_contents, xlsx_name, minutes_contents, minutes_name, *rest):
+        s = _session()
+        if not n or not s:
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        if role != "admin" or not sid:
+            return no_update, _alert("Only the society's administrator can seat the committee.", False), no_update
+        raw = _decode(xlsx_contents)
+        if not raw:
+            return no_update, _alert("Choose the filled Election Results.xlsx first.", False), no_update
+        from app.services import xlsx_templates as xt
+        res = xt.parse_upload(xlsx_contents, xlsx_name or "", "Election Results", ["office"], max_rows=10)
+        if res.errors:
+            return no_update, _alert(" ".join(res.errors), False), no_update
+        k = len(ob.CORE_OFFICES)
+        sig_files = {o: (rest[k + i], _decode(rest[i])) for i, o in enumerate(ob.CORE_OFFICES)}
+        passwords = {o: rest[2 * k + i] or "" for i, o in enumerate(ob.CORE_OFFICES)}
+        try:
+            msg = ob.seat_founding_committee(uid, sid, res.rows, minutes_name, _decode(minutes_contents), sig_files,
+                                             passwords, workbook_sha256=ob._sha(raw))
+        except ob.PartialSeating as exc:                  # some offices are now seated: show them, keep the message
+            body, mk = _body(sid, uid, role, view=_committee_view(sid))
+            return body, _alert(str(exc), False), mk
+        except ob.OnboardingError as exc:                 # nothing changed: leave the chosen files in place
+            return no_update, _alert(str(exc), False), no_update
+        body, mk = _body(sid, uid, role, view=_committee_view(sid))
+        return body, _alert(msg), mk
+
+    @app.callback(
+        Output(f"{P}-all-chosen", "children"),
+        Input(f"{P}-all-xlsx", "filename"), Input(f"{P}-all-minutes", "filename"),
+        *[Input(f"{P}-all-sig-{o}", "filename") for o in ob.CORE_OFFICES],
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_seat_all_files(xlsx_name, minutes_name, *sig_names):
+        picks = [("Workbook", xlsx_name), ("Minutes", minutes_name)] + \
+                [(f"{ob.OFFICE_LABEL[o]} signature", nm) for o, nm in zip(ob.CORE_OFFICES, sig_names)]
+        out = []
+        for label, nm in picks:
+            out.append(html.Span([f"{label}: ", html.Strong(nm) if nm else "not chosen"],
+                                 style={"marginRight": "12px", "color": "#17976e" if nm else "#8895a5"}))
+        return out
+
     # ── signature thumbnail preview while choosing a signature image ──────────
     @app.callback(
         Output({"type": f"{P}-f", "office": ALL, "field": "sig-preview"}, "children", allow_duplicate=True),

@@ -121,6 +121,42 @@ def _office_card(office: str, seated: dict | None, society_id: int | None = None
     ], style=_CARD)
 
 
+def _seat_all_panel(seated: dict):
+    """Apply Election Results.xlsx: seat every office that is still open in one action. The workbook carries each person's
+    flat, name, contact and resolution; the signed minutes (one file for all three), each signature image and each
+    temporary password are given here. Always renders all three rows so the callback's ids are always present."""
+    def upload(comp_id, text, accept, disabled=False):
+        return dcc.Upload(id=comp_id, accept=accept, multiple=False, disabled=disabled,
+                          children=html.Span(text, style={"fontSize": "12px", "textDecoration": "underline",
+                                                          "cursor": "default" if disabled else "pointer"}),
+                          style={"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px",
+                                 "opacity": 0.5 if disabled else 1})
+    rows = []
+    for o in ob.CORE_OFFICES:
+        held = seated.get(o)
+        rows.append(dbc.Row([
+            dbc.Col(html.Div([html.Strong(ob.OFFICE_LABEL[o], style={"fontSize": "12.5px"}),
+                              html.Div(f"{held['holder_name']} (already seated)" if held else "from the workbook", style=_MUTED)]), md=3),
+            dbc.Col(upload(f"{P}-all-sig-{o}", "Signature image (PNG, JPG or WEBP)", ".png,.jpg,.jpeg,.webp", disabled=bool(held)), md=5),
+            dbc.Col(dbc.Input(id=f"{P}-all-pw-{o}", size="sm", type="password", autoComplete="new-password",
+                              placeholder="Temporary password", disabled=bool(held)), md=4),
+        ], className="g-2 mb-1 align-items-center"))
+    return dbc.Card(dbc.CardBody([
+        html.Strong("Seat all three from Election Results.xlsx", className="d-block mb-1", style={"fontSize": "13px"}),
+        html.Small("Choose the filled workbook and the one signed minutes file that covers all three, then each signature image and "
+                   "temporary password. Offices already seated are left as they are. Nothing is seated unless every check passes.",
+                   className="text-muted d-block mb-2"),
+        dbc.Row([
+            dbc.Col(_field("Election Results.xlsx", upload(f"{P}-all-xlsx", "Choose the filled workbook (.xlsx)", ".xlsx")), md=6),
+            dbc.Col(_field("Signed minutes (PDF, PNG or JPG, up to 5 MB)", upload(f"{P}-all-minutes", "Choose the minutes file", ".pdf,.png,.jpg,.jpeg")), md=6),
+        ], className="g-2"),
+        *rows,
+        html.Div(id=f"{P}-all-chosen", style={"fontSize": "11.5px", "color": "#667", "margin": "4px 0"}),
+        dbc.Button([html.I(className="fas fa-users me-2"), "Seat all three"], id=f"{P}-all-go", color="primary", size="sm", n_clicks=0),
+        html.Span("  Their flats and logins are created now; they must change the password at first sign-in.", style=_MUTED),
+    ], className="py-2"), className="mb-2")
+
+
 def _stage_committee(society_id: int):
     seated = ob.seated_officers(society_id)
     s = ob.db._execute("SELECT grievance_officer_name, grievance_officer_email, grievance_officer_phone, onboarding_state FROM societies WHERE id=%s",
@@ -141,6 +177,8 @@ def _stage_committee(society_id: int):
            html.Div("The President, Secretary and Treasurer sign the Agreement, so they must hold office first. Each is seated with the "
                     "resolution that elected them and the signed minutes; the file's SHA-256 is kept as evidence. Use a different flat "
                     "for each person: the Agreement needs four different people to sign.", style=_MUTED)]
+    if s.get("onboarding_state") in ("registered", "committee seated") and not all(seated[o] for o in ob.CORE_OFFICES):
+        out.append(_seat_all_panel(seated))
     out += [_office_card(o, seated[o], society_id) for o in ob.CORE_OFFICES]
     out.append(html.Div([
         html.Strong("Grievance officer (DPDP)"), html.Div("Named on the login page and in every privacy notice.", style=_MUTED),

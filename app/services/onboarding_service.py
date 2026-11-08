@@ -62,6 +62,10 @@ class OnboardingError(ValueError):
     """A step was refused; the message is safe to show the user."""
 
 
+class PartialSeating(OnboardingError):
+    """seat_founding_committee() seated some offices, then stopped; the screen must be re-rendered to show them."""
+
+
 def _rows(sql, params=None):
     return db._execute(sql, params, fetch_all=True) or []
 
@@ -161,8 +165,8 @@ def stage_report(society_id: int) -> list[dict]:
 
 
 # ── stage 2: founding committee ───────────────────────────────────────────────────────────────────────────────────
-def _store_evidence(society_id: int, filename: str, data: bytes) -> tuple[str, str]:
-    """Validate and store the minutes file; returns (stored name, sha256)."""
+def _check_evidence_file(filename: str, data: bytes) -> str:
+    """Validate the minutes file (type, size, magic bytes) and return its lower-case extension. Writes nothing."""
     ext = os.path.splitext(filename or "")[1].lower()
     if ext not in EVIDENCE_TYPES:
         raise OnboardingError("Attach the minutes as a PDF, PNG or JPG file.")
@@ -170,6 +174,26 @@ def _store_evidence(society_id: int, filename: str, data: bytes) -> tuple[str, s
         raise OnboardingError("The minutes file must be between 1 byte and 5 MB.")
     if not data.startswith(EVIDENCE_TYPES[ext]):
         raise OnboardingError("The file does not look like a real %s." % ext.lstrip(".").upper())
+    return ext
+
+
+def _check_signature_file(filename: str, data: bytes) -> None:
+    """Validate a signature image's type, size and magic bytes. Writes nothing and does not compress."""
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".webp"):
+        raise OnboardingError("Signature must be a PNG, JPG or WEBP image.")
+    if not data or len(data) > 1024 * 1024:
+        raise OnboardingError("The signature image must be between 1 byte and 1 MB.")
+    magic = data[:12]
+    ok_magic = (magic.startswith(b"\x89PNG") or magic[:4] == b"\xff\xd8\xff" or
+                magic[:4] == b"RIFF" and magic[8:12] == b"WEBP")
+    if not ok_magic:
+        raise OnboardingError("The signature file does not look like a real image.")
+
+
+def _store_evidence(society_id: int, filename: str, data: bytes) -> tuple[str, str]:
+    """Validate and store the minutes file; returns (stored name, sha256)."""
+    ext = _check_evidence_file(filename, data)
     digest = _sha(data)
     try:
         from app.dash_apps.callbacks.drilldown_callbacks import ASSETS_ROOT
@@ -185,16 +209,7 @@ def _store_signature(society_id: int, filename: str, data: bytes) -> str:
     """Validate and store a signature image (PNG, JPG, JPEG or WEBP); magic-byte check each, then
     convert to WebP < 50 KB via image_utils.compress_to_webp. Returns the stored relative path."""
     from app.dash_apps.drilldown.image_utils import compress_to_webp as _c2w
-    ext = os.path.splitext(filename or "")[1].lower()
-    if ext not in (".png", ".jpg", ".jpeg", ".webp"):
-        raise OnboardingError("Signature must be a PNG, JPG or WEBP image.")
-    if not data or len(data) > 1024 * 1024:
-        raise OnboardingError("The signature image must be between 1 byte and 1 MB.")
-    magic = data[:12]
-    ok_magic = (magic.startswith(b"\x89PNG") or magic[:4] == b"\xff\xd8\xff" or
-                magic[:4] == b"RIFF" and magic[8:12] == b"WEBP")
-    if not ok_magic:
-        raise OnboardingError("The signature file does not look like a real image.")
+    _check_signature_file(filename, data)
     webp = _c2w(data)
     if webp is None:
         raise OnboardingError("The signature image could not be compressed below 50 KB.")
@@ -418,6 +433,114 @@ def validate_election_rows(rows: list[dict]) -> tuple[dict, list[str]]:
     if len(flats) != len(set(flats)) or len(emails) != len(set(emails)):
         errors.append("The President, Secretary and Treasurer must be three different people: use a different flat and email for each.")
     return out, errors
+
+
+def _area_int(v) -> int | None:
+    """Flat area from the workbook ('1200', '1200.5' or blank) as whole square feet."""
+    try:
+        return int(round(float(v))) if str(v if v is not None else "").strip() else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _login_exists(society_id: int, flat: str, email: str) -> bool:
+    """True when the flat already has an apartment login under this email, so no temporary password is needed for it."""
+    return bool(_row("""SELECT 1 AS x FROM users u JOIN apartments a ON a.id = u.linked_id AND a.society_id = u.society_id
+                         WHERE u.society_id=%s AND u.role='apartment' AND a.flat_number=%s AND lower(u.email)=%s LIMIT 1""",
+                     (society_id, flat, (email or "").lower())))
+
+
+def seat_founding_committee(actor_id: int, society_id: int, rows: list[dict], minutes_name: str | None,
+                            minutes_bytes: bytes | None, signatures: dict | None, passwords: dict | None,
+                            workbook_sha256: str | None = None) -> str:
+    """Apply Election Results.xlsx: seat the President, Secretary and Treasurer in one action and name the grievance officer.
+
+    `rows` are the parsed sheet rows (validate_election_rows decides if they are acceptable). `signatures` maps
+    office -> (file name, bytes) and `passwords` maps office -> the temporary login password. One signed minutes file
+    covers all three, because they were elected at the same meeting.
+
+    Everything that can be checked without writing is checked first, so a bad workbook, a missing signature or a short
+    password changes nothing. An office that is already seated is left alone, so pressing the button again after a failure
+    seats only what is still open. Each seat is the existing seat_founding_officer(), so every rule it enforces still
+    applies. Raises OnboardingError (PartialSeating once some offices are seated) with a message safe to show."""
+    from app.security.password_policy import validate_password
+
+    if state_of(society_id) not in ("registered", "committee seated"):
+        raise OnboardingError("The founding committee can only be seated before the Setup Wizard is submitted.")
+    data, errors = validate_election_rows(rows)
+    if errors:
+        raise OnboardingError("Fix the Election Results file and upload it again: " + " ".join(errors))
+    signatures, passwords = signatures or {}, passwords or {}
+    seated = seated_officers(society_id)
+    todo = [o for o in CORE_OFFICES if not seated.get(o)]
+
+    problems: list[str] = []
+    if todo:
+        try:
+            _check_evidence_file(minutes_name or "", minutes_bytes or b"")
+        except OnboardingError as exc:
+            problems.append(f"Signed minutes: {exc}")
+    held_flats = {str(v["flat_number"]).strip().lower(): o for o, v in seated.items() if v}
+    held_emails = {str(v.get("email") or "").strip().lower(): o for o, v in seated.items() if v}
+    for office in todo:
+        label, rec = OFFICE_LABEL[office], data[office]
+        sig_name, sig_bytes = signatures.get(office) or (None, None)
+        if not sig_bytes:
+            problems.append(f"{label}: attach the signature image.")
+        else:
+            try:
+                _check_signature_file(sig_name or "", sig_bytes)
+            except OnboardingError as exc:
+                problems.append(f"{label}: {exc}")
+        if rec["flat"].lower() in held_flats:
+            problems.append(f"{label}: flat {rec['flat']} already holds the {OFFICE_LABEL[held_flats[rec['flat'].lower()]]} seat.")
+        if rec["email"] in held_emails:
+            problems.append(f"{label}: {rec['email']} already holds the {OFFICE_LABEL[held_emails[rec['email']]]} seat.")
+        if not _login_exists(society_id, rec["flat"], rec["email"]):
+            err = validate_password(passwords.get(office) or "")
+            if err:
+                problems.append(f"{label}: temporary password. {err}")
+    if problems:
+        raise OnboardingError("Nothing was seated. " + " ".join(problems))
+
+    done: list[str] = []
+    for office in todo:
+        rec = data[office]
+        sig_name, sig_bytes = signatures[office]
+        try:
+            seat_founding_officer(actor_id, society_id, office, rec["flat"], rec["name"], rec["email"], rec["phone"],
+                                  passwords.get(office) or "", rec["ref"], minutes_name, minutes_bytes,
+                                  signature_name=sig_name, signature_bytes=sig_bytes, apartment_size=_area_int(rec.get("size")))
+        except Exception as exc:                                    # noqa: BLE001 - report what is already seated either way
+            reason = str(exc) if isinstance(exc, OnboardingError) else "an unexpected error stopped it (see the server log)."
+            if not isinstance(exc, OnboardingError):
+                log.exception("seating %s for society %s from Election Results.xlsx failed", office, society_id)
+            if not done:
+                raise OnboardingError(f"{OFFICE_LABEL[office]} could not be seated: {reason}") from exc
+            raise PartialSeating(f"{OFFICE_LABEL[office]} could not be seated: {reason} Seated so far: "
+                                 f"{', '.join(OFFICE_LABEL[o] for o in done)}. Fix this and press the button again; "
+                                 "offices that are already seated are skipped.") from exc
+        done.append(office)
+
+    note = ""
+    g = data["grievance_officer"]
+    try:
+        set_grievance_officer(society_id, g["name"], g["email"], g["phone"] or None)
+    except OnboardingError as exc:
+        note = f" The grievance officer was not saved: {exc}"
+    try:
+        _audit(society_id, actor_id, "FOUNDING_COMMITTEE_SEATED_FROM_XLSX", "society", society_id,
+               {"seated": done, "already_seated": [o for o in CORE_OFFICES if o not in todo],
+                "workbook_sha256": workbook_sha256 or ""})
+    except Exception:                                               # noqa: BLE001 - the seats stand; the per-seat audit is already written
+        log.exception("could not audit the Election Results.xlsx seating for society %s", society_id)
+    if done:
+        msg = "Seated " + ", ".join(f"{data[o]['name']} as {OFFICE_LABEL[o]}" for o in done) + "."
+    else:
+        msg = "The President, Secretary and Treasurer were already seated."
+    if state_of(society_id) == "committee seated":
+        msg += " All three office-bearers are seated; the Setup Wizard is next."
+    return msg + note
 
 
 # ── stage 4: annexes ──────────────────────────────────────────────────────────────────────────────────────────────
