@@ -15599,7 +15599,11 @@ BEGIN
     END LOOP;
 
     -- 6) Activate. One transaction: any failure above leaves the society exactly as it was.
-    UPDATE societies SET onboarding_state = 'active' WHERE id = p_society_id;
+    -- The society lands on Stage 5 (Enrollment) in the SAME transaction, so a failure after commit can never leave an
+    -- active society with no phase (which the app reads as "onboarding complete" and skips Stages 5 to 7).
+    UPDATE societies SET onboarding_state = 'active',
+                         onboarding_phase = COALESCE(onboarding_phase, 'enrollment')
+     WHERE id = p_society_id;
     UPDATE onboarding_declarations SET status = 'posted' WHERE society_id = p_society_id;
     INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source)
     VALUES (p_society_id, p_actor_id, 'SOCIETY_ACTIVATED', 'society', p_society_id::TEXT,
