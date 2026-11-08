@@ -1407,7 +1407,7 @@ def render_list_card(card_id: str, title: str, icon: str,
         # Uses the single global modal in app_shell.py (see
         # bulk_enroll_callbacks.py), not a per-card component, so it's just
         # a plain button id here — no pattern-matching MATCH/ALL needed.
-        if entity in ("apartments", "vendors", "security", "apartment_users", "assets"):
+        if entity in ("apartments", "vendors", "security", "apartment_users", "assets", "supervisor", "staff", "users", "team"):
             header_right.append(dbc.Button(
                 [html.I(className="fas fa-file-excel me-1"), "Bulk Enroll"],
                 id={"type": "btn-bulk-enroll", "entity": entity},

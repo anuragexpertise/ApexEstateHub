@@ -126,6 +126,14 @@ def _stage_committee(society_id: int):
     s = ob.db._execute("SELECT grievance_officer_name, grievance_officer_email, grievance_officer_phone, onboarding_state FROM societies WHERE id=%s",
                        (society_id,), fetch_one=True) or {}
     out = [html.H6("Stage 2: seat the founding committee"),
+           dbc.Card(dbc.CardBody([
+               html.Strong("Paper workflow: Election Results / minutes evidence", className="d-block mb-1", style={"fontSize":"13px"}),
+               html.Small("Seat officers (or prepare from Election Results.xlsx offline), print this seating summary with signing footer, obtain signatures, scan and upload signed scan. Server computes SHA-256.", className="text-muted d-block mb-2"),
+               dbc.Row([
+                   dbc.Col(dbc.Button([html.I(className="fas fa-print me-2"), "Print seating summary"], id=f"{P}-election-print", color="primary", size="sm", outline=True, n_clicks=0), md="auto"),
+                   dbc.Col(dcc.Upload(id=f"{P}-election-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed Election Results scan"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg,.xlsx"), md="auto"),
+               ], className="g-2"), dcc.Download(id=f"{P}-election-dl"), html.Div(id=f"{P}-election-status", style={"fontSize":"12.5px","marginTop":"6px"}),
+           ], className="py-2"), className="mb-2"),
            html.Div("The President, Secretary and Treasurer sign the Agreement, so they must hold office first. Each is seated with the "
                     "resolution that elected them and the signed minutes; the file's SHA-256 is kept as evidence. Use a different flat "
                     "for each person: the Agreement needs four different people to sign.", style=_MUTED)]

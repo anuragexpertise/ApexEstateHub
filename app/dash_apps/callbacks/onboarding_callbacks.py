@@ -804,4 +804,53 @@ def register_onboarding_callbacks(app):
     def _bf_accs(sid):
         return ob.db._execute("SELECT id AS acc_id FROM accounts WHERE society_id=%s AND has_bf=TRUE ORDER BY id", (sid,), fetch_all=True) or []
 
+
+    @app.callback(
+        Output(f"{P}-election-status", "children"),
+        Input(f"{P}-election-scan", "contents"),
+        Input(f"{P}-election-print", "n_clicks"),
+        State(f"{P}-election-scan", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_election_evidence(contents, _p, filename):
+        s=_session()
+        if not s or not s[0]: return no_update
+        sid,uid,role=s
+        if role!='admin': return dbc.Alert("Only admin can upload election evidence.", color="danger", className="py-1")
+        from app.services import paper_evidence as pe
+        if ctx.triggered_id==f"{P}-election-scan" and contents:
+            try:
+                ev=pe.store_signed_scan(sid,"election_results",uid,filename,contents,{"kind":"Election Results.xlsx scan"})
+                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), f"Election Results signed scan stored. SHA-256: {ev['sha256']}"], color="success", className="py-1")
+            except Exception as exc:
+                return dbc.Alert(str(exc), color="danger", className="py-1")
+        st=pe.evidence_status(sid,"election_results")
+        return dbc.Alert([html.I(className="fas fa-check-circle me-2"), f"Stored: {st.get('filename') or ''} SHA-256 {str(st.get('sha256') or '')[:16]}…"], color="success", className="py-1") if st.get("evidenced") else html.Div("No signed Election Results scan uploaded.", className="text-muted small")
+
+    @app.callback(
+        Output(f"{P}-election-dl","data"),
+        Input(f"{P}-election-print","n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_election_print(n):
+        if not n: return no_update
+        s=_session(); 
+        if not s or not s[0]: return no_update
+        from app.services import paper_evidence as pe
+        sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
+        seated=ob.seated_officers(sid)
+        rows=[]
+        for off in ob.CORE_OFFICES:
+            v=seated.get(off) or {}
+            rows.append([ob.OFFICE_LABEL[off], v.get('holder_name') or '', v.get('flat_number') or '', v.get('email') or '', v.get('phone') or '', v.get('resolution_ref') or ''])
+        g=ob.db._execute("SELECT grievance_officer_name,grievance_officer_email,grievance_officer_phone FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
+        rows.append(["Grievance officer", g.get('grievance_officer_name') or '', '', g.get('grievance_officer_email') or '', g.get('grievance_officer_phone') or '', ''])
+        name,page=pe.printable_html("Election Results / Founding Committee Seating", soc.get('name') or f"Society {sid}",
+                                    "President / Secretary / Treasurer / Grievance officer", ["Office","Name","Flat","Email","Mobile","Resolution ref"],
+                                    rows, ["Returning Officer / Chair","Secretary (minutes)","President","Observer/Auditor"],
+                                    ["Use with Election Results.xlsx workflow. Upload signed & scanned minutes/results; server computes SHA-256."])
+        return dcc.send_string(page,name,type="text/html")
+
     print("  ✓ Onboarding callbacks registered")

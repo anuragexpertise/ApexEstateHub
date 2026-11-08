@@ -133,6 +133,18 @@ _BULK_TEMPLATES: dict[str, dict] = {
             "purchase_date must be in YYYY-MM-DD format."
         ),
     },
+    "supervisor": {
+        "label": "Supervisor",
+        "columns": ["email", "password", "name", "mobile"],
+        "required": ["email", "password", "name"],
+        "notes": "Creates a Supervisor team login (role supervisor). No date of birth/ID proof/photo collected here.",
+    },
+    "staff": {
+        "label": "Staff",
+        "columns": ["email", "password", "name", "mobile"],
+        "required": ["email", "password", "name"],
+        "notes": "Creates a Staff team login (role staff). No date of birth/ID proof/photo collected here.",
+    },
 }
 
 
@@ -661,6 +673,32 @@ def _bulk_insert_assets(rows: list[dict], sid: int, user_id: int = None) -> dict
 
     return {"success": success, "failed": failed}
 
+
+
+def _bulk_insert_team_role(rows: list[dict], sid: int, user_id: int = None, role_name: str = "staff") -> dict:
+    from werkzeug.security import generate_password_hash
+    required = _BULK_TEMPLATES[role_name]["required"]
+    success, failed = 0, []
+    for i, row in enumerate(rows):
+        try:
+            missing = [f for f in required if f not in row or row[f] is None or str(row[f]).strip() == ""]
+            if missing:
+                raise ValueError(f"Missing required fields: {', '.join(missing)}")
+            email = _clean_email(row.get("email"))
+            pw = str(row.get("password") or "").strip()
+            err = validate_password(pw)
+            if err:
+                raise ValueError(err)
+            name = str(row.get("name") or "").strip()[:100]
+            if db._execute("SELECT 1 FROM users WHERE lower(email)=lower(%s)", (email,), fetch_one=True):
+                raise ValueError("Email already registered")
+            db._execute("""INSERT INTO users (society_id,email,password_hash,role,login_method,linked_id,name,created_by,active)
+                           VALUES (%s,%s,%s,%s,'password',NULL,%s,%s,TRUE)""",
+                        (sid,email,generate_password_hash(pw),role_name,name,user_id))
+            success += 1
+        except Exception as e:
+            failed.append((i, _friendly_error(e)))
+    return {"success": success, "failed": failed}
 # ══════════════════════════════════════════════════════════════════════════════
 # CALLBACKS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -825,10 +863,16 @@ def register_bulk_enroll_callbacks(app):
             results = _bulk_insert_vendors(rows, sid, actor_id)
         elif entity == "apartment_users":
             results = _bulk_insert_apartment_users(rows, sid, actor_id)
+        elif entity in ("supervisor","staff"):
+            results = _bulk_insert_team_role(rows, sid, actor_id, role_name=entity)
         elif entity == "assets":
             results = _bulk_insert_assets(rows, sid, actor_id)
-        else:   # security
+        elif entity == "security":
             results = _bulk_insert_security(rows, sid, actor_id)
+        elif entity in ("supervisor","staff"):
+            results = _bulk_insert_team_role(rows, sid, actor_id, role_name=entity)
+        else:
+            results = {"success":0,"failed":[(0,f"Unsupported bulk entity: {entity}")]}
 
         # Secret-free audit: counts and the entity kind only - never row
         # contents, which carry names, phones and (initial) credentials.

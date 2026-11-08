@@ -966,10 +966,20 @@ def reconciliation_state(book, rec: dict | None) -> dict:
             "evidenced": bool(rec.get("sha256"))}
 
 
+EVIDENCE_PURPOSES = {
+    "bank_statement","cash_count","audited_report","review_letter","paper_signature",
+    "pending_receivables","tds_rates","declaration_undivided_interest","brought_forward",
+    "account_statement","election_results","apartment_charges","bulk_apartments","bulk_vendors",
+    "bulk_security","bulk_supervisor","bulk_staff","adoption_resolution","other_paper_evidence",
+}
+
 def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filename: str,
                         data: bytes, uploaded_by: int, meta: dict) -> dict:
-    """Store an evidence file via _store_evidence extended with purpose; returns db row."""
+    """Store an evidence file; server computes SHA-256. Purpose is checked in Python so old DBs still work."""
     import os as _os
+    purpose = (purpose or "").strip()
+    if purpose not in EVIDENCE_PURPOSES:
+        raise OnboardingError("Unknown evidence purpose.")
     ext = _os.path.splitext(filename or "")[1].lower()
     if ext not in EVIDENCE_TYPES:
         raise OnboardingError("Attach the file as a PDF, PNG or JPG (max 5 MB).")
