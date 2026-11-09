@@ -88,24 +88,21 @@ def render_adoption_panel(society_id: int | None) -> html.Div:
     except Exception:                                              # noqa: BLE001
         initial_scan_status = None
     paper_card = dbc.Card(dbc.CardBody([
-        html.H6([html.I(className="fas fa-file-signature me-2"), "Adoption of Bye-laws 1-58: paper signing"], className="mb-1"),
-        html.Small("Fill Society_bye_laws.xlsx (download the template, which carries today's choices), upload it to fill the "
-                   "choices below, print the signed list as a PDF, have it signed, then upload the signed scan. The scan's "
-                   "SHA-256 is stored as evidence for the General Body resolution.", className="text-muted d-block mb-2"),
+        html.H6([html.I(className="fas fa-file-signature me-2"), "Adoption of Bye-laws 1-58"], className="mb-1"),
+        html.Small("Record which Model Bye-Laws 2011 clauses your Association adopts. Upload the signed General Body "
+                   "minutes here as the real third-party document (Annex G); the clause choices are stored as data. "
+                   "No separate print/sign/scan loop is needed for the bye-law list itself.", className="text-muted d-block mb-2"),
         dbc.Row([
             dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Society_bye_laws.xlsx"], id="adopt-bl-tpl",
                                size="sm", outline=True, color="secondary", n_clicks=0), width="auto"),
             dbc.Col(dcc.Upload(id="adopt-bl-xlsx", children=dbc.Button([html.I(className="fas fa-file-excel me-2"), "Upload filled xlsx"],
-                                                                       size="sm", outline=True, color="secondary", n_clicks=0),
+                                                                           size="sm", outline=True, color="secondary", n_clicks=0),
                                multiple=False, accept=".xlsx"), width="auto"),
-            dbc.Col(dbc.Button([html.I(className="fas fa-print me-2"), "Print signing PDF"], id="adopt-bl-print",
-                               size="sm", outline=True, color="primary", n_clicks=0), width="auto"),
-            dbc.Col(dcc.Upload(id="adopt-bl-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed scan"],
-                                                                       size="sm", outline=True, color="secondary", n_clicks=0),
+            dbc.Col(dcc.Upload(id="adopt-bl-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed General Body minutes"],
+                                                                           size="sm", outline=True, color="secondary", n_clicks=0),
                                multiple=False, accept=".pdf,.png,.jpg,.jpeg"), width="auto"),
         ], className="g-2"),
         dcc.Download(id="adopt-bl-tpl-dl"),
-        dcc.Download(id="adopt-bl-print-dl"),
         html.Div(id="adopt-bl-import-status", className="mt-2", style={"fontSize": "12px"}),
         html.Div(initial_scan_status, id="adopt-bl-evidence-status", className="mt-2", style={"fontSize": "12px"}),
     ]), className="mb-3")

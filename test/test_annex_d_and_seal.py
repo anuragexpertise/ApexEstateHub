@@ -47,7 +47,7 @@ def test_every_control_has_a_fix_target():
 
 def test_fix_targets_are_real_rail_keys_or_committee():
     from app.dash_apps.pages.setup_wizard import CATEGORIES
-    assert all(v in CATEGORIES or v == "committee" for v in ob.CONTROL_FIX.values())
+    assert all(v in CATEGORIES or v in ("committee", "Onboarding Hub") for v in ob.CONTROL_FIX.values())
 
 
 def test_seal_needs_exact_i_agree_and_password(monkeypatch):

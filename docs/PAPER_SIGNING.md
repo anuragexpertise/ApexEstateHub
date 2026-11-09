@@ -1,78 +1,41 @@
-# Paper signing workflow
+# Paper signing workflow (after onboarding simplification)
 
-One reusable flow for every dataset that must be signed on paper and evidenced:
+After the onboarding simplification, the print-sign-scan loops for generated forms (Election Results data, TDS rates,
+Part A declaration, pending receivables, brought forward, bulk enrolment registers, bye-law adoption list) are removed.
+The Agreement with its sealed annexes is the only instrument signed. Scanned third-party originals are uploaded directly as
+evidence; nothing is printed and signed separately.
 
-```
-fill data (grid / xlsx upload)  ->  make_document(): server-side PDF with signing footer
-   ->  download / print / sign / scan  ->  upload signed scan (PDF/PNG/JPG, max 5 MB)
-   ->  server SHA-256  ->  onboarding_evidence row, bound to the generated document
-```
+Three remaining paths use signed scans:
 
-Code: `app/services/paper_evidence.py` (flow), `onboarding_service.store_evidence_file / record_document / latest_document`
-(storage), `xlsx_templates.py` (templates and validators).
+| Path | What is signed | How |
+|---|---|---|
+| Agreement paper mode | The Agreement text with annex hashes | `agreement_print_html()` → print, sign, scan → `store_evidence_file(..., "paper_signature")` |
+| Builder's Declaration | The builder's Declaration PDF + workbook | `undivided_declaration.apply()` → stores Declaration evidence |
+| Plain evidence uploads | Registration certificate, bank statements, cash count, audited report, review letter, election minutes, adoption minutes | `store_evidence_file()` directly (no `make_document`) |
 
-## Three hashes tie the paper to the data
+The reusable `paper_evidence.py` flow (`make_document`, `store_signed_scan`, `snapshot_hash`, `record_document`,
+`onboarding_documents`) is retained but is no longer used by any onboarding loop. It remains available for any future
+paper-signing need.
+
+## Three hashes tie paper to data (retained for reference)
 
 | Hash | What | Where |
 |---|---|---|
-| `snapshot_sha256` | the exact rows, extra sections and meta lines that were printed (no dates, no renderer) | `onboarding_documents`, copied to the evidence row |
-| `document_sha256` | the generated, unsigned PDF | `onboarding_documents`, copied to the evidence row |
-| `sha256` | the signed scan the user uploaded | `onboarding_evidence` |
+| `snapshot_sha256` | the exact rows printed | `onboarding_documents`, copied to evidence row |
+| `document_sha256` | the generated unsigned PDF | `onboarding_documents`, copied to evidence row |
+| `sha256` | the signed scan uploaded | `onboarding_evidence` |
 
-Every PDF page carries the **Doc ID** (`EH-<society>-<PURPOSE>-<snapshot8>`), the first 16 hex of the data hash and
-"Page x of y". The Doc ID is deterministic: the same data prints with the same ID.
+## Evidence purposes (all three allow-lists must stay in sync)
 
-**Stale evidence.** `evidence_status(..., current_snapshot=...)` compares the data as it is now with the snapshot that was
-signed. If the entries changed after signing, the screen says so and asks for a new print, signature and scan. Wired for:
-pending receivables, election results, bye-laws adoption. The other flows are bound (Doc ID, both hashes) but compare only
-when their caller passes `current_snapshot`.
+`onboarding_service.EVIDENCE_PURPOSES`, the CHECK constraint in `database/estatehub.sql`, and
+`database/migrations/003_paper_evidence_purposes.sql`.
 
-A scan uploaded with no generated document on file is still stored, but marked **not linked**.
+Current values: `bank_statement`, `cash_count`, `audited_report`, `review_letter`, `paper_signature`,
+`pending_receivables`, `tds_rates`, `declaration_undivided_interest`, `brought_forward`, `account_statement`,
+`election_results`, `apartment_charges`, `bulk_apartments`, `bulk_vendors`, `bulk_security`, `bulk_supervisor`,
+`bulk_staff`, `adoption_resolution`, `other_paper_evidence`, `registration_certificate`, `ca_rates_letter`,
+`adoption_minutes`.
 
-## Flows
+## File limits
 
-| Use | purpose | Print / scan wired in |
-|---|---|---|
-| Election Results (President, Secretary, Treasurer, Grievance officer) | `election_results` | `onboarding_callbacks.py` |
-| TDS Rates (CA signs; per-row effective date) | `tds_rates` | `onboarding_wizard_callbacks.py` |
-| Declaration of Undivided Interest, Part A (+ apartment-wise table) | `declaration_undivided_interest` | `onboarding_wizard_callbacks.py` |
-| Brought Forward (any As-on date) | `brought_forward` | `onboarding_wizard_callbacks.py` |
-| Pending receivables (ties to Sundry Debtors) | `pending_receivables` | `onboarding_wizard_callbacks.py` |
-| Account statements (bank / deposit / cash, same As-on date) | `account_statement` | `onboarding_wizard_callbacks.py` |
-| Bulk enrol: Apartments, Vendors, Security, Supervisor, Staff (others: `other_paper_evidence`) | `bulk_*` | `bulk_enroll_callbacks.py` |
-| Adoption of bye-laws 1-58 (`Society_bye_laws.xlsx`) | `adoption_resolution` | `paper_sign_callbacks.py` |
-
-The bulk register prints every column of the upload except `password`, and the SHA-256 of the uploaded xlsx.
-
-## Adding another document
-
-1. Add the purpose to `EVIDENCE_PURPOSES` (onboarding_service.py), to the CHECK list in `estatehub.sql` (inline, no ALTER),
-   and to a migration for existing databases.
-2. Build `(headers, rows, signers, meta_lines)` in one function and use it for both print and the stale check.
-3. Print: `doc = pe.make_document(sid, purpose, uid, title, society_name, subtitle, headers, rows, signers, meta)` then
-   `dcc.send_bytes(doc["data"], doc["filename"])`. Pass `sections=[...]` for extra tables and `kind=` when several
-   documents share one purpose.
-4. Scan: `pe.store_signed_scan(sid, purpose, uid, filename, contents, meta, kind=...)`; show `pe.stored_message(ev)`.
-5. Status: `pe.status_line(pe.evidence_status(sid, purpose, current_snapshot=pe.snapshot_hash(...)))`.
-6. Classify the new callbacks in `docs/authz_manifest.json` (`scripts/inventory_endpoints.py --check`).
-
-## Fonts
-
-`reportlab` ships Helvetica, which has no rupee sign: with it the PDF prints `Rs.`. If DejaVu Sans is installed
-(`/usr/share/fonts/truetype/dejavu/`), or placed in `app/assets/fonts/DejaVuSans.ttf` + `DejaVuSans-Bold.ttf`, or pointed
-to by `ESTATEHUB_PDF_FONT` / `ESTATEHUB_PDF_FONT_BOLD`, the PDF uses it and prints the rupee sign and Devanagari. If
-`reportlab` is not installed, `make_document` falls back to the printable HTML (`fmt = "html"`).
-
-## Later signing modes
-
-`SIGNING_MODES = ("paper",)`; `make_document(signing_mode=...)` refuses anything else today.
-
-* **password mode**: `document_signing.py` already stores each signer's own-password confirmation with the SHA-256 of the
-  exact item text. Use `snapshot_sha256` as that item text hash, so the paper and password routes sign the same thing.
-* **eSign mode**: `esign_adapter.py` already has `aadhaar_eSign`, `dsc` and `paper` methods; for `paper` its `evidence_ref`
-  is the scan's SHA-256, which is the `sha256` stored here.
-
-## Existing databases
-
-Run `python3 database/apply_migration.py` (003 adds the purposes, 004 adds `onboarding_documents` and the binding columns).
-A fresh database gets everything from `estatehub.sql`.
+PDF, PNG, JPG, JPEG; max 5 MB; magic-byte check. These limits are unchanged.

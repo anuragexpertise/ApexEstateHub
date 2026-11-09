@@ -1649,18 +1649,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
             dbc.Button("Apply to form", id="onb-tds-apply", color="primary", size="sm", disabled=True, n_clicks=0, className="mb-3"),
             html.Small("Individual rate changes: fill the 'effective_start_date' column (YYYY-MM-DD) in the TDS Rates template. A blank cell uses the TDS Effective Date above.",
                        className="text-muted d-block mb-2"),
-            dbc.Card(dbc.CardBody([
-                html.Strong("Paper signing (TDS rates, CA)", className="d-block mb-1", style={"fontSize":"13px"}),
-                html.Small("Print/Save PDF with signing footer -> CA/signatories sign & scan -> upload scan (server computes SHA-256). Signed by CA; rates need not be marked provisional once evidenced.",
-                           className="text-muted d-block mb-2"),
-                dbc.Row([
-                    dbc.Col(dbc.Button([html.I(className="fas fa-print me-2"), "Print / Save PDF"], id="onb-tds-print", color="primary", size="sm", outline=True, n_clicks=0), md="auto"),
-                    dbc.Col(dcc.Upload(id="onb-tds-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed scan"], color="secondary", size="sm", outline=True, n_clicks=0),
-                                       multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
-                ], className="g-2"),
-                dcc.Download(id="onb-tds-print-dl"),
-                html.Div(id="onb-tds-evidence-status", style={"fontSize":"12.5px","marginTop":"6px"}),
-            ], className="py-2"), className="mb-3", style={"border":"1px dashed #9bb7d4"}),
+            html.Div(id="onb-tds-evidence-status", style={"fontSize":"12.5px","marginTop":"6px", "color": "#667"}),
         ]
         
         header = html.Div([
@@ -1760,14 +1749,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                               dbc.Input(id="sw-apt-interest", type="number", value=s_int if s_int is not None else "", min=0, step=0.01, className="mb-1", placeholder="Set by General Body resolution"),
                               html.Small("UP Model Bye-Laws 2011, bye-law 46(a): the rate is set by General Body resolution. " + INTEREST_RATE_NOTE, className="text-muted d-block mb-1")] + citation, width=8)]),
             html.P("After enrolment, each flat needs its undivided-interest %. Area share is used until you enter the Declaration figures.", className="text-muted small"),
-            html.Hr(),
-            dbc.Alert("Declaration - Undivided Interest (Part A / Apartment Charges): print this declaration, obtain signatures, scan and upload. Server computes SHA-256 and stores evidence.", color="info", className="py-2", style={"fontSize":"12.5px"}),
-            dbc.Row([
-                dbc.Col(dbc.Button([html.I(className="fas fa-print me-2"), "Print / Save PDF (Declaration Part A)"], id="onb-apt-print", color="primary", size="sm", outline=True, n_clicks=0), md="auto"),
-                dbc.Col(dcc.Upload(id="onb-apt-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed scan"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
-            ], className="g-2 mb-1"),
-            dcc.Download(id="onb-apt-print-dl"),
-            html.Div(id="onb-apt-evidence-status", style={"fontSize":"12.5px","marginTop":"4px"}),
+            html.Div(id="onb-apt-evidence-status", style={"fontSize":"12.5px","marginTop":"4px", "color": "#667"}),
         ]
     elif category == "Funds":
         from app.services import regime_rules_admin as rra
@@ -2137,21 +2119,6 @@ def render_category_content(category, society_id=None, state=None, constitution=
             ], className="g-2 mt-1 align-items-center"),
             html.Div(id="onb-bf-recv-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
             html.Div(id="onb-bf-tieout", className="mb-3", style={"fontSize": "12px", "fontWeight": "700"}),
-            dbc.Card(dbc.CardBody([
-                html.Strong("Paper signing (Pending receivables)", className="d-block mb-1", style={"fontSize": "13px"}),
-                html.Small("After filling: add signing footer -> print / Save as PDF -> sign & scan -> upload scan (server computes SHA-256 and stores evidence).",
-                           className="text-muted d-block mb-2"),
-                dbc.Row([
-                    dbc.Col(dbc.Button([html.I(className="fas fa-print me-2"), "Print / Save PDF (with signing footer)"],
-                                       id="onb-recv-print", color="primary", size="sm", outline=True, n_clicks=0), md="auto"),
-                    dbc.Col(dcc.Upload(id="onb-recv-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed & scanned PDF/image"],
-                                       color="secondary", size="sm", outline=True, n_clicks=0),
-                                       multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
-                ], className="g-2 align-items-center"),
-                dcc.Download(id="onb-recv-print-dl"),
-                html.Div(id="onb-recv-evidence-status", style={"fontSize": "12.5px", "marginTop": "6px"}),
-            ], className="py-2"), className="mb-3", style={"border": "1px dashed #9bb7d4"}),
-
             # ── item 11: reconciliation & evidence ────────────────────────────────
             html.Hr(),
             html.H6("Reconciliation & evidence", className="mt-4 mb-2 text-primary"),
@@ -2160,12 +2127,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
             dcc.Store(id="onb-reconciliation-json", data=_saved_reconciliation(society_id)),
             html.Div(id="onb-bf-reconciliation-cards", className="mb-3"),
             html.Small("Use per-account Attach scan in reconciliation cards for individual bank/deposit/cash statements (same As-on date). Overall Brought Forward paper evidence below.", className="text-muted d-block mb-2"),
-            dbc.Row([
-                dbc.Col(dbc.Button([html.I(className="fas fa-print me-2"), "Print / Save PDF (Account Statements)"], id="onb-bf-print", color="primary", size="sm", outline=True, n_clicks=0), md="auto"),
-                dbc.Col(dcc.Upload(id="onb-bf-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed scan (Account Statements)"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
-            ], className="g-2 mb-1"),
-            dcc.Download(id="onb-bf-print-dl"),
-            html.Div(id="onb-bf-evidence-status", style={"fontSize":"12.5px","marginTop":"4px"}),
+            html.Div(id="onb-bf-evidence-status", style={"fontSize":"12.5px","marginTop":"4px", "color": "#667"}),
             html.Div(id="onb-bf-evidence-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
         ]
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]

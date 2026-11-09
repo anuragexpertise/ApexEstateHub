@@ -35,7 +35,16 @@ def _field(label, comp, width="100%"):
 
 def tracker(society_id: int):
     items = []
+    groups = [(1, 3, "Set up"), (4, 4, "Sign"), (5, 7, "Go-live checklist")]
+    gi = 0
     for s in ob.stage_report(society_id):
+        if gi < len(groups) and s["n"] == groups[gi][0]:
+            items.append(html.Div(groups[gi][2], style={"fontSize": "10px", "fontWeight": "700",
+                                                        "color": "#556", "marginTop": "6px", "marginBottom": "2px",
+                                                        "textTransform": "uppercase", "letterSpacing": "0.5px",
+                                                        "borderBottom": "1px solid #e1e7ef", "paddingBottom": "2px",
+                                                        "flexBasis": "100%", "textAlign": "left"}))
+            gi += 1
         icon, color = _ICON[s["status"]]
         items.append(html.Div([
             html.I(className=f"fas {icon}", style={"color": color, "fontSize": "20px"}),
@@ -163,14 +172,15 @@ def _stage_committee(society_id: int):
                        (society_id,), fetch_one=True) or {}
     out = [html.H6("Stage 2: seat the founding committee"),
            dbc.Card(dbc.CardBody([
-               html.Strong("Paper workflow: Election Results / minutes evidence", className="d-block mb-1", style={"fontSize":"13px"}),
-               html.Small("Seat officers (or prepare from Election Results.xlsx offline), print this seating summary with signing footer, obtain signatures, scan and upload signed scan. Server computes SHA-256.", className="text-muted d-block mb-2"),
+               html.Strong("Minutes evidence (mandatory)", className="d-block mb-1", style={"fontSize":"13px"}),
+               html.Small("The signed minutes of the election are the real third-party document. Upload the scan here; "
+                          "the server computes its SHA-256 and Annex B records it. No separate print/sign/scan loop is needed "
+                          "for the Election Results data itself.", className="text-muted d-block mb-2"),
                dbc.Row([
-                   dbc.Col(dbc.Button([html.I(className="fas fa-print me-2"), "Print seating summary"], id=f"{P}-election-print", color="primary", size="sm", outline=True, n_clicks=0), md="auto"),
-                   dbc.Col(dcc.Upload(id=f"{P}-election-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed Election Results scan"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
+                   dbc.Col(dcc.Upload(id=f"{P}-election-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed election minutes scan"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
                    dbc.Col(dbc.Button([html.I(className="fas fa-file-excel me-2"), "Election Results.xlsx template"], id=f"{P}-election-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
                    dbc.Col(dcc.Upload(id=f"{P}-election-xlsx", children=dbc.Button([html.I(className="fas fa-table me-2"), "Fill forms from Election Results.xlsx"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".xlsx"), md="auto"),
-               ], className="g-2"), dcc.Download(id=f"{P}-election-dl"), dcc.Download(id=f"{P}-election-tpl-dl"),
+               ], className="g-2"), dcc.Download(id=f"{P}-election-tpl-dl"),
                html.Div(id=f"{P}-election-import-status", style={"fontSize":"12.5px","marginTop":"6px"}),
                html.Div(id=f"{P}-election-status", style={"fontSize":"12.5px","marginTop":"6px"}),
            ], className="py-2"), className="mb-2"),

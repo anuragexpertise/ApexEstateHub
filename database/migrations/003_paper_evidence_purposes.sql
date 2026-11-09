@@ -14,6 +14,7 @@ BEGIN
             'bank_statement','cash_count','audited_report','review_letter','paper_signature',
             'pending_receivables','tds_rates','declaration_undivided_interest','brought_forward',
             'account_statement','election_results','apartment_charges','bulk_apartments','bulk_vendors',
-            'bulk_security','bulk_supervisor','bulk_staff','adoption_resolution','other_paper_evidence'
+            'bulk_security','bulk_supervisor','bulk_staff','adoption_resolution','other_paper_evidence',
+            'registration_certificate','ca_rates_letter','adoption_minutes'
         ));
 END $$;
