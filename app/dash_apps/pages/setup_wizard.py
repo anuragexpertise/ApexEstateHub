@@ -2126,14 +2126,9 @@ def render_category_content(category, society_id=None, state=None, constitution=
                    "(the server computes each file's SHA-256; nobody types a hash).", className="text-muted small mb-2"),
             dcc.Store(id="onb-reconciliation-json", data=_saved_reconciliation(society_id)),
             html.Div(id="onb-bf-reconciliation-cards", className="mb-3"),
-            dcc.Download(id="onb-bf-account-statements-dl"),
-            dbc.Row([
-                dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Account Statements template (all accounts)"],
-                                   id="onb-bf-account-statements-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
-            ], className="g-2 mb-2"),
-            html.Small("Download one Account Statements XLSX with one row per account. Fill each account's closing balance "
-                       "and upload it back. Each account still gets its own 'Attach scan' evidence below.", className="text-muted d-block mb-2"),
-            html.Small("Use per-account Attach scan in reconciliation cards for individual bank/deposit/cash statements (same As-on date). Overall Brought Forward paper evidence below.", className="text-muted d-block mb-2"),
+            html.Small("Statement balances are taken from the Brought Forward XLSX uploaded above — one row per account. "
+                       "Each account only needs its 'Attach scan' evidence below (PDF/PNG/JPG; server computes SHA-256).",
+                       className="text-muted d-block mb-2"),
             html.Div(id="onb-bf-evidence-status", style={"fontSize":"12.5px","marginTop":"4px", "color": "#667"}),
             html.Div(id="onb-bf-evidence-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
         ]

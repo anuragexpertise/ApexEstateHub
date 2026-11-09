@@ -606,10 +606,6 @@ def register_onboarding_wizard_callbacks(app):
                           value=float(st["diff"]) if st["diff"] is not None else None, placeholder="Difference"),
                 html.Div(status_kids, id={"type": "onb-bf-rec-status", "acc_id": acc_id}, style={"fontSize": "11.5px", "lineHeight": "1.35"}),
                 html.Div([
-                    dcc.Upload(id={"type": "onb-bf-stmt-xlsx", "acc_id": acc_id},
-                               children=dbc.Button("Upload xlsx", size="sm", outline=True, color="secondary", n_clicks=0, className="me-1 mb-1"),
-                               multiple=False, accept=".xlsx", className="d-inline-block"),
-                    dcc.Download(id={"type": "onb-bf-stmt-dl", "acc_id": acc_id}),
                     dcc.Upload(id={"type": "onb-bf-evidence", "acc_id": acc_id},
                                children=dbc.Button("Attach scan", size="sm", outline=True, color="secondary", n_clicks=0, className="mb-1"),
                                multiple=False, accept=".pdf,.png,.jpg,.jpeg", className="d-inline-block ms-1"),
@@ -634,16 +630,14 @@ def register_onboarding_wizard_callbacks(app):
         Output({"type": "onb-bf-rec-status", "acc_id": ALL}, "children"),
         Input({"type": "onb-bf-rec-stmt", "acc_id": ALL}, "value"),
         Input({"type": "onb-bf-evidence", "acc_id": ALL}, "contents"),
-        Input({"type": "onb-bf-stmt-xlsx", "acc_id": ALL}, "contents"),
         State({"type": "onb-bf-evidence", "acc_id": ALL}, "filename"),
         State({"type": "onb-bf-rec-book", "acc_id": ALL}, "data"),
         State("onb-reconciliation-json", "data"),
-        State({"type": "onb-bf-stmt-xlsx", "acc_id": ALL}, "filename"),
         State("sw-bf-as-on", "date"),
         prevent_initial_call=True,
     )
     @require_session
-    def bf_reconciliation_update(stmts, contents, xlsx_contents, filenames, books, rec_json, xlsx_names, bf_as_on):
+    def bf_reconciliation_update(stmts, contents, filenames, books, rec_json, bf_as_on):
         s = _session()
         trig = ctx.triggered_id
         if not s or not s[0] or not isinstance(trig, dict):
@@ -658,23 +652,6 @@ def register_onboarding_wizard_callbacks(app):
         if trig["type"] == "onb-bf-rec-stmt":
             val = stmts[acc_ids.index(trig["acc_id"])] if trig["acc_id"] in acc_ids else None
             item["statement_balance"] = "" if val in (None, "") else str(money(val))
-        elif trig["type"] == "onb-bf-stmt-xlsx":
-            # Per-account statement .xlsx: the as-on date MUST equal the Brought Forward as-on date, else it is rejected.
-            n = acc_ids.index(trig["acc_id"]) if trig["acc_id"] in acc_ids else -1
-            c = xlsx_contents[n] if 0 <= n < len(xlsx_contents or []) else None
-            if not c:
-                return no_update, no_update, no_update
-            res = parse_upload(c, (xlsx_names[n] if n < len(xlsx_names or []) else "") or "", "Header",
-                               ["account_id", "as_on_date", "closing_balance"], max_rows=5)
-            if res.errors or not res.rows:
-                errors[trig["acc_id"]] = "Rejected: " + (" ".join(res.errors) or "the Header sheet is empty.")
-            else:
-                clean, why = ob.validate_statement_header(res.rows[0], int(trig["acc_id"]), bf_as_on)
-                if why:
-                    errors[trig["acc_id"]] = why
-                else:
-                    item.update({"statement_balance": clean["closing_balance"], "as_on_date": clean["as_on_date"],
-                                 "statement_file": (xlsx_names[n] or "")[:120], "statement_source": "xlsx"})
         else:
             n = acc_ids.index(trig["acc_id"]) if trig["acc_id"] in acc_ids else -1
             raw = None
@@ -708,33 +685,6 @@ def register_onboarding_wizard_callbacks(app):
             else:
                 statuses.append(html.Span(errors[a], className="text-danger") if a in errors else _rec_status(st, r))
         return rec, diffs, statuses
-
-    # Combined Account Statements template: one XLSX with one row per bank/deposit/cash account ---------------
-    @app.callback(
-        Output("onb-bf-account-statements-dl", "data"),
-        Input("onb-bf-account-statements-tpl", "n_clicks"),
-        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
-        State("sw-bf-as-on", "date"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def bf_account_statements_template(n, amts, bf_as_on):
-        if not n:
-            return no_update
-        s = _session()
-        if not s or not s[0]:
-            return no_update
-        sid = s[0]
-        ids = [it["id"]["acc_id"] for it in (ctx.states_list[0] or [])]
-        accs = {a["id"]: a for a in ob._rows("SELECT id, name, tab_name FROM accounts WHERE society_id=%s", (sid,))}
-        accounts = [accs[int(i)] for i in ids if int(i) in accs]
-        try:
-            on = ob._iso_day(bf_as_on)
-        except ValueError:
-            on = None
-        from app.services.xlsx_templates import build_statement_templates
-        return dcc.send_bytes(build_statement_templates(accounts, on), "Account Statements - all accounts.xlsx")
-
 
     # ── Legal Regime Selection: "Your Legal Regime" card + Legal Hierarchy table (item 7) ──────────────────
     # Re-rendered when a Yes/No answer changes AND when State / Constitution change on Society Details (they are only
