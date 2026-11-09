@@ -1049,6 +1049,8 @@ def _register_xlsx_callbacks(app):
                     outs[k][i] = float(item[k])
         row_eff = {idx: it["effective_start_date"] for idx, it in (pending.get("rows") or {}).items()
                    if it.get("effective_start_date")}
+        return (outs["nature"], outs["rate"], outs["rate_no_pan"], outs["single"], outs["agg"],
+                pending.get("tan"), pending.get("effective_date"), False, row_eff)
     # BF template download: exactly the accounts listed on screen ----------------------
     def _acc_meta():
         from database.seed import ACCOUNTS
