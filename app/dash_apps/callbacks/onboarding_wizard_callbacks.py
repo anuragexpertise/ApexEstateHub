@@ -819,9 +819,10 @@ def register_onboarding_wizard_callbacks(app):
     @app.callback(
         Output("onb-bf-print-dl","data"), Output("onb-bf-evidence-feedback","children", allow_duplicate=True),
         Input("onb-bf-print","n_clicks"), State("sw-bf-fy","value"), State("sw-bf-as-on","date"),
-        State({"type":"sw-bf-amt","acc_id":ALL},"value"), prevent_initial_call=True)
+        State({"type":"sw-bf-amt","acc_id":ALL},"value"), State({"type":"sw-bf-remarks","acc_id":ALL},"value"),
+        prevent_initial_call=True)
     @require_session
-    def bf_print(n,fy,as_on,amts):
+    def bf_print(n,fy,as_on,amts,remarks=None):
         if not n: return no_update,no_update
         s=_session(); 
         if not s or not s[0] or s[2] != "admin": return no_update,no_update
@@ -832,16 +833,17 @@ def register_onboarding_wizard_callbacks(app):
         body=[]; dr=cr=Decimal(0)
         for i,aid in enumerate(ids):
             v=amts[i] if i<len(amts or []) else None
-            if v in (None,"",0,0.0): continue
+            rem=(remarks[i] if i<len(remarks or []) else None)
+            if v in (None,"",0,0.0) and not rem: continue
             a=meta.get(aid)
             if not a: continue
-            amt=Decimal(str(v)); side=a[5] or 'Dr'
+            amt=Decimal(str(v or 0)); side=a[5] or 'Dr'
             if side=='Dr': dr+=amt
             else: cr+=amt
-            body.append([str(aid),a[2] or '',a[3] or a[1] or '',side,f"{amt:,.2f}"])
-        body.append(["","TOTAL","",f"Dr {dr:,.2f}",f"Cr {cr:,.2f}"])
+            body.append([str(aid),a[2] or '',a[3] or a[1] or '',side,f"{amt:,.2f}",(remarks[i] if i<len(remarks or []) else None) or ''])
+        body.append(["","TOTAL","",f"Dr {dr:,.2f}",f"Cr {cr:,.2f}",""])
         doc=pe.make_document(sid,"brought_forward",s[1],"Brought Forward Opening Balances",soc.get("name") or f"Society {sid}",
-                                    f"FY {fy or ''} | As-on {as_on or ''}",["Account ID","Tab","Account","Side","Amount"],body,
+                                    f"FY {fy or ''} | As-on {as_on or ''}",["Account ID","Tab","Account","Side","Amount","Remarks"],body,
                                     ["Prepared by","Treasurer","Secretary","Auditor/CA"],
                                     [f"As-on date: {as_on or '—'} (may be mid-year).", "Attach all bank/deposit/cash account statements for the same As-on date as reconciliation evidence."])
         return dcc.send_bytes(doc["data"],doc["filename"]), _msg("Signing PDF generated (Doc ID %s). Print, sign, scan, upload the signed scan." % doc["doc_id"],"success")
@@ -873,12 +875,17 @@ def register_onboarding_wizard_callbacks(app):
         if not s or not s[0] or s[2] != "admin": return no_update
         from app.services import paper_evidence as pe
         sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
+        def _v(x):
+            # None / "" = not entered (blank); a typed 0 is a real answer and must print as 0 (str(0 or '') hid it)
+            if x is None or x == "": return ""
+            try: return format(Decimal(str(x)).normalize(), "f")
+            except Exception: return str(x)
         hdr=["Field","Value"]; body=[
             ["Declaration","Undivided Interest - Part A: Apartment Charges / society defaults"],
-            ["Construction cost of project",str(cost or '')],["Monthly common-expense budget",str(budget or '')],
-            ["Default rate per sq ft",str(rate or '')],["Default fixed amount",str(amt or '')],
-            ["Maintenance billing basis",str(basis or '')],["Billing due day",str(due or '')],
-            ["Interest % per month (simple)",str(interest or '')],
+            ["Construction cost of project",_v(cost)],["Monthly common-expense budget",_v(budget)],
+            ["Default rate per sq ft",_v(rate)],["Default fixed amount",_v(amt)],
+            ["Maintenance billing basis",str(basis or '')],["Billing due day",_v(due)],
+            ["Interest % per month (simple)",_v(interest)],
         ]
         doc=pe.make_document(sid,"declaration_undivided_interest",s[1],"Declaration - Undivided Interest (Part A)",soc.get("name") or f"Society {sid}",
                              "Apartment Charges / society defaults",hdr,body,
@@ -1246,19 +1253,21 @@ def _register_xlsx_callbacks(app):
         State({"type":"tds-rate-no-pan","index":ALL}, "value"),
         State({"type":"tds-single-bill","index":ALL}, "value"),
         State({"type":"tds-agg-bill","index":ALL}, "value"),
+        State({"type":"tds-nature","index":ALL}, "value"),
         prevent_initial_call=True,
     )
     @require_session
-    def tds_print(n, tan, eff, row_eff, secs, discs, rates, npans, singles, aggs):
+    def tds_print(n, tan, eff, row_eff, secs, discs, rates, npans, singles, aggs, natures=None):
         if not n: return no_update, no_update
         s=_session()
         if not s or not s[0] or s[2] != "admin": return no_update, no_update
         from app.services import paper_evidence as pe
         sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
-        hdr=["Section","Discriminator","Rate %","No PAN %","Single bill","Aggregate","Effective start"]
+        hdr=["Section","Discriminator","Nature of income","Rate %","No PAN %","Single bill","Aggregate","Effective start"]
         body=[]
         for i,sec in enumerate(secs or []):
             body.append([sec or "", (discs[i] if i<len(discs or []) else "") or "",
+                         (natures[i] if i<len(natures or []) else "") or "",
                          "" if i>=len(rates or []) or rates[i] in (None,"") else str(rates[i]),
                          "" if i>=len(npans or []) or npans[i] in (None,"") else str(npans[i]),
                          "" if i>=len(singles or []) or singles[i] in (None,"") else str(singles[i]),

@@ -325,7 +325,7 @@ def make_document(society_id: int, purpose: str, actor_id: int | None, title: st
     except ImportError:
         log.warning("reportlab is not installed; falling back to the printable HTML for %s", purpose)
         extra = [f"Doc ID {doc_id}"] + meta_lines
-        _, page = printable_html(title, society_name, subtitle, headers, rows, signers, extra)
+        _, page = printable_html(title, society_name, subtitle, headers, rows, signers, extra, sections=sections)
         data, fmt = page.encode("utf-8"), "html"
     digest = hashlib.sha256(data).hexdigest()
     try:
@@ -378,15 +378,23 @@ def _table(headers: list[str], rows: list[list[str]]) -> str:
 
 
 def printable_html(title: str, society_name: str, subtitle: str, headers: list[str], rows: list[list[str]],
-                   signers: list[str], meta_lines: list[str] | None = None) -> tuple[str, str]:
-    """Return (filename, self-contained printable HTML) with a signing footer."""
+                   signers: list[str], meta_lines: list[str] | None = None,
+                   sections: list[dict] | None = None) -> tuple[str, str]:
+    """Return (filename, self-contained printable HTML) with a signing footer.
+
+    `sections` (extra headed tables, e.g. the Declaration's apartment-wise Part A) MUST be rendered here exactly as the PDF does:
+    the snapshot hash that the signed scan is bound to covers them, so an HTML copy that left them out would be signed on
+    less than the system holds."""
     meta = "".join(f"<div>{escape(m)}</div>" for m in (meta_lines or []))
+    extra_sections = "".join(
+        f"<h3>{escape(str(x.get('heading') or ''))}</h3>" + _table(list(x.get("headers") or []), list(x.get("rows") or []))
+        for x in (sections or []))
     sig_cells = "".join(
         f"<td><div class='box'></div><div class='who'>{escape(s)}</div><div class='muted'>Signature & date</div></td>"
         for s in signers)
     css = (
         "@page{size:A4;margin:12mm}body{font:12pt/1.4 Georgia,serif;color:#111}h1{font-size:16pt;margin:0 0 4px}"
-        "h2{font-size:11pt;margin:0 0 10px;font-weight:normal;color:#444}table{border-collapse:collapse;width:100%;margin:10px 0}"
+        "h2{font-size:11pt;margin:0 0 10px;font-weight:normal;color:#444}h3{font-size:11pt;margin:14px 0 4px}table{border-collapse:collapse;width:100%;margin:10px 0}"
         "th,td{border:1px solid #777;padding:5px 6px;vertical-align:top;font-size:10.5pt}th{background:#f2f4f7}"
         ".muted{color:#555;font-size:9.5pt}.sig{margin-top:18px;page-break-inside:avoid}.sig td{width:auto;text-align:center}"
         ".box{height:42px;border-bottom:1px solid #333;margin-bottom:4px}.who{font-weight:600;font-size:10pt}"
@@ -398,6 +406,7 @@ def printable_html(title: str, society_name: str, subtitle: str, headers: list[s
         f"<h1>{escape(title)}</h1><h2>{escape(society_name)}{(' — ' + escape(subtitle)) if subtitle else ''}</h2>"
         f"<div class='muted'>Generated {escape(date.today().isoformat())}</div>{meta}"
         + _table(headers, rows)
+        + extra_sections
         + "<p class='muted'>After printing and obtaining signatures, scan the signed pages and upload the scan in EstateHub. "
           "The server computes and stores the SHA-256 of the scanned file as evidence.</p>"
         + f"<table class='sig'><tr>{sig_cells}</tr></table>"
