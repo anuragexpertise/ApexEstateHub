@@ -566,6 +566,21 @@ def register_drilldown_callbacks(app):
         except Exception as e:
             return html.Small(f"✗ {error_toast(e, 'Unable to process this image.')['message']}", style={"color": "red"}), no_update
 
+    # ── 0c. Registration certificate upload (master society creation) ──────────
+    # Stores the raw upload contents in a memory store so handle_form_submit can
+    # bind it to the new society as registration_certificate evidence after creation.
+    @app.callback(
+        Output({"type": "reg-cert-store", "entity": MATCH}, "data"),
+        Input({"type": "reg-cert-upload", "entity": MATCH}, "contents"),
+        State({"type": "reg-cert-upload", "entity": MATCH}, "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def handle_reg_cert_upload(contents, filename):
+        if not contents:
+            return no_update
+        return {"contents": contents, "filename": filename}
+
     # ── 0b. Camera capture (device Snap button) ─────────────────────────────────
     # camera_callbacks.py's clientside snapCamCapture() writes the captured
     # frame as a raw "data:image/...;base64,..." string into this same
@@ -1974,12 +1989,13 @@ def register_drilldown_callbacks(app):
         State({"type": "form-field", "entity": ALL, "field": ALL}, "value"),
         State({"type": "form-field-hidden", "entity": ALL, "field": ALL}, "value"),
         State({"type": "form-field-date", "entity": ALL, "field": ALL}, "date"),
+        State({"type": "reg-cert-store", "entity": ALL, "field": ALL}, "data"),
         State("drilldown-store", "data"),
         State("auth-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def handle_form_submit(n_clicks_list, _fv, _hv, _dv, store, auth):
+    def handle_form_submit(n_clicks_list, _fv, _hv, _dv, _rcs, store, auth):
         # ── Guard: nothing triggered or all zero-clicks ──────────────────────
         if not ctx.triggered or not ctx.triggered[0]["value"]:
             return no_update, no_update, no_update, no_update, no_update
@@ -2228,7 +2244,37 @@ def register_drilldown_callbacks(app):
                     return (store, no_update, no_update, 
                             {"type": "error", "message": "Failed to create society."}, 
                             no_update)
-                
+
+                # Store the registration certificate as evidence for Annex E (registration_certificate purpose).
+                # The master uploads it at registration; it is later read by the onboarding hub's Annex E control.
+                try:
+                    rcs = _rcs or []
+                    cert = None
+                    for d in rcs:
+                        if isinstance(d, dict) and d.get("contents"):
+                            cert = d
+                            break
+                    if cert:
+                        from app.services.paper_evidence import decode_upload
+                        from app.services import onboarding_service as obsvc
+                        raw = decode_upload(cert["contents"])
+                        if raw:
+                            ev = obsvc.store_evidence_file(
+                                nsid, "registration_certificate", None,
+                                cert.get("filename") or "registration_certificate.pdf",
+                                raw, get_current_user_id(),
+                                {"kind": "registration_certificate", "source": "master_registration"},
+                            )
+                            # Stamp the society row so Annex B can display certificate info.
+                            db._execute(
+                                """UPDATE societies SET registration_certificate_file=%s, registration_certificate_hash=%s
+                                   WHERE id=%s""",
+                                (cert.get("filename") or "registration_certificate.pdf", ev["sha256"], nsid),
+                            )
+                except Exception as _ev_exc:  # noqa: BLE001
+                    log.exception("could not store registration certificate evidence for society %s", nsid)
+                    # Non-fatal: society is created; the certificate can still be uploaded in the onboarding hub.
+
                 # Success: redirect to the master societies list ("total societies")
                 store = nav_state.navigate_to(store, "list_master_societies", "All Societies")
                 hide_kpis = len(store.get("stack", [])) > 1
