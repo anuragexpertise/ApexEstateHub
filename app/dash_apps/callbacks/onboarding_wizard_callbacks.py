@@ -14,7 +14,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import dash_bootstrap_components as dbc
-from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
+from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
 from app.dash_apps.pages import onboarding_page as op
 from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label, render_review, legal_hierarchy_rows, legal_regime_live
@@ -594,7 +594,7 @@ def register_onboarding_wizard_callbacks(app):
             status_kids = _rec_status(st, r)
             if stale:
                 status_kids = [dbc.Alert(stale[0], color="danger", className="py-0 px-1 mb-1", style={"fontSize": "11px"})] + list(status_kids)
-            rows.append(html.Div([
+            rows.append(            html.Div([
                 dcc.Store(id={"type": "onb-bf-rec-book", "acc_id": acc_id}, data=str(book)),
                 html.Div([
                     html.Div(f"{a['tab_name']} · {a['name']}", className="fw-semibold"),
@@ -606,8 +606,6 @@ def register_onboarding_wizard_callbacks(app):
                           value=float(st["diff"]) if st["diff"] is not None else None, placeholder="Difference"),
                 html.Div(status_kids, id={"type": "onb-bf-rec-status", "acc_id": acc_id}, style={"fontSize": "11.5px", "lineHeight": "1.35"}),
                 html.Div([
-                    dbc.Button("Template (xlsx)", id={"type": "onb-bf-stmt-tpl", "acc_id": acc_id}, size="sm",
-                               outline=True, color="secondary", n_clicks=0, className="me-1 mb-1"),
                     dcc.Upload(id={"type": "onb-bf-stmt-xlsx", "acc_id": acc_id},
                                children=dbc.Button("Upload xlsx", size="sm", outline=True, color="secondary", n_clicks=0, className="me-1 mb-1"),
                                multiple=False, accept=".xlsx", className="d-inline-block"),
@@ -711,30 +709,31 @@ def register_onboarding_wizard_callbacks(app):
                 statuses.append(html.Span(errors[a], className="text-danger") if a in errors else _rec_status(st, r))
         return rec, diffs, statuses
 
-    # Per-account statement template: pre-filled with the account and the Brought Forward As-on date ---------------
+    # Combined Account Statements template: one XLSX with one row per bank/deposit/cash account ---------------
     @app.callback(
-        Output({"type": "onb-bf-stmt-dl", "acc_id": MATCH}, "data"),
-        Input({"type": "onb-bf-stmt-tpl", "acc_id": MATCH}, "n_clicks"),
+        Output("onb-bf-account-statements-dl", "data"),
+        Input("onb-bf-account-statements-tpl", "n_clicks"),
+        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
         State("sw-bf-as-on", "date"),
         prevent_initial_call=True,
     )
     @require_session
-    def bf_statement_template(n, bf_as_on):
+    def bf_account_statements_template(n, amts, bf_as_on):
+        if not n:
+            return no_update
         s = _session()
-        trig = ctx.triggered_id
-        if not n or not s or not s[0] or not isinstance(trig, dict):
+        if not s or not s[0]:
             return no_update
-        a = ob._row("SELECT id, name, tab_name FROM accounts WHERE society_id=%s AND id=%s", (s[0], int(trig["acc_id"])))
-        if not a:
-            return no_update
+        sid = s[0]
+        ids = [it["id"]["acc_id"] for it in (ctx.states_list[0] or [])]
+        accs = {a["id"]: a for a in ob._rows("SELECT id, name, tab_name FROM accounts WHERE society_id=%s", (sid,))}
+        accounts = [accs[int(i)] for i in ids if int(i) in accs]
         try:
             on = ob._iso_day(bf_as_on)
         except ValueError:
             on = None
-        import re as _r
-        from app.services.xlsx_templates import build_statement_template
-        label = _r.sub(r"[^A-Za-z0-9 _-]+", "", f"{a['tab_name']} {a['name']}").strip() or f"account {a['id']}"
-        return dcc.send_bytes(build_statement_template(dict(a), on), f"Account Statement - {label}.xlsx")
+        from app.services.xlsx_templates import build_statement_templates
+        return dcc.send_bytes(build_statement_templates(accounts, on), "Account Statements - all accounts.xlsx")
 
 
     # ── Legal Regime Selection: "Your Legal Regime" card + Legal Hierarchy table (item 7) ──────────────────
