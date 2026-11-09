@@ -236,9 +236,11 @@ def _controls(code: str, a: dict, society_id: int, sealed_ok: bool = False):
                                    color="link", size="sm", n_clicks=0, style={"fontSize": "12px", "padding": "0 0 0 8px"}))
         rows.append(html.Li(line, style={"listStyle": "none", "fontSize": "12.5px", "margin": "2px 0"}))
     titles = {"A": "Annex A: legal regime and bye-laws", "B": "Annex B: review of the setup",
-              "C": "Annex C: opening financial position", "D": "Annex D: data-protection and custody schedule"}
+              "C": "Annex C: opening financial position", "D": "Annex D: data-protection and custody schedule",
+              "E": "Annex E: source-documents index"}
     badge = dbc.Badge("Sealed", color="success") if a["status"] == "sealed" else (dbc.Badge("Blocked", color="danger") if a["blocking"] else dbc.Badge("Ready to seal", color="info"))
-    body = [html.Div([html.Strong(titles[code]), html.Span("  "), badge, html.Span(f"  SHA-256 {a['content_hash'][:16]}...", style=_MUTED)]),
+    ch = a.get("content_hash") or ""
+    body = [html.Div([html.Strong(titles.get(code, f"Annex {code}")), html.Span("  "), badge, html.Span(f"  SHA-256 {ch[:16]}...", style=_MUTED)]),
             html.Ul(rows, style={"padding": "0", "margin": "6px 0 0"})]
     if code == "B":
         body.append(_annex_b_signatures(a, society_id))
