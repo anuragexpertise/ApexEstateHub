@@ -63,8 +63,11 @@
 .sw-grid-head { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #495057; background: #f1f3f5; border-bottom: 1px solid #dee2e6; position: sticky; top: 0; z-index: 1; }
 .sw-tds-grid  { grid-template-columns: 70px 130px 320px 90px 100px 130px 140px; }
 .sw-acc-grid  { grid-template-columns: 60px 110px 320px 60px 60px 70px 80px; }
+.sw-rec-grid  { grid-template-columns: minmax(220px, 1.4fr) 150px 120px minmax(220px, 1.2fr) minmax(220px, 1fr); align-items: start; }
 .sw-grid-row > div { white-space: nowrap; }
 .sw-grid-row .form-control { min-width: 0; }
+.sw-rec-grid > div { white-space: normal; overflow-wrap: anywhere; }
+.sw-rec-grid .btn { white-space: nowrap; }
 
 /* ── Brought Forward: Balance-Sheet style, Assets | Liabilities & Equity ── */
 .sw-bf-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
