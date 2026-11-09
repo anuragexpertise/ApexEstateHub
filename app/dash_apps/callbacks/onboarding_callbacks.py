@@ -922,17 +922,55 @@ def register_onboarding_callbacks(app):
         return ob.db._execute("SELECT id AS acc_id FROM accounts WHERE society_id=%s AND has_bf=TRUE ORDER BY id", (sid,), fetch_all=True) or []
 
 
-    def _election_parts(sid):
-        """(headers, rows, signers, meta) of the Election Results document - shared by the print and the stale check."""
-        seated=ob.seated_officers(sid)
-        rows=[]
+    # The seating forms (flat / name / email / mobile / resolution) and the grievance officer are only SAVED when "Seat" /
+    # "Save grievance officer" is pressed. The print used to read the database alone, so an admin who had typed (or imported
+    # from Election Results.xlsx) every entry but not yet seated them got a completely blank sheet. The print now also reads
+    # the entries as they are on screen: a seated officer comes from the record, an office not yet seated from its form, and
+    # the Status column says which, so the paper never claims more than the system holds.
+    _EL_LIVE = ("flat", "name", "email", "phone", "ref")
+
+    def _election_live_states():
+        return [State({"type": f"{P}-f", "office": ALL, "field": f}, "value") for f in _EL_LIVE] + [
+            State(f"{P}-g-name", "value"), State(f"{P}-g-email", "value"), State(f"{P}-g-phone", "value")]
+
+    def _election_live(states_list):
+        """ctx.states_list slice (the _election_live_states() entries) -> {office: {field: text}, '__grievance__': {...}}."""
+        live = {}
+        groups = list(states_list or [])
+        for fname, group in zip(_EL_LIVE, groups[:len(_EL_LIVE)]):
+            for item in (group if isinstance(group, list) else []):
+                office = (item.get("id") or {}).get("office")
+                val = item.get("value")
+                if office and val not in (None, ""):
+                    live.setdefault(office, {})[fname] = str(val).strip()
+        rest = groups[len(_EL_LIVE):len(_EL_LIVE) + 3]
+        if len(rest) == 3 and all(isinstance(x, dict) for x in rest):
+            live["__grievance__"] = {k: str((x.get("value") or "")).strip() for k, x in zip(("name", "email", "phone"), rest)}
+        return live
+
+    def _election_parts(sid, live=None):
+        """(headers, rows, signers, meta) of the Election Results document - shared by the print and the stale check.
+        `live` = _election_live(...) so entries typed but not yet saved are printed too (marked in the Status column)."""
+        live = live or {}
+        seated = ob.seated_officers(sid)
+        rows = []
         for off in ob.CORE_OFFICES:
-            v=seated.get(off) or {}
-            rows.append([ob.OFFICE_LABEL[off], v.get('holder_name') or '', v.get('flat_number') or '', v.get('email') or '', v.get('phone') or '', v.get('resolution_ref') or ''])
-        g=ob.db._execute("SELECT grievance_officer_name,grievance_officer_email,grievance_officer_phone FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
-        rows.append(["Grievance officer", g.get('grievance_officer_name') or '', '', g.get('grievance_officer_email') or '', g.get('grievance_officer_phone') or '', ''])
-        return (["Office","Name","Flat","Email","Mobile","Resolution ref"], rows,
-                ["Returning Officer / Chair","Secretary (minutes)","President","Observer/Auditor"],
+            v = seated.get(off)
+            if v:
+                rows.append([ob.OFFICE_LABEL[off], v.get('holder_name') or '', v.get('flat_number') or '', v.get('email') or '',
+                             v.get('phone') or '', v.get('resolution_ref') or '', "Seated"])
+                continue
+            t = live.get(off) or {}
+            rows.append([ob.OFFICE_LABEL[off], t.get('name', ''), t.get('flat', ''), t.get('email', ''), t.get('phone', ''),
+                         t.get('ref', ''), "Entered, not yet seated" if any(t.values()) else "Not entered"])
+        g = ob.db._execute("SELECT grievance_officer_name,grievance_officer_email,grievance_officer_phone FROM societies WHERE id=%s", (sid,), fetch_one=True) or {}
+        saved = (g.get('grievance_officer_name') or '', g.get('grievance_officer_email') or '', g.get('grievance_officer_phone') or '')
+        typed = live.get("__grievance__")
+        cur = (typed.get("name", ""), typed.get("email", ""), typed.get("phone", "")) if typed is not None else saved
+        g_status = "Saved" if cur == saved and any(cur) else ("Entered, not yet saved" if any(cur) else "Not entered")
+        rows.append(["Grievance officer", cur[0], '', cur[1], cur[2], '', g_status])
+        return (["Office", "Name", "Flat", "Email", "Mobile", "Resolution ref", "Status"], rows,
+                ["Returning Officer / Chair", "Secretary (minutes)", "President", "Observer/Auditor"],
                 ["Use with Election Results.xlsx workflow. Upload signed & scanned minutes/results; server computes SHA-256."])
 
     @app.callback(
@@ -940,10 +978,11 @@ def register_onboarding_callbacks(app):
         Input(f"{P}-election-scan", "contents"),
         Input(f"{P}-election-print", "n_clicks"),
         State(f"{P}-election-scan", "filename"),
+        *_election_live_states(),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_election_evidence(contents, _p, filename):
+    def onb_election_evidence(contents, _p, filename, *_live):
         s=_session()
         if not s or not s[0]: return no_update
         sid,uid,role=s
@@ -955,7 +994,7 @@ def register_onboarding_callbacks(app):
                 return dbc.Alert([html.I(className="fas fa-check-circle me-2"), "Election Results: " + pe.stored_message(ev)], color="success", className="py-1")
             except Exception as exc:
                 return dbc.Alert(str(exc), color="danger", className="py-1")
-        hdr,rows,_sg,meta=_election_parts(sid)
+        hdr,rows,_sg,meta=_election_parts(sid, _election_live(ctx.states_list[1:]))
         cur=pe.snapshot_hash("election_results","Election Results / Founding Committee Seating",hdr,rows,meta)
         st=pe.evidence_status(sid,"election_results",current_snapshot=cur)
         colour,text=pe.status_line(st)
@@ -966,16 +1005,17 @@ def register_onboarding_callbacks(app):
     @app.callback(
         Output(f"{P}-election-dl","data"),
         Input(f"{P}-election-print","n_clicks"),
+        *_election_live_states(),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_election_print(n):
+    def onb_election_print(n, *_live):
         if not n: return no_update
         s=_session()
         if not s or not s[0]: return no_update
         from app.services import paper_evidence as pe
         sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
-        hdr,rows,signers,meta=_election_parts(sid)
+        hdr,rows,signers,meta=_election_parts(sid, _election_live(ctx.states_list))
         doc=pe.make_document(sid,"election_results",s[1],"Election Results / Founding Committee Seating", soc.get('name') or f"Society {sid}",
                              "President / Secretary / Treasurer / Grievance officer", hdr, rows, signers, meta)
         return dcc.send_bytes(doc["data"],doc["filename"])
