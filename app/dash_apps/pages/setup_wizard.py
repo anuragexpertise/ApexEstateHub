@@ -2161,8 +2161,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
             html.Div(id="onb-bf-reconciliation-cards", className="mb-3"),
             html.Small("Use per-account Attach scan in reconciliation cards for individual bank/deposit/cash statements (same As-on date). Overall Brought Forward paper evidence below.", className="text-muted d-block mb-2"),
             dbc.Row([
-                dbc.Col(dbc.Button([html.I(className="fas fa-print me-2"), "Print / Save PDF (Brought Forward)"], id="onb-bf-print", color="primary", size="sm", outline=True, n_clicks=0), md="auto"),
-                dbc.Col(dcc.Upload(id="onb-bf-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed scan (Brought Forward)"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
+                dbc.Col(dbc.Button([html.I(className="fas fa-print me-2"), "Print / Save PDF (Account Statements)"], id="onb-bf-print", color="primary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(dcc.Upload(id="onb-bf-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed scan (Account Statements)"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
             ], className="g-2 mb-1"),
             dcc.Download(id="onb-bf-print-dl"),
             html.Div(id="onb-bf-evidence-status", style={"fontSize":"12.5px","marginTop":"4px"}),

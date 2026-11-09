@@ -661,7 +661,7 @@ def register_onboarding_wizard_callbacks(app):
         live = {int(i): money(v) for i, v in zip(ids, amts or []) if v not in (None, "")}
         accs = {a["id"]: a for a in ob._rows("SELECT id, name, tab_name, drcr_account FROM accounts WHERE society_id=%s", (sid,))}
         rec_json = rec_json or {}
-        cards = []
+        rows = []
         for acc_id, book in live.items():
             a = accs.get(acc_id)
             if not a or a["tab_name"] not in ob.BANK_TABS or a["drcr_account"] == "Cr" or book <= 0:
@@ -670,29 +670,44 @@ def register_onboarding_wizard_callbacks(app):
             stmt = r.get("statement_balance", "")
             st = ob.reconciliation_state(book, r)
             stale = ob.stale_statement_errors(bf_as_on, {f"bank_{acc_id}": r})
-            cards.append(html.Div([
+            status_kids = _rec_status(st, r)
+            if stale:
+                status_kids = [dbc.Alert(stale[0], color="danger", className="py-0 px-1 mb-1", style={"fontSize": "11px"})] + list(status_kids)
+            rows.append(html.Div([
                 dcc.Store(id={"type": "onb-bf-rec-book", "acc_id": acc_id}, data=str(book)),
-                html.Strong(f"{a['tab_name']} · {a['name']}", className="d-block"),
-                html.Small(f"Book balance: ₹{book}", className="text-muted d-block mb-1"),
-                dbc.Row([
-                    dbc.Col(dbc.Button("Statement template (xlsx)", id={"type": "onb-bf-stmt-tpl", "acc_id": acc_id}, size="sm",
-                                       outline=True, color="secondary", n_clicks=0), md="auto"),
-                    dbc.Col(dcc.Upload(id={"type": "onb-bf-stmt-xlsx", "acc_id": acc_id},
-                                       children=dbc.Button("Upload statement (xlsx)", size="sm", outline=True, color="secondary", n_clicks=0),
-                                       multiple=False, accept=".xlsx"), md="auto"),
-                    dcc.Download(id={"type": "onb-bf-stmt-dl", "acc_id": acc_id}),
-                ], className="g-2 mb-1"),
-                *([dbc.Alert(stale[0], color="danger", className="py-1 mb-1", style={"fontSize": "11.5px"})] if stale else []),
+                html.Div([
+                    html.Div(f"{a['tab_name']} · {a['name']}", className="fw-semibold"),
+                    html.Small(f"Book balance: ₹{book}", className="text-muted"),
+                ]),
                 dbc.Input(id={"type": "onb-bf-rec-stmt", "acc_id": acc_id}, type="number", debounce=True, step=0.01, min=0, size="sm",
-                          value=float(money(stmt)) if stmt not in (None, "") else None, placeholder="Balance per bank statement / cash count"),
-                dbc.Input(id={"type": "onb-bf-rec-diff", "acc_id": acc_id}, type="number", size="sm", disabled=True, className="mt-1",
+                          value=float(money(stmt)) if stmt not in (None, "") else None, placeholder="Statement / cash-count balance"),
+                dbc.Input(id={"type": "onb-bf-rec-diff", "acc_id": acc_id}, type="number", size="sm", disabled=True,
                           value=float(st["diff"]) if st["diff"] is not None else None, placeholder="Difference"),
-                html.Div(_rec_status(st, r), id={"type": "onb-bf-rec-status", "acc_id": acc_id}, style={"fontSize": "11.5px", "marginTop": "2px"}),
-                dcc.Upload(id={"type": "onb-bf-evidence", "acc_id": acc_id},
-                           children=dbc.Button("Attach scan", size="sm", outline=True, color="secondary", n_clicks=0),
-                           multiple=False, accept=".pdf,.png,.jpg,.jpeg", className="mt-1"),
-            ], style={"border": "1px solid #c9d2dc", "borderRadius": "6px", "padding": "10px", "marginBottom": "8px"}))
-        return cards or [html.Div("No bank/cash accounts with a non-zero brought-forward balance.", className="text-muted small")]
+                html.Div(status_kids, id={"type": "onb-bf-rec-status", "acc_id": acc_id}, style={"fontSize": "11.5px", "lineHeight": "1.35"}),
+                html.Div([
+                    dbc.Button("Template (xlsx)", id={"type": "onb-bf-stmt-tpl", "acc_id": acc_id}, size="sm",
+                               outline=True, color="secondary", n_clicks=0, className="me-1 mb-1"),
+                    dcc.Upload(id={"type": "onb-bf-stmt-xlsx", "acc_id": acc_id},
+                               children=dbc.Button("Upload xlsx", size="sm", outline=True, color="secondary", n_clicks=0, className="me-1 mb-1"),
+                               multiple=False, accept=".xlsx", className="d-inline-block"),
+                    dcc.Download(id={"type": "onb-bf-stmt-dl", "acc_id": acc_id}),
+                    dcc.Upload(id={"type": "onb-bf-evidence", "acc_id": acc_id},
+                               children=dbc.Button("Attach scan", size="sm", outline=True, color="secondary", n_clicks=0, className="mb-1"),
+                               multiple=False, accept=".pdf,.png,.jpg,.jpeg", className="d-inline-block ms-1"),
+                ], style={"whiteSpace": "normal"}),
+            ], className="sw-grid-row sw-rec-grid"))
+
+        if not rows:
+            return [html.Div("No bank/cash accounts with a non-zero brought-forward balance.", className="text-muted small")]
+
+        header = html.Div([
+            html.Div("Account / Book balance"),
+            html.Div("Statement balance"),
+            html.Div("Difference"),
+            html.Div("Status / evidence"),
+            html.Div("Actions"),
+        ], className="sw-grid-row sw-rec-grid sw-grid-head")
+        return [html.Div([header] + rows, className="sw-hscroll")]
 
     @app.callback(
         Output("onb-reconciliation-json", "data"),
