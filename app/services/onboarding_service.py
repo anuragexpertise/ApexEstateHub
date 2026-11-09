@@ -1228,6 +1228,7 @@ EVIDENCE_PURPOSES = {
     "pending_receivables","tds_rates","declaration_undivided_interest","brought_forward",
     "account_statement","election_results","apartment_charges","bulk_apartments","bulk_vendors",
     "bulk_security","bulk_supervisor","bulk_staff","adoption_resolution","other_paper_evidence",
+    "registration_certificate","ca_rates_letter","adoption_minutes",
 }
 
 def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filename: str,
@@ -1687,9 +1688,20 @@ def _annex_a(society_id: int, soc: dict) -> tuple[dict, dict]:
 
 def _annex_b(society_id: int, soc: dict, decl: dict | None) -> tuple[dict, dict]:
     officers = seated_officers(society_id)
+    # Strip any secrets (stepup_hash) from the declaration before it goes into a sealed annex.
+    clean_decl = None
+    if decl is not None:
+        import copy as _copy
+        clean_decl = _copy.deepcopy(decl)
+        admin = (clean_decl.get("draft") or {}).get("administrator") or {}
+        if isinstance(admin, dict) and "stepup_hash" in admin:
+            del admin["stepup_hash"]
     content = {"society": {"name": soc.get("name"), "registration_number": soc.get("registration_number"),
                            "pan": soc.get("pan_number"), "tan": soc.get("tan_number"), "gstin": soc.get("gstin")},
-               "declaration": decl or {},
+               "registration": {"number": soc.get("registration_number"),
+                                "certificate_filename": soc.get("registration_certificate_file"),
+                                "certificate_sha256": soc.get("registration_certificate_hash")},
+               "declaration": clean_decl or {},
                "office_bearers": {o: ({"name": v["holder_name"], "flat": v["flat_number"], "evidence_hash": v["evidence_hash"],
                                        "resolution_ref": v["resolution_ref"],
                                        "signature_image": signature_path(society_id, v.get("signature_image")),
@@ -1766,9 +1778,10 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
                                   "evidence_sha256": r.get("sha256")}
         if not (st["agrees"] and st["evidenced"]):
             unreconciled.append(a["name"] + (" (differs by Rs %s)" % st["diff"] if st["diff"] else
-                                            " (no statement balance)" if not st["has_statement"] else " (no scan attached)"))
+                                             " (no statement balance)" if not st["has_statement"] else " (no scan attached)"))
     audited = recon.get("audited_sha256") or inputs.get("audited_hash")
-    content = {"financial_year": fy, "as_at_date": str(date(fy, 4, 1)), "opening_balances": lines,
+    as_on = draft_bf.get("as_on_date") or str(date(fy, 4, 1))
+    content = {"financial_year": fy, "as_at_date": as_on, "opening_balances": lines,
                "total_debits": str(dr), "total_credits": str(cr), "fund_balances": str(fund_cr), "bank_and_deposit_balances": str(bank_dr),
                "receivables_control": str(debtors_dr), "arrears_by_flat": arrears,
                "bank_agrees_to_statement": (not unreconciled) if recon else bool(inputs.get("bank_agrees")),
@@ -1796,7 +1809,8 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
     return content, controls
 
 
-ANNEX_CODES = ("A", "B", "C", "D")
+ANNEX_CODES = ("A", "B", "C", "D", "E")
+SUPPLEMENTARY_ANNEX_CODES = ("F", "G", "H")
 
 # Where each failing control is fixed: a wizard rail key, or "committee" for the Stage 2 screen.
 CONTROL_FIX = {
@@ -1806,6 +1820,7 @@ CONTROL_FIX = {
     ("C", "balanced"): "Brought Forward", ("C", "accounts_known"): "Brought Forward", ("C", "funds_backed"): "Brought Forward",
     ("C", "arrears_tie"): "Brought Forward", ("C", "bank_agrees"): "Brought Forward",
     ("D", "grievance_officer"): "committee", ("D", "grievance_contact"): "committee", ("D", "stepup_set"): "Administrator",
+    ("E", "registration_certificate"): "Onboarding Hub", ("E", "index_complete"): "Onboarding Hub",
 }
 
 # Categories of sub-processor. Provider names are read from the environment, never invented here.
@@ -1848,8 +1863,64 @@ def _annex_d(society_id: int, soc: dict) -> tuple[dict, dict]:
     return content, controls
 
 
+_EVIDENCE_DOC_NAMES = {
+    "registration_certificate": "Society registration certificate",
+    "ca_rates_letter": "CA letter confirming TDS / GST rates",
+    "adoption_minutes": "Signed General Body minutes (bye-law adoption)",
+    "account_statement": "Bank / deposit / cash account statement",
+    "cash_count": "Cash-count certificate",
+    "audited_report": "Audited statements",
+    "review_letter": "CA review letter",
+    "election_results": "Signed election minutes",
+}
+
+_EVIDENCE_STAGE = {
+    "registration_certificate": 1,
+    "ca_rates_letter": 3,
+    "account_statement": 3,
+    "cash_count": 3,
+    "audited_report": 3,
+    "review_letter": 3,
+    "election_results": 2,
+}
+
+
+def _annex_e(society_id: int) -> tuple[dict, dict]:
+    """Annex E: source-documents index. One row per scanned original read from onboarding_evidence."""
+    rows = _rows("""SELECT id, purpose, acc_id, filename, stored_name, sha256, uploaded_by, uploaded_at
+                       FROM onboarding_evidence WHERE society_id=%s ORDER BY purpose, uploaded_at DESC""", (society_id,)) or []
+    uploaders = {}
+    for r in rows:
+        uid = r["uploaded_by"]
+        if uid not in uploaders:
+            u = _row("SELECT id, name, email FROM users WHERE id=%s", (uid,)) or {}
+            uploaders[uid] = {"id": uid, "name": u.get("name") or u.get("email") or f"user {uid}"}
+    items = []
+    for r in rows:
+        purpose = r["purpose"]
+        items.append({
+            "document": _EVIDENCE_DOC_NAMES.get(purpose, purpose.replace("_", " ").title()),
+            "stage": _EVIDENCE_STAGE.get(purpose),
+            "purpose": purpose,
+            "filename": r["filename"],
+            "uploaded_by": uploaders.get(r["uploaded_by"], {"id": r["uploaded_by"], "name": None}),
+            "uploaded_at": str(r["uploaded_at"])[:10] if r.get("uploaded_at") else None,
+            "sha256": r["sha256"],
+            "acc_id": r["acc_id"],
+        })
+    reg = [r for r in rows if r["purpose"] == "registration_certificate"]
+    reg_ok = bool(reg) and bool(reg[0].get("sha256"))
+    content = {"documents": items}
+    controls = {
+        "registration_certificate": _ctl(reg_ok, "Registration certificate uploaded and its SHA-256 is recorded." if reg_ok
+                                         else "Upload the society's registration certificate before sealing.", True),
+        "index_complete": _ctl(True, "Source documents index lists every uploaded scan. Missing optional documents are shown below.", False),
+    }
+    return content, controls
+
+
 def build_annexes(society_id: int, actor_id: int | None = None) -> dict:
-    """Render Annexes A, B, C and D from the saved draft and store them as 'draft' with their control results."""
+    """Render Annexes A, B, C, D and E from the saved draft and store them as 'draft' with their control results."""
     soc = _row("SELECT * FROM societies WHERE id=%s", (society_id,))
     if not soc:
         raise OnboardingError("Society not found.")
@@ -1857,7 +1928,7 @@ def build_annexes(society_id: int, actor_id: int | None = None) -> dict:
         raise OnboardingError("Annexes can be prepared only before the society is active.")
     decl = declaration(society_id)
     built = {"A": _annex_a(society_id, soc), "B": _annex_b(society_id, soc, decl), "C": _annex_c(society_id, decl),
-             "D": _annex_d(society_id, soc)}
+             "D": _annex_d(society_id, soc), "E": _annex_e(society_id)}
     with db._conn() as conn:
         cur = conn.cursor()
         for code, (content, controls) in built.items():
@@ -1870,7 +1941,7 @@ def build_annexes(society_id: int, actor_id: int | None = None) -> dict:
 
 
 def seal_annexes(society_id: int, actor_id: int) -> dict:
-    """Seal A, B, C, D (refused while any control blocks) and write the Agreement text with their hashes into it."""
+    """Seal A, B, C, D, E (refused while any control blocks) and write the Agreement text with their hashes into it."""
     if state_of(society_id) != "setup draft":
         raise OnboardingError("Submit the Setup Wizard before sealing the annexes.")
     drafts = {r["annex_code"]: r for r in _rows(
@@ -2169,8 +2240,15 @@ def agreement_text(society_id: int, agreement_no: str, annex_hashes: dict, annex
         f"Annex C (opening financial position as at {c.get('as_at_date')}: debits Rs {c.get('total_debits')}, credits Rs {c.get('total_credits')}, "
         f"CA review: {c.get('ca_review')}), SHA-256 {annex_hashes['C']}\n"
         f"Annex D (data-protection and custody schedule), SHA-256 {annex_hashes['D']}\n"
+        f"Annex E (source-documents index: registration certificate, statements, minutes and other scanned originals), "
+        f"SHA-256 {annex_hashes.get('E', '')}\n"
         "The signatories sign the Society's declared legal basis and opening position as sealed in these annexes. A wrong opening figure "
         "found later is corrected by reversal, never by editing.\n\n"
+        "7A. SUPPLEMENTARY ANNEXURES\n"
+        "Annexures F (enrollment and undivided-interest basis), G (adoption of Model Bye-Laws 1 to 58) and H (advisers appointed) "
+        "are added by the Society alone after go-live and do not require the Operator's signature. Each is chained to this Agreement "
+        "by its SHA-256 and is signed by the President, Secretary and Treasurer using the society's chosen signing method. "
+        "The Operator is informed but is not a party to these supplementary annexures.\n\n"
         "EXECUTION\n"
         "For the Society:\n" + sign_lines + "\n"
         f"For the Operator: authorised signatory of {op_name}\n"
@@ -2188,7 +2266,7 @@ def write_agreement(society_id: int) -> dict:
         raise OnboardingError("The Agreement is already sealed.")
     sealed = {r["annex_code"]: r for r in _rows("SELECT annex_code, content, content_hash FROM onboarding_annexes WHERE society_id=%s AND status='sealed'", (society_id,))}
     if set(sealed) != set(ANNEX_CODES):
-        raise OnboardingError("Seal annexes A, B, C and D first.")
+        raise OnboardingError("Seal annexes A, B, C, D and E first.")
     hashes = {k: v["content_hash"] for k, v in sealed.items()}
     contents = {k: (v["content"] if isinstance(v["content"], dict) else json.loads(v["content"])) for k, v in sealed.items()}
     text = agreement_text(society_id, ag.get("agreement_no") or "", hashes, contents)
@@ -2278,7 +2356,8 @@ def agreement_print_html(society_id: int) -> tuple[str, str]:
     if not ag or not ag.get("body_text") or set(sealed) != set(ANNEX_CODES):
         raise OnboardingError("The Agreement is issued for printing once annexes A, B, C and D are sealed.")
     titles = {"A": "Annex A: legal regime and bye-laws", "B": "Annex B: review of the setup",
-              "C": "Annex C: opening financial position", "D": "Annex D: data-protection and custody schedule"}
+              "C": "Annex C: opening financial position", "D": "Annex D: data-protection and custody schedule",
+              "E": "Annex E: source-documents index"}
     soc = _row("SELECT name FROM societies WHERE id=%s", (society_id,)) or {}
     officers = seated_officers(society_id)
     try:
@@ -2337,7 +2416,7 @@ def assert_ready_to_sign(society_id: int) -> None:
     ag = _row("SELECT body_text FROM society_agreements WHERE society_id=%s", (society_id,))
     sealed = {r["annex_code"]: r["content_hash"] for r in _rows("SELECT annex_code, content_hash FROM onboarding_annexes WHERE society_id=%s AND status='sealed' AND NOT blocking", (society_id,))}
     if set(sealed) != set(ANNEX_CODES) or not ag:
-        raise OnboardingError("Annexes A, B, C and D must be sealed before the Agreement is signed.")
+        raise OnboardingError("Annexes A, B, C, D and E must be sealed before the Agreement is signed.")
     if any(h not in (ag["body_text"] or "") for h in sealed.values()):
         raise OnboardingError("The Agreement text no longer matches the sealed annexes; reissue it from the annexes.")
     if OPERATOR_LEGAL_NAME_DEFAULT not in (ag["body_text"] or ""):
@@ -2488,7 +2567,179 @@ def mark_enrollment_complete(society_id: int, actor_id: int, enrol_later_reason:
     _audit(society_id, actor_id, "ENROLLMENT_COMPLETED", "society", society_id,
            {"enrol_later_reason": reason or None,
             "no_declaration_reason": (no_declaration_reason or "").strip() if waived else None})
+    # Wire Annex F sealing to enrollment completion (non-blocking).
+    try:
+        build_supplementary_annex(society_id, "F", actor_id)
+    except Exception:                                       # noqa: BLE001 - F sealing is non-blocking
+        log.exception("could not build Annex F for society %s", society_id)
     return "Enrollment marked complete. The apartment, vendor and security portals are now open."
+
+
+# ── supplementary annexures F, G, H (post go-live, D5) ──────────────────────────
+def _roster_hash(society_id: int, role: str) -> tuple[int, str | None]:
+    """Count and SHA-256 of non-personal roster keys for an entity role."""
+    rows = _rows("""SELECT flat_number OR entity_code AS key_val FROM users
+                     WHERE society_id=%s AND role=%s ORDER BY key_val""", (society_id, role)) or []
+    keys = [str(r["key_val"]) for r in rows if r.get("key_val")]
+    return len(keys), _sha(canonical(keys)) if keys else None
+
+
+def _annex_f_content(society_id: int) -> dict:
+    """Annex F: enrollment and undivided-interest basis. No personal data (constraint 2.4)."""
+    from app.services import undivided_declaration as ud
+    ev = ud.latest_evidence(society_id)
+    decl_pdf_sha = ev.get("sha256") if ev else None
+    decl_xlsx_sha = (ev.get("meta") or {}).get("workbook_sha256") if ev else None
+    meta = ev.get("meta") or {}
+    balanced = bool(meta.get("balanced"))
+    total_pct = meta.get("total_pct")
+    flats = meta.get("flats")
+    waiver_reason = None
+    if not ev:
+        # Check if a waiver reason was recorded at enrollment completion
+        row = _row("SELECT after_value FROM audit_events WHERE society_id=%s AND action='ENROLLMENT_COMPLETED' "
+                   "ORDER BY id DESC LIMIT 1", (society_id,))
+        if row:
+            import json as _j
+            try:
+                payload = _j.loads(row["after_value"] or "{}")
+                waiver_reason = payload.get("no_declaration_reason")
+            except Exception:
+                pass
+    apt_n, apt_sha = _roster_hash(society_id, "apartment")
+    ven_n, ven_sha = _roster_hash(society_id, "vendor")
+    sec_n, sec_sha = _roster_hash(society_id, "security")
+    sup_n, sup_sha = _roster_hash(society_id, "supervisor")
+    stf_n, stf_sha = _roster_hash(society_id, "staff")
+    return {
+        "declaration_pdf_sha256": decl_pdf_sha,
+        "declaration_xlsx_sha256": decl_xlsx_sha,
+        "flats_with_share": flats,
+        "total_declared_pct": str(total_pct) if total_pct is not None else None,
+        "balanced": balanced,
+        "waiver_reason": waiver_reason,
+        "roster": {
+            "apartments": {"count": apt_n, "sha256": apt_sha},
+            "vendors": {"count": ven_n, "sha256": ven_sha},
+            "security": {"count": sec_n, "sha256": sec_sha},
+            "supervisor": {"count": sup_n, "sha256": sup_sha},
+            "staff": {"count": stf_n, "sha256": stf_sha},
+        },
+    }
+
+
+def _annex_g_content(society_id: int) -> dict:
+    """Annex G: adoption of Model Bye-Laws 1 to 58."""
+    from app.services import regime_rules_admin as rra
+    cur = rra.list_society_bye_laws(society_id) or []
+    clauses = []
+    for cid, title in rra.MODEL_BYE_LAW_CLAUSES:
+        c = next((r for r in cur if r.get("clause_id") == cid), {})
+        prov = c.get("status") == "provisional"
+        clauses.append({
+            "clause": cid.replace("BL_", ""),
+            "title": title,
+            "choice": c.get("proposed_status" if prov else "status"),
+            "variation_text": c.get("variation_text") or "",
+            "active": bool(c.get("resolution_id")) and not prov,
+        })
+    # Signed General Body minutes SHA-256 from evidence
+    ev = _rows("""SELECT sha256, filename FROM onboarding_evidence
+                   WHERE society_id=%s AND purpose='adoption_minutes' ORDER BY uploaded_at DESC LIMIT 1""", (society_id,))
+    minutes_sha = ev[0]["sha256"] if ev else None
+    minutes_file = ev[0]["filename"] if ev else None
+    # Resolution id from the latest adviser/resolution context
+    res_row = _row("""SELECT r.id FROM resolutions r JOIN meetings m ON m.id = r.meeting_id
+                       WHERE m.society_id=%s AND r.status='passed' ORDER BY r.passed_on DESC NULLS LAST, r.id DESC LIMIT 1""",
+                   (society_id,))
+    return {
+        "clauses": clauses,
+        "minutes_sha256": minutes_sha,
+        "minutes_file": minutes_file,
+        "resolution_id": res_row["id"] if res_row else None,
+    }
+
+
+def _annex_h_content(society_id: int) -> dict:
+    """Annex H: advisers appointed."""
+    advisers = []
+    for a in list_advisers(society_id):
+        # Appointment letter SHA-256 from evidence
+        ev = _rows("""SELECT sha256, filename FROM onboarding_evidence
+                       WHERE society_id=%s AND purpose='adoption_minutes' AND meta->>'adviser_id'=%s
+                       ORDER BY uploaded_at DESC LIMIT 1""", (society_id, str(a["id"])))
+        advisers.append({
+            "kind": a["kind"],
+            "name": a["name"],
+            "firm": a["firm"],
+            "membership_number": a["membership_number"],
+            "scope": a["scope"],
+            "term_start": str(a["term_start"])[:10] if a.get("term_start") else None,
+            "term_end": str(a["term_end"])[:10] if a.get("term_end") else None,
+            "resolution_id": a["resolution_id"],
+            "appointment_letter_sha256": ev[0]["sha256"] if ev else None,
+            "appointment_letter_file": ev[0]["filename"] if ev else None,
+            "active": bool(a["active"]),
+        })
+    return {"advisers": advisers}
+
+
+_SUPPLEMENTARY_BUILDERS = {
+    "F": _annex_f_content,
+    "G": _annex_g_content,
+    "H": _annex_h_content,
+}
+
+
+def build_supplementary_annex(society_id: int, code: str, actor_id: int | None = None) -> dict:
+    """Build a supplementary annexure (F, G, H) as 'draft'. Post go-live only."""
+    if code not in SUPPLEMENTARY_ANNEX_CODES:
+        raise OnboardingError("Unknown supplementary annexure code.")
+    st = state_of(society_id)
+    if st != "active":
+        raise OnboardingError("Supplementary annexures can only be prepared after the society is active.")
+    builder = _SUPPLEMENTARY_BUILDERS[code]
+    content = builder(society_id)
+    content_hash = _sha(canonical(content))
+    # Hash chain: agreement_hash + previous_annex_hash
+    ag = _row("SELECT body_text FROM society_agreements WHERE society_id=%s ORDER BY id DESC LIMIT 1", (society_id,))
+    agreement_hash = _sha(ag["body_text"]) if ag and ag.get("body_text") else ""
+    prev = _row("""SELECT content_hash FROM onboarding_supplementary_annexes
+                    WHERE society_id=%s AND annex_code IN ('F','G','H') AND status='sealed'
+                    ORDER BY sealed_at DESC NULLS LAST, id DESC LIMIT 1""", (society_id,))
+    previous_annex_hash = prev["content_hash"] if prev else agreement_hash
+    with db._conn() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM onboarding_supplementary_annexes WHERE society_id=%s AND annex_code=%s AND status IN ('draft')", (society_id, code))
+        cur.execute("""INSERT INTO onboarding_supplementary_annexes
+                        (society_id, annex_code, content, content_hash, agreement_hash, previous_annex_hash, status, created_at, updated_at)
+                       VALUES (%s,%s,%s::jsonb,%s,%s,%s,'draft',NOW(),NOW())""",
+                    (society_id, code, json.dumps(content, default=str), content_hash, agreement_hash, previous_annex_hash))
+    return supplementary_annex_status(society_id)
+
+
+def supplementary_annex_status(society_id: int) -> dict:
+    rows = _rows("""SELECT annex_code, status, content_hash, agreement_hash, previous_annex_hash, sealed_at
+                     FROM onboarding_supplementary_annexes WHERE society_id=%s ORDER BY annex_code""", (society_id,)) or []
+    return {r["annex_code"]: dict(r) for r in rows}
+
+
+def seal_supplementary_annex(society_id: int, code: str, actor_id: int) -> dict:
+    """Seal a supplementary annexure (refused if the society is not active or no draft exists)."""
+    if code not in SUPPLEMENTARY_ANNEX_CODES:
+        raise OnboardingError("Unknown supplementary annexure code.")
+    if state_of(society_id) != "active":
+        raise OnboardingError("Supplementary annexures can only be sealed after the society is active.")
+    row = _row("""SELECT id, content_hash, agreement_hash, previous_annex_hash FROM onboarding_supplementary_annexes
+                   WHERE society_id=%s AND annex_code=%s AND status='draft'
+                   ORDER BY id DESC LIMIT 1""", (society_id, code))
+    if not row:
+        raise OnboardingError(f"No draft supplementary annexure {code} to seal. Build it first.")
+    with db._conn() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE onboarding_supplementary_annexes SET status='superseded' WHERE society_id=%s AND annex_code=%s AND status='sealed'", (society_id, code))
+        cur.execute("UPDATE onboarding_supplementary_annexes SET status='sealed', sealed_at=NOW() WHERE id=%s", (row["id"],))
+    return supplementary_annex_status(society_id)
 
 
 def advance_phase(society_id: int, actor_id: int, to_phase: str) -> str:

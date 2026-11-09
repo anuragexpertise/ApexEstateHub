@@ -565,85 +565,6 @@ def register_onboarding_wizard_callbacks(app):
         clean, _ = pr.clean_rows(rows or [], known)
         return dcc.send_bytes(pr.build_template(clean, known), "pending_receivables_template.xlsx")
 
-    # ── pending receivables: paper signing evidence workflow ──────────────────────
-    def _ev_badge(sid, purpose, acc_id=None, current_snapshot=None):
-        from app.services import paper_evidence as pe
-        st = pe.evidence_status(sid, purpose, acc_id, current_snapshot) if sid else {}
-        return _ev_alert(st)
-
-    def _recv_parts(rows, sid, fy=None):
-        """(clean rows, errors, headers, body, signers, meta lines) of the receivables document: used by BOTH the print and
-        the stale check, so the snapshot hash is computed from the very same lines."""
-        from app.services import pending_receivables as pr
-        clean, errors = pr.clean_rows(rows or [], ob.known_flat_numbers(sid))
-        hdr = ["Flat no.", "Value receivable (₹)", "Days overdue", "Remarks"]
-        body = [[r["flat_number"], f"{Decimal(r['amount']):,.2f}", "" if r["overdue_days"] is None else str(r["overdue_days"]), r.get("remarks") or ""] for r in clean]
-        body.append(["TOTAL", f"{pr.total(clean):,.2f}", "", f"{len(clean)} apartment(s)"])
-        meta = [f"Total receivables: ₹{pr.total(clean):,.2f}", "Ties to Sundry Debtors accounts as entered in Brought Forward."]
-        return clean, errors, hdr, body, ["Prepared by", "Treasurer", "Secretary", "President / Auditor"], meta
-
-    @app.callback(
-        Output("onb-recv-print-dl", "data"),
-        Output("onb-bf-recv-feedback", "children", allow_duplicate=True),
-        Input("onb-recv-print", "n_clicks"),
-        State("onb-recv-grid", "data"),
-        State("sw-bf-fy", "value"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def recv_print(n, rows, fy):
-        if not n:
-            return no_update, no_update
-        s = _session()
-        if not s or not s[0] or s[2] != "admin":
-            return no_update, no_update
-        from app.services import paper_evidence as pe
-        sid = s[0]
-        soc = ob.db._execute("SELECT name FROM societies WHERE id=%s", (sid,), fetch_one=True) or {}
-        clean, errors, hdr, body, signers, meta = _recv_parts(rows, sid, fy)
-        if errors:
-            return no_update, _alert("Fix receivable rows before printing: " + " ".join(errors[:3]), False)
-        doc = pe.make_document(sid, "pending_receivables", s[1], "Pending receivables by apartment",
-                               soc.get("name") or f"Society {sid}",
-                               f"Opening dues / FY {fy}" if fy else "Opening dues", hdr, body, signers, meta)
-        return (dcc.send_bytes(doc["data"], doc["filename"]),
-                _alert("Signing PDF generated (Doc ID %s). Print it, sign, scan, and upload the signed scan." % doc["doc_id"]))
-
-    @app.callback(
-        Output("onb-recv-evidence-status", "children"),
-        Input("onb-recv-scan", "contents"),
-        Input("onb-recv-print", "n_clicks"),
-        Input("onb-recv-grid", "data"),
-        State("onb-recv-scan", "filename"),
-        State("sw-bf-fy", "value"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def recv_scan(_contents, _p, _rows, filename, fy):
-        s = _session()
-        if not s or not s[0] or s[2] != "admin":
-            return no_update
-        sid, uid, role = s
-        from app.services import paper_evidence as pe
-        if ctx.triggered_id == "onb-recv-scan" and ctx.triggered and ctx.triggered[0].get("value"):
-            try:
-                ev = pe.store_signed_scan(sid, "pending_receivables", uid, filename, ctx.triggered[0]["value"],
-                                          {"kind": "pending_receivables", "fy": fy})
-                return dbc.Alert([html.I(className="fas fa-check-circle me-2"),
-                                  f"{pe.stored_message(ev)} ({ev.get('filename') or filename})"],
-                                 color="success", className="py-1 mb-0", style={"fontSize":"12px"})
-            except Exception as exc:  # noqa: BLE001
-                return dbc.Alert(str(exc), color="danger", className="py-1 mb-0", style={"fontSize":"12px"})
-        # entries changed after signing? compare the snapshot of the grid as it is now with the one that was signed
-        cur = None
-        try:
-            clean, errs, hdr, body, _sg, meta = _recv_parts(_rows, sid)
-            if not errs:
-                cur = pe.snapshot_hash("pending_receivables", "Pending receivables by apartment", hdr, body, meta)
-        except Exception:  # noqa: BLE001
-            cur = None
-        return _ev_badge(sid, "pending_receivables", None, cur)
-
     # ── item 11: reconciliation cards (driven by the live Brought Forward amounts) ────────────
     @app.callback(
         Output("onb-bf-reconciliation-cards", "children"),
@@ -815,102 +736,6 @@ def register_onboarding_wizard_callbacks(app):
         label = _r.sub(r"[^A-Za-z0-9 _-]+", "", f"{a['tab_name']} {a['name']}").strip() or f"account {a['id']}"
         return dcc.send_bytes(build_statement_template(dict(a), on), f"Account Statement - {label}.xlsx")
 
-    # Brought forward paper evidence (overall) ------------------------------------
-    @app.callback(
-        Output("onb-bf-print-dl","data"), Output("onb-bf-evidence-feedback","children", allow_duplicate=True),
-        Input("onb-bf-print","n_clicks"), State("sw-bf-fy","value"), State("sw-bf-as-on","date"),
-        State({"type":"sw-bf-amt","acc_id":ALL},"value"), State({"type":"sw-bf-remarks","acc_id":ALL},"value"),
-        prevent_initial_call=True)
-    @require_session
-    def bf_print(n,fy,as_on,amts,remarks=None):
-        if not n: return no_update,no_update
-        s=_session(); 
-        if not s or not s[0] or s[2] != "admin": return no_update,no_update
-        from app.services import paper_evidence as pe
-        sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
-        from database.seed import ACCOUNTS
-        meta={a[0]:a for a in ACCOUNTS}; ids=[d["id"]["acc_id"] for d in (ctx.states_list[2] or [])]
-        body=[]; dr=cr=Decimal(0)
-        for i,aid in enumerate(ids):
-            v=amts[i] if i<len(amts or []) else None
-            rem=(remarks[i] if i<len(remarks or []) else None)
-            if v in (None,"",0,0.0) and not rem: continue
-            a=meta.get(aid)
-            if not a: continue
-            amt=Decimal(str(v or 0)); side=a[5] or 'Dr'
-            if side=='Dr': dr+=amt
-            else: cr+=amt
-            body.append([str(aid),a[2] or '',a[3] or a[1] or '',side,f"{amt:,.2f}",(remarks[i] if i<len(remarks or []) else None) or ''])
-        body.append(["","TOTAL","",f"Dr {dr:,.2f}",f"Cr {cr:,.2f}",""])
-        doc=pe.make_document(sid,"brought_forward",s[1],"Brought Forward Opening Balances",soc.get("name") or f"Society {sid}",
-                                    f"FY {fy or ''} | As-on {as_on or ''}",["Account ID","Tab","Account","Side","Amount","Remarks"],body,
-                                    ["Prepared by","Treasurer","Secretary","Auditor/CA"],
-                                    [f"As-on date: {as_on or '—'} (may be mid-year).", "Attach all bank/deposit/cash account statements for the same As-on date as reconciliation evidence."])
-        return dcc.send_bytes(doc["data"],doc["filename"]), _msg("Signing PDF generated (Doc ID %s). Print, sign, scan, upload the signed scan." % doc["doc_id"],"success")
-
-    @app.callback(Output("onb-bf-evidence-status","children"), Input("onb-bf-scan","contents"), Input("onb-bf-print","n_clicks"),
-                  State("onb-bf-scan","filename"), State("sw-bf-fy","value"), State("sw-bf-as-on","date"), prevent_initial_call=True)
-    @require_session
-    def bf_scan(contents,_p,filename,fy,as_on):
-        s=_session(); 
-        if not s or not s[0] or s[2] != "admin": return no_update
-        from app.services import paper_evidence as pe
-        sid,uid,_=s
-        if ctx.triggered_id=="onb-bf-scan" and contents:
-            try:
-                ev=pe.store_signed_scan(sid,"brought_forward",uid,filename,contents,{"fy":fy,"as_on_date":as_on})
-                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), pe.stored_message(ev)], color="success", className="py-1 mb-0", style={"fontSize":"12px"})
-            except Exception as exc:
-                return dbc.Alert(str(exc), color="danger", className="py-1 mb-0", style={"fontSize":"12px"})
-        return _ev_badge(sid,"brought_forward")
-
-    @app.callback(Output("onb-apt-print-dl","data"), Input("onb-apt-print","n_clicks"),
-                  State("sw-apt-cost","value"), State("sw-apt-budget","value"), State("sw-apt-rate","value"),
-                  State("sw-apt-amt","value"), State("sw-apt-billing-basis","value"), State("sw-apt-due","value"),
-                  State("sw-apt-interest","value"), prevent_initial_call=True)
-    @require_session
-    def apt_print(n,cost,budget,rate,amt,basis,due,interest):
-        if not n: return no_update
-        s=_session(); 
-        if not s or not s[0] or s[2] != "admin": return no_update
-        from app.services import paper_evidence as pe
-        sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
-        def _v(x):
-            # None / "" = not entered (blank); a typed 0 is a real answer and must print as 0 (str(0 or '') hid it)
-            if x is None or x == "": return ""
-            try: return format(Decimal(str(x)).normalize(), "f")
-            except Exception: return str(x)
-        hdr=["Field","Value"]; body=[
-            ["Declaration","Undivided Interest - Part A: Apartment Charges / society defaults"],
-            ["Construction cost of project",_v(cost)],["Monthly common-expense budget",_v(budget)],
-            ["Default rate per sq ft",_v(rate)],["Default fixed amount",_v(amt)],
-            ["Maintenance billing basis",str(basis or '')],["Billing due day",_v(due)],
-            ["Interest % per month (simple)",_v(interest)],
-        ]
-        doc=pe.make_document(sid,"declaration_undivided_interest",s[1],"Declaration - Undivided Interest (Part A)",soc.get("name") or f"Society {sid}",
-                             "Apartment Charges / society defaults",hdr,body,
-                             ["Prepared by","Treasurer","Secretary","President/Authorized signatory"],
-                             ["Part A covers Apartment Charges / billing defaults and the apartment-wise undivided interest. Obtain signatures, scan, upload signed scan; server computes SHA-256."],
-                             sections=[pe.apartment_charges_section(sid, budget)])
-        return dcc.send_bytes(doc["data"],doc["filename"])
-
-    @app.callback(Output("onb-apt-evidence-status","children"), Input("onb-apt-scan","contents"), Input("onb-apt-print","n_clicks"),
-                  State("onb-apt-scan","filename"), prevent_initial_call=True)
-    @require_session
-    def apt_scan(contents,_p,filename):
-        s=_session(); 
-        if not s or not s[0] or s[2] != "admin": return no_update
-        from app.services import paper_evidence as pe
-        sid,uid,_=s
-        if ctx.triggered_id=="onb-apt-scan" and contents:
-            try:
-                ev=pe.store_signed_scan(sid,"declaration_undivided_interest",uid,filename,contents,{"part":"A","kind":"apartment_charges"})
-                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), pe.stored_message(ev)], color="success", className="py-1 mb-0", style={"fontSize":"12px"})
-            except Exception as exc:
-                return dbc.Alert(str(exc), color="danger", className="py-1 mb-0", style={"fontSize":"12px"})
-        return _ev_badge(sid,"declaration_undivided_interest")
-
-    print("  ✓ Onboarding wizard callbacks registered")
 
     # ── Legal Regime Selection: "Your Legal Regime" card + Legal Hierarchy table (item 7) ──────────────────
     # Re-rendered when a Yes/No answer changes AND when State / Constitution change on Society Details (they are only
@@ -1096,17 +921,6 @@ def _msg(text, color):
     return dbc.Alert(text, color=color, className="py-2 mb-2", style={"fontSize": "12.5px"})
 
 
-def _ev_alert(st):
-    """Status of the latest signed scan: stored+linked, stale (entries changed after signing), unlinked, or none."""
-    from app.services import paper_evidence as pe
-    colour, text = pe.status_line(st or {})
-    if colour == "muted":
-        return html.Div(text, className="text-muted small")
-    icon = {"success": "fa-check-circle", "warning": "fa-exclamation-triangle", "info": "fa-info-circle"}[colour]
-    return dbc.Alert([html.I(className=f"fas {icon} me-2"), text], color=colour, className="py-1 mb-0",
-                     style={"fontSize": "12px"})
-
-
 def _register_xlsx_callbacks(app):
     # TDS template download ---------------------------------------------------------
     @app.callback(
@@ -1235,69 +1049,6 @@ def _register_xlsx_callbacks(app):
                     outs[k][i] = float(item[k])
         row_eff = {idx: it["effective_start_date"] for idx, it in (pending.get("rows") or {}).items()
                    if it.get("effective_start_date")}
-        return (outs["nature"], outs["rate"], outs["rate_no_pan"], outs["single"], outs["agg"],
-                pending.get("tan") or no_update, pending.get("effective_date") or no_update, True, row_eff)
-
-
-    # TDS paper evidence -----------------------------------------------------------
-    @app.callback(
-        Output("onb-tds-print-dl", "data"),
-        Output("onb-tds-preview", "children", allow_duplicate=True),
-        Input("onb-tds-print", "n_clicks"),
-        State("sw-society-tan", "value"),
-        State("sw-tds-effective-date", "date"),
-        State("sw-tds-row-eff", "data"),
-        State({"type":"tds-section","index":ALL}, "value"),
-        State({"type":"tds-discriminator","index":ALL}, "value"),
-        State({"type":"tds-rate","index":ALL}, "value"),
-        State({"type":"tds-rate-no-pan","index":ALL}, "value"),
-        State({"type":"tds-single-bill","index":ALL}, "value"),
-        State({"type":"tds-agg-bill","index":ALL}, "value"),
-        State({"type":"tds-nature","index":ALL}, "value"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def tds_print(n, tan, eff, row_eff, secs, discs, rates, npans, singles, aggs, natures=None):
-        if not n: return no_update, no_update
-        s=_session()
-        if not s or not s[0] or s[2] != "admin": return no_update, no_update
-        from app.services import paper_evidence as pe
-        sid=s[0]; soc=ob.db._execute("SELECT name FROM societies WHERE id=%s",(sid,),fetch_one=True) or {}
-        hdr=["Section","Discriminator","Nature of income","Rate %","No PAN %","Single bill","Aggregate","Effective start"]
-        body=[]
-        for i,sec in enumerate(secs or []):
-            body.append([sec or "", (discs[i] if i<len(discs or []) else "") or "",
-                         (natures[i] if i<len(natures or []) else "") or "",
-                         "" if i>=len(rates or []) or rates[i] in (None,"") else str(rates[i]),
-                         "" if i>=len(npans or []) or npans[i] in (None,"") else str(npans[i]),
-                         "" if i>=len(singles or []) or singles[i] in (None,"") else str(singles[i]),
-                         "" if i>=len(aggs or []) or aggs[i] in (None,"") else str(aggs[i]),
-                         (row_eff or {}).get(str(i)) or eff or ""])
-        doc=pe.make_document(sid,"tds_rates",s[1],"TDS Rates", soc.get("name") or f"Society {sid}", f"TAN {tan or '—'} | Effective {eff or '—'}",
-                                    hdr, body, ["Prepared by","Chartered Accountant (sign)","Treasurer","Secretary"],
-                                    ["Signed by CA; rates evidenced by signed scan (server SHA-256). Individual rate changes may use separate effective start dates in upload template."])
-        return dcc.send_bytes(doc["data"],doc["filename"]), _msg("Signing PDF generated (Doc ID %s). Print, get the CA to sign, scan, upload the signed scan." % doc["doc_id"],"success")
-
-    @app.callback(
-        Output("onb-tds-evidence-status","children"),
-        Input("onb-tds-scan","contents"), Input("onb-tds-print","n_clicks"),
-        State("onb-tds-scan","filename"), State("sw-tds-effective-date","date"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def tds_scan(contents,_p,filename,eff):
-        s=_session()
-        if not s or not s[0] or s[2] != "admin": return no_update
-        sid,uid,_=s
-        from app.services import paper_evidence as pe
-        if ctx.triggered_id=="onb-tds-scan" and contents:
-            try:
-                ev=pe.store_signed_scan(sid,"tds_rates",uid,filename,contents,{"effective_date":eff,"signed_by":"CA"})
-                return dbc.Alert([html.I(className="fas fa-check-circle me-2"), pe.stored_message(ev)], color="success", className="py-1 mb-0", style={"fontSize":"12px"})
-            except Exception as exc:
-                return dbc.Alert(str(exc), color="danger", className="py-1 mb-0", style={"fontSize":"12px"})
-        return _ev_alert(pe.evidence_status(sid,"tds_rates"))
-
     # BF template download: exactly the accounts listed on screen ----------------------
     def _acc_meta():
         from database.seed import ACCOUNTS

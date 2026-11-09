@@ -179,7 +179,7 @@ CREATE TRIGGER trg_onboarding_declarations_updated_at
 CREATE TABLE onboarding_annexes (
     id              SERIAL PRIMARY KEY,
     society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    annex_code      VARCHAR(1) NOT NULL CHECK (annex_code IN ('A', 'B', 'C', 'D')),
+    annex_code      VARCHAR(1) NOT NULL CHECK (annex_code IN ('A', 'B', 'C', 'D', 'E')),
     content         JSONB NOT NULL DEFAULT '{}'::jsonb,   -- frozen annex content
     content_hash    VARCHAR(64) NOT NULL,                 -- SHA-256 of the canonical annex text
     status          VARCHAR(20) NOT NULL DEFAULT 'draft'  -- draft | submitted | sealed | superseded
@@ -211,6 +211,38 @@ CREATE TRIGGER trg_onboarding_annexes_updated_at
     BEFORE UPDATE ON onboarding_annexes
     FOR EACH ROW
     EXECUTE FUNCTION fn_trg_onboarding_annexes_updated_at();
+
+-- V5: Supplementary annexures F (enrollment), G (bye-law adoption), H (advisers).
+-- Sealed after go-live by the President, Secretary and Treasurer only; chained to the signed Agreement.
+CREATE TABLE onboarding_supplementary_annexes (
+    id              SERIAL PRIMARY KEY,
+    society_id      INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    annex_code      VARCHAR(1) NOT NULL CHECK (annex_code IN ('F', 'G', 'H')),
+    content         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    content_hash    VARCHAR(64) NOT NULL,
+    agreement_hash  VARCHAR(64) NOT NULL,
+    previous_annex_hash VARCHAR(64) NOT NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'sealed', 'superseded')),
+    sealed_at       TIMESTAMP,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (society_id, annex_code, status)
+);
+
+CREATE INDEX idx_supplementary_annexes_society ON onboarding_supplementary_annexes (society_id);
+
+CREATE OR REPLACE FUNCTION fn_trg_supplementary_annexes_updated_at() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at := NOW();
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_supplementary_annexes_updated_at
+    BEFORE UPDATE ON onboarding_supplementary_annexes
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_supplementary_annexes_updated_at();
 
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
@@ -23807,7 +23839,10 @@ CREATE TABLE onboarding_evidence (
             'bulk_supervisor',
             'bulk_staff',
             'adoption_resolution',
-            'other_paper_evidence'
+            'other_paper_evidence',
+            'registration_certificate',
+            'ca_rates_letter',
+            'adoption_minutes'
         )
     ),
     acc_id INT,

@@ -20,7 +20,7 @@ from datetime import date
 
 from app.services import signing_service
 
-KINDS = ("noc", "agreement", "resolution", "minutes", "poll", "expense", "fund_withdrawal", "adviser_appointment", "stepup_change")
+KINDS = ("noc", "agreement", "resolution", "minutes", "poll", "expense", "fund_withdrawal", "adviser_appointment", "stepup_change", "supplementary_annex")
 PURPOSE = {"noc": "SIGNING_NOC"}          # every other kind is sealed with SIGNING_AGREEMENT
 OFFICES = ("president", "vice_president", "secretary", "joint_secretary", "treasurer", "working_committee_member")
 ALL_BEARERS = list(OFFICES)
@@ -32,6 +32,7 @@ DEFAULT_POLICY = {
     "agreement":       dict(eligible=["president", "secretary", "treasurer", "platform"], required=["president", "secretary", "treasurer", "platform"], min=4),
     "stepup_change":   dict(eligible=["president", "secretary", "treasurer"], required=["president", "secretary", "treasurer"], min=3),
     "adviser_appointment": dict(eligible=["president", "secretary", "treasurer"], required=["president", "secretary", "treasurer"], min=3),
+    "supplementary_annex": dict(eligible=["president", "secretary", "treasurer"], required=["president", "secretary", "treasurer"], min=3),
     "resolution":      dict(eligible=["president", "vice_president", "secretary", "joint_secretary", "chair"], required=["secretary", "chair"], min=2),
     "minutes":         dict(eligible=["president", "vice_president", "secretary", "joint_secretary", "chair"], required=["secretary", "chair"], min=2),
     "poll":            dict(eligible=["secretary", "president"], required=[], min=1),
@@ -128,6 +129,13 @@ def item_text(kind: str, subject_id: int, db=None) -> tuple[int, str]:
             raise SigningRefused("Step-up change request not found.")
         fp = sha256(r["new_hash"])[:12]
         return r["society_id"], f"Society {r['name']}: replace the step-up password (request #{subject_id}, hash fingerprint {fp})"
+    if kind == "supplementary_annex":
+        r = d._execute("SELECT society_id, annex_code, content_hash, agreement_hash, previous_annex_hash FROM onboarding_supplementary_annexes WHERE id=%s",
+                       (subject_id,), fetch_one=True)
+        if not r:
+            raise SigningRefused("Supplementary annexure not found.")
+        return r["society_id"], (f"supplementary_annex|{subject_id}|{r['annex_code']}|{r['content_hash']}|"
+                                 f"{r['agreement_hash']}|{r['previous_annex_hash']}")
     raise SigningRefused(f"Unsupported record kind {kind!r}.")
 
 

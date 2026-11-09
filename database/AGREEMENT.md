@@ -92,9 +92,17 @@ Agreement text. A failing blocking control prevents sealing. Changing anything a
 | **B — Review of the setup** | The Setup Wizard Review as a frozen snapshot: society identity, the three office-bearers (name, flat, election evidence and the signature image on record with its SHA-256), declared rates and charges, accounts. TDS and GST rates are marked pending the CA's confirmation until confirmed. |
 | **C — Opening financial position** | Financial year and as-at date; every opening balance; fund-by-fund statement; arrears by flat; bank and cash reconciliation with scans and their SHA-256; the earlier audited statements and reviewer reference if any (otherwise labelled "unaudited" and "unreviewed"). Posted as the opening position on activation. |
 | **D — Data-protection and custody schedule** | The grievance officer, the Fiduciary and Processor roles, the sub-processors in use, the signing method chosen, and the step-up password custody statement in clause 4. |
+| **E — Source-documents index** | Every scanned third-party original on file: the society's registration certificate, bank/deposit/cash account statements, cash-count certificate, audited statements, CA review letter, signed election minutes, and the CA's rates letter where present. Each row names the document, its stage, purpose, filename, uploader and SHA-256. Nothing personal is stored. |
 
 Arrears declared for flats not yet enrolled are held as pending opening receivables and linked when the flat is enrolled. A wrong
 opening figure found later is corrected by reversal, never by editing.
+
+## 7A. Supplementary annexures
+
+Annexures F (enrollment and undivided-interest basis), G (adoption of Model Bye-Laws 1 to 58) and H (advisers appointed) are added
+by the Society alone after go-live and do not require the Operator's signature. Each is chained to this Agreement by its SHA-256 and
+is signed by the President, Secretary and Treasurer using the society's chosen signing method. The Operator is informed but is not a
+party to these supplementary annexures.
 
 ## Execution
 

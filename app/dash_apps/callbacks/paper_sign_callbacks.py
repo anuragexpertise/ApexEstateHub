@@ -147,23 +147,6 @@ def register_paper_sign_callbacks(app):
             msg += " Already active (resolution on file), left unchanged: " + ", ".join(skipped) + "."
         return choice_out, var_out, dbc.Alert(msg, color="success", className="py-1 mb-0", style={"fontSize": "12px"})
 
-    @app.callback(Output("adopt-bl-print-dl", "data"), Output("adopt-bl-evidence-status", "children", allow_duplicate=True),
-                  Input("adopt-bl-print", "n_clicks"), prevent_initial_call=True)
-    @require_session
-    def adopt_print(n):
-        s = _admin()
-        if not n or not s:
-            return no_update, no_update
-        sid, uid, _role = s
-        from app.services import paper_evidence as pe
-        soc = ob.db._execute("SELECT name FROM societies WHERE id=%s", (sid,), fetch_one=True) or {}
-        hdr, rows, signers, meta = document_parts(sid)
-        doc = pe.make_document(sid, PURPOSE, uid, TITLE, soc.get("name") or f"Society {sid}",
-                               "Society bye-laws", hdr, rows, signers, meta, kind=KIND)
-        return (dcc.send_bytes(doc["data"], doc["filename"]),
-                dbc.Alert(f"Signing PDF generated (Doc ID {doc['doc_id']}). Print, sign, scan and upload the signed scan.",
-                          color="success", className="py-1 mb-0", style={"fontSize": "12px"}))
-
     @app.callback(Output("adopt-bl-evidence-status", "children"), Input("adopt-bl-scan", "contents"),
                   State("adopt-bl-scan", "filename"), prevent_initial_call=True)
     @require_session
