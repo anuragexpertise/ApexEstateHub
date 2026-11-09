@@ -2229,8 +2229,8 @@ def register_drilldown_callbacks(app):
                             {"type": "error", "message": "Failed to create society."}, 
                             no_update)
                 
-                # Success: pop back to list and re-render
-                store = nav_state.pop(store)
+                # Success: redirect to the master societies list ("total societies")
+                store = nav_state.navigate_to(store, "list_master_societies", "All Societies")
                 hide_kpis = len(store.get("stack", [])) > 1
                 content, bc, db_err = _render_current(store, auth)
                 kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
