@@ -8692,7 +8692,7 @@ def render_form_master_society_new() -> "html.Div":
                     dbc.Label("Registration Certificate (scan/PDF)", html_for="new-society-reg-cert", style={"fontSize":"11px", "fontWeight":"700"}),
                     dcc.Upload(
                         id={"type": "reg-cert-upload", "entity": "master_society", "field": "registration_certificate"},
-                        children=html.Div([html.I(className="fas fa-cloud-upload-alt me-1"), "Upload registration certificate (PDF/PNG/JPG)"], style={"fontSize": "12px"}),
+                        children=html.Div([html.I(className="fas fa-cloud-upload-alt me-1"), "Upload / Drop"], style={"fontSize": "12px"}),
                         style={
                             "flex": "1", "height": "42px", "lineHeight": "42px",
                             "borderWidth": "2px", "borderStyle": "dashed",
@@ -8704,23 +8704,6 @@ def render_form_master_society_new() -> "html.Div":
                     ),
                     html.Div(id={"type": "reg-cert-preview", "entity": "master_society"}, style={"fontSize":"11px","marginTop":"4px"}),
                     dcc.Store(id={"type": "reg-cert-store", "entity": "master_society"}, storage_type="memory"),
-                ], width=12, className="mb-3"),
-                dbc.Col([
-                    dbc.Label("Registration Certificate (scan/PDF)", html_for="new-society-reg-cert", style={"fontSize":"11px", "fontWeight":"700"}),
-                    dcc.Upload(
-                        id={"type": "form-upload", "entity": "master_society", "field": "registration_certificate"},
-                        children=html.Div([html.I(className="fas fa-cloud-upload-alt me-1"), "Upload / Drop"], style={"fontSize": "12px"}),
-                        style={
-                            "flex": "1", "height": "42px", "lineHeight": "42px",
-                            "borderWidth": "2px", "borderStyle": "dashed",
-                            "borderRadius": "10px", "textAlign": "center",
-                            "borderColor": "#667eea", "background": "rgba(102,126,234,0.04)",
-                            "cursor": "pointer",
-                        },
-                        multiple=False, accept=".pdf,.png,.jpg,.jpeg",
-                    ),
-                    html.Div(id={"type": "image-preview", "entity": "master_society", "field": "registration_certificate"}, style={"fontSize":"11px","marginTop":"4px"}),
-                    dcc.Store(id={"type": "form-field-hidden", "entity": "master_society", "field": "registration_certificate"}, storage_type="memory"),
                 ], width=12, className="mb-3"),
                 # State, Constitution (regime) and the registration certificate are the
                 # society's own onboarding/setup-wizard steps, not the master's.
