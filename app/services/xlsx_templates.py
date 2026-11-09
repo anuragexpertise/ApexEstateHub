@@ -160,6 +160,34 @@ def build_statement_template(acc: dict, as_on: str | None) -> bytes:
     return buf.getvalue()
 
 
+def build_statement_templates(accounts: list[dict], as_on: str | None) -> bytes:
+    """One XLSX with one sheet per bank/deposit/cash account — a single 'Account Statements' file for upload."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Accounts"
+    ws.append(["account_id", "account_name", "tab", "as_on_date", "closing_balance"])
+    for c in range(1, 6):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+    for acc in accounts:
+        ws.append([acc.get("id"), acc.get("name") or "", acc.get("tab_name") or "", as_on or "YYYY-MM-DD", ""])
+    locked_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    for r in range(2, len(accounts) + 2):
+        for c in (1, 2, 3):
+            ws.cell(row=r, column=c).fill = locked_fill
+    dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
+    dv.add(f"E2:E{len(accounts) + 1}")
+    ws.add_data_validation(dv)
+    wi = wb.create_sheet("Instructions")
+    wi.append(["Notes"])
+    wi.append(["Fill closing_balance with the balance per the bank / deposit statement or the cash count as on as_on_date, one row per account."])
+    wi.append(["as_on_date must be the same As-on date as Brought Forward; a statement as on any other date is rejected."])
+    wi.append(["Do not change account_id. Each row maps to its account; upload this single file for all accounts."])
+    wi.append(["Each account still needs its own 'Attach scan' evidence in the reconciliation cards."])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 BYE_LAW_COLUMNS = ["clause_id", "clause_title", "choice", "variation_text", "note"]
 BYE_LAW_CHOICES = ("adopted_as_is", "adopted_with_variation", "not_adopted")
 
