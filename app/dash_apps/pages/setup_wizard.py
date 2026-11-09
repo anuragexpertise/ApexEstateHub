@@ -2053,15 +2053,36 @@ def render_category_content(category, society_id=None, state=None, constitution=
             ], className="sw-bf-side")
 
         _bf_as_on = (_bf_draft.get("as_on_date") if '_bf_draft' in locals() else None) or str(fy_start_date())
+        # Funds selected/held for this society (prescribed + opted on the Funds step)
+        from app.services.up_aoa_fund_catalog import FUNDS as _BF_FUNDS, register_rows as _bf_register_rows, status_spec as _bf_status_spec
+        _bf_acc_names = {a[0]: a[1] for a in ACCOUNTS}
+        _bf_values = {"apt_sinking_fund_rate": None, "apt_repair_fund_rate": None}
+        _held_rows = _bf_register_rows(_modes, _bf_acc_names, _bf_values)
+        _held_keys = {r["key"] for r in _held_rows}
+        _fund_items = []
+        for _r in _held_rows:
+            _st, _col = _bf_status_spec(_BF_FUNDS[_r["key"]])
+            _fund_items.append(html.Li([
+                html.Strong(_r["name"]), " ",
+                dbc.Badge(_st, color=_col, className="me-1"),
+                html.Small(f"({_r['account']})", className="text-muted"),
+            ], className="mb-1"))
+        _not_opted = [_BF_FUNDS[k]["name"] for k in ("sinking", "repair", "depreciation") if k not in _held_keys]
+
         inputs = [
             _render_banner("Brought Forward", "Enter brought forward (opening balance) amounts for accounts. You may start mid-year using an As-on date (not necessarily the start of the financial year)."),
             dbc.Row([
                 dbc.Col([_label("Financial Year (Start Year)"), dbc.Input(id="sw-bf-fy", type="number", value=s_fy, step=1, className="mb-3")], md=4),
                 dbc.Col([_label("As-on date (opening balances)"), html.Div(dcc.DatePickerSingle(id="sw-bf-as-on", date=str(_bf_as_on), display_format="YYYY-MM-DD"), className="mb-3")], md=4),
             ]),
-            html.Small("Only funds this society holds are listed: the prescribed funds, plus any optional fund it opted into on the Funds step. "
-                       "To carry an opening balance for Sinking or Repair & Maintenance, opt in first. "
-                       "Attach bank/deposit/cash account statements for the same As-on date under Reconciliation & evidence.",
+            dbc.Card(dbc.CardBody([
+                html.Div([html.I(className="fas fa-piggy-bank me-2 text-primary"),
+                          html.Strong("Funds selected for this society")], className="mb-2"),
+                html.Ul(_fund_items, className="mb-1 ps-3", style={"fontSize": "12.5px"}) if _fund_items else html.Small("No fund accounts listed.", className="text-muted"),
+                html.Small("Not selected: " + ", ".join(_not_opted) + ". Opt in on the Funds step to carry their opening balances.",
+                           className="text-muted d-block mt-1") if _not_opted else None,
+            ], className="py-2"), className="mb-3", style={"border": "1px solid #d7deea", "background": "#f8faff"}),
+            html.Small("Attach bank/deposit/cash account statements for the same As-on date under Reconciliation & evidence.",
                        className="text-muted d-block mb-2"),
             html.H6("Brought Forward Accounts", className="mt-4 mb-2 text-primary"),
             dbc.Row([
@@ -2075,8 +2096,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
             html.Div(id="onb-bf-preview", className="mb-2"),
             dbc.Button("Apply to form", id="onb-bf-apply", color="primary", size="sm", disabled=True, n_clicks=0, className="mb-3"),
             html.Div([
-                _side("Assets", "Dr", [1000]),
                 _side("Liabilities & Equity", "Cr", [2000, 3000]),
+                _side("Assets", "Dr", [1000]),
             ], className="sw-bf-grid"),
 
             # ── item 10: pending receivables by apartment ─────────────────────────
