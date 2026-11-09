@@ -125,7 +125,9 @@ def test_after_treasurer_seated_the_committee_stage_stays_until_grievance_named(
 def test_continue_goes_to_wizard_and_named_grievance_goes_straight_there(hub, monkeypatch):
     monkeypatch.setattr(hub, "state_of", lambda sid: "committee seated")
     monkeypatch.setattr(op, "grievance_named", lambda sid: True)
-    assert _body_text(op.hub_body("admin", 1, 2)) == ["WIZARD"]
+    # default (no view) shows the committee stage with the "Continue to society setup" button
+    assert _body_text(op.hub_body("admin", 1, 2)) == ["COMMITTEE"]
+    # explicit view="setup" goes to the wizard
     assert _body_text(op.hub_body("admin", 1, 2, view="setup")) == ["WIZARD"]
 
 

@@ -777,7 +777,7 @@ def hub_body(role: str, society_id: int, user_id: int | None, view: str | None =
         out += _stage_committee(society_id) if is_admin else [html.Div("The administrator is seating the founding committee.", style=_MUTED)]
     elif st == "committee seated":
         if is_admin:
-            if view == "committee" or (view != "setup" and not grievance_named(society_id)):
+            if view == "committee" or view is None or (view != "setup" and not grievance_named(society_id)):
                 out += _stage_committee(society_id)
             else:
                 out += setup_stage(society_id, current_step=deep_step)
@@ -832,9 +832,9 @@ def render_pending(role: str, society_id: int | None, user_id: int | None):
         dcc.Store(id=f"{P}-marker", data=marker(society_id)),
         dcc.Store(id="onb-setup-step", data=_initial_step(society_id)),
         dcc.Store(id="onb-wizard-step", storage_type="session", data=_initial_step(society_id)),
-        dcc.Store(id="onb-view", data="current"),
+        dcc.Store(id="onb-view", data=_committee_view(society_id) or "current"),
         html.Div(id="onb-celebrate-sink", style={"display": "none"}),
-        html.Div(hub_body(role, society_id, user_id), id=f"{P}-body"),
+        html.Div(hub_body(role, society_id, user_id, view=_committee_view(society_id)), id=f"{P}-body"),
     ], className="portal-page onb-root")
 
 
