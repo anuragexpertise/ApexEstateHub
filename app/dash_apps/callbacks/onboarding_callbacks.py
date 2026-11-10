@@ -19,6 +19,7 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 
+from app.dash_apps.pages import onboarding_page as op
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
 from app.security.guards import require_session
 from app.services import document_signing as ds
