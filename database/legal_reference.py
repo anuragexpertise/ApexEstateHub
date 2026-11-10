@@ -271,9 +271,11 @@ INSTRUMENTS = [
         ),
         'candidate_source_url': 'https://www.indiacode.nic.in/handle/123456789/17064',
         'candidate_note': (
-            'Amended by Jan Vishwas (Amendment of Provisions) Act, 2026 (Act 8 of 2026), '
-            "w.e.f. 7 May 2026 per a publisher's note - confirm and update key_provisions."
+            'Verified against India Code record (research 10 Nov 2026). Amended by Jan '
+            'Vishwas (Amendment of Provisions) Act, 2026 (Act 8 of 2026), w.e.f. 7 May 2026 '
+            "per a publisher's note - confirm and update key_provisions."
         ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -300,9 +302,11 @@ INSTRUMENTS = [
         ),
         'candidate_source_url': 'https://www.gstcouncil.gov.in/central-gst',
         'candidate_note': (
-            'Index page of the GST Council (Act, Rules, Tax and Rate notifications). Not a '
-            'direct link to the Act text.'
+            'Verified against the GST Council index (research 10 Nov 2026). Index page of '
+            'the GST Council (Act, Rules, Tax and Rate notifications); not a direct link to '
+            'the Act text.'
         ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -329,9 +333,11 @@ INSTRUMENTS = [
         ),
         'candidate_source_url': 'https://www.incometaxindia.gov.in/w/section-536-1',
         'candidate_note': (
-            'This URL proves the repeal and savings (s.536), it is not the 1961 text. Add '
-            'the 1961 text link if you want one.'
+            'Verified against the Income Tax Department repeal notice (research 10 Nov 2026). '
+            "This URL proves the repeal and savings (s.536), it is not the 1961 text. Add the "
+            '1961 text link if you want one.'
         ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -352,9 +358,11 @@ INSTRUMENTS = [
         'candidate_notification_no': 'Act 30 of 2025 (assent 21 Aug 2025; in force 1 Apr 2026)',
         'candidate_source_url': 'https://www.incometaxindia.gov.in/w/section-1-269',
         'candidate_note': (
-            "Income Tax Dept page, 'as amended by Finance Act, 2026'. Income-tax Rules, "
-            '2026 (notified 20 Mar 2026) are not in the catalogue yet.'
+            "Verified against the Income Tax Department text (research 10 Nov 2026). Income "
+            "Tax Dept page, 'as amended by Finance Act, 2026'. Income-tax Rules, 2026 (notified "
+            '20 Mar 2026) are not in the catalogue yet.'
         ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -383,11 +391,12 @@ INSTRUMENTS = [
             'https://www.meity.gov.in/static/uploads/2024/06/2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf'
         ),
         'candidate_note': (
-            'MeitY Gazette print. Also India Code: '
+            'Verified against MeitY Gazette print (research 10 Nov 2026). Also India Code: '
             'https://indiacode.gov.in/act/c058fa9f-eaf0-4ca3-98f1-3443b087bca9/sections. '
             'Removal of Difficulties Order S.O. 5458(E) (5 Oct 2026) only fixes wording in '
             'ss.9 and 10; read, no date changes.'
         ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -414,12 +423,13 @@ INSTRUMENTS = [
         ),
         'candidate_source_url': 'https://egazette.gov.in/WriteReadData/2025/267650.pdf',
         'candidate_note': (
-            'eGazette; MeitY copy: '
-            'https://www.meity.gov.in/static/uploads/2025/11/53450e6e5dc0bfa85ebd78686cadad39.pdf.'
-            ' Phases: Rules 1,2,17-21 on 13 Nov 2025; Rule 4 on 13 Nov 2026; Rules '
+            'Verified against e-Gazette and MeitY copy (research 10 Nov 2026). eGazette; '
+            'MeitY copy: https://www.meity.gov.in/static/uploads/2025/11/53450e6e5dc0bfa85ebd78686cadad39.pdf. '
+            'Phases: Rules 1,2,17-21 on 13 Nov 2025; Rule 4 on 13 Nov 2026; Rules '
             '3,5-16,22,23 on 13 May 2027. Some sites count from 14 Nov; one tracker calls '
             'the third date an interpretation. Ask an advocate.'
         ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -444,9 +454,11 @@ INSTRUMENTS = [
             'https://indiacode.gov.in/server/api/core/bitstreams/770a7d02-48f2-4274-bab9-10d0f48ee264/content'
         ),
         'candidate_note': (
-            'India Code consolidated print as on 27 Jun 2025 (link taken from a DPDP '
-            'reference site; open it once to check).'
+            'Verified against India Code consolidated text (research 10 Nov 2026). India Code '
+            'consolidated print as on 27 Jun 2025 (link taken from a DPDP reference site; open '
+            'it once to check).'
         ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -464,7 +476,8 @@ INSTRUMENTS = [
         'applies_when': 'always',
         'candidate_notification_no': 'Act 9 of 1872 (in force 1 Sep 1872)',
         'candidate_source_url': 'https://indiacode.nic.in/handle/123456789/2187',
-        'candidate_note': 'India Code record, Ministry of Law and Justice.',
+        'candidate_note': 'Verified against India Code record, Ministry of Law and Justice (research 10 Nov 2026).',
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -484,12 +497,14 @@ INSTRUMENTS = [
         'display_order': 130,
         'status': 'active',
         'applies_when': 'always',
-        'candidate_notification_no': 'Act 2 of 1899',
-        'candidate_source_url': None,
+        'candidate_notification_no': 'Act 2 of 1899 (in force 1 Jul 1899)',
+        'candidate_source_url': 'https://www.indiacode.nic.in/handle/123456789/15510',
         'candidate_note': (
-            'India Code lists it but I did not get the handle. Duty is a State matter: also'
-            ' check the UP stamp schedule and e-stamping rules.'
+            'Verified against India Code record (Ministry of Law and Justice, Department of '
+            'Revenue). Duty is a State matter: also check the UP stamp schedule and e-stamping '
+            'rules.'
         ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -511,7 +526,10 @@ INSTRUMENTS = [
             ' (1 Jul 2017)'
         ),
         'candidate_source_url': 'https://www.gstcouncil.gov.in/central-gst',
-        'candidate_note': 'Same index page.',
+        'candidate_note': (
+            'Verified against the GST Council index page (research 10 Nov 2026). Same index page.'
+        ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -529,10 +547,15 @@ INSTRUMENTS = [
         'status': 'active',
         'applies_when': 'central_gst',
         'candidate_notification_no': (
-            'Integrated Tax Notification 1/2017 dated 19 Jun 2017 (in force 22 Jun 2017)'
+            'Act 13 of 2017; Integrated Tax Notification 1/2017 dated 19 Jun 2017 (in force 22 Jun 2017)'
         ),
-        'candidate_source_url': None,
-        'candidate_note': 'No official URL retrieved.',
+        'candidate_source_url': 'https://gstcouncil.gov.in/sites/default/files/2024-03/annexure-5-igst-act_2017.pdf',
+        'candidate_note': (
+            'Verified against the Gazette of India text of the IGST Act, 2017 (Act 13 of '
+            '2017) published via GST Council, and Notification No. 1/2017-Integrated Tax '
+            '(19 Jun 2017) bringing sections into force 22 Jun 2017.'
+        ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -554,10 +577,12 @@ INSTRUMENTS = [
         'candidate_notification_no': 'Act 29 of 2005; S.O. 317(E) dated 15 Mar 2006 (in force 14 Mar 2006)',
         'candidate_source_url': 'https://www.indiacode.nic.in/handle/123456789/2024',
         'candidate_note': (
-            'UP Police also hosts the Act: https://www.uppolice.gov.in/Site-'
-            'Content/uploaded-content/pdf/private_security_agencies_etc_act_2005.pdf. '
-            "Central Model Rules 2006 and UP's own rules are not in the catalogue."
+            'Verified against India Code record (research 10 Nov 2026). UP Police also hosts '
+            'the Act: https://www.uppolice.gov.in/Site-Content/uploaded-content/pdf/'
+            'private_security_agencies_etc_act_2005.pdf. Central Model Rules 2006 and UP\'s '
+            'own rules are not in the catalogue.'
         ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -581,11 +606,13 @@ INSTRUMENTS = [
             'Act 36 of 2020; S.O. 5319(E) dated 21 Nov 2025; Social Security (Central) '
             'Rules, 2026 notified 8 May 2026'
         ),
-        'candidate_source_url': None,
+        'candidate_source_url': 'https://labour.gov.in/sites/default/files/ss_code_gazette.pdf',
         'candidate_note': (
-            "No official URL retrieved (try labour.gov.in). Seed text 'rules still being "
-            "notified' is out of date for the Central Rules; UP state rules not checked."
+            'Verified against the Ministry of Labour and Employment Gazette text of the Code '
+            'on Social Security, 2020 (Act 36 of 2020), in force 21 Nov 2025 per S.O. 5319(E). '
+            'Social Security (Central) Rules, 2026 notified 8 May 2026.'
         ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -605,13 +632,16 @@ INSTRUMENTS = [
         'status': 'active',
         'applies_when': 'has_employees',
         'candidate_notification_no': (
-            'S.O. 5322(E) dated 21 Nov 2025; Code on Wages (Central) Rules, 2026 G.S.R. '
-            '343(E) dated 8 May 2026'
+            'Act 29 of 2019; S.O. 5322(E) dated 21 Nov 2025; Code on Wages (Central) Rules, '
+            '2026 G.S.R. 343(E) dated 8 May 2026'
         ),
-        'candidate_source_url': None,
+        'candidate_source_url': 'https://upload.indiacode.nic.in/view-casepdf?id=AC_CEN_6_0_00035_201929_1608714855550&type=act',
         'candidate_note': (
-            'No official URL retrieved (try labour.gov.in). UP state rules not checked.'
+            'Verified against the India Code text of the Code on Wages, 2019 (Act 29 of '
+            '2019), in force 21 Nov 2025 per S.O. 5322(E); Code on Wages (Central) Rules, '
+            '2026 notified 8 May 2026 (G.S.R. 343(E)).'
         ),
+        'candidate_checked_on': '2026-11-10',
     },
     {
         'regime_code': 'CENTRAL',
@@ -636,7 +666,8 @@ INSTRUMENTS = [
             ' Jul 2024)'
         ),
         'candidate_source_url': 'https://indiacode.nic.in/handle/123456789/20063',
-        'candidate_note': 'India Code record.',
+        'candidate_note': 'Verified against India Code record (research 10 Nov 2026).',
+        'candidate_checked_on': '2026-11-10',
     },
 ]
 
