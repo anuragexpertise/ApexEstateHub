@@ -15,10 +15,13 @@ def _read(rel):
 def test_seat_callback_passes_flat_area_by_keyword():
     """The flat area used to land in the signature_name slot and was silently dropped."""
     tree = ast.parse(_read("app/dash_apps/callbacks/onboarding_callbacks.py"))
-    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "seat_founding_officer"]
-    assert calls, "onb_seat must call seat_founding_officer"
-    assert any(k.arg == "apartment_size" for k in calls[0].keywords)
-    assert len(calls[0].args) <= 11
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "seat_founding_committee"]
+    assert calls, "onb_seat must call seat_founding_committee"
+    assert any(k.arg == "workbook_sha256" for k in calls[0].keywords)   # keyword, not positional
+    svc = ast.parse(_read("app/services/onboarding_service.py"))
+    inner = [n for n in ast.walk(svc) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "seat_founding_officer"
+             or isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "seat_founding_officer"]
+    assert any(k.arg == "apartment_size" for c in inner for k in c.keywords)
 
 
 def test_policy_lookup_is_one_query_per_render(monkeypatch):

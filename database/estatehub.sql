@@ -227,8 +227,12 @@ CREATE TABLE onboarding_supplementary_annexes (
     sealed_at       TIMESTAMP,
     created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (society_id, annex_code, status)
+    CHECK (status <> 'sealed' OR sealed_at IS NOT NULL)
 );
+
+-- At most one open draft and one sealed annexure per code; superseded rows are unlimited history.
+CREATE UNIQUE INDEX uq_supplementary_annex_live ON onboarding_supplementary_annexes (society_id, annex_code, status)
+    WHERE status IN ('draft', 'sealed');
 
 CREATE INDEX idx_supplementary_annexes_society ON onboarding_supplementary_annexes (society_id);
 
@@ -22247,7 +22251,7 @@ SELECT co.id AS committee_office_id, co.society_id, co.office_code, co.apartment
 CREATE TABLE signer_policy (
     id               SERIAL PRIMARY KEY,
     society_id       INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
-    subject_kind     VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'adviser_appointment', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal')),
+    subject_kind     VARCHAR(20) NOT NULL CHECK (subject_kind IN ('noc', 'agreement', 'adviser_appointment', 'resolution', 'minutes', 'poll', 'expense', 'fund_withdrawal', 'stepup_change', 'supplementary_annex')),
     eligible_offices TEXT[] NOT NULL,
     required_offices TEXT[] NOT NULL DEFAULT '{}',
     min_signers      INT NOT NULL DEFAULT 1 CHECK (min_signers BETWEEN 1 AND 5),
@@ -22272,7 +22276,9 @@ CREATE TABLE document_signatures (
             'minutes',
             'poll',
             'expense',
-            'fund_withdrawal'
+            'fund_withdrawal',
+            'stepup_change',
+            'supplementary_annex'
         )
     ),
     subject_id INT NOT NULL,
@@ -22333,7 +22339,9 @@ CREATE TABLE signed_records (
             'minutes',
             'poll',
             'expense',
-            'fund_withdrawal'
+            'fund_withdrawal',
+            'stepup_change',
+            'supplementary_annex'
         )
     ),
     subject_id INT NOT NULL,
@@ -23842,7 +23850,8 @@ CREATE TABLE onboarding_evidence (
             'other_paper_evidence',
             'registration_certificate',
             'ca_rates_letter',
-            'adoption_minutes'
+            'adoption_minutes',
+            'adviser_appointment_letter'
         )
     ),
     acc_id INT,

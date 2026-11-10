@@ -1228,7 +1228,7 @@ EVIDENCE_PURPOSES = {
     "pending_receivables","tds_rates","declaration_undivided_interest","brought_forward",
     "account_statement","election_results","apartment_charges","bulk_apartments","bulk_vendors",
     "bulk_security","bulk_supervisor","bulk_staff","adoption_resolution","other_paper_evidence",
-    "registration_certificate","ca_rates_letter","adoption_minutes",
+    "registration_certificate","ca_rates_letter","adoption_minutes","adviser_appointment_letter",
 }
 
 def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filename: str,
@@ -2576,11 +2576,20 @@ def mark_enrollment_complete(society_id: int, actor_id: int, enrol_later_reason:
 
 
 # ── supplementary annexures F, G, H (post go-live, D5) ──────────────────────────
+_ROSTER_SQL = {
+    # Non-personal keys only: flat numbers and row ids. Counts and a SHA-256 go into the annexure, never names.
+    "apartment": "SELECT flat_number AS k FROM apartments WHERE society_id=%s ORDER BY flat_number",
+    "vendor": "SELECT id::text AS k FROM vendors WHERE society_id=%s AND active ORDER BY id",
+    "security": "SELECT id::text AS k FROM security_staff WHERE society_id=%s AND active ORDER BY id",
+    "supervisor": "SELECT id::text AS k FROM employees WHERE society_id=%s AND is_active AND designation ILIKE 'supervisor%%' ORDER BY id",
+    "staff": "SELECT id::text AS k FROM employees WHERE society_id=%s AND is_active AND COALESCE(designation,'') NOT ILIKE 'supervisor%%' ORDER BY id",
+}
+
+
 def _roster_hash(society_id: int, role: str) -> tuple[int, str | None]:
-    """Count and SHA-256 of non-personal roster keys for an entity role."""
-    rows = _rows("""SELECT flat_number OR entity_code AS key_val FROM users
-                     WHERE society_id=%s AND role=%s ORDER BY key_val""", (society_id, role)) or []
-    keys = [str(r["key_val"]) for r in rows if r.get("key_val")]
+    """Count and SHA-256 of the non-personal roster keys for one entity role."""
+    rows = _rows(_ROSTER_SQL[role], (society_id,)) or []
+    keys = [str(r["k"]) for r in rows if r.get("k")]
     return len(keys), _sha(canonical(keys)) if keys else None
 
 
@@ -2590,7 +2599,7 @@ def _annex_f_content(society_id: int) -> dict:
     ev = ud.latest_evidence(society_id)
     decl_pdf_sha = ev.get("sha256") if ev else None
     decl_xlsx_sha = (ev.get("meta") or {}).get("workbook_sha256") if ev else None
-    meta = ev.get("meta") or {}
+    meta = (ev or {}).get("meta") or {}
     balanced = bool(meta.get("balanced"))
     total_pct = meta.get("total_pct")
     flats = meta.get("flats")
@@ -2648,15 +2657,13 @@ def _annex_g_content(society_id: int) -> dict:
                    WHERE society_id=%s AND purpose='adoption_minutes' ORDER BY uploaded_at DESC LIMIT 1""", (society_id,))
     minutes_sha = ev[0]["sha256"] if ev else None
     minutes_file = ev[0]["filename"] if ev else None
-    # Resolution id from the latest adviser/resolution context
-    res_row = _row("""SELECT r.id FROM resolutions r JOIN meetings m ON m.id = r.meeting_id
-                       WHERE m.society_id=%s AND r.status='passed' ORDER BY r.passed_on DESC NULLS LAST, r.id DESC LIMIT 1""",
-                   (society_id,))
+    # The resolution(s) that activated the clauses, not merely the latest passed resolution.
+    res_ids = sorted({int(r["resolution_id"]) for r in cur if r.get("resolution_id")})
     return {
         "clauses": clauses,
         "minutes_sha256": minutes_sha,
         "minutes_file": minutes_file,
-        "resolution_id": res_row["id"] if res_row else None,
+        "resolution_ids": res_ids,
     }
 
 
@@ -2666,7 +2673,7 @@ def _annex_h_content(society_id: int) -> dict:
     for a in list_advisers(society_id):
         # Appointment letter SHA-256 from evidence
         ev = _rows("""SELECT sha256, filename FROM onboarding_evidence
-                       WHERE society_id=%s AND purpose='adoption_minutes' AND meta->>'adviser_id'=%s
+                       WHERE society_id=%s AND purpose='adviser_appointment_letter' AND meta->>'adviser_id'=%s
                        ORDER BY uploaded_at DESC LIMIT 1""", (society_id, str(a["id"])))
         advisers.append({
             "kind": a["kind"],
@@ -2691,54 +2698,100 @@ _SUPPLEMENTARY_BUILDERS = {
 }
 
 
+def _agreement_hash(society_id: int) -> str:
+    ag = _row("SELECT body_text FROM society_agreements WHERE society_id=%s ORDER BY id DESC LIMIT 1", (society_id,))
+    if not ag or not ag.get("body_text"):
+        raise OnboardingError("The Agreement is not on file; supplementary annexures cannot be chained to it.")
+    return _sha(ag["body_text"])
+
+
 def build_supplementary_annex(society_id: int, code: str, actor_id: int | None = None) -> dict:
-    """Build a supplementary annexure (F, G, H) as 'draft'. Post go-live only."""
+    """Build a supplementary annexure (F, G, H) as 'draft'. Post go-live only.
+
+    The chain is F -> G -> H, each linked to the previous SEALED annexure (F links to the Agreement). A later annexure
+    therefore cannot be built before the earlier one is sealed, so the chain cannot fork. Rebuilding a draft replaces it.
+    A sealed annexure is never edited; to change it, build and seal a new one (the old one becomes 'superseded')."""
     if code not in SUPPLEMENTARY_ANNEX_CODES:
         raise OnboardingError("Unknown supplementary annexure code.")
-    st = state_of(society_id)
-    if st != "active":
+    if state_of(society_id) != "active":
         raise OnboardingError("Supplementary annexures can only be prepared after the society is active.")
-    builder = _SUPPLEMENTARY_BUILDERS[code]
-    content = builder(society_id)
+    agreement_hash = _agreement_hash(society_id)
+    previous_annex_hash = agreement_hash
+    if code != "F":
+        before = SUPPLEMENTARY_ANNEX_CODES[SUPPLEMENTARY_ANNEX_CODES.index(code) - 1]
+        prev = _row("""SELECT content_hash FROM onboarding_supplementary_annexes
+                        WHERE society_id=%s AND annex_code=%s AND status='sealed'""", (society_id, before))
+        if not prev:
+            raise OnboardingError(f"Annexure {before} must be signed and sealed before annexure {code}.")
+        previous_annex_hash = prev["content_hash"]
+    content = _SUPPLEMENTARY_BUILDERS[code](society_id)
     content_hash = _sha(canonical(content))
-    # Hash chain: agreement_hash + previous_annex_hash
-    ag = _row("SELECT body_text FROM society_agreements WHERE society_id=%s ORDER BY id DESC LIMIT 1", (society_id,))
-    agreement_hash = _sha(ag["body_text"]) if ag and ag.get("body_text") else ""
-    prev = _row("""SELECT content_hash FROM onboarding_supplementary_annexes
-                    WHERE society_id=%s AND annex_code IN ('F','G','H') AND status='sealed'
-                    ORDER BY sealed_at DESC NULLS LAST, id DESC LIMIT 1""", (society_id,))
-    previous_annex_hash = prev["content_hash"] if prev else agreement_hash
     with db._conn() as conn:
         cur = conn.cursor()
-        cur.execute("DELETE FROM onboarding_supplementary_annexes WHERE society_id=%s AND annex_code=%s AND status IN ('draft')", (society_id, code))
+        cur.execute("DELETE FROM onboarding_supplementary_annexes WHERE society_id=%s AND annex_code=%s AND status='draft'", (society_id, code))
         cur.execute("""INSERT INTO onboarding_supplementary_annexes
-                        (society_id, annex_code, content, content_hash, agreement_hash, previous_annex_hash, status, created_at, updated_at)
-                       VALUES (%s,%s,%s::jsonb,%s,%s,%s,'draft',NOW(),NOW())""",
+                        (society_id, annex_code, content, content_hash, agreement_hash, previous_annex_hash, status)
+                       VALUES (%s,%s,%s::jsonb,%s,%s,%s,'draft')""",
                     (society_id, code, json.dumps(content, default=str), content_hash, agreement_hash, previous_annex_hash))
+    _audit(society_id, actor_id, "SUPPLEMENTARY_ANNEX_BUILT", "society", society_id, {"annex": code, "content_hash": content_hash})
     return supplementary_annex_status(society_id)
 
 
 def supplementary_annex_status(society_id: int) -> dict:
-    rows = _rows("""SELECT annex_code, status, content_hash, agreement_hash, previous_annex_hash, sealed_at
-                     FROM onboarding_supplementary_annexes WHERE society_id=%s ORDER BY annex_code""", (society_id,)) or []
-    return {r["annex_code"]: dict(r) for r in rows}
+    """Latest row per annexure code (sealed wins over draft; superseded rows are history)."""
+    rows = _rows("""SELECT id, annex_code, status, content_hash, agreement_hash, previous_annex_hash, sealed_at
+                     FROM onboarding_supplementary_annexes WHERE society_id=%s AND status IN ('draft','sealed')
+                     ORDER BY annex_code, (status='sealed') DESC, id DESC""", (society_id,)) or []
+    out: dict = {}
+    for r in rows:
+        out.setdefault(r["annex_code"], dict(r))
+    return out
+
+
+def sign_supplementary_annex(society_id: int, code: str, user_id: int, password: str) -> dict:
+    """One office-bearer's signature on the draft annexure. President, Secretary and Treasurer only: the Operator
+    (platform) is not an eligible signer. The annexure is sealed when the third signature arrives."""
+    if code not in SUPPLEMENTARY_ANNEX_CODES:
+        raise OnboardingError("Unknown supplementary annexure code.")
+    if state_of(society_id) != "active":
+        raise OnboardingError("Supplementary annexures can only be signed after the society is active.")
+    row = _row("""SELECT id FROM onboarding_supplementary_annexes
+                   WHERE society_id=%s AND annex_code=%s AND status='draft' ORDER BY id DESC LIMIT 1""", (society_id, code))
+    if not row:
+        raise OnboardingError(f"No draft annexure {code} to sign. Build it first.")
+    from app.services import document_signing as ds
+    try:
+        st = ds.sign("supplementary_annex", int(row["id"]), user_id, password or "")
+    except ds.SigningRefused as exc:
+        raise OnboardingError(str(exc)) from exc
+    if st.get("sealed"):
+        _mark_supplementary_sealed(society_id, code, int(row["id"]), user_id)
+    return st
+
+
+def _mark_supplementary_sealed(society_id: int, code: str, row_id: int, actor_id: int | None) -> None:
+    with db._conn() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE onboarding_supplementary_annexes SET status='superseded' WHERE society_id=%s AND annex_code=%s AND status='sealed'", (society_id, code))
+        cur.execute("UPDATE onboarding_supplementary_annexes SET status='sealed', sealed_at=NOW() WHERE id=%s", (row_id,))
+    _audit(society_id, actor_id, "SUPPLEMENTARY_ANNEX_SEALED", "society", society_id, {"annex": code})
 
 
 def seal_supplementary_annex(society_id: int, code: str, actor_id: int) -> dict:
-    """Seal a supplementary annexure (refused if the society is not active or no draft exists)."""
+    """Mark the draft sealed ONLY if President, Secretary and Treasurer have already sealed it through document_signing.
+    This never seals on its own authority."""
     if code not in SUPPLEMENTARY_ANNEX_CODES:
         raise OnboardingError("Unknown supplementary annexure code.")
     if state_of(society_id) != "active":
         raise OnboardingError("Supplementary annexures can only be sealed after the society is active.")
-    row = _row("""SELECT id, content_hash, agreement_hash, previous_annex_hash FROM onboarding_supplementary_annexes
-                   WHERE society_id=%s AND annex_code=%s AND status='draft'
-                   ORDER BY id DESC LIMIT 1""", (society_id, code))
+    row = _row("""SELECT id FROM onboarding_supplementary_annexes
+                   WHERE society_id=%s AND annex_code=%s AND status='draft' ORDER BY id DESC LIMIT 1""", (society_id, code))
     if not row:
         raise OnboardingError(f"No draft supplementary annexure {code} to seal. Build it first.")
-    with db._conn() as conn:
-        cur = conn.cursor()
-        cur.execute("UPDATE onboarding_supplementary_annexes SET status='superseded' WHERE society_id=%s AND annex_code=%s AND status='sealed'", (society_id, code))
-        cur.execute("UPDATE onboarding_supplementary_annexes SET status='sealed', sealed_at=NOW() WHERE id=%s", (row["id"],))
+    signed = _row("SELECT 1 AS ok FROM signed_records WHERE subject_kind='supplementary_annex' AND subject_id=%s AND status='valid'", (row["id"],))
+    if not signed:
+        raise OnboardingError(f"Annexure {code} must be signed by the President, Secretary and Treasurer before it is sealed.")
+    _mark_supplementary_sealed(society_id, code, int(row["id"]), actor_id)
     return supplementary_annex_status(society_id)
 
 

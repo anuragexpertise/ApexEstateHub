@@ -133,7 +133,7 @@ stamping is recorded with the sealed Agreement.
 **S1. Entire agreement.** This Agreement with its Annexes and the Society's master record is the entire agreement on its subject
 and replaces earlier understandings.
 
-**S2. Amendment.** An amendment is effective only if it is in writing and signed by both Parties.
+**S2. Amendment.** An amendment is effective only if it is in writing and signed by both Parties. Supplementary annexures F to H under clause 7A are not amendments and need only the Society's three office-bearers.
 
 **S3. Severability.** If a provision is held invalid, the remainder continues in force.
 

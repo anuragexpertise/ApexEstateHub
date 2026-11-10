@@ -172,7 +172,7 @@ def test_09_agreement_cannot_be_signed_before_annexes_are_sealed(world):
     from app.dash_apps.callbacks.drilldown_callbacks import _get_or_create_agreement
     ag = _get_or_create_agreement(db, sid)
     pres = world["ob"].seated_officers(sid)["president"]["user_id"]
-    with pytest.raises(ds.SigningRefused, match="Annexes A, B, C and D must be sealed"):
+    with pytest.raises(ds.SigningRefused, match="Annexes A, B, C, D and E must be sealed"):
         ds.sign("agreement", ag["id"], pres, "pw")
 
 
@@ -180,9 +180,11 @@ def test_10_seal_annexes_puts_their_hashes_in_the_agreement(world):
     ob, sid, db = world["ob"], world["sid"], world["db"]
     ob.save_annex_inputs(sid, "", True, None, None)
     ob.set_grievance_officer(sid, "G. Officer", "grievance@example.com", None)    # Annex D needs one
+    db._execute("INSERT INTO onboarding_evidence (society_id, purpose, filename, stored_name, sha256, size_bytes, uploaded_by) "
+                "VALUES (%s,'registration_certificate','reg.pdf','x.pdf',%s,10,%s)", (sid, "e" * 64, world["admin"]))   # Annex E blocks without it
     ob.build_annexes(sid, world["admin"])
     st = ob.seal_annexes(sid, world["admin"])
-    assert {k: v["status"] for k, v in st.items()} == {"A": "sealed", "B": "sealed", "C": "sealed", "D": "sealed"}
+    assert {k: v["status"] for k, v in st.items()} == {"A": "sealed", "B": "sealed", "C": "sealed", "D": "sealed", "E": "sealed"}
     text = db._execute("SELECT body_text FROM society_agreements WHERE society_id=%s", (sid,), fetch_one=True)["body_text"]
     assert all(v["content_hash"] in text for v in st.values())
     assert "EstateHub LLP" in text and "Treasurer" in text and "DATA PROTECTION" in text
@@ -249,8 +251,8 @@ def test_17_office_bearer_arrears_declared_in_annex_c_block_activation(world):
     try:
         db._execute("UPDATE societies SET onboarding_state='setup draft' WHERE id=%s", (sid2,))
         db._execute("INSERT INTO onboarding_annexes (society_id, annex_code, content, content_hash, status) VALUES "
-                    "(%s,'A','{}','a','sealed'),(%s,'B','{}','b','sealed'),(%s,'D','{}','d','sealed'),(%s,'C',%s::jsonb,'c','sealed')",
-                    (sid2, sid2, sid2, sid2, json.dumps({"financial_year": 2026, "opening_balances": [],
+                    "(%s,'A','{}','a','sealed'),(%s,'B','{}','b','sealed'),(%s,'D','{}','d','sealed'),(%s,'E','{}','e','sealed'),(%s,'C',%s::jsonb,'c','sealed')",
+                    (sid2, sid2, sid2, sid2, sid2, json.dumps({"financial_year": 2026, "opening_balances": [],
                                                    "arrears_by_flat": [{"flat_number": "B-1", "amount": "5000", "overdue_days": 120}]})))
         ag = db._execute("INSERT INTO society_agreements (society_id, body_text) VALUES (%s,'t') RETURNING id", (sid2,), fetch_one=True)["id"]
         db._execute("INSERT INTO signed_records (society_id, subject_kind, subject_id, purpose, item_hash, signature, key_version, key_id, algorithm, signers) "
