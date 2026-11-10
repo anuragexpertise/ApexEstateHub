@@ -15,6 +15,6 @@ BEGIN
             'pending_receivables','tds_rates','declaration_undivided_interest','brought_forward',
             'account_statement','election_results','apartment_charges','bulk_apartments','bulk_vendors',
             'bulk_security','bulk_supervisor','bulk_staff','adoption_resolution','other_paper_evidence',
-            'registration_certificate','ca_rates_letter','adoption_minutes'
+            'registration_certificate','ca_rates_letter','adoption_minutes','adviser_appointment_letter'
         ));
 END $$;

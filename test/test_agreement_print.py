@@ -9,7 +9,7 @@ PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4
 SCAN_SHA = "e" * 64
 
 
-def _stub(monkeypatch, tmp_path, sealed_codes=("A", "B", "C", "D")):
+def _stub(monkeypatch, tmp_path, sealed_codes=("A", "B", "C", "D", "E")):
     sigdir = tmp_path / "7" / "signatures"; sigdir.mkdir(parents=True)
     evdir = tmp_path / "7" / "evidence"; evdir.mkdir(parents=True)
     (sigdir / "pres.png").write_bytes(PNG); (sigdir / "sec.png").write_bytes(PNG)      # treasurer has none on record
@@ -20,7 +20,7 @@ def _stub(monkeypatch, tmp_path, sealed_codes=("A", "B", "C", "D")):
                                           "secretary": {"name": "S", "signature_image": "7/signatures/sec.png"}}},
                 "C": {"total_debits": "1600000.00", "opening_balances": [{"name": "SBI <A/c>", "amount": "100000"}],
                       "bank_reconciliation": {"1311": {"evidence_sha256": SCAN_SHA}}},
-                "D": {"k": "D"}}
+                "D": {"k": "D"}, "E": {"k": "E"}}
     annex = [{"annex_code": c, "content": contents[c] if c == "C" else json.dumps(contents[c]), "content_hash": c * 64} for c in sealed_codes]
     ag = {"agreement_no": "AG/2026/7", "body_text": "AGREEMENT <TEXT> & more"}
 
@@ -57,9 +57,9 @@ def test_all_images_are_embedded(monkeypatch, tmp_path):
 def test_footer_with_all_four_parties_on_every_section(monkeypatch, tmp_path):
     _stub(monkeypatch, tmp_path)
     _, page = ob.agreement_print_html(7)
-    assert page.count("<tfoot>") == 6                                   # agreement + 4 annexes + signature page
+    assert page.count("<tfoot>") == 7                                   # agreement + 5 annexes + signature page
     for who in ("P Sundar", "SC Verma", "TR Vashisht", "For the Operator"):
-        assert page.count(who) >= 6
+        assert page.count(who) >= 7
     assert "table-footer-group" in page
 
 
