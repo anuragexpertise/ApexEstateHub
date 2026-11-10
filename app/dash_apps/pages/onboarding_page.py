@@ -21,6 +21,9 @@ from dash import dcc, html
 from app.services import document_signing as ds
 from app.services import onboarding_service as ob
 from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label, render_category_content
+from app.dash_apps.callbacks.onboarding_callbacks import _committee_view
+
+P = "onb"
 
 P = "onb"
 _MUTED = {"fontSize": "12px", "color": "#667"}
@@ -71,63 +74,34 @@ def marker(society_id: int) -> str:
 # ── stage 2 ───────────────────────────────────────────────────────────────────────────────────────────────────────
 def _office_card(office: str, seated: dict | None, society_id: int | None = None):
     label = ob.OFFICE_LABEL[office]
-    if seated:
-        sig = ob.signature_url(society_id, seated.get("signature_image")) if society_id else None
-        sig_img = html.Div()
-        if sig:
-            sig_img = html.Img(src=sig, style={"maxWidth": "120px", "maxHeight": "60px", "marginTop": "6px",
-                                                           "border": "1px solid #c9d2dc", "borderRadius": "4px"})
-        def fid(f):
-            return {"type": f"{P}-f", "office": office, "field": f}
-        return html.Div([html.I(className="fas fa-user-check me-2", style={"color": "#2e9e5b"}),
-                         html.Strong(f"{label}: {seated['holder_name']}"), html.Span(f"  flat {seated['flat_number']}", style=_MUTED),
-                         html.Div(f"Elected under {seated['resolution_ref']}; minutes SHA-256 {str(seated['evidence_hash'])[:16]}...", style=_MUTED),
-                         html.Div([html.Strong("Signature: ", style={"fontSize": "11.5px", "color": "#556"}), sig_img], style={"marginTop": "6px"}),
-                         html.Details([html.Summary("Edit details", style={"fontSize": "12px", "cursor": "pointer", "marginTop": "8px"}),
-                                       dbc.Row([
-                                           dbc.Col(_field("Mobile", dbc.Input(id=fid("phone"), size="sm", value=seated.get("phone") or "", maxLength=20)), md=4),
-                                           dbc.Col(_field("Signature image", dcc.Upload(
-                                               id=fid("sig"), accept=".png,.jpg,.jpeg,.webp", multiple=False,
-                                               children=html.Span("Replace signature", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"}),
-                                               style={"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px"})), md=4),
-                                           dbc.Col(html.Div(id=fid("sig-preview"), style={"fontSize": "11.5px", "color": "#667", "marginTop": "6px"}), md=2),
-                                           dbc.Col(dbc.Button("Save", id=fid("save"), color="primary", size="sm", n_clicks=0, style={"fontSize": "12px"}), md=1),
-                                           dbc.Col(html.Div(id=fid("msg"), style={"fontSize": "12px"}), md=1),
-                                       ], className="g-2")], style={"marginTop": "8px"})],
-                        style=_CARD)
+    if not seated:
+        return html.Div([
+            html.Div([html.Strong(f"Seat the {label}"), html.Span("  not yet seated — use 'Seat all three' below", style=_MUTED)]),
+        ], style=_CARD)
 
+    sig = ob.signature_url(society_id, seated.get("signature_image")) if society_id else None
+    sig_img = html.Div()
+    if sig:
+        sig_img = html.Img(src=sig, style={"maxWidth": "120px", "maxHeight": "60px", "marginTop": "6px",
+                                           "border": "1px solid #c9d2dc", "borderRadius": "4px"})
     def fid(f):
         return {"type": f"{P}-f", "office": office, "field": f}
-    return html.Div([
-        html.Div([html.Strong(f"Seat the {label}"), html.Span("  not yet seated", style=_MUTED)]),
-        dbc.Row([
-            dbc.Col(_field("Flat number", dbc.Input(id=fid("flat"), size="sm", maxLength=20)), md=3),
-            dbc.Col(_field("Full name", dbc.Input(id=fid("name"), size="sm", maxLength=100)), md=5),
-            dbc.Col(_field("Flat area (sq ft)", dbc.Input(id=fid("size"), size="sm", type="number", min=0)), md=4),
-        ], className="g-2 mt-1"),
-        dbc.Row([
-            dbc.Col(_field("Email (their login)", dbc.Input(id=fid("email"), size="sm", type="email", maxLength=100)), md=5),
-            dbc.Col(_field("Mobile *", dbc.Input(id=fid("phone"), size="sm", maxLength=20)), md=3),
-            dbc.Col(_field("Temporary password", dbc.Input(id=fid("password"), size="sm", type="password", autoComplete="new-password")), md=4),
-        ], className="g-2"),
-        dbc.Row([
-            dbc.Col(_field("Election resolution reference", dbc.Input(id=fid("ref"), size="sm", maxLength=200, placeholder="e.g. GBM 12-Oct-2026, Res. 3")), md=6),
-            dbc.Col(_field("Signed minutes (PDF, PNG or JPG, up to 5 MB)", dcc.Upload(
-                id=fid("file"), accept=".pdf,.png,.jpg,.jpeg", multiple=False,
-                children=html.Span("Choose the minutes file", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"}),
-                style={"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px"})), md=6),
-        ], className="g-2"),
-        dbc.Row([
-            dbc.Col(_field("Signature image * (PNG, JPG or WEBP, up to 1 MB)", dcc.Upload(
-                id=fid("sig"), accept=".png,.jpg,.jpeg,.webp", multiple=False,
-                children=html.Span("Choose the signature image", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"}),
-                style={"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px"})), md=6),
-            dbc.Col(html.Div(id=fid("sig-preview"), style={"fontSize": "11.5px", "color": "#667", "marginTop": "6px"}), md=6),
-        ], className="g-2"),
-        html.Div([dbc.Button(f"Seat {label}", id={"type": f"{P}-seat", "office": office}, color="primary", size="sm", n_clicks=0),
-                  html.Span("  Their flat and login are created now; they must change the password at first sign-in.", style=_MUTED),
-                  html.Span("  Mobile and signature image are both required.", style=_MUTED)]),
-    ], style=_CARD)
+    return html.Div([html.I(className="fas fa-user-check me-2", style={"color": "#2e9e5b"}),
+                     html.Strong(f"{label}: {seated['holder_name']}"), html.Span(f"  flat {seated['flat_number']}", style=_MUTED),
+                     html.Div(f"Elected under {seated['resolution_ref']}; minutes SHA-256 {str(seated['evidence_hash'])[:16]}...", style=_MUTED),
+                     html.Div([html.Strong("Signature: ", style={"fontSize": "11.5px", "color": "#556"}), sig_img], style={"marginTop": "6px"}),
+                     html.Details([html.Summary("Edit details", style={"fontSize": "12px", "cursor": "pointer", "marginTop": "8px"}),
+                                   dbc.Row([
+                                       dbc.Col(_field("Mobile", dbc.Input(id=fid("phone"), size="sm", value=seated.get("phone") or "", maxLength=20)), md=4),
+                                       dbc.Col(_field("Signature image", dcc.Upload(
+                                           id=fid("sig"), accept=".png,.jpg,.jpeg,.webp", multiple=False,
+                                           children=html.Span("Replace signature", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"}),
+                                           style={"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px"})), md=4),
+                                       dbc.Col(html.Div(id=fid("sig-preview"), style={"fontSize": "11.5px", "color": "#667", "marginTop": "6px"}), md=2),
+                                       dbc.Col(dbc.Button("Save", id=fid("save"), color="primary", size="sm", n_clicks=0, style={"fontSize": "12px"}), md=1),
+                                       dbc.Col(html.Div(id=fid("msg"), style={"fontSize": "12px"}), md=1),
+                                   ], className="g-2")], style={"marginTop": "8px"})],
+                  style=_CARD)
 
 
 def _seat_all_panel(seated: dict):

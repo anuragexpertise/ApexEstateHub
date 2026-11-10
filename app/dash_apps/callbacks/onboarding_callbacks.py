@@ -19,7 +19,6 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 
-from app.dash_apps.pages import onboarding_page as op
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
 from app.security.guards import require_session
 from app.services import document_signing as ds
@@ -27,7 +26,7 @@ from app.services import onboarding_service as ob
 
 log = logging.getLogger(__name__)
 
-P = op.P
+P = "onb"
 
 
 def _session():
@@ -71,53 +70,6 @@ def _committee_view(sid):
 
 
 def register_onboarding_callbacks(app):
-    fields = ("flat", "name", "size", "email", "phone", "password", "ref")
-
-    # Outputs are the single hub body/toast/marker, so the inputs cannot use MATCH (Dash rejects a MATCH
-    # key that the Outputs do not carry). ALL + ctx.triggered_id / ctx.states_list picks out the office clicked.
-    @app.callback(
-        Output(f"{P}-body", "children", allow_duplicate=True),
-        Output(f"{P}-toast", "children", allow_duplicate=True),
-        Output(f"{P}-marker", "data", allow_duplicate=True),
-        Input({"type": f"{P}-seat", "office": ALL}, "n_clicks"),
-        [State({"type": f"{P}-f", "office": ALL, "field": f}, "value") for f in fields],
-        State({"type": f"{P}-f", "office": ALL, "field": "file"}, "contents"),
-        State({"type": f"{P}-f", "office": ALL, "field": "file"}, "filename"),
-        State({"type": f"{P}-f", "office": ALL, "field": "sig"}, "contents"),
-        State({"type": f"{P}-f", "office": ALL, "field": "sig"}, "filename"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def onb_seat(_clicks, *_states):
-        s = _session()
-        trig = ctx.triggered_id
-        if not s or not isinstance(trig, dict) or not (ctx.triggered and ctx.triggered[0].get("value")):
-            return no_update, no_update, no_update
-        sid, uid, role = s
-        if role != "admin" or not sid:
-            return no_update, _alert("Only the society's administrator can seat the committee.", False), no_update
-        office = trig["office"]
-
-        def _val(i):
-            for item in (ctx.states_list[i] or []):
-                if isinstance(item.get("id"), dict) and item["id"].get("office") == office:
-                    return item.get("value")
-            return None
-
-        flat, name, size, email, phone, password, ref = (_val(i) for i in range(len(fields)))
-        contents, filename = _val(len(fields)), _val(len(fields) + 1)
-        sig_contents, sig_filename = _val(len(fields) + 2), _val(len(fields) + 3)
-        try:
-            msg = ob.seat_founding_officer(uid, sid, office, flat, name, email, phone, password or "", ref,
-                                           filename, _decode(contents),
-                                           signature_name=sig_filename,
-                                           signature_bytes=_decode(sig_contents),
-                                           apartment_size=int(size) if size not in (None, "") else None)
-        except ob.OnboardingError as exc:
-            return no_update, _alert(str(exc), False), no_update
-        body, mk = _body(sid, uid, role, view=_committee_view(sid))
-        return body, _alert(msg), mk
-
     # ── Apply Election Results.xlsx: seat every open office in one action ─────────────────────────────────────────────
     # Plain ids (not pattern-matching): the panel always renders all three offices, so every State below is in the layout.
     @app.callback(
