@@ -93,3 +93,37 @@ def test_store_evidence_returns_id_and_sha(monkeypatch, tmp_path):
     data = b"%PDF-1.4 test"
     out = ob.store_evidence_file(1, "bank_statement", 3, "stmt.pdf", data, 2, {})
     assert out["id"] == 5 and out["sha256"] == hashlib.sha256(data).hexdigest()
+
+
+def test_annex_e_registration_certificate_control(monkeypatch):
+    """Annex E's registration_certificate control passes when either an evidence row or the
+    society row (master's upload at registration) carries the certificate SHA-256."""
+    sha = "a" * 64
+    cert_row = {"id": 1, "purpose": "registration_certificate", "acc_id": None, "filename": "cert.pdf",
+                "stored_name": f"{sha}.pdf", "sha256": sha, "uploaded_by": 1, "uploaded_at": "2026-01-01"}
+    user_row = {"id": 1, "name": "Master", "email": "master@example.com"}
+
+    # 1) an onboarding-hub evidence row satisfies the control
+    _wire(monkeypatch, [
+        ("FROM onboarding_evidence", [cert_row]),
+        ("FROM users", [user_row]),
+    ])
+    controls = ob._annex_e(1, {})[1]
+    assert controls["registration_certificate"]["passed"] is True
+
+    # 2) no evidence row, but the master's certificate hash on the society row satisfies it
+    _wire(monkeypatch, [
+        ("FROM onboarding_evidence", []),
+        ("FROM societies", [{"registration_certificate_hash": "b" * 64, "registration_certificate_file": "cert.pdf"}]),
+    ])
+    controls = ob._annex_e(1, {})[1]
+    assert controls["registration_certificate"]["passed"] is True
+
+    # 3) neither source has the certificate: the control blocks sealing
+    _wire(monkeypatch, [
+        ("FROM onboarding_evidence", []),
+        ("FROM societies", [{"registration_certificate_hash": None, "registration_certificate_file": None}]),
+    ])
+    ctl = ob._annex_e(1, {})[1]["registration_certificate"]
+    assert ctl["passed"] is False and ctl["blocking"] is True
+    assert "Upload the society's registration certificate before sealing." in ctl["reason"]
