@@ -1885,8 +1885,14 @@ _EVIDENCE_STAGE = {
 }
 
 
-def _annex_e(society_id: int) -> tuple[dict, dict]:
-    """Annex E: source-documents index. One row per scanned original read from onboarding_evidence."""
+def _annex_e(society_id: int, soc: dict | None = None) -> tuple[dict, dict]:
+    """Annex E: source-documents index. One row per scanned original read from onboarding_evidence.
+
+    The registration certificate also counts when the master recorded it on the society row at
+    registration (societies.registration_certificate_hash): the master uploads it at society
+    creation, so sealing must not block the Agreement just because no separate onboarding-hub
+    evidence row exists for it.
+    """
     rows = _rows("""SELECT id, purpose, acc_id, filename, stored_name, sha256, uploaded_by, uploaded_at
                        FROM onboarding_evidence WHERE society_id=%s ORDER BY purpose, uploaded_at DESC""", (society_id,)) or []
     uploaders = {}
@@ -1910,6 +1916,10 @@ def _annex_e(society_id: int) -> tuple[dict, dict]:
         })
     reg = [r for r in rows if r["purpose"] == "registration_certificate"]
     reg_ok = bool(reg) and bool(reg[0].get("sha256"))
+    if not reg_ok:
+        soc = soc or _row("SELECT registration_certificate_hash, registration_certificate_file FROM societies WHERE id=%s", (society_id,)) or {}
+        if soc.get("registration_certificate_hash"):
+            reg_ok = True
     content = {"documents": items}
     controls = {
         "registration_certificate": _ctl(reg_ok, "Registration certificate uploaded and its SHA-256 is recorded." if reg_ok
@@ -1928,7 +1938,7 @@ def build_annexes(society_id: int, actor_id: int | None = None) -> dict:
         raise OnboardingError("Annexes can be prepared only before the society is active.")
     decl = declaration(society_id)
     built = {"A": _annex_a(society_id, soc), "B": _annex_b(society_id, soc, decl), "C": _annex_c(society_id, decl),
-             "D": _annex_d(society_id, soc), "E": _annex_e(society_id)}
+             "D": _annex_d(society_id, soc), "E": _annex_e(society_id, soc)}
     with db._conn() as conn:
         cur = conn.cursor()
         for code, (content, controls) in built.items():
