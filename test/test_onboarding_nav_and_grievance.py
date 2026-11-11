@@ -113,7 +113,15 @@ def hub(monkeypatch):
 
 
 def _body_text(out):
-    return [x for x in out[1:]]
+    def _keep(x):
+        if x is None or x == "":
+            return False
+        if isinstance(x, (str, int, float, bool)):
+            return True                      # bare text stays
+        if getattr(x, "children", None) is None:
+            return False                     # empty placeholder panel (e.g. evidence register)
+        return True
+    return [x for x in out[1:] if _keep(x)]
 
 
 def test_after_treasurer_seated_the_committee_stage_stays_until_grievance_named(hub, monkeypatch):
