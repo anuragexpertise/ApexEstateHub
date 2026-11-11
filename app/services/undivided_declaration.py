@@ -363,6 +363,17 @@ def latest_evidence(society_id: int) -> dict | None:
     return dict(r) if r else None
 
 
+def billing_waits(society_id: int) -> bool:
+    """True while bills by undivided interest are on hold for want of the builder's Declaration (see
+    fn_billing_waits_for_declaration). False once the Declaration is on file or Enrollment is complete."""
+    try:
+        r = _row("SELECT fn_billing_waits_for_declaration(%s) AS w", (society_id,))
+    except Exception:                                   # noqa: BLE001 - function not installed yet on an older database
+        log.exception("could not read the billing hold for society %s", society_id)
+        return False
+    return bool((r or {}).get("w"))
+
+
 def declared_unenrolled(society_id: int) -> list[dict]:
     """Flats that exist (from the Declaration) but have no owner login yet."""
     return _rows("""SELECT a.id, a.flat_number, a.apartment_size, a.undivided_interest_pct

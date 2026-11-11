@@ -4668,6 +4668,26 @@ RETURNS NUMERIC LANGUAGE sql IMMUTABLE AS $$
         ELSE 0 END, 0), 2)
 $$;
 
+-- Billing by undivided interest waits for the builder's Declaration (Stage 5, Enrollment). TRUE while the society is still in
+-- the Enrollment stage, its society-default billing basis is 'undivided_interest', and no Declaration workbook is on file.
+-- Completing Enrollment already requires the Declaration (or an audited reason that the building has none) and shares that
+-- total 100%, so once the stage is complete this is FALSE and billing catches up from the calc-start month. It is a quiet
+-- RETURN in fn_auto_generate_receivables, not an exception: fn_apartments_list calls that function on every screen load.
+CREATE OR REPLACE FUNCTION fn_billing_waits_for_declaration(p_society_id INT)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    -- plpgsql (not sql): onboarding_evidence is created further down this file and a sql function is checked when it is created.
+    RETURN EXISTS (SELECT 1 FROM societies WHERE id = p_society_id AND onboarding_phase = 'enrollment')
+       AND COALESCE((SELECT c.billing_basis FROM apt_charges_fines_basis c
+                      WHERE c.society_id = p_society_id AND c.apt_id IS NULL AND c.apt_status = TRUE
+                        AND c.start_date <= CURRENT_DATE AND (c.end_date IS NULL OR c.end_date >= CURRENT_DATE)
+                      ORDER BY c.start_date DESC LIMIT 1), '') = 'undivided_interest'
+       AND NOT EXISTS (SELECT 1 FROM onboarding_evidence e
+                        WHERE e.society_id = p_society_id AND e.purpose = 'declaration_undivided_interest'
+                          AND e.meta ->> 'xlsx_sha256' IS NOT NULL);
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION fn_auto_generate_receivables(p_society_id INT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE
@@ -4723,6 +4743,11 @@ BEGIN
     -- V5: billing is gated on activation; a society that is not 'active' cannot generate bills.
     SELECT onboarding_state INTO v_gate_state FROM societies WHERE id = p_society_id;
     IF v_gate_state IS DISTINCT FROM 'active' THEN
+        RETURN;
+    END IF;
+
+    -- Undivided-interest billing needs each flat's declared share: wait for the builder's Declaration (see the helper above).
+    IF fn_billing_waits_for_declaration(p_society_id) THEN
         RETURN;
     END IF;
 

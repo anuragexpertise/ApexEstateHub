@@ -843,12 +843,22 @@ def apt_charges_error(basis, budget, rate, amt):
     return None
 
 
+UNDIVIDED_BILLING_NOTICE = ("Each flat is billed its share of the monthly budget, and the shares come from the builder's Declaration of "
+                            "undivided interest. You upload it at Stage 5, Enrollment (a downloadable workbook with Flat No, Area and "
+                            "Undivided-Interest, plus the signed PDF). Until the Declaration is on file, or Enrollment is completed with a "
+                            "recorded reason that the building has none, no bills are raised on this basis. Bills then catch up from the "
+                            "billing start month.")
+
+
 def basis_hint(basis):
     label, _ = BASIS_NEEDS.get(basis or "undivided_interest", BASIS_NEEDS["undivided_interest"])
-    extra = (" Each flat also needs its undivided-interest % (area share is used until the Declaration figures are entered after enrolment)."
-             if (basis or "undivided_interest") == "undivided_interest" else "")
-    return dbc.Alert([html.I(className="fas fa-hand-point-up me-2"), html.Strong("Required for this basis: "), label + "." + extra],
-                     color="warning", className="py-2 mb-3", style={"fontSize": "12.5px"})
+    alert = dbc.Alert([html.I(className="fas fa-hand-point-up me-2"), html.Strong("Required for this basis: "), label + "."],
+                      color="warning", className="py-2 mb-3", style={"fontSize": "12.5px"})
+    if (basis or "undivided_interest") != "undivided_interest":
+        return alert
+    return html.Div([alert, dbc.Alert([html.I(className="fas fa-info-circle me-2"), html.Strong("Billing starts after the Declaration. "),
+                                       UNDIVIDED_BILLING_NOTICE],
+                                      color="info", className="py-2 mb-3", style={"fontSize": "12.5px"})])
 
 
 # ── Legal Hierarchy: instruments as links ─────────────────────────────────
