@@ -1235,8 +1235,8 @@ def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filen
                         data: bytes, uploaded_by: int, meta: dict, *, doc_id: str | None = None,
                         document_sha256: str | None = None, snapshot_sha256: str | None = None) -> dict:
     """Store an evidence file; server computes SHA-256. The purpose is checked here AND by the table's CHECK constraint
-    (estatehub.sql / migrations 003). doc_id / document_sha256 / snapshot_sha256 link a signed scan to the document
-    EstateHub generated (paper_evidence.make_document); they are None for evidence that was not generated here."""
+    (estatehub.sql / migrations 003). doc_id / document_sha256 / snapshot_sha256 are legacy link columns:
+    the generated-document flow is retired, so they are normally None."""
     import os as _os
     purpose = (purpose or "").strip()
     if purpose not in EVIDENCE_PURPOSES:
@@ -1282,33 +1282,6 @@ def get_evidence(society_id: int, purpose: str, acc_id: int | None = None) -> li
                      FROM onboarding_evidence
                     WHERE society_id=%s AND purpose=%s
                     ORDER BY uploaded_at DESC""", (society_id, purpose)) or []
-
-
-def record_document(society_id: int, purpose: str, doc_id: str, snapshot_sha256: str, document_sha256: str,
-                    fmt: str, row_count: int, meta: dict | None, generated_by: int | None,
-                    signing_mode: str = "paper") -> dict:
-    """Remember a document EstateHub generated for signing, so a later signed scan can be bound to it."""
-    if purpose not in EVIDENCE_PURPOSES:
-        raise OnboardingError("Unknown evidence purpose.")
-    row = _row("""INSERT INTO onboarding_documents (society_id, purpose, doc_id, snapshot_sha256, document_sha256, fmt,
-                    row_count, signing_mode, meta, generated_by)
-                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s) RETURNING id""",
-               (society_id, purpose, doc_id, snapshot_sha256, document_sha256, fmt, int(row_count or 0),
-                signing_mode, json.dumps(meta or {}), generated_by))
-    return {"id": row["id"], "doc_id": doc_id}
-
-
-def latest_document(society_id: int, purpose: str, kind: str | None = None, doc_id: str | None = None) -> dict | None:
-    """The newest generated document for a purpose (optionally one `kind` of it, or one exact doc_id)."""
-    sql = """SELECT id, purpose, doc_id, snapshot_sha256, document_sha256, fmt, row_count, signing_mode, meta, generated_at
-               FROM onboarding_documents WHERE society_id=%s AND purpose=%s"""
-    params: list = [society_id, purpose]
-    if doc_id:
-        sql += " AND doc_id=%s"; params.append(doc_id)
-    if kind:
-        sql += " AND meta->>'kind'=%s"; params.append(kind)
-    sql += " ORDER BY generated_at DESC, id DESC LIMIT 1"
-    return _row(sql, tuple(params))
 
 
 # ── stage 3: setup draft submit (merged from setup_wizard.submit_setup_wizard) ──────────────────────────
@@ -1914,6 +1887,24 @@ def _annex_e(society_id: int, soc: dict | None = None) -> tuple[dict, dict]:
             "sha256": r["sha256"],
             "acc_id": r["acc_id"],
         })
+    # The signed election minutes are stored on the committee_offices rows (one file shared by the three office-bearers),
+    # not in onboarding_evidence. Index them by reference rather than duplicating the file.
+    seen_minutes = set()
+    for m in _rows("""SELECT DISTINCT evidence_hash, evidence_file FROM committee_offices
+                       WHERE society_id=%s AND evidence_hash IS NOT NULL AND evidence_hash <> ''
+                         AND office_code IN ('president','secretary','treasurer') ORDER BY evidence_hash""", (society_id,)) or []:
+        if m["evidence_hash"] in seen_minutes:
+            continue
+        seen_minutes.add(m["evidence_hash"])
+        items.append({
+            "document": _EVIDENCE_DOC_NAMES["election_results"], "stage": _EVIDENCE_STAGE["election_results"],
+            "purpose": "election_results", "filename": m.get("evidence_file"), "uploaded_by": None, "uploaded_at": None,
+            "sha256": m["evidence_hash"], "acc_id": None,
+        })
+    have = {i["purpose"] for i in items}
+    optional = (("cash_count", "cash-count certificate"), ("audited_report", "audited statements"),
+                ("review_letter", "CA review letter"), ("ca_rates_letter", "CA letter on TDS / GST rates"))
+    missing = [label for code, label in optional if code not in have]
     reg = [r for r in rows if r["purpose"] == "registration_certificate"]
     reg_ok = bool(reg) and bool(reg[0].get("sha256"))
     if not reg_ok:
@@ -1924,7 +1915,8 @@ def _annex_e(society_id: int, soc: dict | None = None) -> tuple[dict, dict]:
     controls = {
         "registration_certificate": _ctl(reg_ok, "Registration certificate uploaded and its SHA-256 is recorded." if reg_ok
                                          else "Upload the society's registration certificate before sealing.", True),
-        "index_complete": _ctl(True, "Source documents index lists every uploaded scan. Missing optional documents are shown below.", False),
+        "index_complete": _ctl(not missing, "Every source document is indexed." if not missing else
+                               "Optional documents not on file: " + ", ".join(missing) + ".", False),
     }
     return content, controls
 
@@ -2356,7 +2348,7 @@ def _print_value(v, society_id: int | None = None, evidence: dict | None = None)
 
 
 def agreement_print_html(society_id: int) -> tuple[str, str]:
-    """The Agreement text and every sealed annex (A-D) in full, as one self-contained printable HTML file, for paper signing.
+    """The Agreement text and every sealed annex (A-E) in full, as one self-contained printable HTML file, for paper signing.
     All images the annexes refer to are embedded, and the four parties' signature block is repeated in the footer of every printed
     page. Returns (file name, html). Refused until the Agreement is issued, so a paper copy always matches what the system holds."""
     from html import escape
@@ -2364,7 +2356,7 @@ def agreement_print_html(society_id: int) -> tuple[str, str]:
     sealed = {r["annex_code"]: r for r in _rows(
         "SELECT annex_code, content, content_hash FROM onboarding_annexes WHERE society_id=%s AND status='sealed'", (society_id,))}
     if not ag or not ag.get("body_text") or set(sealed) != set(ANNEX_CODES):
-        raise OnboardingError("The Agreement is issued for printing once annexes A, B, C and D are sealed.")
+        raise OnboardingError("The Agreement is issued for printing once annexes A, B, C, D and E are sealed.")
     titles = {"A": "Annex A: legal regime and bye-laws", "B": "Annex B: review of the setup",
               "C": "Annex C: opening financial position", "D": "Annex D: data-protection and custody schedule",
               "E": "Annex E: source-documents index"}
@@ -2578,10 +2570,7 @@ def mark_enrollment_complete(society_id: int, actor_id: int, enrol_later_reason:
            {"enrol_later_reason": reason or None,
             "no_declaration_reason": (no_declaration_reason or "").strip() if waived else None})
     # Wire Annex F sealing to enrollment completion (non-blocking).
-    try:
-        build_supplementary_annex(society_id, "F", actor_id)
-    except Exception:                                       # noqa: BLE001 - F sealing is non-blocking
-        log.exception("could not build Annex F for society %s", society_id)
+    _try_build_supplementary(society_id, "F", actor_id)
     return "Enrollment marked complete. The apartment, vendor and security portals are now open."
 
 
@@ -2715,6 +2704,73 @@ def _agreement_hash(society_id: int) -> str:
     return _sha(ag["body_text"])
 
 
+_SUPP_NEXT = {"F": "G", "G": "H"}
+SUPPLEMENTARY_TITLES = {
+    "F": "Annexure F: enrollment and undivided-interest basis",
+    "G": "Annexure G: adoption of the Model Bye-Laws (clauses 1 to 58)",
+    "H": "Annexure H: advisers appointed",
+}
+# The onboarding phase from which each annexure is due (phase order: enrollment, adoption, advisers, complete).
+_SUPP_DUE_FROM = {"F": "adoption", "G": "advisers", "H": "complete"}
+_PHASE_ORDER = ("enrollment", "adoption", "advisers", "complete")
+
+
+def _try_build_supplementary(society_id: int, code: str, actor_id: int | None) -> bool:
+    """Best-effort build used by stage changes: sealing is non-blocking, so a refusal (for example the earlier annexure is
+    not sealed yet) is logged and the checklist shows the annexure as pending. Never raises."""
+    try:
+        build_supplementary_annex(society_id, code, actor_id)
+        return True
+    except OnboardingError as exc:
+        log.info("annexure %s not built for society %s: %s", code, society_id, exc)
+    except Exception:                                       # noqa: BLE001
+        log.exception("could not build annexure %s for society %s", code, society_id)
+    return False
+
+
+def supplementary_checklist(society_id: int, user_id: int | None = None) -> list[dict]:
+    """One row per annexure F, G, H for the Hub: due or not, status, who has signed and who still must. Read-only."""
+    from app.services import document_signing as ds
+    phase = society_phase(society_id) or "complete"
+    cur = _PHASE_ORDER.index(phase) if phase in _PHASE_ORDER else len(_PHASE_ORDER) - 1
+    status = supplementary_annex_status(society_id)
+    out = []
+    for code in SUPPLEMENTARY_ANNEX_CODES:
+        row = status.get(code)
+        due = cur >= _PHASE_ORDER.index(_SUPP_DUE_FROM[code])
+        signed, mine, sealed = [], [], bool(row and row["status"] == "sealed")
+        if row and row["status"] in ("draft", "sealed"):
+            try:
+                st = ds.status("supplementary_annex", int(row["id"]))
+                signed = [x["office_code"] for x in st["signed"]]
+                if user_id and not sealed:
+                    mine = [r[0] for r in ds._signer_roles(db, society_id, "supplementary_annex", int(row["id"]), user_id)
+                            if r[0] in st["policy"]["eligible"] and r[0] not in signed]
+            except Exception:                               # noqa: BLE001
+                log.exception("could not read signatures of annexure %s", code)
+        before = None
+        if code != "F":
+            before = SUPPLEMENTARY_ANNEX_CODES[SUPPLEMENTARY_ANNEX_CODES.index(code) - 1]
+        blocked_by = before if (before and not (status.get(before) or {}).get("status") == "sealed") else None
+        out.append({"code": code, "title": SUPPLEMENTARY_TITLES[code], "due": due,
+                    "status": (row or {}).get("status") or "not built", "annex_id": (row or {}).get("id"),
+                    "content_hash": (row or {}).get("content_hash"), "signed": signed, "mine": mine,
+                    "blocked_by": blocked_by})
+    return out
+
+
+def supplementary_annex_content(society_id: int, code: str) -> dict | None:
+    """The stored content of the current draft or sealed annexure (what the signers are signing)."""
+    if code not in SUPPLEMENTARY_ANNEX_CODES:
+        raise OnboardingError("Unknown supplementary annexure code.")
+    row = _row("""SELECT content FROM onboarding_supplementary_annexes WHERE society_id=%s AND annex_code=%s
+                    AND status IN ('draft','sealed') ORDER BY (status='sealed') DESC, id DESC LIMIT 1""", (society_id, code))
+    if not row:
+        return None
+    c = row["content"]
+    return json.loads(c) if isinstance(c, str) else c
+
+
 def build_supplementary_annex(society_id: int, code: str, actor_id: int | None = None) -> dict:
     """Build a supplementary annexure (F, G, H) as 'draft'. Post go-live only.
 
@@ -2785,6 +2841,10 @@ def _mark_supplementary_sealed(society_id: int, code: str, row_id: int, actor_id
         cur.execute("UPDATE onboarding_supplementary_annexes SET status='superseded' WHERE society_id=%s AND annex_code=%s AND status='sealed'", (society_id, code))
         cur.execute("UPDATE onboarding_supplementary_annexes SET status='sealed', sealed_at=NOW() WHERE id=%s", (row_id,))
     _audit(society_id, actor_id, "SUPPLEMENTARY_ANNEX_SEALED", "society", society_id, {"annex": code})
+    # The chain F -> G -> H only moves when the earlier one is sealed, so once it is, prepare the next draft if its stage is reached.
+    nxt = _SUPP_NEXT.get(code)
+    if nxt:
+        _try_build_supplementary(society_id, nxt, actor_id)
 
 
 def seal_supplementary_annex(society_id: int, code: str, actor_id: int) -> dict:
@@ -2813,6 +2873,9 @@ def advance_phase(society_id: int, actor_id: int, to_phase: str) -> str:
         raise OnboardingError("That stage is not the current one.")
     db._execute("UPDATE societies SET onboarding_phase=%s WHERE id=%s", (to_phase, society_id))
     _audit(society_id, actor_id, "ONBOARDING_PHASE", "society", society_id, {"phase": to_phase})
+    # Leaving adoption prepares Annexure G; leaving advisers prepares H. Non-blocking: if the earlier annexure is not sealed
+    # yet the draft is prepared as soon as it is (see _mark_supplementary_sealed) and the checklist shows it as pending.
+    _try_build_supplementary(society_id, {"advisers": "G", "complete": "H"}[to_phase], actor_id)
     return "Saved."
 
 

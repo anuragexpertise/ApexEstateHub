@@ -1,4 +1,4 @@
-"""Paper-signing workflow: schema, snapshot/document/scan binding, stale detection, PDF, bye-law xlsx, bulk register."""
+"""Evidence schema, scan validation, bye-law xlsx, and checks that the retired print/sign/scan loops stay gone."""
 from __future__ import annotations
 
 import base64
@@ -37,150 +37,6 @@ def test_fresh_schema_accepts_every_evidence_purpose():
     block = _evidence_table_sql()
     allowed = set(re.findall(r"'([a-z_]+)'", block))
     assert set(ob.EVIDENCE_PURPOSES) <= allowed, sorted(set(ob.EVIDENCE_PURPOSES) - allowed)
-
-
-def test_fresh_schema_has_binding_columns_and_documents_table():
-    block = _evidence_table_sql()
-    for col in ("doc_id", "document_sha256", "snapshot_sha256"):
-        assert re.search(rf"\b{col}\b", block), col
-    text = (ROOT / "database" / "estatehub.sql").read_text(encoding="utf-8")
-    assert re.search(r"CREATE TABLE onboarding_documents\b", text)
-    mig = (ROOT / "database" / "migrations" / "004_paper_sign_binding.sql").read_text(encoding="utf-8")
-    assert "ADD COLUMN IF NOT EXISTS doc_id" in mig and "CREATE TABLE IF NOT EXISTS onboarding_documents" in mig
-
-
-# ── snapshot + Doc ID ─────────────────────────────────────────────────────────────────────────────────────────
-def test_snapshot_is_deterministic_and_data_sensitive():
-    a = pe.snapshot_hash("pending_receivables", "T", HDR, ROWS, ["m"])
-    assert a == pe.snapshot_hash("pending_receivables", "T", HDR, [list(r) for r in ROWS], ["m"])
-    assert a != pe.snapshot_hash("pending_receivables", "T", HDR, [["A-101", "1,001.00"], ["TOTAL", "1,001.00"]], ["m"])
-    assert a != pe.snapshot_hash("pending_receivables", "T", HDR, ROWS, ["other meta"])
-    assert a != pe.snapshot_hash("tds_rates", "T", HDR, ROWS, ["m"])
-    with_sec = pe.snapshot_hash("pending_receivables", "T", HDR, ROWS, ["m"], [{"heading": "h", "headers": ["x"], "rows": [["1"]]}])
-    assert with_sec != a
-
-
-def test_doc_id_is_stable_and_readable():
-    snap = pe.snapshot_hash("pending_receivables", "T", HDR, ROWS)
-    d = pe.make_doc_id(7, "pending_receivables", snap)
-    assert d == pe.make_doc_id(7, "pending_receivables", snap)
-    assert re.fullmatch(r"EH-7-PENDINGREC-[0-9A-F]{8}", d), d
-
-
-# ── PDF ───────────────────────────────────────────────────────────────────────────────────────────────────────
-def test_pdf_is_real_multipage_and_carries_the_doc_id(monkeypatch):
-    pypdf = pytest.importorskip("pypdf")
-    monkeypatch.setattr(pe, "_fonts", lambda: ("Helvetica", "Helvetica-Bold", False))
-    rows = [[f"A-{i}", f"{i * 100:,.2f}"] for i in range(1, 150)] + [["TOTAL", "9,99,999.00"]]
-    snap = pe.snapshot_hash("pending_receivables", "T", HDR, rows)
-    doc_id = pe.make_doc_id(7, "pending_receivables", snap)
-    pdf = pe._render_pdf("Pending receivables", "Sunrise", "FY", HDR, rows, ["Treasurer", "Secretary"], ["meta ₹5"],
-                         doc_id, snap)
-    assert pdf.startswith(b"%PDF-")
-    reader = pypdf.PdfReader(io.BytesIO(pdf))
-    pages = [p.extract_text() for p in reader.pages]
-    assert len(pages) >= 3
-    for i, text in enumerate(pages, start=1):                      # Doc ID, data hash and page x of y on EVERY page
-        assert doc_id in text and snap[:16] in text and f"Page {i} of {len(pages)}" in text
-    full = "\n".join(pages)
-    assert "Rs.5" in full and "₹" not in full                        # Helvetica has no rupee glyph: printed as Rs.
-    assert "Signature & date" in pages[-1] and "Treasurer" in pages[-1]
-    assert "Flat no." in pages[1]                                    # header row repeats on later pages
-
-
-def test_make_document_records_the_document(monkeypatch):
-    seen = {}
-    monkeypatch.setattr(ob, "record_document", lambda *a, **k: seen.update(args=a, kwargs=k) or {"id": 1})
-    doc = pe.make_document(7, "pending_receivables", 3, "Pending receivables", "Sunrise", "FY", HDR, ROWS, ["Treasurer"], ["m"],
-                           kind="k")
-    assert doc["fmt"] == "pdf" and doc["data"].startswith(b"%PDF-")
-    assert doc["filename"].endswith(f"{doc['doc_id']}.pdf")
-    args = seen["args"]
-    assert args[0] == 7 and args[1] == "pending_receivables" and args[2] == doc["doc_id"]
-    assert args[3] == doc["snapshot_sha256"] and args[4] == doc["document_sha256"] and args[5] == "pdf"
-    assert pe.hashlib.sha256(doc["data"]).hexdigest() == doc["document_sha256"]
-
-
-def test_make_document_survives_a_recording_failure(monkeypatch):
-    def boom(*a, **k):
-        raise RuntimeError("db down")
-    monkeypatch.setattr(ob, "record_document", boom)
-    doc = pe.make_document(7, "tds_rates", 3, "TDS Rates", "S", "", HDR, ROWS, ["CA"])
-    assert doc["data"].startswith(b"%PDF-")
-
-
-def test_unknown_signing_mode_is_refused(monkeypatch):
-    with pytest.raises(ob.OnboardingError):
-        pe.make_document(7, "tds_rates", 3, "T", "S", "", HDR, ROWS, ["CA"], signing_mode="esign")
-
-
-# ── scan binding + stale detection ────────────────────────────────────────────────────────────────────────────
-def test_scan_is_bound_to_the_generated_document(monkeypatch):
-    got = {}
-    gen = {"doc_id": "EH-7-X-AAAA", "document_sha256": "d" * 64, "snapshot_sha256": "s" * 64, "generated_at": "now"}
-    monkeypatch.setattr(ob, "latest_document", lambda sid, purpose, kind=None, doc_id=None: got.update(kind=kind) or gen)
-    monkeypatch.setattr(ob, "store_evidence_file",
-                        lambda *a, **k: got.update(args=a, kw=k) or {"id": 5, "sha256": "x" * 64, "filename": a[3]})
-    ev = pe.store_signed_scan(7, "pending_receivables", 3, "scan.pdf", _data_uri(PDF_BYTES), {"fy": 2026}, kind="k")
-    assert got["kind"] == "k"
-    assert got["kw"] == {"doc_id": "EH-7-X-AAAA", "document_sha256": "d" * 64, "snapshot_sha256": "s" * 64}
-    assert got["args"][-1]["bound"] is True and ev["bound"] is True
-    assert "linked to Doc ID EH-7-X-AAAA" in pe.stored_message({**ev, "doc_id": "EH-7-X-AAAA"})
-
-
-def test_scan_without_a_generated_document_is_stored_unbound(monkeypatch):
-    got = {}
-    monkeypatch.setattr(ob, "latest_document", lambda *a, **k: None)
-    monkeypatch.setattr(ob, "store_evidence_file",
-                        lambda *a, **k: got.update(kw=k) or {"id": 5, "sha256": "x" * 64, "filename": a[3]})
-    ev = pe.store_signed_scan(7, "tds_rates", 3, "scan.pdf", _data_uri(PDF_BYTES))
-    assert got["kw"]["doc_id"] is None and ev["bound"] is False
-    assert "not linked" in pe.stored_message(ev)
-
-
-def test_scan_validation_still_applies():
-    with pytest.raises(ob.OnboardingError):
-        pe.store_signed_scan(7, "tds_rates", 3, "notes.txt", _data_uri(b"hello"))
-    with pytest.raises(ob.OnboardingError):
-        pe.store_signed_scan(7, "tds_rates", 3, "fake.pdf", _data_uri(b"not a pdf"))
-    with pytest.raises(ob.OnboardingError):
-        pe.store_signed_scan(7, "tds_rates", 3, "scan.pdf", None)
-
-
-def _ev(snapshot, doc_id="EH-7-X-AAAA"):
-    return [{"sha256": "a" * 64, "filename": "s.pdf", "uploaded_at": "t", "doc_id": doc_id,
-             "snapshot_sha256": snapshot, "document_sha256": "d" * 64}]
-
-
-def test_evidence_goes_stale_when_the_data_changes(monkeypatch):
-    monkeypatch.setattr(ob, "get_evidence", lambda *a, **k: _ev("s1"))
-    same = pe.evidence_status(7, "pending_receivables", current_snapshot="s1")
-    changed = pe.evidence_status(7, "pending_receivables", current_snapshot="s2")
-    assert same["evidenced"] and same["bound"] and not same["stale"]
-    assert changed["stale"]
-    assert pe.status_line(same)[0] == "success"
-    colour, text = pe.status_line(changed)
-    assert colour == "warning" and "print again" in text.lower()
-
-
-def test_status_without_evidence_or_link(monkeypatch):
-    monkeypatch.setattr(ob, "get_evidence", lambda *a, **k: [])
-    assert pe.status_line(pe.evidence_status(7, "tds_rates"))[0] == "muted"
-    monkeypatch.setattr(ob, "get_evidence", lambda *a, **k: _ev(None, doc_id=None))
-    st = pe.evidence_status(7, "tds_rates", current_snapshot="s2")
-    assert st["evidenced"] and not st["bound"] and not st["stale"]      # nothing to compare against
-    assert pe.status_line(st)[0] == "info"
-
-
-def test_apartment_charges_section_totals(monkeypatch):
-    monkeypatch.setattr(ob, "_rows", lambda *a, **k: [
-        {"flat_number": "A-10", "apartment_size": 1000, "undivided_interest_pct": "60.0"},
-        {"flat_number": "A-2", "apartment_size": 500, "undivided_interest_pct": "40.0"}])
-    sec = pe.apartment_charges_section(7, "10000")
-    assert [r[0] for r in sec["rows"]] == ["A-2", "A-10", "TOTAL"]            # natural order
-    assert sec["rows"][0][3] == "4,000.00" and sec["rows"][1][3] == "6,000.00"
-    assert sec["rows"][-1][1:] == ["1500", "100.0000", "10,000.00"]
-    assert pe.apartment_charges_section(7, None)["rows"][0][3] == ""
 
 
 # ── TDS wording ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -240,21 +96,32 @@ def test_bye_law_variation_text_is_dropped_unless_adopted_with_variation():
     assert res.rows[0]["variation_text"] == ""
 
 
-def test_adoption_document_lists_all_58_clauses(monkeypatch):
+def test_adoption_minutes_replace_the_generated_adoption_document():
     from app.dash_apps.callbacks import paper_sign_callbacks as ps
-    from app.services import regime_rules_admin as rra
-    monkeypatch.setattr(ps, "current_choices", lambda sid: {"BL_08": {"choice": "adopted_as_is", "variation_text": "", "active": False}})
-    hdr, rows, signers, meta = ps.document_parts(7)
-    assert len(rows) == len(rra.MODEL_BYE_LAW_CLAUSES) == 58
-    assert [r for r in rows if r[0] == "08"][0][2] == "Adopted as is"
-    assert "1 of 58" in meta[1] and "Chair of the General Body meeting" in signers
+    assert ps.PURPOSE == "adoption_minutes" and "adoption_minutes" in ob.EVIDENCE_PURPOSES
+    assert not hasattr(ps, "document_parts") and not hasattr(ps, "_stale_snapshot")
 
 
-# ── bulk-enrol register ───────────────────────────────────────────────────────────────────────────────────────
-def test_bulk_register_never_includes_passwords_and_routes_purposes():
+def test_bulk_enrol_print_and_scan_loop_is_gone():
     from app.dash_apps.callbacks import bulk_enroll_callbacks as be
-    assert "password" in be._REGISTER_HIDE
-    assert be._bulk_purpose("apartments") == ("bulk_apartments", "bulk:apartments")
-    assert be._bulk_purpose("staff")[0] == "bulk_staff"
-    assert be._bulk_purpose("assets") == ("other_paper_evidence", "bulk:assets")
-    assert all(p in ob.EVIDENCE_PURPOSES for p in set(be._BULK_EVIDENCE_PURPOSE.values()) | {"other_paper_evidence"})
+    for name in ("_bulk_purpose", "_BULK_EVIDENCE_PURPOSE", "_REGISTER_HIDE", "bulk_register_print", "bulk_register_scan"):
+        assert not hasattr(be, name), name
+    src = (ROOT / "app" / "dash_apps" / "callbacks" / "bulk_enroll_callbacks.py").read_text(encoding="utf-8")
+    assert "make_document" not in src and "store_signed_scan" not in src
+
+
+def test_generated_document_plumbing_is_gone():
+    for name in ("make_document", "store_signed_scan", "evidence_status", "snapshot_hash", "printable_html"):
+        assert not hasattr(pe, name), name
+    for name in ("record_document", "latest_document"):
+        assert not hasattr(ob, name), name
+
+
+def test_scan_validation_still_applies():
+    with pytest.raises(ob.OnboardingError):
+        pe.validate_scan("notes.txt", b"hello")
+    with pytest.raises(ob.OnboardingError):
+        pe.validate_scan("fake.pdf", b"not a pdf")
+    with pytest.raises(ob.OnboardingError):
+        pe.validate_scan("scan.pdf", None)
+    assert pe.validate_scan("ok.pdf", PDF_BYTES)[0] == ".pdf"

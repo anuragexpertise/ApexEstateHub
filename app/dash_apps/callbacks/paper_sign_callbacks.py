@@ -1,8 +1,8 @@
 # app/dash_apps/callbacks/paper_sign_callbacks.py
 """
-Paper signing of the Adoption of Model Bye-Laws 1-58 (Society_bye_laws.xlsx), on the reusable workflow in
-app/services/paper_evidence.py:  template -> upload (validated, fills the choices) -> PDF with signing footer -> signed scan
--> server SHA-256 -> evidence bound to the generated document.
+Adoption of the Model Bye-Laws 1-58 (Society_bye_laws.xlsx): template download, validated xlsx import that fills the choice
+buttons, and ONE plain upload of the signed General Body minutes (purpose adoption_minutes). The clause choices are data; no
+generated print / sign / scan loop remains. After go-live the choices and the minutes SHA-256 are sealed in Annex G.
 
 Listed in _SETUP_EXEMPT_MODULES: the Adoption panel lives in the Onboarding Hub, which a not-yet-active society uses. Every
 callback checks the session and the admin role itself.
@@ -18,9 +18,7 @@ from app.services import onboarding_service as ob
 from app.services import regime_rules_admin as rra
 from app.services import xlsx_templates as xt
 
-PURPOSE = "adoption_resolution"
-KIND = "model_bye_laws"
-TITLE = "Adoption of Model Bye-Laws (clauses 1-58)"
+PURPOSE = "adoption_minutes"
 _CHOICE_LABEL = {"adopted_as_is": "Adopted as is", "adopted_with_variation": "Adopted with variation",
                  "not_adopted": "Not adopted"}
 
@@ -51,37 +49,15 @@ def current_choices(society_id: int) -> dict:
     return out
 
 
-def document_parts(society_id: int):
-    """(headers, rows, signers, meta) of the signing PDF - shared by the print and the stale check."""
-    cur = current_choices(society_id)
-    rows, n_rec = [], 0
-    for cid, title in rra.MODEL_BYE_LAW_CLAUSES:
-        c = cur.get(cid) or {}
-        if c.get("choice"):
-            n_rec += 1
-        rows.append([cid.replace("BL_", ""), title, _CHOICE_LABEL.get(c.get("choice"), "Not recorded (follows the Model Bye-Laws as written)"),
-                     c.get("variation_text") or ""])
-    meta = ["Adoption by the Association of the Model Bye-Laws, 2011 (UP Apartment Owners' Associations).",
-            f"{n_rec} of {len(rra.MODEL_BYE_LAW_CLAUSES)} clauses have a recorded choice. Choices are provisional until the General "
-            "Body resolution is recorded; quote its number here: ____________________"]
-    return (["Clause", "Title", "Choice", "Variation (if any)"], rows,
-            ["President", "Secretary", "Treasurer", "Chair of the General Body meeting"], meta)
-
-
-def _stale_snapshot(society_id: int) -> str:
-    from app.services import paper_evidence as pe
-    hdr, rows, _sg, meta = document_parts(society_id)
-    return pe.snapshot_hash(PURPOSE, TITLE, hdr, rows, meta)
-
-
 def _status(society_id: int):
-    from app.services import paper_evidence as pe
-    st = pe.evidence_status(society_id, PURPOSE, current_snapshot=_stale_snapshot(society_id))
-    colour, text = pe.status_line(st)
-    if colour == "muted":
-        return html.Div(text, className="text-muted")
-    icon = {"success": "fa-check-circle", "warning": "fa-exclamation-triangle", "info": "fa-info-circle"}[colour]
-    return dbc.Alert([html.I(className=f"fas {icon} me-2"), text], color=colour, className="py-1 mb-0", style={"fontSize": "12px"})
+    """Status of the signed General Body minutes on file."""
+    ev = ob.get_evidence(society_id, PURPOSE)
+    if not ev:
+        return html.Div("No signed General Body minutes on file yet.", className="text-muted")
+    e = ev[0]
+    return dbc.Alert([html.I(className="fas fa-check-circle me-2"),
+                      f"Minutes on file: {e['filename']} (SHA-256 {e['sha256'][:16]}...). It is bound into Annex G."],
+                     color="success", className="py-1 mb-0", style={"fontSize": "12px"})
 
 
 def register_paper_sign_callbacks(app):
@@ -152,13 +128,13 @@ def register_paper_sign_callbacks(app):
     @require_session
     def adopt_scan(contents, filename):
         s = _admin()
-        if not s or not contents:
+        if not s or not contents or "," not in contents:
             return no_update
         sid, uid, _role = s
-        from app.services import paper_evidence as pe
+        import base64
         try:
-            ev = pe.store_signed_scan(sid, PURPOSE, uid, filename, contents, {"kind": KIND}, kind=KIND)
+            raw = base64.b64decode(contents.split(",", 1)[1])
+            ob.store_evidence_file(sid, PURPOSE, None, filename or "", raw, uid, {"kind": "adoption_minutes"})
         except Exception as exc:                               # noqa: BLE001
             return dbc.Alert(str(exc), color="danger", className="py-1 mb-0", style={"fontSize": "12px"})
-        return dbc.Alert([html.I(className="fas fa-check-circle me-2"), pe.stored_message(ev)], color="success",
-                         className="py-1 mb-0", style={"fontSize": "12px"})
+        return _status(sid)

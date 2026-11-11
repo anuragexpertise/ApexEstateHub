@@ -515,7 +515,6 @@ def _bulk_enroll_modal() -> dbc.Modal:
                              " The validated upload and its SHA-256 are recorded; the roster hash goes into Annex F after go-live. "
                              "No separate print/sign/scan loop is needed.",
                              className="text-muted d-block mb-2", style={"fontSize": "11.5px"}),
-                        dcc.Store(id="bulk-enroll-register-store", storage_type="memory", data=None),
                         html.Div(id="bulk-enroll-evidence-status", className="mt-2", style={"fontSize": "12px"}),
                     ]),
                 ])

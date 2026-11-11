@@ -425,3 +425,11 @@ Annex E and its blocking control, clause 7A present in the text, F/G/H chain and
 - Signing: `app/services/document_signing.py`, `signing_service.py`, `esign_adapter.py`.
 - Registration: `app/services/society_service.py` (`create_society_checked`).
 - Agreement template: `database/AGREEMENT.md`. Flow doc: `docs/PAPER_SIGNING.md`.
+
+---
+
+## Status after the completion pass
+
+Done: F/G/H screen in the Hub (prepare, read, sign with password, chain-aware); G prepared when leaving adoption and H when leaving advisers (F on enrollment complete); the next draft is prepared automatically when the earlier annexure seals; generated print/sign/scan code removed (`bulk_enroll_callbacks.py` print/scan, `paper_sign_callbacks.py` snapshot/scan, `paper_evidence.py` reduced to `decode_upload` and `validate_scan`, `record_document` / `latest_document` deleted); Adoption now takes one plain upload of the signed minutes (`adoption_minutes`); Annex E indexes the election minutes; `fn_activate_society` requires A to E like the Python check.
+
+Left on purpose: the `onboarding_documents` table and migration 004 (existing databases may hold rows; dropping them is a separate, destructive step) and the unused `doc_id` / `document_sha256` / `snapshot_sha256` columns on `onboarding_evidence`. F/G/H are signed by password only, the paper or eSign method of the Agreement is not offered for them.

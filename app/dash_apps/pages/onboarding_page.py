@@ -667,6 +667,50 @@ def _stage_enrollment(society_id: int, role: str | None):
     return html.Div(kids, style=_CARD)
 
 
+# ── post go-live: supplementary annexures F, G, H (signed by President, Secretary, Treasurer only) ─────────
+_SUPP_BADGE = {"sealed": ("Sealed", "success"), "draft": ("Draft: awaiting signatures", "warning"), "not built": ("Pending", "secondary")}
+
+
+def supplementary_section(society_id: int, role: str | None, user_id: int | None):
+    """Build, review and sign Annexures F, G and H. They attach to the signed Agreement as a hash chain (F -> G -> H) and need the
+    three office-bearers only: the Operator never signs them (clause 7A of the Agreement). Sealing is non-blocking, so each row
+    simply shows as pending until it is done."""
+    rows = ob.supplementary_checklist(society_id, user_id)
+    is_admin = role == "admin"
+    items = []
+    for r in rows:
+        label, colour = _SUPP_BADGE.get(r["status"], (r["status"], "secondary"))
+        have = set(r["signed"])
+        who = " ".join(f"{'✓' if o in have else '○'} {o.title()}" for o in ("president", "secretary", "treasurer"))
+        body = [html.Div([html.Strong(r["title"] + " "), dbc.Badge(label, color=colour, className="ms-1"),
+                          dbc.Badge("not due yet", color="light", text_color="dark", className="ms-1") if not r["due"] else ""])]
+        if r["status"] in ("draft", "sealed"):
+            body.append(html.Div(who + (f"   ·   SHA-256 {r['content_hash'][:16]}…" if r.get("content_hash") else ""), style=_MUTED))
+            content = ob.supplementary_annex_content(society_id, r["code"])
+            body.append(html.Details([html.Summary("Read what is being signed", style={"fontSize": "12.5px", "cursor": "pointer"}),
+                                      html.Pre(json.dumps(content, indent=2, default=str, ensure_ascii=False),
+                                               style={"whiteSpace": "pre-wrap", "fontSize": "11.5px", "maxHeight": "260px", "overflow": "auto",
+                                                      "background": "#fff", "border": "1px solid #e1e7ef", "padding": "8px"})]))
+        if r["blocked_by"] and r["status"] == "not built":
+            body.append(html.Div(f"Waiting for Annexure {r['blocked_by']} to be signed and sealed first.", style=_MUTED))
+        controls = []
+        if is_admin and r["status"] != "sealed" and not r["blocked_by"]:
+            controls.append(dbc.Button("Refresh draft" if r["status"] == "draft" else "Prepare for signing",
+                                       id={"type": f"{P}-supp-build", "code": r["code"]}, color="primary", outline=True, size="sm",
+                                       n_clicks=0, className="me-2"))
+        if r["status"] == "draft" and r["mine"]:
+            controls += [dbc.Input(id={"type": f"{P}-supp-pw", "code": r["code"]}, type="password", placeholder="Your login password",
+                                   autoComplete="current-password", size="sm", style={"maxWidth": "240px", "display": "inline-block", "marginRight": "8px"}),
+                         dbc.Button(f"Sign as {r['mine'][0].title()}", id={"type": f"{P}-supp-sign", "code": r["code"]}, color="success", size="sm", n_clicks=0)]
+        if controls:
+            body.append(html.Div(controls, style={"marginTop": "6px"}))
+        items.append(html.Div(body, style={"padding": "8px 0", "borderBottom": "1px solid #e1e7ef"}))
+    return html.Div([html.H6("Supplementary annexures F, G and H"),
+                     html.Div("Added to the Agreement after go-live. Signed by the President, Secretary and Treasurer with their own passwords; "
+                              "the Operator is informed and does not sign. Changing the data after signing needs a new annexure; a sealed one is never edited. "
+                              "No names, phones or emails appear in them.", style=_MUTED), *items], style=_CARD)
+
+
 def _stage_active(society_id: int, role: str | None = None, user_id: int | None = None):
     phase = ob.society_phase(society_id) or "complete"
     is_admin = role == "admin"
@@ -682,15 +726,16 @@ def _stage_active(society_id: int, role: str | None = None, user_id: int | None 
         if is_admin:
             out += [dbc.Button("Mark adoption done", id=f"{P}-phase-next", color="success", size="sm", n_clicks=0, className="me-2"),
                     dbc.Button("Do later", id=f"{P}-phase-later", color="secondary", outline=True, size="sm", n_clicks=0)]
-        out += [html.Hr(), legacy_resolutions_section(society_id, role)]
+        out += [html.Hr(), supplementary_section(society_id, role, user_id), html.Hr(), legacy_resolutions_section(society_id, role)]
     elif phase == "advisers":
         out += [html.H6("Stage 7: Adviser access"), advisers_section(society_id, role, user_id)]
         if is_admin:
             out += [dbc.Button("Finish onboarding", id=f"{P}-phase-next", color="success", size="sm", n_clicks=0, className="me-2"),
                     dbc.Button("Do later", id=f"{P}-phase-later", color="secondary", outline=True, size="sm", n_clicks=0)]
+        out += [html.Hr(), supplementary_section(society_id, role, user_id)]
     else:
-        out += [html.Div("Onboarding is complete.", style=_MUTED), html.Hr(), advisers_section(society_id, role, user_id),
-                html.Hr(), legacy_resolutions_section(society_id, role)]
+        out += [html.Div("Onboarding is complete.", style=_MUTED), html.Hr(), supplementary_section(society_id, role, user_id),
+                html.Hr(), advisers_section(society_id, role, user_id), html.Hr(), legacy_resolutions_section(society_id, role)]
     return out
 
 

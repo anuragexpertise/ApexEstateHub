@@ -761,19 +761,6 @@ def _bulk_insert_team_role(rows: list[dict], sid: int, user_id: int = None, role
 # CALLBACKS
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Which evidence purpose each bulk entity files under (the others share "other_paper_evidence", told apart by `kind`).
-_BULK_EVIDENCE_PURPOSE = {
-    "apartments": "bulk_apartments", "vendors": "bulk_vendors", "security": "bulk_security",
-    "supervisor": "bulk_supervisor", "staff": "bulk_staff",
-}
-_REGISTER_HIDE = {"password"}      # credentials never go on paper
-
-
-def _bulk_purpose(entity: str) -> tuple[str, str]:
-    """(evidence purpose, document kind) for a bulk entity."""
-    return _BULK_EVIDENCE_PURPOSE.get(entity, "other_paper_evidence"), f"bulk:{entity}"
-
-
 def register_bulk_enroll_callbacks(app):
 
     # ── 1. Open modal ────────────────────────────────────────────────────────────
@@ -986,88 +973,26 @@ def register_bulk_enroll_callbacks(app):
         }}
         return result_ui, store, content, breadcrumb, toast
 
-    # ── 5. Paper sign-off: register snapshot, print PDF, signed-scan upload ─────────────────────────────
+    # ── 5. Upload record (no print / sign / scan loop) ───────────────────────────────────────────────────
     @app.callback(
-        Output("bulk-enroll-register-store", "data"),
+        Output("bulk-enroll-evidence-status", "children"),
         Input("bulk-enroll-upload", "contents"),
         State("bulk-enroll-upload", "filename"),
         State("bulk-enroll-entity-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def bulk_register_snapshot(contents, filename, entity):
-        """Keep what was uploaded (minus passwords) plus the SHA-256 of the uploaded file, for the register to print."""
-        if not contents or entity not in _BULK_TEMPLATES:
-            return None
-        try:
-            rows = _parse_upload(contents, filename)
-            raw = base64.b64decode(contents.split(",", 1)[1])
-        except Exception:                                   # noqa: BLE001
-            return None
-        if not rows or len(rows) > MAX_BULK_ROWS:
-            return None
-        import hashlib
-        cols = [c for c in _BULK_TEMPLATES[entity]["columns"] if c not in _REGISTER_HIDE]
-        return {"entity": entity, "filename": filename or "upload.xlsx", "sha256": hashlib.sha256(raw).hexdigest(),
-                "columns": cols, "rows": [[r.get(c, "") for c in cols] for r in rows]}
-
-    @app.callback(
-        Output("bulk-enroll-print-dl", "data"),
-        Output("bulk-enroll-evidence-status", "children", allow_duplicate=True),
-        Input("bulk-enroll-print", "n_clicks"),
-        State("bulk-enroll-register-store", "data"),
-        State("bulk-enroll-entity-store", "data"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def bulk_register_print(n, reg, entity):
-        if not n or entity not in _BULK_TEMPLATES:
-            raise PreventUpdate
-        if get_current_user_role() not in ("admin", "master"):
-            return no_update, html.Div("You don't have permission to do that.", className="text-danger")
-        sid, uid = get_current_society_id(), get_current_user_id()
-        if not sid:
-            return no_update, html.Div("Not authenticated.", className="text-danger")
-        if not reg or reg.get("entity") != entity or not reg.get("rows"):
-            return no_update, html.Div("Upload the Excel file first; the register is printed from that upload.",
-                                       className="text-warning")
-        from app.services import paper_evidence as pe
-        label = _BULK_TEMPLATES[entity]["label"]
-        purpose, kind = _bulk_purpose(entity)
-        soc = ob.db._execute("SELECT name FROM societies WHERE id=%s", (sid,), fetch_one=True) or {}
-        hdr = [c.replace("_", " ").capitalize() for c in reg["columns"]]
-        meta = [f"Enrolment batch: {label} - file {reg['filename']} - {len(reg['rows'])} row(s)",
-                f"Source file SHA-256: {reg['sha256']}",
-                "Initial passwords are not printed."]
-        doc = pe.make_document(sid, purpose, uid, f"Enrolment register - {label}", soc.get("name") or f"Society {sid}",
-                               "Bulk enrolment", hdr, reg["rows"],
-                               ["Prepared by", "Treasurer", "Secretary", "President"], meta, kind=kind)
-        return (dcc.send_bytes(doc["data"], doc["filename"]),
-                html.Div(f"Signing PDF generated (Doc ID {doc['doc_id']}). Print it, sign, scan, and upload the signed scan.",
-                         className="text-success"))
-
-    @app.callback(
-        Output("bulk-enroll-evidence-status", "children"),
-        Input("bulk-enroll-scan", "contents"),
-        State("bulk-enroll-scan", "filename"),
-        State("bulk-enroll-entity-store", "data"),
-        State("bulk-enroll-register-store", "data"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def bulk_register_scan(contents, filename, entity, reg):
+    def bulk_upload_record(contents, filename, entity):
+        """Show the SHA-256 of the file that was just uploaded. The server computes it; nobody types a hash. The roster
+        hash that binds the enrolled people to the Agreement is taken after go-live (Annex F)."""
         if not contents or entity not in _BULK_TEMPLATES:
             raise PreventUpdate
         if get_current_user_role() not in ("admin", "master"):
             return html.Div("You don't have permission to do that.", className="text-danger")
-        sid, uid = get_current_society_id(), get_current_user_id()
-        if not sid:
-            return html.Div("Not authenticated.", className="text-danger")
-        from app.services import paper_evidence as pe
-        purpose, kind = _bulk_purpose(entity)
-        meta = {"entity": entity, "batch_file": (reg or {}).get("filename"), "source_sha256": (reg or {}).get("sha256")}
         try:
-            ev = pe.store_signed_scan(sid, purpose, uid, filename, contents, meta, kind=kind)
-        except Exception as exc:                            # noqa: BLE001
-            return html.Div(str(exc), className="text-danger")
-        return html.Div([html.I(className="fas fa-check-circle me-2"), pe.stored_message(ev)], className="text-success")
+            raw = base64.b64decode(contents.split(",", 1)[1])
+        except Exception:                                   # noqa: BLE001
+            raise PreventUpdate
+        import hashlib
+        return html.Div(f"Upload recorded: {filename or 'upload.xlsx'}, SHA-256 {hashlib.sha256(raw).hexdigest()}.",
+                        className="text-muted")

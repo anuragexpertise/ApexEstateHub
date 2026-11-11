@@ -941,4 +941,51 @@ def register_onboarding_callbacks(app):
                "Grievance officer fields are filled; press Save to keep them."
         return (*per_field, g["name"], g["email"], g["phone"], _alert(note))
 
+    # ── post go-live: Annexures F, G, H (build by the admin; sign by President / Secretary / Treasurer) ──────────
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input({"type": f"{P}-supp-build", "code": ALL}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_supp_build(clicks):
+        s = _session()
+        trig = ctx.triggered_id
+        if not s or not s[0] or s[2] != "admin" or not trig or not any(clicks or []):
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        try:
+            ob.build_supplementary_annex(sid, trig["code"], uid)
+        except ob.OnboardingError as exc:
+            return no_update, _alert(str(exc), False), no_update
+        body, mk = _body(sid, uid, role)
+        return body, _alert(f"Annexure {trig['code']} is ready for signing."), mk
+
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input({"type": f"{P}-supp-sign", "code": ALL}, "n_clicks"),
+        State({"type": f"{P}-supp-pw", "code": ALL}, "value"),
+        State({"type": f"{P}-supp-pw", "code": ALL}, "id"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_supp_sign(clicks, pws, pw_ids):
+        s = _session()
+        trig = ctx.triggered_id
+        if not s or not s[0] or not trig or not any(clicks or []):
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        code = trig["code"]
+        password = next((v for v, i in zip(pws or [], pw_ids or []) if i.get("code") == code), "")
+        try:
+            st = ob.sign_supplementary_annex(sid, code, uid, password or "")
+        except ob.OnboardingError as exc:
+            return no_update, _alert(str(exc), False), no_update
+        body, mk = _body(sid, uid, role)
+        return body, _alert("Signed." + (f" Annexure {code} is sealed." if st.get("sealed") else "")), mk
+
     print("  ✓ Onboarding callbacks registered")
