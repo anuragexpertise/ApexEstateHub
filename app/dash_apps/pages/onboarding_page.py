@@ -140,6 +140,19 @@ def _seat_all_panel(seated: dict):
     ], className="py-2"), className="mb-2")
 
 
+def _opt_doc_row(opt: tuple[str, str]):
+    """One optional-document upload row: label + upload button + status div."""
+    code, label = opt
+    return dbc.Row([
+        dbc.Col(html.Strong(label, style={"fontSize": "12px"}), md=4),
+        dbc.Col(dcc.Upload(id={"type": f"{P}-opt-doc-upload", "code": code},
+                           children=html.Span(f"Upload {label}", style={"fontSize": "11.5px", "textDecoration": "underline", "cursor": "pointer"}),
+                           accept=".pdf,.png,.jpg,.jpeg", multiple=False,
+                           style={"padding": "4px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px", "fontSize": "11.5px"}), md=5),
+        dbc.Col(html.Div(id={"type": f"{P}-opt-doc-status", "code": code}, style={"fontSize": "11px", "color": "#8895a5"}), md=3),
+    ], className="g-1 mb-1 align-items-center")
+
+
 def _stage_committee(society_id: int):
     seated = ob.seated_officers(society_id)
     s = ob.db._execute("SELECT grievance_officer_name, grievance_officer_email, grievance_officer_phone, onboarding_state FROM societies WHERE id=%s",
@@ -152,13 +165,20 @@ def _stage_committee(society_id: int):
                           "for the Election Results data itself.", className="text-muted d-block mb-2"),
                dbc.Row([
                    dbc.Col(dcc.Upload(id=f"{P}-election-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed election minutes scan"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
+                   dbc.Col(dcc.Upload(id=f"{P}-reg-cert-upload", children=dbc.Button([html.I(className="fas fa-file-certificate me-2"), "Upload registration certificate"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
                    dbc.Col(dbc.Button([html.I(className="fas fa-file-excel me-2"), "Election Results.xlsx template"], id=f"{P}-election-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
                    dbc.Col(dcc.Upload(id=f"{P}-election-xlsx", children=dbc.Button([html.I(className="fas fa-table me-2"), "Fill forms from Election Results.xlsx"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".xlsx"), md="auto"),
                ], className="g-2"), dcc.Download(id=f"{P}-election-tpl-dl"),
                html.Div(id=f"{P}-election-import-status", style={"fontSize":"12.5px","marginTop":"6px"}),
                html.Div(id=f"{P}-election-status", style={"fontSize":"12.5px","marginTop":"6px"}),
+               html.Div(id=f"{P}-reg-cert-status", style={"fontSize":"12.5px","marginTop":"6px"}),
+            ], className="py-2"), className="mb-2"),
+           dbc.Card(dbc.CardBody([
+               html.Strong("Optional documents (non-blocking)", className="d-block mb-1", style={"fontSize":"13px"}),
+               html.Small("Listed in Annex E but do not block sealing. Upload any you have on file.", className="text-muted d-block mb-2"),
+               *[_opt_doc_row(o) for o in ob.OPTIONAL_DOCS],
            ], className="py-2"), className="mb-2"),
-           html.Div("The President, Secretary and Treasurer sign the Agreement, so they must hold office first. Each is seated with the "
+            html.Div("The President, Secretary and Treasurer sign the Agreement, so they must hold office first. Each is seated with the "
                     "resolution that elected them and the signed minutes; the file's SHA-256 is kept as evidence. Use a different flat "
                     "for each person: the Agreement needs four different people to sign.", style=_MUTED)]
     if s.get("onboarding_state") in ("registered", "committee seated") and not all(seated[o] for o in ob.CORE_OFFICES):
