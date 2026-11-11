@@ -1087,6 +1087,51 @@ def register_onboarding_callbacks(app):
         body = op.hub_body(role, sid, uid, view=view or "committee")
         return [no_update for _ in row_codes], body, op.marker(sid)
 
+    # ── Evidence register: re-hash stored scans against the SHA-256 recorded at upload (tamper check) ──
+    # ALL outputs beside a plain one are valid; MATCH would not be (see onb_opt_doc above).
+    @app.callback(
+        Output({"type": f"{P}-ev-status", "id": ALL}, "children"),
+        Output(f"{P}-ev-summary", "children"),
+        Input({"type": f"{P}-ev-verify", "id": ALL}, "n_clicks"),
+        Input(f"{P}-ev-verify-all", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_ev_verify(_clicks, _all_clicks):
+        from app.services import evidence_service as ev
+        trig = ctx.triggered_id
+        if trig is None or not (ctx.triggered and ctx.triggered[0].get("value")):
+            raise PreventUpdate                                            # a re-rendered card, not a click
+        s = _session()
+        if not s or not s[0] or s[2] != "admin":
+            raise PreventUpdate
+        sid, uid, _role = s
+        row_ids = [o["id"]["id"] for o in ctx.outputs_list[0]]
+        targets = row_ids if trig == f"{P}-ev-verify-all" else ([trig["id"]] if isinstance(trig, dict) else [])
+        results = {}
+        for eid in targets:
+            try:
+                results[eid] = ev.verify_row(sid, eid)
+            except ev.EvidenceError:
+                results[eid] = {"status": "missing"}
+        shown = {"ok": ("✓ Verified", "#2e7d32"), "missing": ("✗ File missing", "#b26a00"), "altered": ("✗ ALTERED", "#c62828")}
+        statuses = [html.Span(shown[results[i]["status"]][0], style={"color": shown[results[i]["status"]][1], "fontWeight": "600"})
+                    if i in results else no_update for i in row_ids]
+        failed = [r for r in results.values() if r["status"] != "ok"]
+        if failed:
+            try:
+                ob._audit(sid, uid, "EVIDENCE_INTEGRITY_FAILED", "onboarding_evidence", None,
+                          {"via": "verify", "failed": len(failed), "checked": len(results)})
+            except Exception:                                              # noqa: BLE001
+                log.exception("could not audit the integrity failure")
+            summary = dbc.Alert(f"{len(failed)} of {len(results)} checked file(s) failed the integrity check. Re-upload the "
+                                "original scan to restore it, and tell the platform operator.", color="danger", className="py-2 mb-0",
+                                style={"fontSize": "12.5px"})
+        else:
+            summary = dbc.Alert(f"{len(results)} file(s) checked: every stored scan matches its recorded SHA-256.",
+                                color="success", className="py-2 mb-0", style={"fontSize": "12.5px"})
+        return statuses, summary
+
     # ── post go-live: Annexures F, G, H (build by the admin; sign by President / Secretary / Treasurer) ──────────
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
