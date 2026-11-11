@@ -644,6 +644,13 @@ def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None
     failed: list[tuple] = []
     skipped: list[tuple] = []
 
+    # Order: Builder's Declaration must be complete before owner enrollment.
+    from app.services import undivided_declaration as ud
+    decl = ud.status(sid)
+    if not decl["balanced"] or not decl["evidence"]:
+        return {"success": 0, "failed": [],
+                "skipped": [("all", "Owner enrollment requires the Builder's Declaration to be complete first (shares total 100% and the Declaration PDF on file).", "")]}
+
     for i, row in enumerate(rows, start=2):
         err = _check_required(row, required)
         if err:

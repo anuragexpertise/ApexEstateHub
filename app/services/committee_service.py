@@ -174,9 +174,9 @@ def flat_detail(society_id: int, apartment_id: int) -> dict | None:
     if not flat:
         return None
     flat["users"] = _rows(
-        """SELECT id, name, email FROM users
-            WHERE society_id = %(sid)s AND role = 'apartment' AND user_type = 'owner' AND linked_id = %(aid)s
-            ORDER BY id""",
+        """SELECT id, name, email, user_type FROM users
+            WHERE society_id = %(sid)s AND role = 'apartment' AND user_type IN ('owner', 'family') AND linked_id = %(aid)s
+            ORDER BY CASE user_type WHEN 'owner' THEN 0 WHEN 'family' THEN 1 ELSE 2 END, id""",
         {"sid": int(society_id), "aid": int(apartment_id)})
     return flat
 
@@ -212,7 +212,8 @@ def clean_phone(v):
 def owner_prefill(society_id, apartment_id) -> dict:
     """Name / email / phone of the flat's owner login, to prefill the office-bearer form (the Secretary edits the phone)."""
     r = _row("SELECT u.name, u.email, a.mobile AS phone FROM apartments a LEFT JOIN users u ON u.society_id=a.society_id "
-             "AND u.role='apartment' AND u.linked_id=a.id WHERE a.society_id=%s AND a.id=%s ORDER BY u.id LIMIT 1",
+             "AND u.role='apartment' AND u.linked_id=a.id AND u.user_type IN ('owner', 'family') "
+             "WHERE a.society_id=%s AND a.id=%s ORDER BY CASE u.user_type WHEN 'owner' THEN 0 WHEN 'family' THEN 1 ELSE 2 END, u.id LIMIT 1",
              (society_id, apartment_id)) or {}
     ph = clean_phone(r.get("phone"))
     return {"name": r.get("name"), "email": r.get("email"), "phone": ph or None}
@@ -242,10 +243,15 @@ def appoint(actor_id, actor_role, society_id, apartment_id, office_code, holder_
     ref = (resolution_ref or "").strip()[:255] or None
     role_code = OFFICE_ROLE[office_code]
     pre = owner_prefill(sid, aid)
+    flat = flat_detail(sid, aid)
     email = clean_email(email) if (email or "").strip() else pre.get("email")
     phone = clean_phone(phone) if (phone or "").strip() else pre.get("phone")
     if email is False or phone is False:
         return False, "The email or phone number is not valid."
+    # Order: apartments must have an owner/family login before a committee bearer can be seated.
+    owner_users = (flat or {}).get("users") or []
+    if not owner_users:
+        return False, f"Flat {flat.get('flat_number', aid) if flat else aid} has no owner/family login yet. Enrol an owner for this flat (Name, email, password, user_type='owner') before appointing a committee bearer."
     sig = (signature_image or "").strip()[:255] or None
     ev_file = (evidence_file or "").strip()[:255] or None
     ev_hash = (evidence_hash or "").strip() or None

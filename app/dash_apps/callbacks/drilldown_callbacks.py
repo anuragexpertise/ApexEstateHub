@@ -5303,6 +5303,12 @@ def _save_apartment_user(db, d, sid, is_edit, pk):
 
     from app.dash_apps.auth_layer import get_current_linked_id, get_current_user_id
     
+    # Order: Builder's Declaration must be complete before owner enrollment.
+    from app.services import undivided_declaration as ud
+    decl = ud.status(sid)
+    if not decl["balanced"] or not decl["evidence"]:
+        return False, "Owner enrollment requires the Builder's Declaration to be complete first (shares total 100% and the Declaration PDF on file).", None
+
     email = (d.get("email") or "").strip().lower()
     if not email:
         return False, "Email is required", None

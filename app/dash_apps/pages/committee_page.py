@@ -123,11 +123,21 @@ def appoint_form(society_id: int):
                 id=f"{P}-office", clearable=False, value="president",
                 options=[{"label": label + ("" if single else " (several allowed)"), "value": code}
                          for code, label, single, _r in cs.OFFICES])), md=4),
-            dbc.Col(_field("Flat", dcc.Dropdown(id=f"{P}-flat", options=flat_options(society_id),
-                                                placeholder="Select the flat…")), md=4),
+            dbc.Col(_field("Flat", html.Div([
+                dcc.Input(
+                    id={"type": "form-field-hidden", "entity": "committee", "field": "flat"},
+                    type="hidden", value=""),
+                html.Div(
+                    id={"type": "drillin-trigger", "entity": "committee", "field": "flat"},
+                    n_clicks=0, children="Tap to select flat…",
+                    style={"display": "flex", "alignItems": "center",
+                           "padding": "10px 12px", "borderRadius": "10px",
+                           "border": "1px solid #dbe3ee", "background": "#fff",
+                           "cursor": "pointer", "fontSize": "13px", "width": "100%"}),
+            ])), md=4),
             dbc.Col(_field("Login (flat owner)", dcc.Dropdown(id=f"{P}-user", options=[], placeholder="Pick a flat first"),
                            "A login lets the office-bearer sign and approve. Leave empty to record the office by name only."),
-                    md=4),
+                     md=4),
         ]),
         html.Div(id=f"{P}-hint", style={"marginBottom": "8px", "fontSize": "13px"}),
         dbc.Row([
