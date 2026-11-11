@@ -2130,17 +2130,18 @@ def render_category_content(category, society_id=None, state=None, constitution=
             html.Div(id="onb-bf-recv-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
             html.Div(id="onb-bf-tieout", className="mb-3", style={"fontSize": "12px", "fontWeight": "700"}),
             # ── item 11: reconciliation & evidence ────────────────────────────────
-            html.Hr(),
-            html.H6("Reconciliation & evidence", className="mt-4 mb-2 text-primary"),
-            html.P("Reconcile every bank/cash account that carries a brought-forward balance, and attach the supporting scans "
-                   "(the server computes each file's SHA-256; nobody types a hash).", className="text-muted small mb-2"),
-            dcc.Store(id="onb-reconciliation-json", data=_saved_reconciliation(society_id)),
-            html.Div(id="onb-bf-reconciliation-cards", className="mb-3"),
-            html.Small("Statement balances are taken from the Brought Forward XLSX uploaded above — one row per account. "
-                       "Each account only needs its 'Attach scan' evidence below (PDF/PNG/JPG; server computes SHA-256).",
-                       className="text-muted d-block mb-2"),
-            html.Div(id="onb-bf-evidence-status", style={"fontSize":"12.5px","marginTop":"4px", "color": "#667"}),
-            html.Div(id="onb-bf-evidence-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
+            dbc.Card(dbc.CardBody([
+                html.H6("Reconciliation & evidence", className="mb-2 text-primary", style={"fontSize": "13px"}),
+                html.P("Reconcile every bank/cash account that carries a brought-forward balance, and attach the supporting scans "
+                       "(the server computes each file's SHA-256; nobody types a hash).", className="text-muted small mb-2"),
+                dcc.Store(id="onb-reconciliation-json", data=_saved_reconciliation(society_id)),
+                html.Div(id="onb-bf-reconciliation-cards", className="mb-3"),
+                html.Small("Statement balances are taken from the Brought Forward XLSX uploaded above — one row per account. "
+                           "Each account only needs its 'Attach scan' evidence below (PDF/PNG/JPG; server computes SHA-256).",
+                           className="text-muted d-block mb-2"),
+                html.Div(id="onb-bf-evidence-status", style={"fontSize":"12.5px","marginTop":"4px", "color": "#667"}),
+                html.Div(id="onb-bf-evidence-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
+            ]), className="mb-3", style={"border": "1px solid #d7deea", "background": "#f8faff"}),
         ]
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Administrator":
