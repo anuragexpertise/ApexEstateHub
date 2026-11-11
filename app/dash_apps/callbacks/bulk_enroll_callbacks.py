@@ -742,7 +742,10 @@ def _bulk_insert_team_role(rows: list[dict], sid: int, user_id: int = None, role
             missing = [f for f in required if f not in row or row[f] is None or str(row[f]).strip() == ""]
             if missing:
                 raise ValueError(f"Missing required fields: {', '.join(missing)}")
-            email = _clean_email(row.get("email"))
+            from app.services.committee_service import clean_email
+            email = clean_email(row.get("email"))
+            if not email:
+                raise ValueError("The email address is not valid")
             pw = str(row.get("password") or "").strip()
             err = validate_password(pw)
             if err:

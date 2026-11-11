@@ -133,3 +133,35 @@ def test_sql_activation_requires_a_to_e_like_python():
     sql = (ROOT / "database" / "estatehub.sql").read_text(encoding="utf-8")
     assert "unnest(ARRAY['A','B','C','D','E'])" in sql and "ARRAY['A','B','C','D'])" not in sql
     assert tuple(ob.ANNEX_CODES) == ("A", "B", "C", "D", "E") if hasattr(ob, "ANNEX_CODES") else True
+
+
+# ── review fixes ──────────────────────────────────────────────────────────────────────────────────────────────
+def test_annexure_is_refused_before_its_stage(monkeypatch):
+    monkeypatch.setattr(ob, "state_of", lambda sid: "active")
+    monkeypatch.setattr(ob, "society_phase", lambda sid: "adoption")
+    with pytest.raises(ob.OnboardingError, match="advisers stage"):
+        ob.build_supplementary_annex(5, "G", 1)
+    with pytest.raises(ob.OnboardingError, match="complete stage"):
+        ob.build_supplementary_annex(5, "H", 1)
+    # the automatic build after a seal swallows that refusal, so no early draft is created
+    assert ob._try_build_supplementary(5, "G", 1) is False
+
+
+def test_screen_hides_prepare_and_sign_until_due(monkeypatch):
+    from app.dash_apps.pages import onboarding_page as op
+    row = {"code": "G", "title": ob.SUPPLEMENTARY_TITLES["G"], "due": False, "status": "draft", "annex_id": 1, "content_hash": "a" * 64,
+           "signed": [], "mine": ["president"], "blocked_by": None}
+    monkeypatch.setattr(ob, "supplementary_checklist", lambda sid, uid=None: [row])
+    monkeypatch.setattr(ob, "supplementary_annex_content", lambda sid, code: {})
+    ids = _ids(op.supplementary_section(5, "admin", 1))
+    assert not [i for i in ids if isinstance(i, dict) and i.get("type") in ("onb-supp-build", "onb-supp-sign")]
+
+
+def test_bulk_team_upload_no_longer_crashes_on_email_cleaning(monkeypatch):
+    from app.dash_apps.callbacks import bulk_enroll_callbacks as be
+    calls = []
+    monkeypatch.setattr(be.db, "_execute", lambda sql, params=None, **k: calls.append(sql) or None)
+    ok = be._bulk_insert_team_role([{"email": "Ravi@Example.com", "password": "Strong@12345", "name": "Ravi"}], 5, 1, role_name="supervisor")
+    assert ok["success"] == 1 and not ok["failed"] and any("INSERT INTO users" in c for c in calls)
+    bad = be._bulk_insert_team_role([{"email": "not-an-email", "password": "Strong@12345", "name": "Ravi"}], 5, 1, role_name="supervisor")
+    assert bad["success"] == 0 and "not valid" in bad["failed"][0][1]
