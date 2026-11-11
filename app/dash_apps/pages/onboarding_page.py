@@ -140,16 +140,27 @@ def _seat_all_panel(seated: dict):
     ], className="py-2"), className="mb-2")
 
 
-def _opt_doc_row(opt: tuple[str, str]):
-    """One optional-document upload row: label + upload button + status div."""
+def _opt_doc_row(opt: tuple[str, str], society_id: int):
+    """One optional-document upload row: label + upload button + status div (shows the file already on record)."""
     code, label = opt
+    try:
+        on_file = ob.get_evidence(society_id, code)
+    except Exception:                                                      # noqa: BLE001  (a lookup failure must not break the stage)
+        on_file = []
+    status = ""
+    if on_file:
+        latest = on_file[0]                                                # newest first
+        status = f"✓ On file: {latest['filename']}"
+        if len(on_file) > 1:
+            status += f" (+{len(on_file) - 1} earlier)"
     return dbc.Row([
         dbc.Col(html.Strong(label, style={"fontSize": "12px"}), md=4),
         dbc.Col(dcc.Upload(id={"type": f"{P}-opt-doc-upload", "code": code},
                            children=html.Span(f"Upload {label}", style={"fontSize": "11.5px", "textDecoration": "underline", "cursor": "pointer"}),
                            accept=".pdf,.png,.jpg,.jpeg", multiple=False,
                            style={"padding": "4px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px", "fontSize": "11.5px"}), md=5),
-        dbc.Col(html.Div(id={"type": f"{P}-opt-doc-status", "code": code}, style={"fontSize": "11px", "color": "#8895a5"}), md=3),
+        dbc.Col(html.Div(status, id={"type": f"{P}-opt-doc-status", "code": code},
+                         style={"fontSize": "11px", "color": "#2e7d32" if on_file else "#8895a5"}), md=3),
     ], className="g-1 mb-1 align-items-center")
 
 
@@ -176,7 +187,7 @@ def _stage_committee(society_id: int):
            dbc.Card(dbc.CardBody([
                html.Strong("Optional documents (non-blocking)", className="d-block mb-1", style={"fontSize":"13px"}),
                html.Small("Listed in Annex E but do not block sealing. Upload any you have on file.", className="text-muted d-block mb-2"),
-               *[_opt_doc_row(o) for o in ob.OPTIONAL_DOCS],
+               *[_opt_doc_row(o, society_id) for o in ob.OPTIONAL_DOCS],
            ], className="py-2"), className="mb-2"),
             html.Div("The President, Secretary and Treasurer sign the Agreement, so they must hold office first. Each is seated with the "
                     "resolution that elected them and the signed minutes; the file's SHA-256 is kept as evidence. Use a different flat "
