@@ -823,6 +823,49 @@ def grievance_named(society_id: int) -> bool:
     return bool((r.get("grievance_officer_name") or "").strip())
 
 
+def evidence_register(society_id: int):
+    """Admin-only list of every stored scan: View / Download (served by app/routes/evidence_routes.py, hash-checked
+    on every read) and a Verify button that re-hashes the stored file against the SHA-256 recorded at upload."""
+    from app.services import evidence_service as ev
+    try:
+        rows = ev.list_register(society_id)
+    except Exception:                                                      # noqa: BLE001  (never break the hub over this card)
+        return html.Div()
+    if not rows:
+        return html.Div()
+    link = {"fontSize": "11.5px", "marginRight": "10px"}
+    body = []
+    for r in rows:
+        eid = r["id"]
+        sha = str(r["sha256"]).lower()
+        when = r["uploaded_at"].strftime("%d %b %Y %H:%M") if r.get("uploaded_at") else ""
+        body.append(html.Tr([
+            html.Td([html.Div(ev.purpose_label(r["purpose"]), style={"fontWeight": "600"}),
+                     html.Div(r["filename"], style={"color": "#667"})]),
+            html.Td([html.Div(when), html.Div(f"{(r.get('size_bytes') or 0) / 1024:.0f} KB", style={"color": "#667"})]),
+            html.Td(html.Code(sha[:16] + "…", title=sha, style={"fontSize": "11px"})),
+            html.Td([html.A("View", href=f"/evidence/{eid}", target="_blank", style=link),
+                     html.A("Download", href=f"/evidence/{eid}?download=1", style=link),
+                     html.A("As PDF", href=f"/evidence/{eid}?as=pdf", target="_blank", style=link)]),
+            html.Td([dbc.Button("Verify", id={"type": f"{P}-ev-verify", "id": eid}, size="sm", outline=True,
+                                color="secondary", n_clicks=0, style={"padding": "0 8px", "fontSize": "11.5px"}),
+                     html.Span(id={"type": f"{P}-ev-status", "id": eid}, style={"fontSize": "11.5px", "marginLeft": "8px"})]),
+        ], style={"fontSize": "12px", "verticalAlign": "top"}))
+    return dbc.Card(dbc.CardBody([
+        html.Div([html.Strong("Evidence register", style={"fontSize": "13px"}),
+                  html.Span(f"  {len(rows)} stored scan(s)", style=_MUTED)]),
+        html.Small("Every file is re-hashed (SHA-256) and compared with the fingerprint recorded at upload before it is shown. "
+                   "A missing or altered file is refused.", className="text-muted d-block mb-2"),
+        html.Div(dbc.Table([html.Thead(html.Tr([html.Th(h) for h in ("Document", "Uploaded", "SHA-256", "Open", "Integrity")])),
+                            html.Tbody(body)], size="sm", borderless=True, className="mb-2"),
+                 style={"overflowX": "auto"}),
+        dbc.Button("Verify all", id=f"{P}-ev-verify-all", size="sm", color="secondary", outline=True, n_clicks=0, className="me-2"),
+        html.A(dbc.Button("Download register (PDF)", size="sm", color="secondary", outline=True), href="/evidence/register.pdf",
+               target="_blank"),
+        html.Div(id=f"{P}-ev-summary", style={"marginTop": "8px"}),
+    ], className="py-2"), className="mb-2 mt-3")
+
+
 def hub_body(role: str, society_id: int, user_id: int | None, view: str | None = None) -> list:
     deep_step = step_from_view(view)
     if deep_step is not None:
@@ -856,6 +899,8 @@ def hub_body(role: str, society_id: int, user_id: int | None, view: str | None =
         out += _stage_active(society_id, role, user_id)
     else:
         out.append(dbc.Alert("This society is suspended. Contact the platform operator.", color="warning"))
+    if is_admin:
+        out.append(evidence_register(society_id))
     return out
 
 

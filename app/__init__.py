@@ -316,6 +316,8 @@ def create_app(config_name: str | None = None) -> Flask:
         app.register_blueprint(verify_bp)
         from app.routes.esign_routes import esign_bp
         app.register_blueprint(esign_bp, url_prefix="/api")
+        from app.routes.evidence_routes import evidence_bp
+        app.register_blueprint(evidence_bp)
         log.info("Blueprints registered ✓")
     except Exception as exc:
         log.warning("Blueprint registration partial: %s", exc)

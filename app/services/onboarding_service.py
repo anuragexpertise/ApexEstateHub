@@ -1233,6 +1233,12 @@ EVIDENCE_PURPOSES = {
     "registration_certificate","ca_rates_letter","adoption_minutes","adviser_appointment_letter",
 }
 
+def evidence_folder(society_id: int):
+    """Where a society's evidence scans live: <assets>/<society_id>/evidence/<sha256><ext>."""
+    from app.dash_apps.callbacks.drilldown_callbacks import ASSETS_ROOT
+    return ASSETS_ROOT / str(int(society_id)) / "evidence"
+
+
 def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filename: str,
                         data: bytes, uploaded_by: int, meta: dict, *, doc_id: str | None = None,
                         document_sha256: str | None = None, snapshot_sha256: str | None = None) -> dict:
@@ -1251,15 +1257,27 @@ def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filen
     if not data.startswith(EVIDENCE_TYPES[ext]):
         raise OnboardingError("The file does not look like a real %s." % ext.lstrip(".").upper())
     digest = _sha(data)
+    stored = f"{digest}{ext}"
+    # The file name IS its SHA-256, so the stored copy can be checked at any time (evidence_service.verify_row).
+    # Prove it now too: never record evidence whose file is not on disk byte-for-byte as uploaded.
     try:
-        from app.dash_apps.callbacks.drilldown_callbacks import ASSETS_ROOT
-        folder = ASSETS_ROOT / str(society_id) / "evidence"
+        folder = evidence_folder(society_id)
         folder.mkdir(parents=True, exist_ok=True)
-        stored = f"{digest}{ext}"
-        (folder / stored).write_bytes(data)
-    except Exception:
+        path = folder / stored
+        if path.is_file() and _sha(path.read_bytes()) != digest:
+            # Same content-addressed name, different bytes on disk: the stored copy was altered or damaged.
+            # The new upload hashes to this name by construction, so it is the genuine content; restore it.
+            log.warning("evidence file %s for society %s did not match its hash on disk; restoring from the new upload",
+                        stored, society_id)
+            path.write_bytes(data)
+        elif not path.is_file():
+            path.write_bytes(data)
+        if _sha(path.read_bytes()) != digest:                              # read-back: what is on disk is what was uploaded
+            raise OSError("read-back hash mismatch")
+    except Exception:                                                      # noqa: BLE001
         log.exception("could not keep evidence file for society %s", society_id)
-        stored = f"{digest}{ext}"
+        raise OnboardingError("The file could not be stored safely. Please upload it again; if it keeps failing, "
+                              "contact the platform operator.")
     row = _row("""INSERT INTO onboarding_evidence (society_id, purpose, acc_id, filename, stored_name,
                     sha256, size_bytes, meta, uploaded_by, doc_id, document_sha256, snapshot_sha256)
                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s) RETURNING id""",
