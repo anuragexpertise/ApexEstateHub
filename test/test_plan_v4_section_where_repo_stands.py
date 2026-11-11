@@ -50,7 +50,8 @@ class TestV4RepoStandStatus:
             migrations = [f for f in os.listdir("database/migrations") if f.endswith(".sql")]
         # Each migration may only create what estatehub.sql also defines; a new one is listed here on purpose.
         assert set(migrations) == {"001_society_signing_keys.sql", "002_master_instrument_verification.sql",
-                                   "003_paper_evidence_purposes.sql", "004_paper_sign_binding.sql"}
+                                   "003_paper_evidence_purposes.sql", "004_paper_sign_binding.sql",
+                                   "005_billing_waits_for_declaration.sql"}
 
     def test_float_count_reduced_from_v3(self):
         total = 0

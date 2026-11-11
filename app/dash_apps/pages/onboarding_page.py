@@ -607,7 +607,14 @@ def declaration_panel(society_id: int, role: str | None):
               dbc.Badge(f"Total: {st['total_pct'].normalize():f}%", color="success" if st["balanced"] else "danger", className="me-2"),
               dbc.Badge("Declaration PDF on file" if ev else "Declaration PDF not on file", color="success" if ev else "warning",
                         text_color=None if ev else "dark")]
-    kids = [html.Div([html.Strong("Builder's Declaration of undivided interest "),
+    hold = []
+    if ud.billing_waits(society_id):
+        hold = [dbc.Alert([html.I(className="fas fa-pause-circle me-2"),
+                           "Billing is on hold. This society bills by undivided interest, so no bills are raised until the "
+                           "Declaration is on file or Enrollment is completed with a recorded reason that the building has none. "
+                           "Bills then catch up from the billing start month."], color="warning", className="py-2 mb-2",
+                          style={"fontSize": "12.5px"})]
+    kids = hold + [html.Div([html.Strong("Builder's Declaration of undivided interest "),
                       dbc.Badge("done" if ok else "needed", color="success" if ok else "warning", text_color=None if ok else "dark")]),
             html.Div("Votes at a General Body meeting are weighted by each flat's undivided interest, so every flat needs its "
                      "share from the Declaration the builder filed, and the shares must total 100%. Download the workbook, fill in "
