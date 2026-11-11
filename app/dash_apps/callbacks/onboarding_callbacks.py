@@ -20,6 +20,7 @@ from flask import session
 import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
+from dash.exceptions import PreventUpdate
 
 from app.dash_apps.pages import onboarding_page as op
 from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
@@ -1031,40 +1032,60 @@ def register_onboarding_callbacks(app):
     # ── Upload optional document: store as evidence for Annex E (non-blocking) ──
     _OPT_LABEL = dict(ob.OPTIONAL_DOCS)
 
+    # The per-row status output is ALL, not MATCH: Dash rejects a callback whose MATCH output sits beside plain
+    # outputs (onb-body / onb-marker) with "Mismatched `MATCH` wildcards across `Output`s", and that one rejected
+    # callback stops the whole front-end callback graph, so the login society dropdown never loaded.
+    # ALL outputs may be mixed freely with plain ones; the callback returns one entry per row (no_update for the others).
     @app.callback(
-        Output({"type": f"{P}-opt-doc-status", "code": MATCH}, "children", allow_duplicate=True),
+        Output({"type": f"{P}-opt-doc-status", "code": ALL}, "children"),
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
-        Input({"type": f"{P}-opt-doc-upload", "code": MATCH}, "contents"),
-        State({"type": f"{P}-opt-doc-upload", "code": MATCH}, "filename"),
+        Input({"type": f"{P}-opt-doc-upload", "code": ALL}, "contents"),
+        State({"type": f"{P}-opt-doc-upload", "code": ALL}, "filename"),
         State("onb-view", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_opt_doc(contents, filename, view):
+    def onb_opt_doc(contents_list, filename_list, view):
+        trig = ctx.triggered_id
+        if not isinstance(trig, dict) or not ctx.outputs_list:
+            raise PreventUpdate
+        code = trig.get("code")
+        row_codes = [o["id"]["code"] for o in ctx.outputs_list[0]]       # layout order of the status divs
+        in_codes = [i["id"]["code"] for i in ctx.inputs_list[0]]
+        if code not in in_codes:
+            raise PreventUpdate
+        contents = contents_list[in_codes.index(code)]
+        filename = filename_list[in_codes.index(code)]
+
+        def row_msg(msg):
+            """Show msg in the triggered row only; leave the other rows alone."""
+            return [msg if c == code else no_update for c in row_codes]
+
         s = _session()
         if not contents or not s or not s[0]:
-            return no_update, no_update, no_update
+            raise PreventUpdate
         if s[2] != "admin":
-            return (_alert("Only the society's administrator can upload optional documents.", False),
+            return (row_msg(_alert("Only the society's administrator can upload optional documents.", False)),
                     no_update, no_update)
         sid, uid, role = s
-        code = ctx.triggered_id["code"]
+        label = _OPT_LABEL.get(code, code)
         raw = _decode(contents)
         if not raw:
-            return (_alert(f"Upload the {_OPT_LABEL.get(code, code)} (PDF, PNG or JPG).", False),
-                    no_update, no_update)
+            return row_msg(_alert(f"Upload the {label} (PDF, PNG or JPG).", False)), no_update, no_update
         try:
             ob._check_evidence_file(filename or "", raw)
         except ob.OnboardingError as exc:
-            return (_alert(f"{code}: {exc}", False), no_update, no_update)
+            return row_msg(_alert(f"{label}: {exc}", False)), no_update, no_update
         try:
             ob.store_evidence_file(sid, code, None, filename or "", raw, uid,
                                    {"kind": "optional_document", "source": "committee_hub"})
         except ob.OnboardingError as exc:
-            return (_alert(f"{code}: {exc}", False), no_update, no_update)
+            return row_msg(_alert(f"{label}: {exc}", False)), no_update, no_update
+        # The hub body is rebuilt, which replaces every status div; the row now shows "On file: <name>" itself
+        # (see onboarding_page._opt_doc_row), so the rows are left untouched here.
         body = op.hub_body(role, sid, uid, view=view or "committee")
-        return (_alert(f"{_OPT_LABEL.get(code, code)} recorded.", True), body, op.marker(sid))
+        return [no_update for _ in row_codes], body, op.marker(sid)
 
     # ── post go-live: Annexures F, G, H (build by the admin; sign by President / Secretary / Treasurer) ──────────
     @app.callback(
