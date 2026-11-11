@@ -996,6 +996,76 @@ def register_onboarding_callbacks(app):
         session["onb_minutes_bytes"] = base64.b64encode(raw).decode("ascii")
         return _alert(f"Signed minutes scan stored: {filename}.", True)
 
+    # ── Upload registration certificate: store as evidence and stamp the society row ──
+    @app.callback(
+        Output(f"{P}-reg-cert-status", "children", allow_duplicate=True),
+        Input(f"{P}-reg-cert-upload", "contents"),
+        State(f"{P}-reg-cert-upload", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_reg_cert(contents, filename):
+        s = _session()
+        if not contents or not s or not s[0]:
+            return no_update
+        if s[2] != "admin":
+            return _alert("Only the society's administrator can upload the registration certificate.", False)
+        sid, uid, role = s
+        raw = _decode(contents)
+        if not raw:
+            return _alert("Upload the registration certificate (PDF, PNG or JPG).", False)
+        try:
+            ob._check_evidence_file(filename or "", raw)
+        except ob.OnboardingError as exc:
+            return _alert(f"Registration certificate: {exc}", False)
+        try:
+            ev = ob.store_evidence_file(sid, "registration_certificate", None, filename or "", raw, uid,
+                                        {"kind": "registration_certificate", "source": "committee_hub"})
+            ob.db._execute("""UPDATE societies SET registration_certificate_file=%s, registration_certificate_hash=%s
+                               WHERE id=%s""",
+                           (filename or "registration_certificate.pdf", ev["sha256"], sid))
+        except ob.OnboardingError as exc:
+            return _alert(f"Registration certificate: {exc}", False)
+        return _alert(f"Registration certificate recorded: {filename} (SHA-256 {ev['sha256'][:16]}...).", True)
+
+    # ── Upload optional document: store as evidence for Annex E (non-blocking) ──
+    _OPT_LABEL = dict(ob.OPTIONAL_DOCS)
+
+    @app.callback(
+        Output({"type": f"{P}-opt-doc-status", "code": MATCH}, "children", allow_duplicate=True),
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input({"type": f"{P}-opt-doc-upload", "code": MATCH}, "contents"),
+        State({"type": f"{P}-opt-doc-upload", "code": MATCH}, "filename"),
+        State("onb-view", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_opt_doc(contents, filename, view):
+        s = _session()
+        if not contents or not s or not s[0]:
+            return no_update, no_update, no_update
+        if s[2] != "admin":
+            return (_alert("Only the society's administrator can upload optional documents.", False),
+                    no_update, no_update)
+        sid, uid, role = s
+        code = ctx.triggered_id["code"]
+        raw = _decode(contents)
+        if not raw:
+            return (_alert(f"Upload the {_OPT_LABEL.get(code, code)} (PDF, PNG or JPG).", False),
+                    no_update, no_update)
+        try:
+            ob._check_evidence_file(filename or "", raw)
+        except ob.OnboardingError as exc:
+            return (_alert(f"{code}: {exc}", False), no_update, no_update)
+        try:
+            ob.store_evidence_file(sid, code, None, filename or "", raw, uid,
+                                   {"kind": "optional_document", "source": "committee_hub"})
+        except ob.OnboardingError as exc:
+            return (_alert(f"{code}: {exc}", False), no_update, no_update)
+        body = op.hub_body(role, sid, uid, view=view or "committee")
+        return (_alert(f"{_OPT_LABEL.get(code, code)} recorded.", True), body, op.marker(sid))
+
     # ── post go-live: Annexures F, G, H (build by the admin; sign by President / Secretary / Treasurer) ──────────
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),

@@ -44,6 +44,8 @@ STAGES = (
 )
 CORE_OFFICES = ("president", "secretary", "treasurer")
 OFFICE_LABEL = {"president": "President", "secretary": "Secretary", "treasurer": "Treasurer"}
+OPTIONAL_DOCS = (("cash_count", "Cash-count certificate"), ("audited_report", "Audited statements"),
+                 ("review_letter", "CA review letter"), ("ca_rates_letter", "CA letter on TDS / GST rates"))
 FUND_TABS = ("SinkFund", "RepFund", "CorpusFund", "MajRepFund", "DepFund")
 BANK_TABS = ("BkAc", "SBI", "ICICI", "CiH", "Dp")
 RECEIVABLE_TABS = ("SDr", "SDrCash", "SDrDig")
