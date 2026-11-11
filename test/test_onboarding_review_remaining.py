@@ -13,13 +13,13 @@ def _read(*parts):
         return f.read()
 
 
-def test_activation_sql_requires_annex_d():
+def test_activation_sql_requires_annexes_a_to_e():
     sql = _read("database", "estatehub.sql")
     start = sql.index("CREATE OR REPLACE FUNCTION fn_activate_society")
     body = sql[start:sql.index("CREATE OR REPLACE VIEW vw_apartment_users", start)]
-    assert "ARRAY['A','B','C','D']" in body
+    assert "ARRAY['A','B','C','D','E']" in body
     assert "ARRAY['A','B','C']" not in body
-    assert "Annexes A, B, C and D must be sealed" in body
+    assert "Annexes A, B, C, D and E must be sealed" in body
 
 
 def test_dpdp_instruments_seeded_unverified_and_always_applicable():
@@ -86,8 +86,8 @@ def test_agreement_text_execution_block_lists_flat_and_signature(monkeypatch):
     monkeypatch.setattr(ob, "seated_officers", lambda sid: officers)
     monkeypatch.setattr(ob, "_row", lambda *a, **k: {"name": "Soc", "plan": "x"})
     monkeypatch.setattr(ob, "_operator", lambda: ("Op LLP", "Agra"))
-    hashes = {k: "h" * 64 for k in "ABCD"}
-    text = ob.agreement_text(5, "AG-1", hashes, {"A": {}, "B": {}, "C": {}, "D": {}})
+    hashes = {k: "h" * 64 for k in "ABCDE"}
+    text = ob.agreement_text(5, "AG-1", hashes, {"A": {}, "B": {}, "C": {}, "D": {}, "E": {"documents": []}})
     assert "flat A-1 (signature image 5/signatures/" in text
     assert "Sam, flat A-2 (no signature image on record)" in text
     assert "Treasurer: ____" in text
