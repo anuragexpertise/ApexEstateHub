@@ -48,7 +48,7 @@ def hint_for(flat: dict):
 def register_committee_callbacks(app):
 
     @app.callback(Output(f"{P}-user", "options"), Output(f"{P}-user", "value"), Output(f"{P}-name", "value"),
-                  Output(f"{P}-hint", "children"), Input(f"{P}-flat", "value"), prevent_initial_call=True)
+                  Output(f"{P}-hint", "children"), Input({"type": "form-field-hidden", "entity": "committee", "field": "flat"}, "value"), prevent_initial_call=True)
     @require_session
     def mc_pick_flat(apartment_id):
         c, err = _ctx()
@@ -64,7 +64,7 @@ def register_committee_callbacks(app):
         return options, (first["id"] if first else None), name, hint_for(flat)
 
     @app.callback(Output(f"{P}-name", "value", allow_duplicate=True), Input(f"{P}-user", "value"),
-                  State(f"{P}-flat", "value"), prevent_initial_call=True)
+                  State({"type": "form-field-hidden", "entity": "committee", "field": "flat"}, "value"), prevent_initial_call=True)
     @require_session
     def mc_pick_user(user_id, apartment_id):
         c, err = _ctx()
@@ -79,7 +79,7 @@ def register_committee_callbacks(app):
     @app.callback(_TOAST, Output(f"{P}-body", "children", allow_duplicate=True),
                   Output(f"{P}-end-office", "options", allow_duplicate=True),
                   Input(f"{P}-appoint-btn", "n_clicks"),
-                  State(f"{P}-office", "value"), State(f"{P}-flat", "value"), State(f"{P}-user", "value"),
+                  State(f"{P}-office", "value"), State({"type": "form-field-hidden", "entity": "committee", "field": "flat"}, "value"), State(f"{P}-user", "value"),
                   State(f"{P}-name", "value"), State(f"{P}-start", "date"), State(f"{P}-term-end", "date"),
                   State(f"{P}-ref", "value"), prevent_initial_call=True)
     @require_session

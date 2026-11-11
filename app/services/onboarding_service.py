@@ -2099,26 +2099,35 @@ def appoint_adviser(actor_id: int, society_id: int, kind: str, name: str, firm: 
     if te < ts:
         raise OnboardingError("The term end must be on or after the term start.")
     login_id = None
-    if login_email:
-        e = cs.clean_email(login_email)
-        if e is False:
-            raise OnboardingError("Enter a valid adviser email address.")
-        if _row("SELECT 1 AS x FROM users WHERE lower(email)=%s", (e,)):
-            raise OnboardingError("That email is already registered to another login.")
-        pw_err = validate_password(login_password or "")
-        if pw_err:
-            raise OnboardingError(pw_err)
-        login_id = _row("INSERT INTO users (society_id, email, password_hash, role, login_method, name, created_by) "
-                        "VALUES (%s,%s,%s,'adviser','password',%s,%s) RETURNING id",
-                        (society_id, e, generate_password_hash(login_password), name[:100], actor_id))["id"]
     try:
-        row = _row("""INSERT INTO adviser_appointments
-                       (society_id, kind, name, firm, membership_number, scope, term_start, term_end, resolution_id,
-                        login_user_id, active)
-                      VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
-                      RETURNING id""",
-                     (society_id, kind, name[:100], firm, membership_number, scope, ts, te,
-                      resolution_id, login_id))
+        with db._conn() as conn:
+            cur = conn.cursor()
+            if login_email:
+                e = cs.clean_email(login_email)
+                if e is False:
+                    raise OnboardingError("Enter a valid adviser email address.")
+                cur.execute("SELECT 1 AS x FROM users WHERE lower(email)=%s", (e,))
+                if cur.fetchone():
+                    raise OnboardingError("That email is already registered to another login.")
+                pw_err = validate_password(login_password or "")
+                if pw_err:
+                    raise OnboardingError(pw_err)
+                cur.execute(
+                    "INSERT INTO users (society_id, email, password_hash, role, login_method, name, created_by) "
+                    "VALUES (%s,%s,%s,'adviser','password',%s,%s) RETURNING id",
+                    (society_id, e, generate_password_hash(login_password), name[:100], actor_id))
+                login_id = cur.fetchone()["id"]
+
+            cur.execute("""INSERT INTO adviser_appointments
+                           (society_id, kind, name, firm, membership_number, scope, term_start, term_end, resolution_id,
+                            login_user_id, active)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
+                           RETURNING id""",
+                        (society_id, kind, name[:100], firm, membership_number, scope, ts, te,
+                         resolution_id, login_id))
+            row = cur.fetchone()
+    except OnboardingError:
+        raise
     except Exception:
         if login_id:
             db._execute("DELETE FROM users WHERE id=%s", (login_id,))
