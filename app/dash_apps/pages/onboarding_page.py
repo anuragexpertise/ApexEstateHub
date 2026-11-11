@@ -464,7 +464,7 @@ def esign_control(society_id: int, kind: str, subject_id: int, user_id: int, off
 def signing_panel(society_id: int, user_id: int | None, role: str | None = None):
     ag = ob.db._execute("SELECT id, body_text FROM society_agreements WHERE society_id=%s", (society_id,), fetch_one=True)
     sealed = ob.annex_status(society_id)
-    if not ag or not ag["body_text"] or any(sealed.get(c, {}).get("status") != "sealed" for c in "ABC"):
+    if not ag or not ag["body_text"] or any(sealed.get(c, {}).get("status") != "sealed" for c in ob.ANNEX_CODES):
         return html.Div("The Agreement is issued for signing once the three annexes are sealed.", style=_MUTED)
     st = ds.status("agreement", ag["id"])
     have = {x["office_code"] for x in st["signed"]}
@@ -694,11 +694,11 @@ def supplementary_section(society_id: int, role: str | None, user_id: int | None
         if r["blocked_by"] and r["status"] == "not built":
             body.append(html.Div(f"Waiting for Annexure {r['blocked_by']} to be signed and sealed first.", style=_MUTED))
         controls = []
-        if is_admin and r["status"] != "sealed" and not r["blocked_by"]:
+        if is_admin and r["status"] != "sealed" and not r["blocked_by"] and r["due"]:
             controls.append(dbc.Button("Refresh draft" if r["status"] == "draft" else "Prepare for signing",
                                        id={"type": f"{P}-supp-build", "code": r["code"]}, color="primary", outline=True, size="sm",
                                        n_clicks=0, className="me-2"))
-        if r["status"] == "draft" and r["mine"]:
+        if r["status"] == "draft" and r["mine"] and r["due"]:
             controls += [dbc.Input(id={"type": f"{P}-supp-pw", "code": r["code"]}, type="password", placeholder="Your login password",
                                    autoComplete="current-password", size="sm", style={"maxWidth": "240px", "display": "inline-block", "marginRight": "8px"}),
                          dbc.Button(f"Sign as {r['mine'][0].title()}", id={"type": f"{P}-supp-sign", "code": r["code"]}, color="success", size="sm", n_clicks=0)]

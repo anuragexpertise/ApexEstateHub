@@ -2781,6 +2781,10 @@ def build_supplementary_annex(society_id: int, code: str, actor_id: int | None =
         raise OnboardingError("Unknown supplementary annexure code.")
     if state_of(society_id) != "active":
         raise OnboardingError("Supplementary annexures can only be prepared after the society is active.")
+    due_from = _SUPP_DUE_FROM[code]
+    phase = society_phase(society_id) or "complete"
+    if phase in _PHASE_ORDER and _PHASE_ORDER.index(phase) < _PHASE_ORDER.index(due_from):
+        raise OnboardingError(f"Annexure {code} is prepared once the society reaches the {due_from} stage, so it records the final data.")
     agreement_hash = _agreement_hash(society_id)
     previous_annex_hash = agreement_hash
     if code != "F":
