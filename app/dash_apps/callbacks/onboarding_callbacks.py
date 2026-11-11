@@ -15,6 +15,8 @@ import json
 import logging
 import time
 
+from flask import session
+
 import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
@@ -93,25 +95,51 @@ def register_onboarding_callbacks(app):
         sid, uid, role = s
         if role != "admin" or not sid:
             return no_update, _alert("Only the society's administrator can seat the committee.", False), no_update
-        raw = _decode(xlsx_contents)
-        if not raw:
-            return no_update, _alert("Choose the filled Election Results.xlsx first.", False), no_update
         from app.services import xlsx_templates as xt
-        res = xt.parse_upload(xlsx_contents, xlsx_name or "", "Election Results", ["office"], max_rows=10)
-        if res.errors:
-            return no_update, _alert(" ".join(res.errors), False), no_update
+        # Use the freshly-uploaded workbook, falling back to rows already imported via
+        # "Fill forms from Election Results.xlsx" so the workbook need not be chosen again.
+        if xlsx_contents:
+            raw = _decode(xlsx_contents)
+            if not raw:
+                return no_update, _alert("Choose the filled Election Results.xlsx first.", False), no_update
+            res = xt.parse_upload(xlsx_contents, xlsx_name or "", "Election Results", ["office"], max_rows=10)
+            if res.errors:
+                return no_update, _alert(" ".join(res.errors), False), no_update
+            rows = res.rows
+            workbook_sha = ob._sha(raw)
+        else:
+            rows = session.get("onb_election_rows")
+            if not rows:
+                return no_update, _alert("Choose the filled Election Results.xlsx first (or use 'Fill forms from Election Results.xlsx').", False), no_update
+            res = type("R", (), {"rows": rows, "errors": []})()
+            workbook_sha = session.get("onb_workbook_sha256") or ""
+        # Use the freshly-uploaded minutes, falling back to the scan already stored via
+        # "Upload signed election minutes scan" so the minutes need not be chosen again.
+        if minutes_contents:
+            minutes_name_used = minutes_name or ""
+            minutes_bytes = _decode(minutes_contents)
+        else:
+            minutes_name_used = session.get("onb_minutes_name") or ""
+            minutes_b64 = session.get("onb_minutes_bytes")
+            minutes_bytes = base64.b64decode(minutes_b64) if minutes_b64 else None
+        if not minutes_bytes:
+            return no_update, _alert("Choose the signed minutes file first (or use 'Upload signed election minutes scan').", False), no_update
         k = len(ob.CORE_OFFICES)
         sig_files = {o: (rest[k + i], _decode(rest[i])) for i, o in enumerate(ob.CORE_OFFICES)}
         passwords = {o: rest[2 * k + i] or "" for i, o in enumerate(ob.CORE_OFFICES)}
         try:
-            msg = ob.seat_founding_committee(uid, sid, res.rows, minutes_name, _decode(minutes_contents), sig_files,
-                                             passwords, workbook_sha256=ob._sha(raw))
+            msg = ob.seat_founding_committee(uid, sid, rows, minutes_name_used, minutes_bytes, sig_files,
+                                             passwords, workbook_sha256=workbook_sha)
         except ob.PartialSeating as exc:                  # some offices are now seated: show them, keep the message
             body, mk = _body(sid, uid, role, view=_committee_view(sid))
             return body, _alert(str(exc), False), mk
         except ob.OnboardingError as exc:                 # nothing changed: leave the chosen files in place
             return no_update, _alert(str(exc), False), no_update
         body, mk = _body(sid, uid, role, view=_committee_view(sid))
+        session.pop("onb_election_rows", None)
+        session.pop("onb_workbook_sha256", None)
+        session.pop("onb_minutes_name", None)
+        session.pop("onb_minutes_bytes", None)
         return body, _alert(msg), mk
 
     @app.callback(
@@ -919,6 +947,8 @@ def register_onboarding_callbacks(app):
         data, errors = ob.validate_election_rows(res.rows)
         if errors:
             return (*keep, no_update, no_update, no_update, _alert("Fix the file and upload it again: " + " ".join(errors), False))
+        session["onb_election_rows"] = res.rows
+        session["onb_workbook_sha256"] = ob._sha(_decode(contents))
         seated = ob.seated_officers(s[0])
         filled = []
         per_field = []
@@ -940,6 +970,31 @@ def register_onboarding_callbacks(app):
                "Add each officer's temporary password, signature image and signed minutes, then press Seat. " \
                "Grievance officer fields are filled; press Save to keep them."
         return (*per_field, g["name"], g["email"], g["phone"], _alert(note))
+
+    # ── Upload signed election minutes scan: store for reuse by "Seat all three" ──
+    @app.callback(
+        Output(f"{P}-election-status", "children", allow_duplicate=True),
+        Input(f"{P}-election-scan", "contents"),
+        State(f"{P}-election-scan", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_election_scan(contents, filename):
+        s = _session()
+        if not contents or not s or not s[0]:
+            return no_update
+        if s[2] != "admin":
+            return _alert("Only the society's administrator can upload the minutes scan.", False)
+        raw = _decode(contents)
+        if not raw:
+            return _alert("Upload the signed minutes scan (PDF, PNG or JPG).", False)
+        try:
+            ob._check_evidence_file(filename or "", raw)
+        except ob.OnboardingError as exc:
+            return _alert(f"Signed minutes: {exc}", False)
+        session["onb_minutes_name"] = filename or ""
+        session["onb_minutes_bytes"] = base64.b64encode(raw).decode("ascii")
+        return _alert(f"Signed minutes scan stored: {filename}.", True)
 
     # ── post go-live: Annexures F, G, H (build by the admin; sign by President / Secretary / Treasurer) ──────────
     @app.callback(
