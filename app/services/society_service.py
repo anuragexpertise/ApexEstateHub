@@ -11,6 +11,7 @@ import re
 from werkzeug.security import generate_password_hash
 
 from app.security.audit_context import get_current_user_id
+from app.utils import today_ist
 from database.db_manager import db
 
 log = logging.getLogger(__name__)
@@ -102,7 +103,7 @@ def create_society_checked(data: dict) -> int:
     if constitution not in ("AOA", "REG_SOCIETY", "COOP", "GENERIC"):
         raise SocietyCreateError("Constitution must be one of: AOA, REG_SOCIETY, COOP, GENERIC.")
 
-    today = __import__("datetime").today_ist().isoformat()
+    today = today_ist().isoformat()
     try:
         result = db._execute(
             """INSERT INTO societies

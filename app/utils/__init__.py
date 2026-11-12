@@ -11,6 +11,21 @@ def now_ist() -> datetime:
     return datetime.now(tz=IST)
 
 
+def as_ist(dt: datetime | None) -> datetime | None:
+    """Make a database timestamp comparable with now_ist().
+
+    Columns such as users.locked_until and polls.ends_at are
+    ``timestamp without time zone`` and hold IST wall-clock time (the
+    connection sets the session timezone to Asia/Kolkata), so psycopg2
+    returns naive datetimes. Comparing those with the aware now_ist()
+    raises TypeError. Naive values are treated as IST; aware values are
+    returned unchanged.
+    """
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=IST)
+    return dt
+
+
 def today_ist() -> date:
     """Current date in IST."""
     return now_ist().date()

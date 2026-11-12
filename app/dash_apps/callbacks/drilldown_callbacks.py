@@ -2885,7 +2885,7 @@ def register_drilldown_callbacks(app):
         if not sid:
             return no_update
         import datetime
-        today = datetime.today_ist()
+        today = today_ist()
         month_start = today.replace(day=1)
         month_end = (month_start + datetime.timedelta(days=32)).replace(day=1) - datetime.timedelta(days=1)
         db._execute(

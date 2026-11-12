@@ -507,7 +507,7 @@ def _rcm_monthly_total(selected_fy: int | None, society_id: int | None) -> float
     if db_instance is None:
         return 0.0
     import datetime
-    today = datetime.today_ist()
+    today = today_ist()
     month_start = today.replace(day=1)
     try:
         rows = db_instance._execute(
