@@ -3153,6 +3153,17 @@ CREATE TABLE legal_instrument_catalog (
         )
     ),
     topic VARCHAR(40),
+    -- Researched but UNCHECKED source leads, loaded by database/legal_reference.py. Kept apart from notification_no / source_url
+    -- on purpose: those mean "someone opened the text and checked it" (see ck_instrument_verified_complete and
+    -- fn_verify_instrument). A candidate is only a starting point for the verifier; it is never shown as the instrument's link
+    -- and never counts as verification. candidate_checked_on is when the lead was researched, not when it was verified.
+    candidate_notification_no VARCHAR(255),
+    candidate_source_url TEXT CHECK (
+        candidate_source_url IS NULL
+        OR candidate_source_url ~* '^https?://'
+    ),
+    candidate_note TEXT,
+    candidate_checked_on DATE,
     CONSTRAINT uq_legal_instrument UNIQUE (
         regime_code,
         title,
@@ -9824,8 +9835,8 @@ BEGIN
         GREATEST(EXTRACT(DAY FROM AGE(CURRENT_DATE, r.due_date)),0)::INT,
         r.confirmed_by::INT, r.confirmed_at::TIMESTAMP, r.created_at::TIMESTAMP, r.gst_exempt_authority::TEXT
     FROM receivables r
-    LEFT JOIN accounts a    ON a.id  = r.acc_id
-    LEFT JOIN accounts ia   ON ia.id = r.interest_acc_id
+    LEFT JOIN accounts a    ON a.society_id  = r.society_id AND a.id  = r.acc_id
+    LEFT JOIN accounts ia   ON ia.society_id = r.society_id AND ia.id = r.interest_acc_id
     LEFT JOIN apartments ap ON ap.id = r.entity_id AND r.role='apartment'
     LEFT JOIN vendors v     ON  v.id = r.entity_id AND r.role='vendor'
     LEFT JOIN security_staff s ON s.id = r.entity_id AND r.role='security'
@@ -9870,7 +9881,7 @@ BEGIN
         p.paid_at::TIMESTAMP, p.confirmed_by::INT, p.confirmed_at::TIMESTAMP, p.created_at::TIMESTAMP,
         p.shift_fraction::NUMERIC, p.mode::VARCHAR(20)
     FROM payables p
-    LEFT JOIN accounts a       ON a.id = p.acc_id
+    LEFT JOIN accounts a       ON a.society_id = p.society_id AND a.id = p.acc_id
     LEFT JOIN security_staff s ON s.id = p.entity_id AND p.role='security'
     WHERE p.society_id = p_society_id
       AND (p_status      IS NULL OR p.status = p_status)
@@ -9927,7 +9938,7 @@ BEGIN
         r.reconciled_at::TIMESTAMP, r.reconciled_by::INT, r.bank_statement_line_id::INT,
         COALESCE(u.name, '')::VARCHAR(100) AS initiated_by
     FROM receipts r
-    LEFT JOIN accounts      a  ON a.id  = r.acc_id
+    LEFT JOIN accounts      a  ON a.society_id = r.society_id AND a.id  = r.acc_id
     LEFT JOIN apartments   ap  ON ap.id = r.entity_id AND r.role = 'apartment'
     LEFT JOIN vendors       v  ON  v.id = r.entity_id AND r.role = 'vendor'
     LEFT JOIN security_staff s ON  s.id = r.entity_id AND r.role = 'security'
@@ -9983,7 +9994,7 @@ BEGIN
         e.created_at::TIMESTAMP,
         e.reconciled_at::TIMESTAMP, e.reconciled_by::INT, e.bank_statement_line_id::INT
     FROM expenses e
-    LEFT JOIN accounts       a ON a.id = e.acc_id
+    LEFT JOIN accounts       a ON a.society_id = e.society_id AND a.id = e.acc_id
     LEFT JOIN vendors        v ON v.id = e.entity_id AND e.role = 'vendor'
     LEFT JOIN security_staff s ON s.id = e.entity_id AND e.role = 'security'
     WHERE e.society_id = p_society_id
@@ -15050,7 +15061,7 @@ BEGIN
         ) AS sale_value,
         ast.gst_disposal_liability
     FROM assets ast
-    JOIN accounts acc ON ast.acc_id = acc.id
+    JOIN accounts acc ON acc.society_id = ast.society_id AND ast.acc_id = acc.id
     WHERE ast.society_id = p_society_id
       AND ast.purchase_date <= v_fy_end
     ORDER BY acc.name, ast.purchase_date;
@@ -23952,18 +23963,7 @@ CREATE TABLE onboarding_events (
 
 -- law catalog: applies_when + topic are declared inline in CREATE TABLE legal_instrument_catalog.
 
--- Researched but UNCHECKED source leads, loaded by database/legal_reference.py. Kept apart from notification_no / source_url
--- on purpose: those mean "someone opened the text and checked it" (see ck_instrument_verified_complete and
--- fn_verify_instrument). A candidate is only a starting point for the verifier; it is never shown as the instrument's link
--- and never counts as verification. candidate_checked_on is when the lead was researched, not when it was verified.
-ALTER TABLE legal_instrument_catalog
-ADD COLUMN candidate_notification_no VARCHAR(255),
-ADD COLUMN candidate_source_url TEXT CHECK (
-    candidate_source_url IS NULL
-    OR candidate_source_url ~* '^https?://'
-),
-ADD COLUMN candidate_note TEXT,
-ADD COLUMN candidate_checked_on DATE;
+-- Researched-but-unchecked source leads (candidate_*) are declared inline in CREATE TABLE legal_instrument_catalog.
 
 -- pseudo-regime CENTRAL (central laws applying to every society)
 INSERT INTO

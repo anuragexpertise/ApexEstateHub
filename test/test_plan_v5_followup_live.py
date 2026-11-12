@@ -232,12 +232,25 @@ def test_15_an_adviser_cannot_sign_in_outside_an_appointment(w):
 # ── V5.12 minimisation ────────────────────────────────────────────────────────────────────────────────────────────
 def test_16_family_logins_need_an_adult_confirmation(w):
     from app.dash_apps.callbacks import bulk_enroll_callbacks as be
+    from app.services import undivided_declaration as ud
     db, sid = w["db"], w["sid"]
     base = {"flat_number": "F-1", "password": "Fam@123456", "name": "Kin", "user_type": "family"}
-    r = be._bulk_insert_apartment_users([{**base, "email": f"kin1{PID}@v5follow.example"}], sid, MASTER_ID)
-    assert r["success"] == 0 and "adults only" in r["failed"][0][1]
-    r = be._bulk_insert_apartment_users([{**base, "email": f"kin2{PID}@v5follow.example", "adult_confirmed": "yes"}], sid, MASTER_ID)
-    assert r["success"] == 1, r
+    # Enrolment is gated on a complete Builder's Declaration (shares total 100% and the PDF on file);
+    # that gate has its own tests, so here it is treated as satisfied.
+    with patch.object(ud, "status", lambda _sid: {"balanced": True, "evidence": True}):
+        r = be._bulk_insert_apartment_users([{**base, "email": f"kin1{PID}@v5follow.example"}], sid, MASTER_ID)
+        assert r["success"] == 0 and "adults only" in r["failed"][0][1]
+        r = be._bulk_insert_apartment_users([{**base, "email": f"kin2{PID}@v5follow.example", "adult_confirmed": "yes"}], sid, MASTER_ID)
+        assert r["success"] == 1, r
+
+
+def test_16b_enrolment_waits_for_the_builders_declaration(w):
+    from app.dash_apps.callbacks import bulk_enroll_callbacks as be
+    from app.services import undivided_declaration as ud
+    base = {"flat_number": "F-1", "password": "Fam@123456", "name": "Kin", "user_type": "owner", "email": f"kin3{PID}@v5follow.example"}
+    with patch.object(ud, "status", lambda _sid: {"balanced": False, "evidence": False}):
+        r = be._bulk_insert_apartment_users([base], w["sid"], MASTER_ID)
+    assert r["success"] == 0 and "Builder's Declaration" in r["skipped"][0][1]
 
 
 def test_17_id_proof_and_photo_are_optional_and_hidden_from_the_operator(w):

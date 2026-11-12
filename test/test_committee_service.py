@@ -3,6 +3,7 @@
 Hermetic tests need no database. The live tests need a seeded throwaway Postgres and explicit opt-in
 (ESTATEHUB_LIVE_TESTS=1, see test/live_db_gate.py); every write happens inside one transaction that is rolled back.
 """
+import json
 import os
 import re
 import sys
@@ -247,7 +248,8 @@ def test_the_tab_shows_forms_to_the_admin_and_only_the_committee_to_owners():
     def ids(node, found=None):
         found = set() if found is None else found
         if getattr(node, "id", None):
-            found.add(node.id)
+            # Dash pattern-matching ids are dicts, which a set cannot hold.
+            found.add(json.dumps(node.id, sort_keys=True) if isinstance(node.id, dict) else node.id)
         kids = getattr(node, "children", None)
         for k in (kids if isinstance(kids, (list, tuple)) else [kids]):
             if k is not None and not isinstance(k, (str, int, float)):
@@ -256,8 +258,10 @@ def test_the_tab_shows_forms_to_the_admin_and_only_the_committee_to_owners():
     from app.dash_apps.pages.committee_page import committee_tab
     admin_ids = set().union(*[ids(n) for n in committee_tab("admin", 1)])
     owner_ids = set().union(*[ids(n) for n in committee_tab("apartment", 1)])
-    assert {"mc-appoint-btn", "mc-end-btn", "mc-flat", "mc-body"} <= admin_ids
-    assert "mc-body" in owner_ids and not {"mc-appoint-btn", "mc-end-btn", "mc-flat"} & owner_ids
+    # The flat is now picked through the drill-in selector, whose hidden field has a pattern-matching id.
+    flat = json.dumps({"type": "form-field-hidden", "entity": "committee", "field": "flat"}, sort_keys=True)
+    assert {"mc-appoint-btn", "mc-end-btn", flat, "mc-body"} <= admin_ids
+    assert "mc-body" in owner_ids and not {"mc-appoint-btn", "mc-end-btn", flat} & owner_ids
 
 
 # ── the Dash callbacks, driven directly with the session identity patched ─────────────────────────────────────

@@ -18,6 +18,7 @@ import os
 from html import escape
 
 from flask import Blueprint, Response, abort, request, send_file
+from flask_login import login_required
 
 from app.security.audit_context import (
     get_current_society_id,
@@ -56,6 +57,7 @@ def _audit(sid: int, uid: int, action: str, eid: int | None, extra: dict) -> Non
 
 
 @evidence_bp.route("/register.pdf")
+@login_required
 def register_pdf():
     sid, uid = _scope()
     soc = ob._row("SELECT name FROM societies WHERE id=%s", (sid,)) or {}
@@ -66,6 +68,7 @@ def register_pdf():
 
 
 @evidence_bp.route("/<int:evidence_id>")
+@login_required
 def evidence_file(evidence_id: int):
     sid, uid = _scope()
     try:

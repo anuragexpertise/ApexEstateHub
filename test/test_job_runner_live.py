@@ -67,6 +67,12 @@ def test_anchor_job_fails_loudly_when_a_chain_does_not_verify(db):
 def test_anchor_job_passes_on_an_intact_ledger(db):
     if not os.getenv("SECRET_VAULT_KEY"):
         pytest.skip("needs the seed's SECRET_VAULT_KEY")
+    # Other live tests commit societies that have ledger entries but never went through onboarding, which is
+    # what issues a society's signing keys. Give those societies keys the way onboarding does, so the job
+    # judges the ledgers rather than the leftovers.
+    from app.services.signing_service import ensure_society_keys
+    for r in db._execute("SELECT DISTINCT society_id FROM transactions WHERE ledger_seq IS NOT NULL", fetch_all=True) or []:
+        ensure_society_keys(int(r["society_id"]), None, db=db)
     assert jr.run_job("anchors", db=db, alert=lambda *a: None)["status"] == "ok"
 
 
