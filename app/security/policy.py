@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import logging
 
-from app.utils import now_ist
+from app.utils import as_ist, now_ist
 from database.db_manager import db
 from database.money import D
 
@@ -266,7 +266,7 @@ def _denial_reason(grants, resource, action, society_id):
         if g.get("resource") != resource or g.get("action") != action:
             continue
         exp = g.get("effective_to")
-        if exp is not None and exp <= _now():
+        if exp is not None and as_ist(exp) <= _now():
             expired.append(g)
         else:
             now_active.append(g)
