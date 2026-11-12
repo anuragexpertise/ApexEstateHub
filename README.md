@@ -24,7 +24,7 @@
 ### Status snapshot — 12 Nov 2026 (commit `ee55a64`)
 
 "As found" is the commit as pulled; "with patch" is the same commit plus the
-fixes listed in §19.1 (D1–D6). Everything was run locally with the commands CI
+fixes listed in §19.1 (D1–D8, plus the open items closed there). Everything was run locally with the commands CI
 uses; it is **not** a reading of the GitHub Actions status.
 
 | Check | As found | With patch |
@@ -35,13 +35,13 @@ uses; it is **not** a reading of the GitHub Actions status.
 | Demo logins listed in §0 (11) | not run on the unpatched app | ✅ 11 of 11 |
 | Account lockout | 6th bad password → HTTP 503 for every later attempt, including the correct password | HTTP 401 while locked; correct password works once the lock expires |
 | Cross-society file access (`/assets/<other society>/…`) | HTTP 200 | HTTP 403 (master still allowed; `default/…` still shared) |
-| Hermetic suite, as CI runs it | ❌ 12 failed · 1,377 passed · 518 skipped | ❌ 1 failed · 1,388 passed · 518 skipped |
-| Full suite on a fresh seeded database | ❌ 21 failed · 52 errors · 2,000 passed · 3 skipped | ❌ 8 failed · 2,065 passed · 3 skipped |
+| Hermetic suite, as CI runs it | ❌ 12 failed · 1,377 passed · 518 skipped | ✅ 0 failed · 1,389 passed · 519 skipped |
+| Full suite on a fresh seeded database (`TZ=Asia/Kolkata`) | ❌ 21 failed · 52 errors · 2,000 passed · 3 skipped | ✅ 0 failed · 2,074 passed · 3 skipped |
 | `scripts/check_callback_guards.py` | ✅ 55 files | ✅ |
-| `scripts/inventory_endpoints.py --check` | ❌ exit 1: 12 endpoints missing from the manifest, 16 stale entries | ❌ unchanged (see O1) |
+| `scripts/inventory_endpoints.py --check` | ❌ exit 1: 12 endpoints missing from the manifest, 16 stale entries | ✅ exit 0 (336 endpoints; 126 still `unclassified`) |
 | `bandit -lll -iii` | ✅ exit 0 | ✅ |
-| `pip-audit --strict` with the CI ignore list | ❌ `pypdf 5.9.0`: 103 advisories | ❌ unchanged (see O2) |
-| `ruff check --select F,E9` | 23 findings (11 unused imports, 9 unused variables, 3 f-strings without placeholders) and 4 undefined names hidden by `# noqa: F821` | 23 findings, no undefined names |
+| `pip-audit --strict` with the CI ignore list | ❌ `pypdf 5.9.0`: 103 advisories | ✅ "No known vulnerabilities found, 18 ignored" (unused `pypdf` pin removed) |
+| `ruff check --select F,E9 app database scripts run.py wsgi.py` | 23 findings (all outside `app/`: unused imports and variables, f-strings without placeholders) and 5 undefined-name sites hidden by `# noqa: F821` | 23 findings, no undefined names |
 | `scripts/release_check.py status` | exit 1 — Provisional: 5.1, 5.2, 5.3 outstanding; 68 rules/decision types without an opinion | same |
 
 ---
@@ -369,7 +369,7 @@ them (`app/services/dpdp_service.py` centralises them).
 | Purpose-bound access trail | 🟡 | `audit_events` records who did what, with a reason, policy version and correlation id; read-access logging of personal data is not comprehensive. |
 | Notice and **consent records** | ✅ | `privacy_notices` is versioned per society (title, body ≥100 characters, effective dates, current flag) and a notice gate holds every user before the dashboard. `consent_records` stores per-purpose consent with the notice version and a withdrawal time; dues and gate safety are recorded as `legitimate_use` **[Verify]**, optional purposes as `consent`. Draft notices carry a "pending legal review" banner. |
 | Data-principal rights (access, correction, **erasure**, nominee, grievance) | ✅ / 🟡 | `rights_requests` records type, due date (`RESPONSE_DAYS = 30`, **[Verify]**) and outcome. Erasure blanks the **profile** only, after a 48-hour notice, and only when `fn_erasure_blockers` reports no blocker (`fn_erase_person_profile`); it never touches ledger rows. Self-service is through Privacy in Settings, not a separate portal. |
-| **Retention and deletion schedule** | 🟡 | `retention_rules` (default 5 years, configurable per society) are read by `retention_engine.sweep_all_societies`, which the in-process retention loop calls once a day. **That function currently only lists each society's rules and returns empty placeholder results; it reports and purges nothing**, so no deletion schedule is enforced yet (see O4 in §19.1). Whether any Act requires a longer period for a class of record is still a question for the CA (`docs/PHASE0_TRACKER.md`, task 0.4). |
+| **Retention and deletion schedule** | 🟡 | `retention_rules` (default 5 years, configurable per society) are read by `retention_engine.sweep_all_societies`, which the in-process retention loop calls once a day. **It reports how many rows are past the retention period (respecting the hold flags) but never deletes**, so no deletion schedule is enforced yet (§19.1). Whether any Act requires a longer period for a class of record is still a question for the CA (`docs/PHASE0_TRACKER.md`, task 0.4). |
 | Breach notification workflow | 🟡 | `breach_register` records incidents and statuses. **Notification** to the Data Protection Board / affected persons is an operational process, not automated. |
 | Grievance officer / contact | ✅ | `societies.grievance_officer_name/email/phone` are shown on the login page and in every notice; a grievance is one of the request types in the rights register. |
 
@@ -2283,31 +2283,39 @@ Rule 12: dbc.Label/Button take ONE positional arg (children). dbc.Label("x", htm
 
 ### 19.1 Defects found on 12 Nov 2026
 
-Found by running commit `ee55a64` (see the status snapshot at the top). **D1–D6
-are fixed in the accompanying patch** and re-tested; **O1–O5 are open**.
+Found by running commit `ee55a64` (see the status snapshot at the top). **D1–D8
+are fixed in the accompanying patches** and re-tested. What is still open is listed
+below the table.
 
 | # | Defect | Evidence | Status |
 |---|---|---|---|
 | D1 | `today_ist` was called on the `datetime` *module* (`app/services/society_service.py`, `app/dash_apps/drilldown/renderers.py`, `app/dash_apps/callbacks/drilldown_callbacks.py`), raising `AttributeError`. `create_society_checked` therefore failed for every new society, and two drill-down helpers that compute the month start failed too | 61 of the 73 failing/erroring tests in the live suite | Fixed: import `today_ist` from `app.utils` |
-| D2 | Account lockout was broken. `users.locked_until` is `timestamp without time zone` (IST wall-clock; the pool sets the session timezone to `Asia/Kolkata`), so psycopg2 returns a naive value, and `locked_until > now_ist()` (aware) raised `TypeError`. After the 5th bad password every later attempt returned HTTP 503, including the correct password; the lock-expiry test failed with the same error | Reproduced against the running app; `test_lockout_expires_allows_login` | Fixed: new `app.utils.as_ist()` treats naive DB timestamps as IST; used at all four comparisons in `auth_service.py` |
+| D2 | Account lockout was broken. `users.locked_until` is `timestamp without time zone` (IST wall-clock; the pool sets the session timezone to `Asia/Kolkata`), so psycopg2 returns a naive value, and `locked_until > now_ist()` (aware) raised `TypeError`. After the 5th bad password every later attempt returned HTTP 503, including the correct password | Reproduced against the running app; `test_lockout_expires_allows_login` | Fixed: new `app.utils.as_ist()` treats naive DB timestamps as IST; used at all four comparisons in `auth_service.py` |
 | D3 | The same naive/aware comparison in the RBAC denial-reason builder (`app/security/policy.py`, `effective_to`) | `test_expired_assignment_is_denied` | Fixed with `as_ist()` |
 | D4 | The same comparison killed the `poll-scheduler` thread at start-up (`app/services/scheduler.py`, `next_run - now`), so poll expiry and the "poll ending soon" reminders never ran | `Exception in thread poll-scheduler` in the boot log | Fixed with `as_ist()` |
-| D5 | `retention_sweep_loop` logged through an undefined name `log` (hidden by `# noqa: F821`), so any sweep result raised `NameError`, caught and logged as "retention sweep job failed" | Code reading; `ruff` | Fixed: uses `logger` |
+| D5 | `retention_sweep_loop` logged through an undefined name `log` (hidden by `# noqa: F821`), so any sweep result raised `NameError`, caught and logged as "retention sweep job failed". The sweep itself was also a stub that read a column that does not exist (`table_name`; the table has `record_class`) | Code reading; `ruff --ignore-noqa` | Fixed: uses `logger`; the sweep is rewritten (see "Retention" below) |
 | D6 | Cross-society file access. The `/assets/<path>` guard looked at `parts[1]` of the **absolute filesystem path** (never numeric), so the society check never ran; had it run, `abort` and `current_user` were not imported (`# noqa: F821`) and it would have returned 500. A society-1 user could download society-2 files | Reproduced: society-1 session got HTTP 200 for `/assets/2/…` | Fixed: the society is read from the first segment of the requested path; other society → 403, master allowed, `default/…` shared |
+| D7 | **Duplicated rows in the payables, receivables, receipts, expenses and fixed-asset lists once there is more than one society.** `accounts` is keyed by `(society_id, id)`, but `fn_payables_named`, `fn_receivables_named`, `fn_receipts_list`, `fn_expenses_list` and `fn_fixed_assets_list_fy` joined it on `id` alone, so each row was repeated for every society that has an account with that id, and could show another society's account name. A fresh seed has one society, so it never showed there | `test_salary_and_payables_cards_open_a_list_that_matches_their_total`: 24 rows instead of 3 after other tests had created societies; reproduced in `psql` | Fixed in `database/estatehub.sql` and, for existing databases, in `database/migrations/006_accounts_join_by_society.sql` (apply it with `psql -f`; safe to repeat) |
+| D8 | `/evidence/<id>` and `/evidence/register.pdf` checked the signed-in administrator only inside a helper, with no `@login_required`, so the endpoint inventory saw them as unguarded | `inventory_endpoints.py --check` | Fixed: `@login_required` added; the role and society checks are unchanged. A signed-out browser is now redirected to the login page instead of receiving 401 |
 
-**Open (not changed by the patch):**
+**Also changed, not defects in the application:**
 
-* **O1 — Endpoint manifest drift (breaks CI).** `scripts/inventory_endpoints.py --check` exits 1: 12 new endpoints are not in `docs/authz_manifest.json` and 16 entries are stale (callbacks removed from `onboarding_wizard_callbacks.py` and `paper_sign_callbacks.py`). This is why `test_resident_surface_authz.py::test_inventory_check_passes` fails. Classify the new endpoints by hand, then run `inventory_endpoints.py --write`; a regenerated manifest covers 336 endpoints (33 `action`, 67 `exempt`, 98 `legacy-gated`, 138 `unclassified`).
-* **O2 — Dependency audit (breaks CI).** `pypdf==5.9.0` has 103 advisories outside the workflow's ignore list, and nothing in the repository imports it. Upgrade or remove it. Other pins that no file imports directly: `Flask-Migrate`, `Flask-WTF`, `WTForms`, `Flask-Session`, `plotly`, `alembic`, `passlib`, `bcrypt`, `APScheduler`, `requests`, `email-validator` (`plotly` and `requests` are Dash dependencies, so check before removing any).
-* **O3 — Eight live-suite failures remain.** Cause is stated only where it was established:
-  * `test_committee_service::test_the_tab_shows_forms_to_the_admin_and_only_the_committee_to_owners`: the test helper `ids()` puts Dash pattern-matching ids (dicts) into a `set` (`TypeError: unhashable type: 'dict'`). Test-side.
-  * `test_er_remediation_live::test_only_the_unavoidable_forward_reference_is_an_alter_table`: finds an `ALTER TABLE` forward reference to `legal_instrument_catalog` as well as `societies` in `estatehub.sql`. The schema or the test expectation is stale.
-  * `test_job_runner_live::test_anchor_job_passes_on_an_intact_ledger`: the `anchors` job fails for societies created by earlier live tests, which commit their rows, because they have no active `SIGNING_LEDGER` key. `create_society_checked` does not provision signing keys; confirm that onboarding does, otherwise the scheduled `anchors` job will fail for new societies.
-  * `test_phase1_followup_live::test_salary_and_payables_cards_open_a_list_that_matches_their_total` (3 cases): the list returns 18 rows where 3 are expected. Cause not determined.
-  * `test_plan_v5_followup_live::test_16_family_logins_need_an_adult_confirmation`: `_bulk_insert_apartment_users` returns no failure entry for a family login. Cause not determined.
-  * `test_resident_surface_authz::test_inventory_check_passes`: O1.
-* **O4 — Retention is not enforced.** `app/services/retention_engine.sweep_all_societies` returns placeholder results without reading or deleting any data, although `retention_rules` exist and §6/§25 describe a sweep.
-* **O5 — Test isolation.** Live tests commit societies and other rows to the seeded database, so a second run against the same database fails (for example payables lists show 18 rows instead of 3). Use a fresh database for each live run.
+* `docs/authz_manifest.json` was out of date and made `inventory_endpoints.py --check` (and `test_inventory_check_passes`) fail. The 16 stale entries (callbacks that no longer exist) were removed and the 12 new endpoints classified: eight onboarding/bulk upload callbacks and the two evidence routes as `legacy-gated` (session plus a role or society check, awaiting a named capability), two display-only callbacks as `exempt` with a reason. 126 endpoints remain `unclassified`; the ratchet only stops that number growing.
+* `pypdf==5.9.0` was removed from `requirements.txt`: nothing imports it, and it carried 103 advisories outside the CI ignore list.
+* `legal_instrument_catalog`'s four `candidate_*` columns were an `ALTER TABLE` after the `CREATE TABLE`; they are now declared inline, so `societies` is again the only forward-reference `ALTER`, as `test_only_the_unavoidable_forward_reference_is_an_alter_table` expects. Databases that already have the columns need nothing.
+* Three live tests were out of date and were corrected: the committee tab test (the flat is now chosen through a drill-in selector with a pattern-matching id), the family-login test (enrolment is gated on a complete Builder's Declaration, which the test did not set up; a second test now covers the gate itself) and the anchor-job test (it ran against societies left behind by other tests that have ledger entries but never went through onboarding, so no signing keys).
+
+**Retention.** `app/services/retention_engine.py` now reports instead of returning placeholders. For each row of `retention_rules` it counts the rows of the record class (the table named by `record_class`, when it exists and has `created_at`) that are older than `default_retention_years`. If `hold_for_disputes` or `hold_for_audits` is set (both default to true) nothing is marked eligible. **It never deletes.** Purging stays a decision for the CA (`docs/PHASE0_TRACKER.md`, task 0.4).
+
+**Signing keys.** `create_society_checked` does not issue a society's four signing keys; the onboarding submit does (`ensure_society_keys`, called before any opening balance is posted). That is consistent with the anchors job, which only anchors societies that have ledger entries. A society that gets ledger entries without completing onboarding makes the `anchors` job fail for that society (loudly, by design). Whether any production path can do that was not established; the live tests do it routinely.
+
+**Still open**
+
+* **O1 — Retention is report-only.** No deletion schedule is enforced; see above.
+* **O2 — Existing databases need migration 006** (D7). Until it is applied, the lists above stay wrong wherever more than one society exists.
+* **O3 — Live tests need a fresh database and an IST clock.** They commit societies and other rows, so a second run against the same database fails (for example a payables list shows rows left by other tests). Several also compare application dates (IST) with `date.today()`; run them with `TZ=Asia/Kolkata` (the alias `Asia/Calcutta` is missing from some tzdata builds, which silently gives UTC) so they pass between 00:00 and 05:30 IST.
+* **O4 — 126 endpoints are still `unclassified` in the authorization manifest**, and 108 are `legacy-gated` rather than tied to a named capability.
+* **O5 — Dependencies.** Pins that no file imports directly: `Flask-Migrate`, `Flask-WTF`, `WTForms`, `Flask-Session`, `plotly`, `alembic`, `passlib`, `bcrypt`, `APScheduler`, `requests`, `email-validator` (`plotly` and `requests` are Dash dependencies, so check before removing any).
 
 ---
 
@@ -3069,13 +3077,13 @@ There is no `pytest.ini`/`pyproject.toml`; run pytest from the repository root.
 
 ```
 hermetic, as found:       12 failed, 1377 passed, 518 skipped, 169 deselected
-hermetic, with patch:      1 failed, 1388 passed, 518 skipped, 169 deselected
+hermetic, with patch:      0 failed, 1389 passed, 519 skipped, 169 deselected
 full + live, as found:    21 failed, 52 errors, 2000 passed, 3 skipped
-full + live, with patch:   8 failed, 2065 passed, 3 skipped
+full + live, with patch:   0 failed, 2074 passed, 3 skipped
 ```
 
 The failures are itemised in §19.1. Live runs used a fresh database seeded with
-`database/migrate.py --seed` and `ESTATEHUB_LIVE_TESTS=1`; run them against a fresh database each time (O5).
+`database/migrate.py --seed`, `ESTATEHUB_LIVE_TESTS=1` and `TZ=Asia/Kolkata`; run them against a fresh database each time (O3).
 Re-run the commands below before quoting a number; this is a snapshot, not a guarantee.
 
 ```bash
@@ -3118,11 +3126,10 @@ says to record it in `docs/`.
 | `check_save_handlers.py` | Save handlers' keys against the schema/entity metadata | no |
 | `release_check.py gate/status/worklist` | Phase-5 assurance gates and what may be claimed | operator/CI gate |
 
-On 12 Nov 2026 `check_callback_guards.py` exits 0 (55 files) but
-`inventory_endpoints.py --check` **exits 1**: 12 endpoints are missing from
-`docs/authz_manifest.json` and 16 manifest entries are stale (§19.1, O1). CI's
-`hermetic` job runs that command, so it fails until the manifest is brought up to date.
-The `security-scans` job also fails on `pypdf` (O2); `bandit -lll -iii` passes.
+On 12 Nov 2026 `check_callback_guards.py` exits 0 (55 files). `inventory_endpoints.py --check`
+exited 1 on `ee55a64` (12 endpoints missing from `docs/authz_manifest.json`, 16 stale) and exits 0
+with the patch; `pip-audit` failed on `pypdf` and passes once that unused pin is removed (§19.1).
+`bandit -lll -iii` passes.
 
 `docs/endpoint_inventory.md` is generated by `inventory_endpoints.py --write`;
 do not hand-edit it. The reviewed classifications live in
@@ -3158,7 +3165,7 @@ The signing key must not sit on the database host.
 Besides the `run_job.py` jobs, `app/services/scheduler.py::init_scheduler()` starts three
 daemon threads when the web app boots (skipped when `TESTING` is set and in the Werkzeug
 reloader's parent process): `poll-scheduler` (expires polls and sends "ending soon"
-reminders), `retention-sweep` (daily, see O4) and `poll-redis-listener`. With several
+reminders), `retention-sweep` (daily; report-only, §19.1) and `poll-redis-listener`. With several
 gunicorn workers each worker starts its own copy.
 
 ### Database roles
@@ -3219,9 +3226,10 @@ passes. Marking an opinion `disputes` does not cover a rule.
 
 ### Retention and privacy operations
 
-`app/services/retention_engine.py` is called once a day by the in-process retention loop
-and is meant to sweep each society's `retention_rules` (default 5 years, configurable), but
-the function is currently a placeholder that purges and reports nothing (§19.1, O4).
+`app/services/retention_engine.py` is called once a day by the in-process retention loop.
+It reports, per society and record class, how many rows are older than the rule's
+`default_retention_years` (default 5, configurable) and honours the dispute/audit hold flags,
+but it **never deletes** anything (§19.1).
 `app/services/dpdp_service.py` enforces the 48-hour erasure notice and refuses
 erasure while `fn_erasure_blockers` reports a blocker; erasure blanks the
 person's profile and never touches ledger rows. Breach and rights requests stay
