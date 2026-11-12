@@ -7,9 +7,9 @@ import logging
 import os
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, abort, jsonify, request
 from flask_cors import CORS
-from flask_login import LoginManager, login_required
+from flask_login import LoginManager, current_user, login_required
 from werkzeug.exceptions import HTTPException
 
 # ── Patch Dash 2.14.2 IndexError bug (State + ALL pattern matching) ──
@@ -189,18 +189,15 @@ def create_app(config_name: str | None = None) -> Flask:
     @app.route("/assets/<path:filename>")
     @login_required
     def serve_asset(filename):
-        # G1: Only serve assets belonging to the user's own society
-        # Assets are stored under app/assets/<society_id>/...\n        # Extract the society_id from the filename path prefix
-        # The filename may contain a society_id directory prefix
-        asset_path = Path(str(assets_path)) / filename
-        # Parse society_id from the path
-        parts = str(asset_path).split('/')
-        if len(parts) > 1 and parts[1].isdigit():
-            file_society_id = int(parts[1])
-            # Get current user's society_id
-            if not hasattr(current_user, 'society_id') or current_user.society_id != file_society_id:  # noqa: SIM102, F821
-                if current_user.role != 'master':  # noqa: F821
-                    abort(403)  # noqa: F821
+        # G1: Only serve assets belonging to the user's own society.
+        # Assets live under app/assets/<society_id>/...; the first segment of
+        # the *requested* path (not of the absolute filesystem path) is the
+        # society id. default/... and other non-numeric folders are shared.
+        first_segment = filename.replace("\\", "/").lstrip("/").split("/", 1)[0]
+        if first_segment.isdigit():
+            same_society = str(getattr(current_user, "society_id", None)) == str(int(first_segment))
+            if not same_society and getattr(current_user, "role", None) != "master":
+                abort(403)
         return send_from_directory(str(assets_path), filename)
 
     @app.route("/print_doc/<doc_type>")

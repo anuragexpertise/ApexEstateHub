@@ -12,7 +12,7 @@ import time
 
 import app.services.push_service as PushService
 from app.services.redis_broker import _REDIS_URL, redis_sync
-from app.utils import now_ist
+from app.utils import as_ist, now_ist
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def poll_scheduler_loop():
             continue
             
         now = now_ist()
-        wait_seconds = (next_run - now).total_seconds()
+        wait_seconds = (as_ist(next_run) - now).total_seconds()
         
         if wait_seconds > 0:
             poll_event_signal.wait(timeout=wait_seconds)
@@ -61,7 +61,7 @@ def retention_sweep_loop():
         try:
             results = sweep_all_societies()
             for key, result in results.items():
-                log.info(  # noqa: F821
+                logger.info(
                     "Retention sweep %s.%s: %d rows too old, %d eligible for purge",
                     key[0], key[1], len(result.too_old), result.total_eligible,
                 )

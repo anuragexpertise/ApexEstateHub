@@ -18,7 +18,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from app.models.user import active_select
 from app.security.password_policy import validate_password
 from app.security.roles import resolve_role
-from app.utils import now_ist
+from app.utils import as_ist, now_ist
 from database.db_manager import db
 
 log = logging.getLogger(__name__)
@@ -149,7 +149,7 @@ def authenticate_user(email: str, password: str,
         return None
 
     locked_until = row.get("locked_until")
-    if locked_until and locked_until > now_ist():
+    if locked_until and as_ist(locked_until) > now_ist():
         log.warning("Locked account attempt: %s until %s", email, locked_until)
         return None
 
@@ -169,7 +169,7 @@ def authenticate_pin(email: str, pin: str,
     if not row:
         return None
     locked_until = row.get("locked_until")
-    if locked_until and locked_until > now_ist():
+    if locked_until and as_ist(locked_until) > now_ist():
         log.warning("Locked account PIN attempt: %s until %s", email, locked_until)
         return None
     stored = row.get("pin_hash") or ""
@@ -187,7 +187,7 @@ def authenticate_pattern(email: str, pattern: str,
     if not row:
         return None
     locked_until = row.get("locked_until")
-    if locked_until and locked_until > now_ist():
+    if locked_until and as_ist(locked_until) > now_ist():
         log.warning("Locked account pattern attempt: %s until %s", email, locked_until)
         return None
     stored = row.get("pattern_hash") or ""
@@ -368,7 +368,7 @@ def verify_password_with_lockout(user_id: int, password: str) -> tuple[bool, str
     if not row:
         return False, "Invalid Admin Password."
     locked_until = row.get("locked_until")
-    if locked_until and locked_until > now_ist():
+    if locked_until and as_ist(locked_until) > now_ist():
         return False, f"Account temporarily locked after too many wrong attempts. Try again in {LOCKOUT_MINUTES} minutes."
     stored = row.get("password_hash") or ""
     if not stored or not check_password_hash(stored, password or ""):
