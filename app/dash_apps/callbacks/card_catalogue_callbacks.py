@@ -4,19 +4,16 @@ import logging
 import time
 from datetime import date, datetime
 
-import dash_bootstrap_components as dbc
 from dash import ALL, Input, Output, State, ctx, html, no_update
 from dash.exceptions import PreventUpdate
 
 from app.dash_apps.drilldown.loaders import _is_db_error
-from database.db_manager import db
-from app.security.guards import require_session
 from app.security.audit_context import (
-    get_current_user_id,
-    get_current_user_role,
-    get_current_society_id,
     get_server_auth,
 )
+from app.security.guards import require_session
+from app.utils import today_ist
+from database.db_manager import db
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +77,7 @@ def _style_kpi_value(card_id, value, raw):
             if isinstance(raw, str):
                 for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
                     try:
-                        raw_date = datetime.strptime(raw.strip(), fmt).date()
+                        raw_date = datetime.strptime(raw.strip(), fmt).date()  # noqa: DTZ007
                         break
                     except ValueError:
                         continue
@@ -92,7 +89,7 @@ def _style_kpi_value(card_id, value, raw):
                 raw_date = raw
             else:
                 return value
-            diff = (raw_date - date.today()).days
+            diff = (raw_date - today_ist()).days
             if diff < 0:
                 color = "#de5c52"
             elif diff <= 7:
@@ -100,7 +97,7 @@ def _style_kpi_value(card_id, value, raw):
             else:
                 color = "#17976e"
             return html.Span(value, style={"color": color, "fontWeight": "700"})
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
     return value
 
@@ -192,13 +189,13 @@ def format_kpi_value(value, fmt: str) -> str:
             if isinstance(value, str):
                 for f in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
                     try:
-                        value = datetime.strptime(value, f).date(); break
+                        value = datetime.strptime(value, f).date(); break  # noqa: DTZ007
                     except ValueError:
                         pass
             if isinstance(value, datetime):
                 value = value.date()
             if isinstance(value, date):
-                today = date.today()
+                today = today_ist()
                 diff  = (value - today).days
                 if diff == 0:  return "Today"
                 if diff == 1:  return "Tomorrow"
@@ -356,8 +353,8 @@ def register_card_catalogue_callbacks(app):
             if role == "admin" and own_user_id:
                 overrides = {
                     "kpi_concerns_assigned": (
-                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
-                        "WHERE society_id=%s AND role='ADM' AND entity_id=%s AND status='assigned'",
+                        ("SELECT COUNT(*)::INT AS v FROM concerns_assigns "
+                        "WHERE society_id=%s AND role='ADM' AND entity_id=%s AND status='assigned'"),
                         (sid, own_user_id),
                     )
                 }
@@ -367,61 +364,61 @@ def register_card_catalogue_callbacks(app):
                 overrides = {
                     # dues / receivables scoped to this apartment
                     "kpi_apartments_dues": (
-                        "SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
+                        ("SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
                         "FROM receivables WHERE entity_id=%s AND role='apartment' "
-                        "AND status IN ('pending','partial')",
+                        "AND status IN ('pending','partial')"),
                         (apt_id,),
                     ),
                     "kpi_receivables_total": (
-                        "SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
+                        ("SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
                         "FROM receivables WHERE entity_id=%s AND role='apartment' "
-                        "AND status IN ('pending','partial')",
+                        "AND status IN ('pending','partial')"),
                         (apt_id,),
                     ),
                     "kpi_advance_credits": (
-                        "SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
+                        ("SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
                         "FROM receivables WHERE entity_id=%s AND role='apartment' "
-                        "AND status='credit'",
+                        "AND status='credit'"),
                         (apt_id,),
                     ),
                     "kpi_my_pending_dues": (
-                        "SELECT COALESCE(SUM(amount - paid_amount), 0) AS v "
+                        ("SELECT COALESCE(SUM(amount - paid_amount), 0) AS v "
                         "FROM receivables "
                         "WHERE society_id=%s AND entity_id=%s AND role='apartment' "
-                        "AND status IN ('pending','partial')",
+                        "AND status IN ('pending','partial')"),
                         (sid, apt_id),
                     ),
                     "kpi_my_overdue_dues": (
-                        "SELECT COALESCE(SUM(amount - paid_amount), 0) AS v "
+                        ("SELECT COALESCE(SUM(amount - paid_amount), 0) AS v "
                         "FROM receivables "
                         "WHERE society_id=%s AND entity_id=%s AND role='apartment' "
-                        "AND status IN ('pending','partial') AND due_date<CURRENT_DATE",
+                        "AND status IN ('pending','partial') AND due_date<CURRENT_DATE"),
                         (sid, apt_id),
                     ),
                     "kpi_receipts_month": (
-                        "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
+                        ("SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
                         "WHERE entity_id=%s AND role='apartment' AND status='confirmed' "
-                        "AND DATE_TRUNC('month',receipt_date)=DATE_TRUNC('month',CURRENT_DATE)",
+                        "AND DATE_TRUNC('month',receipt_date)=DATE_TRUNC('month',CURRENT_DATE)"),
                         (apt_id,),
                     ),
                     "kpi_concerns_open": (
-                        "SELECT COUNT(*)::INT AS v FROM concerns "
-                        "WHERE society_id=%s AND created_by=%s AND status='open'",
+                        ("SELECT COUNT(*)::INT AS v FROM concerns "
+                        "WHERE society_id=%s AND created_by=%s AND status='open'"),
                         (sid, own_user_id),
                     ),
         "kpi_concerns_not_closed": (
-            "SELECT COUNT(*)::INT AS v FROM concerns "
-            "WHERE society_id=%s AND created_by=%s AND status != 'closed'",
+            ("SELECT COUNT(*)::INT AS v FROM concerns "
+            "WHERE society_id=%s AND created_by=%s AND status != 'closed'"),
             (sid, own_user_id),
         ),
         # Owner's bought event tickets for upcoming events — scoped to the
         # apartment owner's user_id (event_tickets.user_id = users.id).
         "kpi_events_tickets": (
-            "SELECT COUNT(*)::INT AS v FROM event_ticket_items eti "
+            ("SELECT COUNT(*)::INT AS v FROM event_ticket_items eti "
             "JOIN event_tickets et ON et.id = eti.event_ticket_id "
             "JOIN events e ON e.id = et.event_id "
             "WHERE et.user_id=%s AND e.event_date>=CURRENT_DATE "
-            "AND et.status IN ('pending','active')",
+            "AND et.status IN ('pending','active')"),
             (own_user_id,),
         ),
                     # kpi_concerns_total is deliberately NOT overridden here —
@@ -436,8 +433,8 @@ def register_card_catalogue_callbacks(app):
                         # (apartments.id, a linked_id) and role='ADM' (admin's
                         # code) — neither ever matches a real row, so this
                         # KPI always showed 0.
-                        "SELECT COUNT(*)::INT AS v FROM gate_access "
-                        "WHERE entity_id=%s AND role='APT' AND time_in::DATE=CURRENT_DATE",
+                        ("SELECT COUNT(*)::INT AS v FROM gate_access "
+                        "WHERE entity_id=%s AND role='APT' AND time_in::DATE=CURRENT_DATE"),
                         (own_user_id,),
                     ),
                     "kpi_owner_member_since": (
@@ -456,20 +453,20 @@ def register_card_catalogue_callbacks(app):
                 # DB calls per refresh for no effect — removed.
                 overrides = {
                     "kpi_receipts_month": (
-                        "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
+                        ("SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
                         "WHERE entity_id=%s AND role='vendor' AND status='confirmed' "
-                        "AND DATE_TRUNC('month',receipt_date)=DATE_TRUNC('month',CURRENT_DATE)",
+                        "AND DATE_TRUNC('month',receipt_date)=DATE_TRUNC('month',CURRENT_DATE)"),
                         (vendor_id,),
                     ),
                     "kpi_receipts_total": (
-                        "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
-                        "WHERE entity_id=%s AND role='vendor' AND status='confirmed'",
+                        ("SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
+                        "WHERE entity_id=%s AND role='vendor' AND status='confirmed'"),
                         (vendor_id,),
                     ),
                     "kpi_receivables_total": (
-                        "SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
+                        ("SELECT COALESCE(SUM(amount-paid_amount),0)::NUMERIC AS v "
                         "FROM receivables WHERE entity_id=%s AND role='vendor' "
-                        "AND status IN ('pending','partial')",
+                        "AND status IN ('pending','partial')"),
                         (vendor_id,),
                     ),
                     "kpi_my_pass_expiry": (
@@ -477,50 +474,50 @@ def register_card_catalogue_callbacks(app):
                         # MAX(valid_until) keyed on vendor_passes.user_id (= users.id),
                         # not via a users JOIN on linked_id (which returned NULL
                         # whenever the linkage didn't line up, leaving the card "—").
-                        "SELECT MAX(vp.valid_until)::DATE AS v "
+                        ("SELECT MAX(vp.valid_until)::DATE AS v "
                         "FROM vendor_passes vp "
-                        "WHERE vp.user_id=%s AND vp.status='active'",
+                        "WHERE vp.user_id=%s AND vp.status='active'"),
                         (own_user_id,),
                     ),
                     "kpi_gate_logs": (
                         # Same fix as the apartment override above: vendor_id
                         # is linked_id (vendors.id), but gate_access.entity_id
                         # is always users.id.
-                        "SELECT COUNT(*)::INT AS v FROM gate_access "
-                        "WHERE entity_id=%s AND role='VND' AND time_in::DATE=CURRENT_DATE",
+                        ("SELECT COUNT(*)::INT AS v FROM gate_access "
+                        "WHERE entity_id=%s AND role='VND' AND time_in::DATE=CURRENT_DATE"),
                         (own_user_id,),
                     ),
                     "kpi_concerns_open": (
-                        "SELECT COUNT(*)::INT AS v FROM concerns c "
+                        ("SELECT COUNT(*)::INT AS v FROM concerns c "
                         "WHERE c.society_id=%s AND c.status='open' "
                         "AND EXISTS (SELECT 1 FROM concerns_assigns ca "
-                        "WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s)",
+                        "WHERE ca.concern_id=c.id AND ca.role='VND' AND ca.entity_id=%s)"),
                         (sid, vendor_id),
                     ) if vendor_id else None,
                     "kpi_concerns_assigned": (
-                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
-                        "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='assigned'",
+                        ("SELECT COUNT(*)::INT AS v FROM concerns_assigns "
+                        "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='assigned'"),
                         (sid, vendor_id),
                     ) if vendor_id else None,
                     "kpi_concerns_invited": (
-                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
-                        "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='invited'",
+                        ("SELECT COUNT(*)::INT AS v FROM concerns_assigns "
+                        "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='invited'"),
                         (sid, vendor_id),
                     ) if vendor_id else None,
                     "kpi_concerns_resolved": (
-                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
-                        "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='resolved'",
+                        ("SELECT COUNT(*)::INT AS v FROM concerns_assigns "
+                        "WHERE society_id=%s AND role='VND' AND entity_id=%s AND status='resolved'"),
                         (sid, vendor_id),
                     ) if vendor_id else None,
                     # Vendor's own bought event tickets for upcoming events —
                     # scoped to the vendor user's user_id, same pattern as
                     # the apartment override above.
                     "kpi_events_tickets": (
-                        "SELECT COUNT(*)::INT AS v FROM event_ticket_items eti "
+                        ("SELECT COUNT(*)::INT AS v FROM event_ticket_items eti "
                         "JOIN event_tickets et ON et.id = eti.event_ticket_id "
                         "JOIN events e ON e.id = et.event_id "
                         "WHERE et.user_id=%s AND e.event_date>=CURRENT_DATE "
-                        "AND et.status IN ('pending','active')",
+                        "AND et.status IN ('pending','active')"),
                         (own_user_id,),
                     ) if own_user_id else None,
                 }
@@ -531,59 +528,59 @@ def register_card_catalogue_callbacks(app):
                 # `security_assigned_name` was never used.
                 overrides = {
                     "kpi_security_shift_count": (
-                        "SELECT COUNT(*)::INT AS v FROM gate_access "
-                        "WHERE entity_id=%s AND role='SEC' AND time_out IS NOT NULL",
+                        ("SELECT COUNT(*)::INT AS v FROM gate_access "
+                        "WHERE entity_id=%s AND role='SEC' AND time_out IS NOT NULL"),
                         (own_user_id,),
                     ),
                     "kpi_security_salary_due": (
-                        "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM payables "
-                        "WHERE entity_id=%s AND role='security' AND status='pending'",
+                        ("SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM payables "
+                        "WHERE entity_id=%s AND role='security' AND status='pending'"),
                         (sec_id,),
                     ),
                     "kpi_receipts_month": (
                         # Security sees society-wide receipts for this month (they collect cash)
-                        "SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
+                        ("SELECT COALESCE(SUM(amount),0)::NUMERIC AS v FROM receipts "
                         "WHERE society_id=%s AND status='confirmed' "
-                        "AND DATE_TRUNC('month',receipt_date)=DATE_TRUNC('month',CURRENT_DATE)",
+                        "AND DATE_TRUNC('month',receipt_date)=DATE_TRUNC('month',CURRENT_DATE)"),
                         (sid,),
                     ),
                     "kpi_gate_logs": (
-                        "SELECT COUNT(*)::INT AS v FROM gate_access "
-                        "WHERE society_id=%s AND time_in::DATE=CURRENT_DATE",
+                        ("SELECT COUNT(*)::INT AS v FROM gate_access "
+                        "WHERE society_id=%s AND time_in::DATE=CURRENT_DATE"),
                         (sid,),
                     ),
                     "kpi_concerns_open": (
-                        "SELECT COUNT(*)::INT AS v FROM concerns c "
+                        ("SELECT COUNT(*)::INT AS v FROM concerns c "
                         "WHERE c.society_id=%s AND c.status='open' "
                         "AND EXISTS (SELECT 1 FROM concerns_assigns ca "
-                        "WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s)",
+                        "WHERE ca.concern_id=c.id AND ca.role='SEC' AND ca.entity_id=%s)"),
                         (sid, sec_id),
                     ) if sec_id else None,
                     "kpi_concerns_assigned": (
-                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
-                        "WHERE society_id=%s AND role='SEC' AND entity_id=%s AND status='assigned'",
+                        ("SELECT COUNT(*)::INT AS v FROM concerns_assigns "
+                        "WHERE society_id=%s AND role='SEC' AND entity_id=%s AND status='assigned'"),
                         (sid, sec_id),
                     ) if sec_id else None,
                     "kpi_concerns_resolved": (
-                        "SELECT COUNT(*)::INT AS v FROM concerns_assigns "
-                        "WHERE society_id=%s AND role='SEC' AND entity_id=%s AND status='resolved'",
+                        ("SELECT COUNT(*)::INT AS v FROM concerns_assigns "
+                        "WHERE society_id=%s AND role='SEC' AND entity_id=%s AND status='resolved'"),
                         (sid, sec_id),
                     ) if sec_id else None,
                     "kpi_presumed_visitor": (
-                        "SELECT COUNT(*)::INT AS v FROM gate_access "
+                        ("SELECT COUNT(*)::INT AS v FROM gate_access "
                         "WHERE society_id=%s AND time_in::DATE=CURRENT_DATE AND role='VIS' "
-                        "AND (time_out IS NULL OR time_out::DATE > CURRENT_DATE)",
+                        "AND (time_out IS NULL OR time_out::DATE > CURRENT_DATE)"),
                         (sid,),
                     ),
                     # Security staffer's own bought event tickets for
                     # upcoming events — scoped to their user_id, same
                     # pattern as the apartment/vendor overrides above.
                     "kpi_events_tickets": (
-                        "SELECT COUNT(*)::INT AS v FROM event_ticket_items eti "
+                        ("SELECT COUNT(*)::INT AS v FROM event_ticket_items eti "
                         "JOIN event_tickets et ON et.id = eti.event_ticket_id "
                         "JOIN events e ON e.id = et.event_id "
                         "WHERE et.user_id=%s AND e.event_date>=CURRENT_DATE "
-                        "AND et.status IN ('pending','active')",
+                        "AND et.status IN ('pending','active')"),
                         (own_user_id,),
                     ) if own_user_id else None,
                 }
@@ -687,7 +684,7 @@ def register_card_catalogue_callbacks(app):
                 rows = db._execute(batch_sql, tuple(batch_params), fetch_all=True)
                 value_by_slot = {r["slot"]: r.get("v") for r in (rows or [])}
                 batch_ok = True
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 batch_net_error = _is_db_error(exc)
                 err_msg = f"KPI batch query failed: {str(exc)[:160]}"
                 print(f"⚠️  {err_msg}")
@@ -721,7 +718,7 @@ def register_card_catalogue_callbacks(app):
                             value = _style_kpi_value(card_id, value, raw)
                             _set_cached(ckey, value)
                             results[idx] = value
-                        except Exception as exc:
+                        except Exception as exc:  # noqa: BLE001
                             if _is_db_error(exc):
                                 cached = _get_cached(ckey)
                                 if cached is not None:

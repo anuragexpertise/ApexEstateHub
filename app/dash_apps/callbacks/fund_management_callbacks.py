@@ -3,14 +3,23 @@
 Fund Management Callbacks — Admin-only Capital/Reserve/Sinking/Repair/Corpus
 fund utilization. Mirrors expense_callbacks.py pattern.
 """
-from dash import Output, Input, State, callback, no_update, ctx, dcc, ALL
-from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
+from dash import ALL, Input, Output, State, ctx, dcc, no_update
+from dash.exceptions import PreventUpdate
+
 from app.dash_apps.drilldown import loaders
-from database.db_manager import db
-from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
-from app.security.audit_context import get_current_user_role, get_current_user_id, get_current_society_id
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.guards import require_session
+from database.db_manager import db
+from database.money import (  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
+    D,
+    money,
+    rupee,
+)
 
 # A law-protected principal is called out in warm amber rather than the
 # green used for a spendable balance, so "nothing here is drawable" is
@@ -141,7 +150,7 @@ def register_fund_management_callbacks(app):
 
             return fund_options, expense_options, balances_table, log_table, toast
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return no_update, no_update, no_update, no_update, dbc.Alert(f"Error loading data: {e}", color="danger", style={"borderRadius": "8px"})
 
     @app.callback(
@@ -202,7 +211,7 @@ def register_fund_management_callbacks(app):
                 (sid, int(fund_acc_id), int(expense_acc_id), particulars, amount, mode, user_id, cheque_no, trx_id, approval_ref, approval_date),
                 fetch_one=True
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return dbc.Alert(f"Not saved: {e}", color="danger", style={"borderRadius": "8px"}), *([no_update] * 10)
 
         # Past this point the journal exists — nothing below may report a
@@ -220,10 +229,10 @@ def register_fund_management_callbacks(app):
             # Reload data — label comes straight from the account's real
             # name (see refresh callback's comment above), no id-keyed map.
             fund_balances = loaders.get_fund_balances(sid)
-            fund_options = build_fund_options(fund_balances)
+            build_fund_options(fund_balances)
 
             expense_accounts = loaders.get_expense_bank_accounts(sid)
-            expense_options = [{"label": f"{a.get('name')} ({a.get('account_code')})", "value": str(a.get('id'))} for a in expense_accounts]
+            [{"label": f"{a.get('name')} ({a.get('account_code')})", "value": str(a.get('id'))} for a in expense_accounts]
 
             balances_table = build_balances_table(fund_balances)
             utilization_log = loaders.get_fund_utilization_log(sid, limit=20)
@@ -232,7 +241,7 @@ def register_fund_management_callbacks(app):
             return (toast, None, None, None, None, None, None, None, None,
                     balances_table, log_table)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"❌ submit_fund_utilization: utilization committed but card refresh failed: {e}")
             return (_committed_with_refresh_failure(toast, e),
                     None, None, None, None, None, None, None, None,
@@ -261,7 +270,7 @@ def register_fund_management_callbacks(app):
             bank_options = _bank_account_options_for_mapping(sid)
             map_table = build_fund_bank_mapping_rows(mappings, bank_options)
             return log_table, map_table
-        except Exception:
+        except Exception:  # noqa: BLE001
             return no_update, no_update
 
     # ── Appropriate income into a fund (Corpus interest → Repair Fund) ─────
@@ -319,7 +328,7 @@ def register_fund_management_callbacks(app):
                  get_current_user_id(), approval_ref or None, approval_date or None),
                 fetch_one=True,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return dbc.Alert(f"Not saved: {e}", color="danger", style={"borderRadius": "8px"}), *([no_update] * 10)
 
         # Past this point the journal exists. Building the tables below used to
@@ -350,7 +359,7 @@ def register_fund_management_callbacks(app):
                     None, None, None, None, None, None,
                     build_balances_table(fund_balances),
                     build_appropriation_log_table(loaders.get_fund_appropriation_log(sid, limit=20)))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"❌ submit_appropriation: appropriation committed but card refresh failed: {e}")
             return (_committed_with_refresh_failure(toast, e),
                     no_update, no_update, None, None, None, None, None, None,
@@ -400,7 +409,7 @@ def register_fund_management_callbacks(app):
                 )
                 toast = dbc.Alert("Appropriation cancelled.",
                                   color="secondary", style={"borderRadius": "8px"})
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return dbc.Alert(f"Not saved: {e}", color="danger", style={"borderRadius": "8px"}), no_update, no_update
 
         # Committed — a reload failure must not read as a failed action.
@@ -408,7 +417,7 @@ def register_fund_management_callbacks(app):
             return (toast,
                     build_appropriation_log_table(loaders.get_fund_appropriation_log(sid, limit=20)),
                     build_balances_table(loaders.get_fund_balances(sid)))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"❌ confirm_or_cancel_appropriation: status changed but card refresh failed: {e}")
             return _committed_with_refresh_failure(toast, e), no_update, no_update
 
@@ -459,7 +468,7 @@ def register_fund_management_callbacks(app):
                     fetch_one=True,
                 )
                 saved += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(str(e))
 
         if errors:
@@ -479,7 +488,7 @@ def register_fund_management_callbacks(app):
                     build_fund_bank_mapping_rows(
                         loaders.get_fund_bank_mappings(sid),
                         _bank_account_options_for_mapping(sid)))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"❌ save_fund_bank_mappings: mappings saved but card refresh failed: {e}")
             return _committed_with_refresh_failure(toast, e), no_update
 
@@ -493,14 +502,14 @@ def _bank_account_options_for_mapping(sid):
     """
     try:
         rows = loaders.get_expense_bank_accounts(sid)
-    except Exception:
+    except Exception:  # noqa: BLE001
         rows = []
     primary = None
     try:
         srow = db._execute("SELECT primary_bank_account_id FROM societies WHERE id=%s",
                            (sid,), fetch_one=True)
         primary = srow.get("primary_bank_account_id") if srow else None
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     options = []
     for a in (rows or []):
@@ -655,10 +664,10 @@ def build_balances_table(fund_balances):
                    style={"color": _FUND_LOCK, "fontSize": "11px"}),
             html.Span([
                 html.Strong("Statutory principal is protected."),
-                " The locked share cannot be drawn down under RERA / the Model "
+                (" The locked share cannot be drawn down under RERA / the Model "
                 "Bye-Laws, and the database refuses any request that would breach "
                 "it. Interest earned on a locked fund is usable — it is credited "
-                "to the Interest Income account rather than drawn from the fund.",
+                "to the Interest Income account rather than drawn from the fund."),
             ], style={"fontSize": "10.5px", "color": "#666"}),
         ], style={"marginTop": "10px", "padding": "9px 12px", "background": "#fffaf5",
                   "borderLeft": f"3px solid {_FUND_LOCK}", "borderRadius": "0 6px 6px 0",

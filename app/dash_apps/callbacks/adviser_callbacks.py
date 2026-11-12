@@ -13,7 +13,11 @@ import dash_bootstrap_components as dbc
 from dash import MATCH, Input, Output, State, ctx, no_update
 
 from app.dash_apps.pages import adviser_page as ap
-from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.guards import require_session
 from app.services import adviser_decisions as ad
 

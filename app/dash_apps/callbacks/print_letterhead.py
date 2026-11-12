@@ -47,7 +47,7 @@ def get_letterhead_assets(society: dict, society_id) -> dict:
         from database.db_manager import db
         sec = db._execute("SELECT holder_name, signature_image FROM committee_offices WHERE society_id=%s AND office_code='secretary' "
                           "AND status='active' ORDER BY term_start DESC LIMIT 1", (society_id,), fetch_one=True) or {}
-    except Exception:
+    except Exception:  # noqa: BLE001
         sec = {}
     return {
         "society_name": society.get("name") or "",

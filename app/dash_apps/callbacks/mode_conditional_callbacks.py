@@ -24,7 +24,7 @@ with this wrapper id at all, per renderers.py).
 
 from __future__ import annotations
 
-from dash import Input, Output, MATCH
+from dash import MATCH, Input, Output
 
 
 def register_mode_conditional_callbacks(app):

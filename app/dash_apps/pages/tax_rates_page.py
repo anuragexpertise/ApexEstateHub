@@ -11,7 +11,7 @@ The society always comes from the server session (the callbacks), never from thi
 from __future__ import annotations
 
 import dash_bootstrap_components as dbc
-from dash import dcc, html
+from dash import html
 
 from app.services import tax_rate_service as trs
 
@@ -47,8 +47,8 @@ def status_banner(society_id: int):
     st = trs.status(society_id)
     if st["pending"]:
         return dbc.Alert([html.I(className="fas fa-exclamation-triangle me-2"), html.Strong("Pending CA confirmation. "),
-                          "The TDS and GST figures below were entered at setup (or edited since) and are provisional "
-                          "until the CA or Treasurer confirms them."], color="warning", className="py-2 mb-3",
+                          ("The TDS and GST figures below were entered at setup (or edited since) and are provisional "
+                          "until the CA or Treasurer confirms them.")], color="warning", className="py-2 mb-3",
                          style={"fontSize": "12.5px"})
     who = f" by {st['confirmed_by']}" if st.get("confirmed_by") else ""
     return dbc.Alert([html.I(className="fas fa-check-circle me-2"), f"Confirmed{who} on {_fmt_dt(st['confirmed_at'])}."],
@@ -172,7 +172,9 @@ def tax_rates_tab(role: str, society_id: int | None):
     if not can_edit and role != "admin":
         return None
     out = [html.Div(id=f"{P}-toast"), html.Div(tax_rates_body(society_id, can_edit), id=f"{P}-body")]
-    from app.dash_apps.callbacks.itc_callbacks import itc_section          # task 1.7: only for those who may act
+    from app.dash_apps.callbacks.itc_callbacks import (
+        itc_section,  # task 1.7: only for those who may act
+    )
     try:
         itc_part = itc_section(society_id)
     except Exception as exc:                                               # noqa: BLE001  (never stop the rates tab loading)

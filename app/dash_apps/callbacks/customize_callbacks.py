@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import dash_bootstrap_components as dbc
-from dash import Input, Output, State, clientside_callback, dcc, html, no_update
+from dash import Input, Output, State, clientside_callback, html, no_update
 from dash.exceptions import PreventUpdate
 
 from app.dash_apps.drilldown.loaders import _is_db_error
@@ -13,15 +13,15 @@ from app.dash_apps.pages.card_catalogue import (
     KPI_CARDS,
     make_kpi_card,
 )
-from app.security.guards import require_session
-from app.security.authorization import Cap
-from app.security.service_guard import audit_event, require_action
 from app.security.audit_context import (
-    get_current_user_id,
-    get_current_user_role,
     get_current_society_id,
+    get_current_user_role,
 )
+from app.security.authorization import Cap
+from app.security.guards import require_session
+from app.security.service_guard import audit_event, require_action
 from app.utils.ux_toasts import error_toast
+
 
 def _kpi_ids_for_portal_tab(portal, tab):
     """Duplicate-safe KPI list for a given portal+tab."""
@@ -30,7 +30,7 @@ def _kpi_ids_for_portal_tab(portal, tab):
             _KPI_PORTAL_ENTRIES,
             get_kpi_ids_for_portal_tab,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         return list(KPI_CARDS.keys())
  
     if not portal and not tab:
@@ -164,7 +164,7 @@ def register_customize_callbacks(app):
             data = json.loads(value)
             if "active" in data and "available" in data:
                 return data
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"capture_order parse error: {e}")
         return no_update
  
@@ -184,7 +184,7 @@ def register_customize_callbacks(app):
             )
             return [{"label": t.replace("_", " ").title(), "value": t}
                     for t in get_tabs_for_portal(portal)]
-        except Exception:
+        except Exception:  # noqa: BLE001
             return []
 
     @app.callback(
@@ -202,7 +202,7 @@ def register_customize_callbacks(app):
             )
             tabs = get_tabs_for_portal(portal)
             return tabs[0] if tabs else None
-        except Exception:
+        except Exception:  # noqa: BLE001
             return None
 
     # ── Load palette + saved active zone when portal/tab changes ─────────────
@@ -252,7 +252,7 @@ def register_customize_callbacks(app):
                     parsed = json.loads(row["value"])
                     saved_active = [c for c in parsed.get("active", [])
                                     if c in KPI_CARDS]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"load_layout DB error: {e}")
 
         active_ids    = saved_active if saved_active else default_active
@@ -375,7 +375,7 @@ def register_customize_callbacks(app):
                 {"type": "success",
                  "message": f"Layout saved for {label}"},
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return (no_update,
                     {"type": "error", "message": f"Save failed: {e}"})
  
@@ -444,7 +444,7 @@ def register_customize_callbacks(app):
                     after={"sql": sql_text.strip()[:2000]}, permission_used=Cap.PLATFORM_SQL_INSPECT)
 
         sql_upper = sql_text.upper()
-        if "DELETE " in sql_upper or "DROP " in sql_upper:
+        if "DELETE " in sql_upper or "DROP " in sql_upper:  # noqa: SIM102
             if "-- DELETE THIS SOCIETY" not in sql_upper:
                 return dbc.Alert(
                     "Destructive query detected. Append '-- DELETE THIS SOCIETY' to confirm.",
@@ -463,7 +463,7 @@ def register_customize_callbacks(app):
                 f"'{_hit}' is a legal-regime rule table. Change it from Master → AOA Rule Editor so the change "
                 "is validated, dated and audited.", color="danger", className="mt-2 py-2", style={"fontSize": "12px"})
 
-        sid = get_current_society_id()
+        get_current_society_id()
         sql = sql_text.strip()
  
         t0 = time.perf_counter()
@@ -478,7 +478,7 @@ def register_customize_callbacks(app):
                 color="success", className="mt-2 py-2",
                 style={"fontSize": "12px"},
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             elapsed = (time.perf_counter() - t0) * 1000
             return dbc.Alert(
                 [html.I(className="fas fa-times-circle me-2"),
@@ -568,7 +568,7 @@ def _fetch_kpi_values(society_id, needed_ids=None) -> dict:
                 value = format_kpi_value(raw, fmt)
                 _set_cached(ckey, value)
                 values[card_id] = value
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             batch_net_error = _is_db_error(exc)
             print(f"KPI batch value error, falling back per-card: {exc}")
             for card_id, query, params, fmt, ckey in pending:
@@ -585,7 +585,7 @@ def _fetch_kpi_values(society_id, needed_ids=None) -> dict:
                     value = format_kpi_value(raw, fmt)
                     _set_cached(ckey, value)
                     values[card_id] = value
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     if _is_db_error(e):
                         cached = _get_cached(ckey)
                         if cached is not None:

@@ -1,10 +1,11 @@
 # app/services/event_service.py
 
-from database.money import D
 import logging
-from datetime import date
-from database.db_manager import db
+
 from app.services.qr_service import generate_qr_code
+from app.utils import today_ist
+from database.db_manager import db
+from database.money import D
 
 logger = logging.getLogger(__name__)
 
@@ -13,16 +14,16 @@ def create_event(
     society_id: int,
     title: str,
     event_date: str,
-    venue: str = None,
-    description: str = None,
-    event_time: str = None,
+    venue: str | None = None,
+    description: str | None = None,
+    event_time: str | None = None,
     ticket_price: float = D(0),
     ticket_price2: float = D(0),
     ticket_name: str = "Adult",
     ticket_name2: str = "Child",
-    account_id: int = None,
+    account_id: int | None = None,
     open_to: str = "all",
-    image: str = None,
+    image: str | None = None,
 ):
     """Create an event in society."""
     import html
@@ -44,7 +45,7 @@ def create_event(
             ticket_name2, ticket_price2, image,
         ), fetch_one=True)
         return row["id"], "Event created successfully"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error creating event: {e}")
         return None, str(e)
 
@@ -56,12 +57,12 @@ def book_event_tickets(
     quantity_adult: int = 0,
     quantity_child: int = 0,
     mode: str = "cash",
-    created_by: int = None,
-    issued_date: str = None,
-    particulars: str = None,
-    cheque_no: str = None,
-    transaction_id: str = None,
-    acc_id: int = None,
+    created_by: int | None = None,
+    issued_date: str | None = None,
+    particulars: str | None = None,
+    cheque_no: str | None = None,
+    transaction_id: str | None = None,
+    acc_id: int | None = None,
 ):
     """
     Book event tickets via fn_sell_event_ticket and generate N individual
@@ -77,7 +78,7 @@ def book_event_tickets(
                 int(quantity_child),
                 mode,
                 created_by,
-                issued_date or date.today().isoformat(),
+                issued_date or today_ist().isoformat(),
                 particulars,
                 cheque_no,
                 transaction_id,
@@ -141,7 +142,7 @@ def book_event_tickets(
             "items": created_items,
         }, "Tickets booked successfully"
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error booking event tickets: {e}")
         return None, str(e)
 
@@ -190,6 +191,6 @@ def get_user_event_tickets(society_id: int, user_id: int):
             })
 
         return results
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error fetching user event tickets: {e}")
         return []

@@ -8,7 +8,11 @@ import dash_bootstrap_components as dbc
 from dash import Input, Output, State, html, no_update
 
 from app.dash_apps.pages import committee_page as cp
-from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.authorization import Cap
 from app.security.guards import require_session
 from app.security.service_guard import blocks, check
@@ -39,8 +43,8 @@ def hint_for(flat: dict):
     """One line telling the admin whether this flat may hold office today."""
     if flat.get("ineligible_stand"):
         return html.Span([html.I(className="fas fa-ban me-1"),
-                          f"Flat {flat['flat_number']} has arrears ({cp._money(flat.get('dues_outstanding'))}) and cannot "
-                          "hold office until they are cleared (bye-law 7)."], style={"color": "#b02a37"})
+                          (f"Flat {flat['flat_number']} has arrears ({cp._money(flat.get('dues_outstanding'))}) and cannot "
+                          "hold office until they are cleared (bye-law 7).")], style={"color": "#b02a37"})
     return html.Span([html.I(className="fas fa-check-circle me-1"),
                       f"Flat {flat['flat_number']} is in good standing today."], style={"color": "#1b7a3d"})
 
@@ -97,7 +101,7 @@ def register_committee_callbacks(app):
                                  actor_society_id=sid)
         except PermissionError as exc:
             return _alert(str(exc), "danger"), no_update, no_update
-        except Exception as exc:     # never a blank page
+        except Exception as exc:     # never a blank page  # noqa: BLE001
             return _alert(f"Could not save: {exc}", "danger"), no_update, no_update
         if not ok:
             return _alert(msg, "warning"), no_update, no_update
@@ -120,7 +124,7 @@ def register_committee_callbacks(app):
             ok, msg = cs.end_office(uid, "admin", sid, office_id, reason, actor_society_id=sid)
         except PermissionError as exc:
             return (_alert(str(exc), "danger"),) + (no_update,) * 4
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             return (_alert(f"Could not save: {exc}", "danger"),) + (no_update,) * 4
         if not ok:
             return (_alert(msg, "warning"),) + (no_update,) * 4

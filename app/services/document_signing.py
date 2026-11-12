@@ -19,6 +19,7 @@ import logging
 from datetime import date
 
 from app.services import signing_service
+from app.utils import today_ist
 
 KINDS = ("noc", "agreement", "resolution", "minutes", "poll", "expense", "fund_withdrawal", "adviser_appointment", "stepup_change", "supplementary_annex")
 PURPOSE = {"noc": "SIGNING_NOC"}          # every other kind is sealed with SIGNING_AGREEMENT
@@ -28,16 +29,16 @@ LINKABLE = ("noc", "agreement", "minutes", "expense", "fund_withdrawal")   # rec
 
 # Defaults (the plan's "planned signers"); a society overrides them in signer_policy.
 DEFAULT_POLICY = {
-    "noc":             dict(eligible=["secretary"], required=["secretary"], min=1),
-    "agreement":       dict(eligible=["president", "secretary", "treasurer", "platform"], required=["president", "secretary", "treasurer", "platform"], min=4),
-    "stepup_change":   dict(eligible=["president", "secretary", "treasurer"], required=["president", "secretary", "treasurer"], min=3),
-    "adviser_appointment": dict(eligible=["president", "secretary", "treasurer"], required=["president", "secretary", "treasurer"], min=3),
-    "supplementary_annex": dict(eligible=["president", "secretary", "treasurer"], required=["president", "secretary", "treasurer"], min=3),
-    "resolution":      dict(eligible=["president", "vice_president", "secretary", "joint_secretary", "chair"], required=["secretary", "chair"], min=2),
-    "minutes":         dict(eligible=["president", "vice_president", "secretary", "joint_secretary", "chair"], required=["secretary", "chair"], min=2),
-    "poll":            dict(eligible=["secretary", "president"], required=[], min=1),
-    "expense":         dict(eligible=["secretary", "treasurer", "president"], required=[], min=1),
-    "fund_withdrawal": dict(eligible=["secretary", "treasurer", "president"], required=[], min=2),
+    "noc":             {"eligible": ["secretary"], "required": ["secretary"], "min": 1},
+    "agreement":       {"eligible": ["president", "secretary", "treasurer", "platform"], "required": ["president", "secretary", "treasurer", "platform"], "min": 4},
+    "stepup_change":   {"eligible": ["president", "secretary", "treasurer"], "required": ["president", "secretary", "treasurer"], "min": 3},
+    "adviser_appointment": {"eligible": ["president", "secretary", "treasurer"], "required": ["president", "secretary", "treasurer"], "min": 3},
+    "supplementary_annex": {"eligible": ["president", "secretary", "treasurer"], "required": ["president", "secretary", "treasurer"], "min": 3},
+    "resolution":      {"eligible": ["president", "vice_president", "secretary", "joint_secretary", "chair"], "required": ["secretary", "chair"], "min": 2},
+    "minutes":         {"eligible": ["president", "vice_president", "secretary", "joint_secretary", "chair"], "required": ["secretary", "chair"], "min": 2},
+    "poll":            {"eligible": ["secretary", "president"], "required": [], "min": 1},
+    "expense":         {"eligible": ["secretary", "treasurer", "president"], "required": [], "min": 1},
+    "fund_withdrawal": {"eligible": ["secretary", "treasurer", "president"], "required": [], "min": 2},
 }
 
 
@@ -149,7 +150,7 @@ def policy(society_id: int, kind: str, db=None, subject_id: int | None = None) -
     row = d._execute("SELECT eligible_offices, required_offices, min_signers, signature_method FROM signer_policy WHERE society_id=%s AND subject_kind=%s",
                      (society_id, kind), fetch_one=True)
     if row:
-        return dict(eligible=list(row["eligible_offices"]), required=list(row["required_offices"]), min=row["min_signers"], signature_method=row["signature_method"])
+        return {"eligible": list(row["eligible_offices"]), "required": list(row["required_offices"]), "min": row["min_signers"], "signature_method": row["signature_method"]}
     pol = dict(DEFAULT_POLICY[kind])
     if kind == "fund_withdrawal" and subject_id:                  # frozen on the withdrawal; offices from the society's spend policy
         u = d._execute("SELECT signatories_required FROM fund_utilizations WHERE id=%s AND society_id=%s", (subject_id, society_id), fetch_one=True)
@@ -182,7 +183,7 @@ def set_policy(society_id: int, kind: str, eligible, required, min_signers: int,
 
 # ── who is this user for this record? ───────────────────────────────────────────────────────────────────────────
 def serving_offices(society_id: int, user_id: int, on: date | None = None, db=None) -> list[dict]:
-    on = on or date.today()
+    on = on or today_ist()
     return _db(db)._execute(
         """SELECT id, office_code FROM committee_offices WHERE society_id=%s AND user_id=%s AND status='active'
               AND term_start <= %s AND (term_end IS NULL OR term_end >= %s)""",
@@ -291,7 +292,9 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
     _confirm_password(user_id, password)                                   # wrong password never signs
     h = sha256(text)
     if action != "decline" and kind in ("agreement", "adviser_appointment"):
-        from app.services import esign_adapter as es                       # V5.6b: the society may require eSign / DSC / paper
+        from app.services import (
+            esign_adapter as es,  # V5.6b: the society may require eSign / DSC / paper
+        )
         if es.is_required(society_id):
             try:
                 method, evidence_ref = es.evidence_for_signature(society_id, kind, subject_id, user_id, method, evidence_ref, h)
@@ -322,7 +325,7 @@ def sign(kind: str, subject_id: int, user_id: int, password: str, db=None, actio
         try:
             d._execute("""INSERT INTO document_signatures (society_id, subject_kind, subject_id, action, user_id, office_code, committee_office_id, item_hash, method, evidence_ref, reason)
                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (society_id, kind, subject_id, action, user_id, office, coid, h, method, evidence_ref, (reason or None)))
-        except Exception as exc:                                           # noqa: BLE001  (two clicks at once)
+        except Exception as exc:
             if "uq_doc_signature_person" in str(exc):
                 raise SigningRefused("You have already signed this item; one person counts once.") from exc
             raise
@@ -378,7 +381,7 @@ def _withdrawal_effect(d, society_id: int, util_id: int, user_id: int, action: s
             d._execute("SELECT fn_cancel_fund_utilization(%s,%s,%s)", (util_id, society_id, user_id), fetch_one=True)
         else:
             d._execute("SELECT * FROM fn_sign_fund_utilization(%s,%s,%s)", (util_id, society_id, user_id), fetch_one=True)
-    except Exception as exc:                                               # noqa: BLE001
+    except Exception as exc:
         lead = ("Your decline is recorded, but the withdrawal could not be cancelled: " if action == "decline"
                 else "Your approval is recorded, but it could not be counted: ")
         raise SigningRefused(lead + _clean(exc)) from exc
@@ -457,7 +460,7 @@ def link_resolution(society_id: int, kind: str, subject_id: int, resolution_id: 
                       ON CONFLICT (society_id, subject_kind, subject_id)
                       DO UPDATE SET resolution_id = EXCLUDED.resolution_id, linked_by = EXCLUDED.linked_by, linked_at = NOW()""",
                    (society_id, kind, subject_id, int(resolution_id), user_id))
-    except Exception as exc:                                               # noqa: BLE001
+    except Exception as exc:
         raise SigningRefused(_clean(exc)) from exc
     _audit(d, society_id, user_id, "DOCUMENT_RESOLUTION_LINKED", kind, subject_id, {"resolution_id": int(resolution_id)})
     st = status(kind, subject_id, d)                                       # the resolution may already be sealed: seal if ready
@@ -493,7 +496,7 @@ def verify(kind: str, subject_id: int, db=None) -> dict:
     if row["status"] != "valid":
         return {"status": row["status"], "signed_at": row["signed_at"]}
     try:
-        society_id, text = item_text(kind, subject_id, d)
+        _society_id, text = item_text(kind, subject_id, d)
     except SigningRefused:
         return {"status": "tampered", "signed_at": row["signed_at"]}
     if sha256(text) != row["item_hash"]:

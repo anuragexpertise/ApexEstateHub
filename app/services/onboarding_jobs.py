@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import threading
 import uuid
-from typing import Callable
+from collections.abc import Callable
 
 from database.db_manager import db
 
@@ -23,20 +23,20 @@ def start(kind: str, society_id: int, actor_id: int | None, fn: Callable, **kwar
             def progress(step: int, message: str):
                 try:
                     db._execute("UPDATE onboarding_jobs SET step=%s, message=%s WHERE id=%s", (int(step), message, job_id))
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
             res = fn(progress=progress, **kwargs)
             db._execute(
                 "UPDATE onboarding_jobs SET status='done', step=steps_total, message=%s, result=%s::jsonb, finished_at=NOW() WHERE id=%s",
                 ("Society is live", json.dumps(res or {"ok": True}, default=str), job_id),
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             try:
                 db._execute(
                     "UPDATE onboarding_jobs SET status='failed', error=%s, finished_at=NOW() WHERE id=%s",
                     (str(exc), job_id),
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
     t = threading.Thread(target=_run, daemon=True)
     t.start()

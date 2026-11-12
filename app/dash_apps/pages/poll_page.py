@@ -1,6 +1,7 @@
-from dash import html, dcc
+from datetime import date, datetime
+
 import dash_bootstrap_components as dbc
-from datetime import datetime, date
+from dash import dcc, html
 
 
 def _to_datetime_local(val) -> str:
@@ -14,7 +15,7 @@ def _to_datetime_local(val) -> str:
         s = val.strip()
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
             try:
-                return datetime.strptime(s, fmt).strftime("%Y-%m-%dT%H:%M")
+                return datetime.strptime(s, fmt).strftime("%Y-%m-%dT%H:%M")  # noqa: DTZ007
             except ValueError:
                 continue
         return s

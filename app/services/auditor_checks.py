@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from app.utils import today_ist
 from database.db_manager import db
 
 MAX_ROWS = 200
@@ -104,7 +105,7 @@ def cash_vouchers(sid):
 
 
 def cashbook(sid, day):
-    day = _parse_day(day) or date.today()
+    day = _parse_day(day) or today_ist()
     rows = _q("SELECT * FROM fn_cashbook_reconciliation(%s, %s)", (sid, day))
     if not rows:
         return _result("error", [], "No result returned.")
@@ -187,7 +188,7 @@ def resolution_tally(sid, resolution_id):
 
 # ── tie-out: statements = ledger = source documents (Plan v3 3.2) ──────────────────────────────────────────────
 def tieout(sid, fy=None):
-    today = date.today()
+    today = today_ist()
     fy = int(fy) if fy else (today.year if today.month >= 4 else today.year - 1)
     rows = _q("SELECT * FROM fn_tieout_report(%s, %s)", (sid, fy))
     bad = [r for r in rows if not r["ok"]]
@@ -229,5 +230,5 @@ def run(check: str, sid: int, day=None, acc_id=None, resolution_id=None) -> dict
         if fn is None:
             return _result("error", [], f"Unknown check '{check}'.")
         return fn(sid)
-    except Exception as exc:  # a missing function / permission problem must show as an error, never a blank panel
+    except Exception as exc:  # a missing function / permission problem must show as an error, never a blank panel  # noqa: BLE001
         return _result("error", [], f"Check could not run: {exc}")

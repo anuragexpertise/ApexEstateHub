@@ -3,19 +3,19 @@
 Flask + Dash application factory for EstateHub.
 """
 
-import os
 import logging
+import os
 from pathlib import Path
+
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+from flask_login import LoginManager, login_required
+from werkzeug.exceptions import HTTPException
 
 # ── Patch Dash 2.14.2 IndexError bug (State + ALL pattern matching) ──
 # Must be imported before dash.Dash.dispatch is used (i.e. before any
 # callback request is handled). See app/dash_patch.py for details.
 import app.dash_patch  # noqa: F401  (side effect: patches Dash.dispatch)
-
-from flask import Flask, jsonify, request
-from flask_login import LoginManager, login_required
-from flask_cors import CORS
-from werkzeug.exceptions import HTTPException
 
 log = logging.getLogger(__name__)
 
@@ -169,16 +169,16 @@ def create_app(config_name: str | None = None) -> Flask:
             assert_vault_ready(_vault_db)
         except RuntimeError:
             raise
-        except Exception as e:                      # database unreachable at import: still check the key itself
+        except Exception as e:                      # database unreachable at import: still check the key itself  # noqa: BLE001
             log.warning("vault database check skipped: %s", e)
             assert_vault_ready(None)
 
     # Initialize background jobs
-    if not app.config.get('TESTING') and not os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+    if not app.config.get('TESTING') and os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
         try:
             from app.services.scheduler import init_scheduler
             init_scheduler()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.error(f"Failed to initialize scheduler: {e}")
 
     # Asset dirs
@@ -198,15 +198,16 @@ def create_app(config_name: str | None = None) -> Flask:
         if len(parts) > 1 and parts[1].isdigit():
             file_society_id = int(parts[1])
             # Get current user's society_id
-            if not hasattr(current_user, 'society_id') or current_user.society_id != file_society_id:
-                if current_user.role != 'master':
-                    abort(403)
+            if not hasattr(current_user, 'society_id') or current_user.society_id != file_society_id:  # noqa: SIM102, F821
+                if current_user.role != 'master':  # noqa: F821
+                    abort(403)  # noqa: F821
         return send_from_directory(str(assets_path), filename)
 
     @app.route("/print_doc/<doc_type>")
     @login_required
     def print_doc(doc_type):
         import os
+
         import markdown
         base_dir = Path(__file__).parent.parent
         if doc_type == "readme":
@@ -259,9 +260,15 @@ def create_app(config_name: str | None = None) -> Flask:
         query args carry the not-yet-saved dropdown picks, since the wizard only
         persists them on submit. The society always comes from the session.
         """
-        from html import escape as _esc
+        from html import escape as _esc  # noqa: F401
+
         from flask import request
-        from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label, render_category_content
+
+        from app.dash_apps.pages.setup_wizard import (
+            CATEGORIES,
+            render_category_content,
+            step_label,
+        )
         from app.dash_apps.print_render import component_to_html, render_print_page
         from app.security.audit_context import get_current_society_id
 
@@ -276,14 +283,14 @@ def create_app(config_name: str | None = None) -> Flask:
         try:
             sid = get_current_society_id()
             if cat_key == "Review":
-                from app.services import onboarding_service as ob
                 from app.dash_apps.pages.setup_wizard import render_review
+                from app.services import onboarding_service as ob
                 draft = ob.load_draft(sid)
                 body = component_to_html(render_review(draft, sid))
             else:
                 body = component_to_html(render_category_content(
                     cat_key, sid, state, constitution=constitution))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.error("print_wizard failed for %s: %s", cat_key, e)
             return "Unable to render this section for printing.", 500
         return render_print_page(step_label(cat_key), body)
@@ -298,13 +305,13 @@ def create_app(config_name: str | None = None) -> Flask:
 
     # Blueprints
     try:
-        from app.routes.auth  import auth_bp
-        from app.routes.api   import api_bp
-        from app.routes.web   import web_bp
-        from app.routes.scan  import scan_bp
-        from app.routes.push_routes import push_bp
-        from app.routes.sse   import sse_bp
+        from app.routes.api import api_bp
+        from app.routes.auth import auth_bp
         from app.routes.presumed_visitor import presumed_bp
+        from app.routes.push_routes import push_bp
+        from app.routes.scan import scan_bp
+        from app.routes.sse import sse_bp
+        from app.routes.web import web_bp
         app.register_blueprint(auth_bp, url_prefix="/auth")
         app.register_blueprint(api_bp,  url_prefix="/api")
         app.register_blueprint(web_bp)
@@ -319,7 +326,7 @@ def create_app(config_name: str | None = None) -> Flask:
         from app.routes.evidence_routes import evidence_bp
         app.register_blueprint(evidence_bp)
         log.info("Blueprints registered ✓")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         log.warning("Blueprint registration partial: %s", exc)
 
     return app

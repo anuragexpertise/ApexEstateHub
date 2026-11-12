@@ -1,16 +1,18 @@
-from apscheduler.schedulers.background import BackgroundScheduler
 import logging
+
 from database.db_manager import db
+
 try:
     from app.services.retention_engine import sweep_all_societies
-except Exception:
+except Exception:  # noqa: BLE001
     def sweep_all_societies():
         return {}
-import app.services.push_service as PushService
-from app.services.redis_broker import redis_sync, _REDIS_URL
 import threading
 import time
-from datetime import datetime, timedelta
+
+import app.services.push_service as PushService
+from app.services.redis_broker import _REDIS_URL, redis_sync
+from app.utils import now_ist
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ def _get_next_poll_event_time():
     try:
         res = db._execute(query, fetch_one=True)
         return res.get('next_run') if res else None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error fetching next poll event time: {e}")
         return None
 
@@ -41,7 +43,7 @@ def poll_scheduler_loop():
             poll_event_signal.wait()
             continue
             
-        now = datetime.now()
+        now = now_ist()
         wait_seconds = (next_run - now).total_seconds()
         
         if wait_seconds > 0:
@@ -59,7 +61,7 @@ def retention_sweep_loop():
         try:
             results = sweep_all_societies()
             for key, result in results.items():
-                log.info(
+                log.info(  # noqa: F821
                     "Retention sweep %s.%s: %d rows too old, %d eligible for purge",
                     key[0], key[1], len(result.too_old), result.total_eligible,
                 )
@@ -81,7 +83,7 @@ def poll_redis_listener_loop():
                     poll_event_signal.set()
             pubsub.close()
             r.close()
-        except Exception as exc:
+        except Exception:  # noqa: BLE001
             time.sleep(2)
 
 def expire_polls_job():
@@ -96,7 +98,7 @@ def expire_polls_job():
         
         if acquired:
             _run_poll_expiry()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.debug(f"Redis lock error in expire_polls_job: {e}")
 
 def _run_poll_expiry():
@@ -110,7 +112,9 @@ def _run_poll_expiry():
             ) or []
             for poll in expired:
                 try:
-                    from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
+                    from app.dash_apps.callbacks.card_catalogue_callbacks import (
+                        invalidate_kpi_cache,
+                    )
                     invalidate_kpi_cache("polls")
                     PushService.notify_poll_results_declared(
                         society_id, poll.get("title") or "Untitled poll"

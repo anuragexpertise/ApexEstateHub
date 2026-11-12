@@ -17,6 +17,7 @@ import json
 from datetime import date, timedelta
 
 from app.services import regime_rules_admin as rra
+from app.utils import today_ist
 
 DECISION_CHOICES = ("adopted_as_is", "adopted_with_variation", "not_adopted")
 # Which Layer-1 decision type can confirm which choice (Layer 2 / 3 have a single decision type each).
@@ -43,7 +44,7 @@ def _parse_value(d: dict, raw) -> tuple[float | None, str | None, str | None]:
         num = float(str(raw).strip())
     except (TypeError, ValueError):
         return None, None, f"{d['rule_key']} must be a number."
-    if num != num or num in (float("inf"), float("-inf")):
+    if num != num or num in (float("inf"), float("-inf")):  # noqa: PLR0124
         return None, None, f"{d['rule_key']} must be a finite number."
     return num, None, None
 
@@ -98,7 +99,7 @@ def effective_rules_for_society(society_id: int, on: date | None = None) -> list
           JOIN rule_parameter_defs d ON d.regime_code = slr.regime_code AND d.society_id IS NULL
           LEFT JOIN LATERAL fn_rule(slr.society_id, d.rule_key, %s) r ON TRUE
          WHERE slr.society_id = %s
-         ORDER BY d.instrument, d.rule_key""", (on or date.today(), society_id))
+         ORDER BY d.instrument, d.rule_key""", (on or today_ist(), society_id))
 
 
 def list_decisions(society_id: int, rule_key: str | None = None) -> list[dict]:
@@ -127,7 +128,7 @@ def save_decision(actor_id, actor_role, society_id: int, rule_key: str, layer: i
     start = rra._d(effective_from)
     if not start:
         return False, "Choose the date the decision takes effect."
-    if start < date.today():
+    if start < today_ist():
         return False, "A decision cannot be back-dated."
     why = rra._text(reason, rra.MIN_TEXT)
     if not why:
@@ -179,7 +180,7 @@ def save_decision(actor_id, actor_role, society_id: int, rule_key: str, layer: i
     if layer == 3 and status == choice:
         v_ratify_days = _ratify_deadline_days(society_id, start)
         # ratify_by = decision_effective + ratify_deadline, but at least today
-        ratify_by_date = max(start + timedelta(days=v_ratify_days), date.today())
+        ratify_by_date = max(start + timedelta(days=v_ratify_days), today_ist())
         decision_id = row.get("id") if isinstance(row, dict) else None
         if decision_id is not None:
             rra.db._execute("""INSERT INTO loa_ratification (society_id, decision_id, rule_key, board_layer,
@@ -222,7 +223,7 @@ def auto_activate(actor_id, actor_role, society_id: int, resolution_id: int, rul
         rerr = _resolution_ok(society_id, rule_key, layer, want, resolution_id)
         if rerr:
             continue                                  # not the right resolution for this layer
-        start = max(rra._d(prov["effective_from"]) or date.today(), date.today())
+        start = max(rra._d(prov["effective_from"]) or today_ist(), today_ist())
         num = float(prov["value"]) if prov["value"] is not None else None
         err = _check(society_id, rule_key, layer, want, num, prov["value_text"], start)
         if err:
@@ -241,7 +242,7 @@ def auto_activate(actor_id, actor_role, society_id: int, resolution_id: int, rul
         # Layer 3 decisions need GBM ratification under bye-law 47(1).
         if layer == 3:
             v_ratify_days = _ratify_deadline_days(society_id, start)
-            ratify_by_date = max(start + timedelta(days=v_ratify_days), date.today())
+            ratify_by_date = max(start + timedelta(days=v_ratify_days), today_ist())
             rra.db._execute("""INSERT INTO loa_ratification (society_id, decision_id, rule_key, board_layer,
                                   decision_effective, ratify_by, created_by)
                                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",

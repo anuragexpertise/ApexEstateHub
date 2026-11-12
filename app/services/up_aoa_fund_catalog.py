@@ -4,10 +4,25 @@ The register holds the data (status, parameters, account routes, billing channel
 screens need: the legacy UP_AOA_FUNDS shape, badge specs, and the Brought Forward row labels that show only the
 funds a society holds - every prescribed fund, plus an optional fund only once the society opts in.
 """
-from schemes.fund_register import (BILLING_CHANNELS, FUND_ORDER, FUNDS, IFMS_NOTES, IFMS_PROJECT_TYPES,  # noqa: F401
-                                   IFMS_SLABS, SHARED_PARAMETERS, STATUS_META, SUPPORT_META, VERIFY_META,
-                                   account_mappings, active_keys, ifms_amount_range, ifms_rate_range, is_prescribed,
-                                   principal_locks, register_rows)
+from schemes.fund_register import (  # noqa: F401
+    BILLING_CHANNELS,
+    FUND_ORDER,
+    FUNDS,
+    IFMS_NOTES,
+    IFMS_PROJECT_TYPES,
+    IFMS_SLABS,
+    SHARED_PARAMETERS,
+    STATUS_META,
+    SUPPORT_META,
+    VERIFY_META,
+    account_mappings,
+    active_keys,
+    ifms_amount_range,
+    ifms_rate_range,
+    is_prescribed,
+    principal_locks,
+    register_rows,
+)
 
 # Legacy shape kept for existing callers: name, statutory (= prescribed, so the card is locked), source,
 # description, rate_applicable - plus everything the register adds.

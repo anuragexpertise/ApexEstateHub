@@ -3,14 +3,10 @@ customize.py  (v2 — full card catalogue palette with groups)
 Drop into: app/dash_apps/pages/customize.py
 """
 
-import json
-from dash import html, dcc
 import dash_bootstrap_components as dbc
+from dash import dcc, html
 
-from app.dash_apps.pages.card_catalogue import (
-    CARD_CATALOGUE, KPI_CARDS, FORM_CARDS,
-    DEFAULT_LAYOUTS
-)
+from app.dash_apps.pages.card_catalogue import CARD_CATALOGUE
 
 GROUP_COLORS = {
     "Apartments": "#3498db", "Vendors": "#9b59b6", "Security": "#e67e22",
@@ -23,7 +19,7 @@ GROUP_COLORS = {
 
 def _palette_section(group: str, card_ids: list) -> html.Div:
     color = GROUP_COLORS.get(group, "#555")
-    section_id = f"palette-group-{group.lower().replace(' ','-')}"
+    f"palette-group-{group.lower().replace(' ','-')}"
     return html.Div([
         html.Div(
             [html.I(className="fas fa-chevron-right me-2",

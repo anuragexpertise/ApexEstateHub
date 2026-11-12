@@ -1,8 +1,14 @@
-from flask import Blueprint, request, jsonify, render_template
-from app.services.push_service import save_push_subscription, remove_push_subscription, send_push_notification, get_push_subscriptions
-from app.auth.jwt_handler import authenticate_bearer
 import logging
 import os
+
+from flask import Blueprint, jsonify, render_template, request
+
+from app.auth.jwt_handler import authenticate_bearer
+from app.services.push_service import (
+    remove_push_subscription,
+    save_push_subscription,
+    send_push_notification,
+)
 
 logger = logging.getLogger(__name__)
 push_bp = Blueprint('push', __name__)
@@ -15,7 +21,7 @@ def _bearer_user_id():
     database and the token must be an ACCESS token (refresh tokens used to be
     accepted here)."""
     header = request.headers.get('Authorization', '')
-    token = header[7:] if header.startswith('Bearer ') else header
+    token = header.removeprefix('Bearer ')
     if not token:
         return None, (jsonify({'error': 'Authorization token required'}), 401)
     user, error = authenticate_bearer(token)
@@ -55,7 +61,7 @@ def subscribe():
         else:
             return jsonify({'error': 'Failed to save subscription'}), 500
             
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Subscribe error: {e}")
         return jsonify({'error': str(e)}), 500
 
@@ -80,7 +86,7 @@ def send_test():
         else:
             return jsonify({'success': False, 'message': message}), 500
             
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Send test error: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -105,7 +111,7 @@ def delete_subscription():
         logger.info(f"Push subscription deleted for user {user_id}")
         return jsonify({'message': 'Subscription deleted successfully'}), 200
         
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Delete subscription error: {e}")
         return jsonify({'error': str(e)}), 500
 
@@ -129,7 +135,7 @@ def save_fcm_token():
         )
         logger.info(f"FCM token saved for user {user_id}")
         return jsonify({'message': 'FCM token saved'}), 200
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Save FCM token error: {e}")
         return jsonify({'error': str(e)}), 500
 
@@ -148,6 +154,6 @@ def delete_fcm_token():
         )
         logger.info(f"FCM token deleted for user {user_id}")
         return jsonify({'message': 'FCM token removed'}), 200
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Delete FCM token error: {e}")
         return jsonify({'error': str(e)}), 500

@@ -13,7 +13,9 @@ Key v3 changes:
 """
 
 from __future__ import annotations
+
 import re
+
 from database.db_manager import db
 
 # Physical table backing each app-level entity key.
@@ -489,7 +491,7 @@ def load_fk_options(ref_table: str) -> list[dict]:
             (), fetch_all=True,
         ) or []
         return [{"label": str(r["label"]), "value": r["id"]} for r in rows]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  load_fk_options({ref_table}): {e}")
         return []
 
@@ -510,7 +512,7 @@ def load_dynamic_select_options(marker: str, society_id: int | None) -> list[dic
                     (society_id,), fetch_all=True,
                 ) or []
                 opts = [{"label": r["service_type"], "value": r["service_type"]} for r in rows]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"⚠️  load_dynamic_select_options(vendor_service_types): {e}")
         # always offer "Other" — covers new societies with no vendors yet,
         # and concerns that genuinely don't match any onboarded vendor type.
@@ -526,7 +528,7 @@ def load_dynamic_select_options(marker: str, society_id: int | None) -> list[dic
                     (society_id,), fetch_all=True,
                 ) or []
                 opts = [{"label": r["section"], "value": r["section"]} for r in rows]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"⚠️  load_dynamic_select_options(tds_sections): {e}")
         return opts
     return []
@@ -779,9 +781,9 @@ _LEDGER_LIST_COLUMNS = [
 
 
 def build_entity_meta() -> dict:
+    from app.dash_apps.drilldown.curated import curated_meta
     from app.dash_apps.drilldown.profile_actions import PROFILE_ACTIONS
     from app.dash_apps.drilldown.registry import to_singular
-    from app.dash_apps.drilldown.curated import curated_meta
 
     curated = curated_meta()
     meta: dict = {}
@@ -796,7 +798,7 @@ def build_entity_meta() -> dict:
             continue
         try:
             columns = get_table_columns(table)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"❌ schema_introspect: failed to introspect table '{table}' "
                   f"for entity '{ekey}': {e} — skipping this entity only")
             continue
@@ -953,7 +955,7 @@ def _safe_build() -> dict:
             f"({', '.join(sorted(meta.keys()))})"
         )
         return meta
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ schema_introspect.build_entity_meta() failed: {e}")
         return {}
 

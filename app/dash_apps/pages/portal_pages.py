@@ -13,12 +13,12 @@ v3 additions:
 from __future__ import annotations
 
 import json
-from datetime import date
 
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
 from app.dash_apps.pages.card_catalogue import DEFAULT_LAYOUTS
+from app.utils import today_ist
 
 
 def _manual_qr_card(scope: str, **kwargs):
@@ -221,7 +221,7 @@ def _kpi_row_dynamic(portal: str, tab: str, sid, *default_kpi_ids: str,
                 saved = [c for c in parsed.get("active", []) if c in KPI_CARDS]
                 if saved:
                     ids = saved
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"_kpi_row_dynamic layout load error ({portal}/{tab}): {e}")
 
     role = _PORTAL_TO_ROLE.get(portal, portal)
@@ -232,7 +232,7 @@ def _kpi_row_dynamic(portal: str, tab: str, sid, *default_kpi_ids: str,
         seeded = {
             cid: resolve_seed_kpi_value(sid, role, cid, entity_id) for cid in ids
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"_kpi_row_dynamic KPI cache seed error ({portal}/{tab}): {e}")
         seeded = {}
 
@@ -317,9 +317,9 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
     500 we show the exact steps + SQL to push it live from Master Settings
     → KPI Inspector → "Integrate to DB", without needing a deploy.
     """
-    from database.db_manager import db
-    from app.dash_apps.pages.master_rules_page import catalog_edit_form
     from app.dash_apps.pages.governance_guide import render_governance_guide
+    from app.dash_apps.pages.master_rules_page import catalog_edit_form
+    from database.db_manager import db
 
     try:
         rows = db._execute(
@@ -330,7 +330,7 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
                ORDER BY display_order""",
             (), fetch_all=True,
         ) or []
-    except Exception:
+    except Exception:  # noqa: BLE001
         rows = None  # table not integrated yet — show setup instructions instead
 
     def _title():
@@ -356,11 +356,11 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
                     html.Li("Master Portal → Settings → KPI Inspector tab.", style={"fontSize": "13px"}),
                     html.Li("Paste the CREATE TABLE statement below into \"SQL Query (editable)\".",
                             style={"fontSize": "13px"}),
-                    html.Li([html.Code("Integrate to DB"), " — creates the table (safe to re-run, uses "
-                             "CREATE TABLE IF NOT EXISTS)."], style={"fontSize": "13px"}),
+                    html.Li([html.Code("Integrate to DB"), (" — creates the table (safe to re-run, uses "
+                             "CREATE TABLE IF NOT EXISTS).")], style={"fontSize": "13px"}),
                     html.Li(["Then seed the rows: run ", html.Code("python database/seed.py"),
-                             " once against this database (calls seed_legal_instrument_catalog(), idempotent "
-                             "on regime+title+year), or paste individual ",
+                             (" once against this database (calls seed_legal_instrument_catalog(), idempotent "
+                             "on regime+title+year), or paste individual "),
                              html.Code("INSERT INTO legal_instrument_catalog ..."),
                              " statements from ", html.Code("database/seed.py"),
                              "'s LEGAL_INSTRUMENTS_UP_AOA list into the same box and Integrate to DB again."],
@@ -451,9 +451,9 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
     role / embedded: only role == 'master' gets 'Edit a catalog entry'; its callbacks are
     master-only on the server regardless of what is rendered.
     """
-    from database.db_manager import db
-    from app.dash_apps.pages.master_rules_page import catalog_edit_form
     from app.dash_apps.pages.governance_guide import render_governance_guide
+    from app.dash_apps.pages.master_rules_page import catalog_edit_form
+    from database.db_manager import db
 
     try:
         rows = db._execute(
@@ -466,7 +466,7 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
                ORDER BY display_order""",
             (), fetch_all=True,
         ) or []
-    except Exception:
+    except Exception:  # noqa: BLE001
         rows = None  # table not integrated yet — show setup instructions instead
 
     def _title():
@@ -492,12 +492,12 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
                     html.Li("Master Portal → Settings → KPI Inspector tab.", style={"fontSize": "13px"}),
                     html.Li("Paste the CREATE TABLE statement below into \"SQL Query (editable)\".",
                             style={"fontSize": "13px"}),
-                    html.Li([html.Code("Integrate to DB"), " — creates the table (safe to re-run, uses "
-                             "CREATE TABLE IF NOT EXISTS)."], style={"fontSize": "13px"}),
+                    html.Li([html.Code("Integrate to DB"), (" — creates the table (safe to re-run, uses "
+                             "CREATE TABLE IF NOT EXISTS).")], style={"fontSize": "13px"}),
                     html.Li(["Then load the catalogue: ", html.Code("python database/migrate.py"),
                              " (or ", html.Code("python database/seed.py"), ") installs ",
-                             html.Code("database/legal_reference.py"), " on this database — idempotent on "
-                             "regime+title+year. To add rows by hand, the catalogue is the ",
+                             html.Code("database/legal_reference.py"), (" on this database — idempotent on "
+                             "regime+title+year. To add rows by hand, the catalogue is the "),
                              html.Code("INSTRUMENTS"), " list in ", html.Code("database/legal_reference.py"),
                              "; paste its ",
                              html.Code("INSERT INTO legal_instrument_catalog ..."),
@@ -581,7 +581,7 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
                    style={"fontSize": "12px", "color": "#777"}),
             dbc.Row([
                 dbc.Col(dbc.Input(id="civ-opinion", placeholder="Opinion reference (advocate or CA)", size="sm"), md=5),
-                dbc.Col(dbc.Input(id="civ-date", type="date", size="sm", value=date.today().isoformat(), max=date.today().isoformat()), md=3),
+                dbc.Col(dbc.Input(id="civ-date", type="date", size="sm", value=today_ist().isoformat(), max=today_ist().isoformat()), md=3),
                 dbc.Col([dbc.Button("Tick all unverified", id="civ-all", color="secondary", outline=True, size="sm", n_clicks=0, className="me-2"),
                          dbc.Button("Verify ticked", id="civ-verify", color="primary", size="sm", n_clicks=0)], md=4),
             ], className="g-2"),

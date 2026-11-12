@@ -9,16 +9,17 @@ CRITICAL: seed.py and society_service.py both use generate_password_hash().
            This file must use check_password_hash() to verify — NOT sha256.
 """
 
-import secrets
-import string
 import logging
-from datetime import datetime, timedelta
+import secrets
+from datetime import timedelta
 
 from werkzeug.security import check_password_hash, generate_password_hash
-from database.db_manager import db
+
 from app.models.user import active_select
-from app.security.roles import resolve_role
 from app.security.password_policy import validate_password
+from app.security.roles import resolve_role
+from app.utils import now_ist
+from database.db_manager import db
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ def _record_failed_attempt(user_id: int) -> None:
                    SET failed_login_attempts = 0,
                        locked_until = :until
                    WHERE id = :uid""",
-                {"until": datetime.utcnow() + timedelta(minutes=LOCKOUT_MINUTES),
+                {"until": now_ist() + timedelta(minutes=LOCKOUT_MINUTES),
                  "uid": user_id},
             )
             log.warning("Account locked after %s failed attempts: user_id=%s", attempts, user_id)
@@ -132,7 +133,7 @@ def _fetch_user_row(email: str, society_id: int | None) -> dict | None:
             {"email": (email or "").strip(), "sid": society_id},
             fetch_one=True,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         log.error("_fetch_user error: %s", exc)
         return None
 
@@ -148,7 +149,7 @@ def authenticate_user(email: str, password: str,
         return None
 
     locked_until = row.get("locked_until")
-    if locked_until and locked_until > datetime.utcnow():
+    if locked_until and locked_until > now_ist():
         log.warning("Locked account attempt: %s until %s", email, locked_until)
         return None
 
@@ -168,7 +169,7 @@ def authenticate_pin(email: str, pin: str,
     if not row:
         return None
     locked_until = row.get("locked_until")
-    if locked_until and locked_until > datetime.utcnow():
+    if locked_until and locked_until > now_ist():
         log.warning("Locked account PIN attempt: %s until %s", email, locked_until)
         return None
     stored = row.get("pin_hash") or ""
@@ -186,7 +187,7 @@ def authenticate_pattern(email: str, pattern: str,
     if not row:
         return None
     locked_until = row.get("locked_until")
-    if locked_until and locked_until > datetime.utcnow():
+    if locked_until and locked_until > now_ist():
         log.warning("Locked account pattern attempt: %s until %s", email, locked_until)
         return None
     stored = row.get("pattern_hash") or ""
@@ -233,7 +234,7 @@ def request_password_reset(email: str,
 
         plain  = secrets.token_urlsafe(32)
         hashed = hashlib.sha256(plain.encode()).hexdigest()
-        expiry = datetime.now() + timedelta(hours=RESET_TOKEN_HOURS)
+        expiry = now_ist() + timedelta(hours=RESET_TOKEN_HOURS)
 
         db._execute(
             """UPDATE users SET reset_token = :tok, reset_token_expires = :exp
@@ -367,7 +368,7 @@ def verify_password_with_lockout(user_id: int, password: str) -> tuple[bool, str
     if not row:
         return False, "Invalid Admin Password."
     locked_until = row.get("locked_until")
-    if locked_until and locked_until > datetime.utcnow():
+    if locked_until and locked_until > now_ist():
         return False, f"Account temporarily locked after too many wrong attempts. Try again in {LOCKOUT_MINUTES} minutes."
     stored = row.get("password_hash") or ""
     if not stored or not check_password_hash(stored, password or ""):

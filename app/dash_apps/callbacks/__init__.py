@@ -97,10 +97,10 @@ def register_callbacks(app):
             if not registered_any and "register_" not in "".join(dir(mod)):
                 pass
                 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             err_msg = f"⚠️ {mod_name} failed: {e}"
             print(err_msg)
-            import traceback; traceback.print_exc()
+            import traceback; traceback.print_exc()  # noqa: I001
             app._failed_callbacks.append({"module": mod_name, "error": str(e)})
 
     # Startup-time check for unregistered callback modules
@@ -113,7 +113,7 @@ def register_callbacks(app):
             content = (callbacks_dir / f"{unreg_mod}.py").read_text(encoding="utf-8")
             if "def register_" in content:
                 print(f"⚠️  WARNING: Module {unreg_mod}.py contains a register_* function but is NOT listed in CALLBACK_MODULES in __init__.py!")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  WARNING: Could not perform dead-code startup check: {e}")
 
     print("✅ All callbacks registered")

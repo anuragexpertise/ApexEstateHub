@@ -18,17 +18,18 @@ _original_dispatch = dash.Dash.dispatch
 
 
 def _patched_dispatch(self):
+    import functools
+    from contextvars import copy_context
+
     import flask
-    from dash._utils import AttributeDict
     from dash._grouping import map_grouping, update_args_group
     from dash._utils import (
+        AttributeDict,
+        convert_to_AttributeDict,
         inputs_to_dict,
         inputs_to_vals,
         split_callback_id,
-        convert_to_AttributeDict,
     )
-    from contextvars import copy_context
-    import functools
 
     body = flask.request.get_json()
 

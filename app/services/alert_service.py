@@ -1,8 +1,9 @@
 # app/services/alert_service.py
 
 import logging
-from database.db_manager import db
+
 from app.services.push_service import send_push_notification
+from database.db_manager import db
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ def _publish_alert_event(society_id: int, user_id: int | None, event_type: str, 
             "data": data,
         }
         broker.publish(payload)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.debug("SSE publish skipped: %s", exc)
 
 
@@ -25,8 +26,8 @@ def create_alert_channel(
     society_id: int,
     channel_type: str,
     name: str,
-    identifier: str = None,
-    apartment_id: int = None,
+    identifier: str | None = None,
+    apartment_id: int | None = None,
     is_recurring: bool = True,
 ):
     """
@@ -69,7 +70,7 @@ def create_alert_channel(
             subscribe_channel(channel_id, apartment_id, society_id)
 
         return channel_id, "Channel created successfully"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error creating alert channel: {e}")
         return None, str(e)
 
@@ -100,7 +101,7 @@ def _channel_membership_error(channel_id: int, apartment_id: int, society_id=Non
     return None, ch
 
 
-def subscribe_channel(channel_id: int, apartment_id: int, society_id: int = None):
+def subscribe_channel(channel_id: int, apartment_id: int, society_id: int | None = None):
     """Subscribe an apartment to an alert channel (same-society only).
 
     Pass `society_id` from the SERVER principal at every user-facing call
@@ -119,12 +120,12 @@ def subscribe_channel(channel_id: int, apartment_id: int, society_id: int = None
             ON CONFLICT (channel_id, apartment_id) DO NOTHING
         """, (channel_id, apartment_id))
         return True, "Subscribed successfully"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"subscribe_channel error: {e}")
         return False, "Unable to update the subscription"
 
 
-def unsubscribe_channel(channel_id: int, apartment_id: int, society_id: int = None):
+def unsubscribe_channel(channel_id: int, apartment_id: int, society_id: int | None = None):
     """Unsubscribe an apartment from an alert channel (same-society only)."""
     try:
         bad, _ch = _channel_membership_error(channel_id, apartment_id, society_id)
@@ -135,12 +136,12 @@ def unsubscribe_channel(channel_id: int, apartment_id: int, society_id: int = No
              WHERE channel_id = %s AND apartment_id = %s
         """, (channel_id, apartment_id))
         return True, "Unsubscribed successfully"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"unsubscribe_channel error: {e}")
         return False, "Unable to update the subscription"
 
 
-def list_channels(society_id: int, apartment_id: int = None, is_admin: bool = False):
+def list_channels(society_id: int, apartment_id: int | None = None, is_admin: bool = False):
     """
     List alert channels.
     If is_admin=False: Only active channels are shown to apartment owners.
@@ -166,12 +167,12 @@ def list_channels(society_id: int, apartment_id: int = None, is_admin: bool = Fa
              ORDER BY ac.active DESC, ac.created_at DESC
         """, (apt_id_param, society_id))
         return rows or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error listing alert channels: {e}")
         return []
 
 
-def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id: int = None):
+def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id: int | None = None):
     """
     Trigger a School Bus, Taxi, or Visitor alert.
 
@@ -342,7 +343,7 @@ def trigger_channel_alert(channel_id: int, triggered_by_user_id: int, society_id
             "state": "pending",
             "event_id": event_row["id"],
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error triggering channel alert: {e}")
         return False, str(e), None
 
@@ -453,14 +454,14 @@ def respond_to_alert(alert_event_id: int, owner_user_id: int, action: str):
             db._execute("UPDATE alert_channels SET active = FALSE WHERE id = %s", (event["channel_id"],))
 
         return True, f"Alert response recorded: {new_state.upper()}"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error responding to alert: {e}")
         return False, str(e)
 
 
 def create_walk_in_visitor(society_id: int, name: str, mobile: str, purpose: str,
-                           apartment_id: int = None, vehicle_number: str = None,
-                           photo: str = None, security_user_id: int = None):
+                           apartment_id: int | None = None, vehicle_number: str | None = None,
+                           photo: str | None = None, security_user_id: int | None = None):
     """
     Create a walk-in visitor record from the security portal.
     Security fills visitor details, then triggers notification to owner.
@@ -478,15 +479,15 @@ def create_walk_in_visitor(society_id: int, name: str, mobile: str, purpose: str
         try:                                                    # DPDP: log that the gate notice applied to this visit
             from app.services import dpdp_service
             dpdp_service.record_visitor_notice(society_id, visitor_id, security_user_id)
-        except Exception:                                       # noqa: BLE001  (never block the gate)
+        except Exception:
             logger.exception("visitor notice logging failed")
         return visitor_id, "Walk-in visitor created"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error creating walk-in visitor: {e}")
         return None, str(e)
 
 
-def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id: int = None, society_id: int = None):
+def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id: int | None = None, society_id: int | None = None):
     """
     Trigger a visitor alert (for both presumed and walk-in visitors).
     Sends push to owner, sets state to 'pending'.
@@ -596,7 +597,7 @@ def trigger_visitor_alert(visitor_id: int, triggered_by_user_id: int, channel_id
             "state": "pending",
             "event_id": event_row["id"],
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error triggering visitor alert: {e}")
         return False, str(e), None
 
@@ -675,7 +676,7 @@ def respond_to_visitor_alert(visitor_id: int, owner_user_id: int, action: str):
         })
 
         return True, f"Visitor alert response recorded: {new_state.upper()}"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error responding to visitor alert: {e}")
         return False, str(e)
 
@@ -768,7 +769,7 @@ def get_active_alerts(society_id: int):
             })
 
         return formatted
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error fetching active alerts: {e}")
         return []
 
@@ -797,7 +798,7 @@ def get_presumed_visitors(society_id: int):
              ORDER BY v.created_at DESC
         """, (society_id,))
         return rows or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error fetching presumed visitors: {e}")
         return []
 
@@ -838,7 +839,7 @@ def get_pending_owner_alerts(society_id: int, apartment_id: int):
             "channel_alerts": alerts or [],
             "visitor_alerts": visitor_alerts or [],
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error fetching pending owner alerts: {e}")
         return {"channel_alerts": [], "visitor_alerts": []}
 
@@ -893,12 +894,12 @@ def get_channel_subscribers_with_profile(channel_id: int):
                 "border_color": border_color,
             })
         return subscribers
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Error fetching channel subscribers: {e}")
         return []
 
 
-def get_channel_subscribers(channel_id: int, society_id: int = None):
+def get_channel_subscribers(channel_id: int, society_id: int | None = None):
     """
     Alias wrapper around get_channel_subscribers_with_profile.
 
@@ -927,6 +928,6 @@ def get_channel_subscribers(channel_id: int, society_id: int = None):
 
         subs = get_channel_subscribers_with_profile(channel_id)
         return {"channel_name": ch["name"], "subscribers": subs}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"get_channel_subscribers error: {e}")
         return {"channel_name": "Channel", "subscribers": []}

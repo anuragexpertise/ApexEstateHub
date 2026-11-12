@@ -130,7 +130,7 @@ def alert_masters(job: str, error: str, db=None) -> int:
         try:
             send_push_notification(user_id=m["id"], title=f"Scheduled job failed: {job}", body=error[:200])
             n += 1
-        except Exception:                                          # noqa: BLE001
+        except Exception:
             log.exception("could not alert master %s", m["id"])
     return n
 
@@ -153,6 +153,6 @@ def run_job(name: str, db=None, alert=alert_masters) -> dict:
                    (json.dumps(detail, default=str) if detail is not None else None, msg + "\n" + traceback.format_exc()[-1500:], run["id"]))
         try:
             alert(name, msg, d)
-        except Exception:                                          # noqa: BLE001
+        except Exception:
             log.exception("alerting masters failed")
         return {"status": "failed", "error": msg, "run_id": run["id"]}

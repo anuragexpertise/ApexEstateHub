@@ -11,12 +11,11 @@ office) is shown up front and enforced by the database.
 """
 from __future__ import annotations
 
-from datetime import date
-
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
 from app.services import committee_service as cs
+from app.utils import today_ist
 
 P = "mc"          # component id prefix
 
@@ -142,7 +141,7 @@ def appoint_form(society_id: int):
         html.Div(id=f"{P}-hint", style={"marginBottom": "8px", "fontSize": "13px"}),
         dbc.Row([
             dbc.Col(_field("Name of office-bearer", dbc.Input(id=f"{P}-name", type="text", maxLength=100)), md=4),
-            dbc.Col(_field("Term starts", dcc.DatePickerSingle(id=f"{P}-start", date=date.today(),
+            dbc.Col(_field("Term starts", dcc.DatePickerSingle(id=f"{P}-start", date=today_ist(),
                                                                display_format="DD MMM YYYY")), md=3),
             dbc.Col(_field("Term ends (optional)", dcc.DatePickerSingle(id=f"{P}-term-end", date=None,
                                                                         display_format="DD MMM YYYY")), md=3),
@@ -206,7 +205,7 @@ def committee_tab(role: str, society_id):
             wd = withdrawals_section(society_id, role)
             if wd is not None:
                 out.append(wd)
-        except Exception:                                                  # noqa: BLE001  never take the committee list down
+        except Exception:  # noqa: BLE001, S110
             pass
         if is_admin:
             out += [appoint_form(society_id), end_form(society_id),
@@ -215,5 +214,5 @@ def committee_tab(role: str, society_id):
         else:
             out.append(html.Div("Read-only view. The society admin records appointments.", style=_MUTED))
         return out
-    except Exception:       # one tab failing to load must not take the whole governance page down with it
+    except Exception:       # one tab failing to load must not take the whole governance page down with it  # noqa: BLE001
         return [html.Div("The committee could not be loaded just now. Please try again shortly.", style=_MUTED)]

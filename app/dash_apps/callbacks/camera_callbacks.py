@@ -14,7 +14,7 @@ the document-level click-delegation listener (initCamDelegation) once per
 navigation.  It deliberately does NOT re-define the camera functions here so
 there is zero code duplication.
 """
-from dash import Output, Input, clientside_callback
+from dash import Input, Output, clientside_callback
 
 # Only the delegation initialiser lives here.  All camera functions
 # (toggleCamCapture, snapCamCapture, stopCamCapture, _stopStream) are defined

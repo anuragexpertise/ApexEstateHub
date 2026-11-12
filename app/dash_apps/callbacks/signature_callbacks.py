@@ -7,7 +7,7 @@ required signatures are in. The user and the society always come from the server
 from __future__ import annotations
 
 import dash_bootstrap_components as dbc
-from dash import ALL, MATCH, Input, Output, State, ctx, html, dcc, no_update
+from dash import MATCH, Input, Output, State, ctx, dcc, html, no_update
 
 from app.security.audit_context import get_current_society_id, get_current_user_id
 from app.security.guards import require_session
@@ -51,7 +51,7 @@ def status_view(kind: str, subject_id: int, message: str | None = None, ok: bool
                                  "confirmed": "Withdrawal approved and posted to the ledger.",
                                  "cancelled": "Withdrawal declined and cancelled; nothing was posted."}.get(fwa.state(int(subject_id)), ""),
                                 style={"fontSize": "12px", "marginTop": "6px", "fontWeight": "600"}))
-        except Exception:                                                  # noqa: BLE001
+        except Exception:                                                  # noqa: BLE001, S110
             pass
     if rows:
         out.append(html.Ul(rows, style={"fontSize": "12px", "margin": "6px 0 0 0", "paddingLeft": "18px"}))
@@ -213,5 +213,5 @@ def register_signature_callbacks(app):
             from app.services import ratification_service as rs
             msg = rs.emergency_verify_expense(sid, subject_id, uid, reason)
             return status_view("expense", subject_id, msg)
-        except Exception as exc:                                   # RatificationRefused or a posting refusal
+        except Exception as exc:                                   # RatificationRefused or a posting refusal  # noqa: BLE001
             return status_view("expense", subject_id, str(exc), ok=False)

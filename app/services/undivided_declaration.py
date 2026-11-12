@@ -86,7 +86,7 @@ def template_bytes(society_id: int) -> bytes:
     """The Declaration workbook. Flats already enrolled are listed with their area (and their share only when it came
     from the Declaration itself, never when it was derived from area)."""
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.worksheet.datavalidation import DataValidation
 
     soc = _row("SELECT name, undivided_interest_basis AS basis FROM societies WHERE id=%s", (society_id,)) or {}
@@ -153,7 +153,7 @@ def _to_decimal(v, percent_formatted: bool = False):
     if v is None or (isinstance(v, str) and not v.strip()):
         return None
     if isinstance(v, bool):
-        raise ValueError("not a number")
+        raise ValueError("not a number")  # noqa: TRY004
     if isinstance(v, (int, float, Decimal)):
         d = Decimal(str(v))
         return d * 100 if percent_formatted else d
@@ -246,7 +246,7 @@ def parse_workbook(data: bytes) -> tuple[list[dict], list[str]]:
 def plan(society_id: int, rows: list[dict]) -> tuple[dict, list[str]]:
     """Compare the parsed rows with the society's flats. Returns (plan, errors); nothing is written."""
     errors: list[str] = []
-    total = sum((r["pct"] for r in rows), Decimal("0"))
+    total = sum((r["pct"] for r in rows), Decimal(0))
     if abs(total - 100) > TOLERANCE:
         diff = total - 100
         hint = ""
@@ -317,7 +317,7 @@ def apply(society_id: int, actor_id: int, xlsx_name: str, xlsx: bytes, pdf_name:
         folder = ASSETS_ROOT / str(society_id) / "evidence"
         folder.mkdir(parents=True, exist_ok=True)
         (folder / stored).write_bytes(pdf)
-    except Exception:                                                  # noqa: BLE001 - the hash is the evidence
+    except Exception:
         log.exception("could not keep the Declaration PDF for society %s", society_id)
     meta = {"xlsx_name": (xlsx_name or "")[:200], "xlsx_sha256": xlsx_digest, "flats": len(rows),
             "created": len(pl["create"]), "updated": len(pl["update"]), "total_pct": f"{pl['total']:f}",
@@ -340,7 +340,7 @@ def apply(society_id: int, actor_id: int, xlsx_name: str, xlsx: bytes, pdf_name:
               {"pdf_sha256": digest, **meta})
     try:
         ob.relink_pending_for_existing_flats(society_id)   # newly declared flats may already carry opening receivables
-    except Exception:                                      # noqa: BLE001 - the declaration stands
+    except Exception:
         log.exception("could not link opening receivables after the Declaration for society %s", society_id)
     note = f" {pl['rounded']} area(s) were rounded to whole sq ft." if pl["rounded"] else ""
     return (f"Declaration applied: {len(rows)} flats ({len(pl['create'])} new, {len(pl['update'])} updated), "
@@ -368,7 +368,7 @@ def billing_waits(society_id: int) -> bool:
     fn_billing_waits_for_declaration). False once the Declaration is on file or Enrollment is complete."""
     try:
         r = _row("SELECT fn_billing_waits_for_declaration(%s) AS w", (society_id,))
-    except Exception:                                   # noqa: BLE001 - function not installed yet on an older database
+    except Exception:
         log.exception("could not read the billing hold for society %s", society_id)
         return False
     return bool((r or {}).get("w"))

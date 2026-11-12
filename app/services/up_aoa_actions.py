@@ -8,11 +8,12 @@ The rules themselves are enforced in SQL (see estatehub.sql, "UP AOA COMPLIANCE
 LAYER"); these functions only validate form input and call them.
 """
 from __future__ import annotations
-from database.money import money
 
 from datetime import date, datetime
 
+from app.utils import today_ist
 from database.db_manager import db
+from database.money import money
 
 S22_STEPS = {
     "notice_served_on": "Notice served on the defaulter",
@@ -492,7 +493,7 @@ def load_card_data(society_id: int) -> dict:
     data = {"rules_on": rules_on, "society": one("SELECT name FROM societies WHERE id=%s", society_id) or {}}
     # Task 1.8: provisional Sec 44AB warning. It is a tax matter, not a UP AOA rule, so it is read before the rules_on gate.
     try:
-        today = date.today()
+        today = today_ist()
         data["tax_audit"] = one("SELECT * FROM fn_tax_audit_flag(%s, %s)", society_id, today.year if today.month >= 4 else today.year - 1)
     except Exception:                                                     # noqa: BLE001  (a warning must never stop the card loading)
         data["tax_audit"] = None
@@ -620,6 +621,7 @@ def bye_law7(society_id: int, election_date, basis):
 def annexure_workbook_bytes(society_id: int) -> bytes:
     """Owner list + loanee list as one workbook (annexures to the bye-law 49 statement)."""
     import io
+
     from openpyxl import Workbook
     from openpyxl.styles import Font
     wb = Workbook()

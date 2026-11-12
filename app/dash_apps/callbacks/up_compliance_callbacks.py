@@ -9,9 +9,13 @@ from dash import Input, Output, State, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
 from app.dash_apps.pages.up_compliance_card import render_up_compliance_body
-from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
-from app.services import up_aoa_actions as act
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.guards import require_session
+from app.services import up_aoa_actions as act
 
 _TOAST = Output("upc-toast", "children", allow_duplicate=True)
 _BODY = Output("upc-body", "children", allow_duplicate=True)
@@ -39,7 +43,7 @@ def _run(fn):
     sid, uid = ctx
     try:
         ok, msg = fn(sid, uid)
-    except Exception as exc:                                    # surface DB rule violations to the admin, never a blank page
+    except Exception as exc:                                    # surface DB rule violations to the admin, never a blank page  # noqa: BLE001
         return _alert(f"Could not save: {exc}", "danger"), no_update
     body = render_up_compliance_body(act.load_card_data(sid)) if ok else no_update
     return _alert(msg, "success" if ok else "danger"), body
@@ -120,7 +124,7 @@ def register_up_compliance_callbacks(app):
             return err, no_update
         try:
             ok, msg = act.post_depreciation_fund(ctx[0])
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             return _alert(f"Could not post: {exc}", "danger"), no_update
         body = render_up_compliance_body(act.load_card_data(ctx[0])) if ok else no_update
         return _alert(msg, "success" if ok else "danger"), body

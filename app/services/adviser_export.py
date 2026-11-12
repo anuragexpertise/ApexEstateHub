@@ -12,9 +12,9 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import datetime
 
 from app.security import adviser_access
+from app.utils import now_ist
 from database.db_manager import db
 
 MAX_ROWS = 50000
@@ -42,7 +42,7 @@ def ledger_csv(user_id: int) -> tuple[str, bytes, int]:
              LEFT JOIN accounts a   ON a.id = t.acc_id AND a.society_id = t.society_id
              LEFT JOIN apartments ap ON t.role = 'apartment' AND ap.id = t.entity_id AND ap.society_id = t.society_id
             WHERE t.society_id = %s ORDER BY t.trx_date, t.id LIMIT %s""", (sid, MAX_ROWS), fetch_all=True) or []
-    now = datetime.now()
+    now = now_ist()
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([f"Prepared for {who.get('name') or 'adviser'} ({cur['kind'].title()}), {soc.get('name')}, {now:%d %b %Y %H:%M}. Owner and member names are hidden. Confidential."])

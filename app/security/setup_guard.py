@@ -57,7 +57,7 @@ def society_portal_state(society_id, role) -> str:
     try:
         row = db._execute("SELECT onboarding_state, onboarding_phase FROM societies WHERE id = :sid",
                           {"sid": society_id}, fetch_one=True)
-    except Exception as exc:                          # noqa: BLE001 - migrations/002 not applied yet: no phase lock
+    except Exception as exc:
         if "onboarding_phase" not in str(exc):
             raise
         row = db._execute("SELECT onboarding_state FROM societies WHERE id = :sid", {"sid": society_id}, fetch_one=True)
@@ -78,7 +78,7 @@ def admin_in_onboarding(society_id, role) -> bool:
     try:
         row = db._execute("SELECT onboarding_state, onboarding_phase FROM societies WHERE id = :sid",
                           {"sid": society_id}, fetch_one=True)
-    except Exception as exc:                          # noqa: BLE001
+    except Exception as exc:
         if "onboarding_phase" not in str(exc):
             raise
         return False

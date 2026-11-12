@@ -7,12 +7,13 @@ Writes happen in callbacks/master_rules_callbacks.py -> services/regime_rules_ad
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
 from app.services import regime_rules_admin as rra
+from app.utils import today_ist
 
 REGIME = rra.DEFAULT_REGIME
 COLOR = "#c96a19"
@@ -95,7 +96,7 @@ def render_bye_laws_sections(society_id: int | None = None) -> list:
     
     try:
         clauses = rra.list_society_bye_laws(society_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
         clauses = []
     
     # Group by clause_id
@@ -137,12 +138,12 @@ def render_bye_laws_sections(society_id: int | None = None) -> list:
 
 
 LAYER_HELP = {
-    1: ("Model Bye-Law adoption", "Decided by the General Body (GBM). Adopt a clause of the 2011 Model Bye-Laws as-is, "
-                                  "adopt it with a variation, or - for non-statutory clauses only - not adopt it."),
-    2: ("Society policy", "Decided by the General Body (GBM). Tightens an adopted clause for your society; "
-                          "it can never loosen the Model Bye-Law."),
-    3: ("Board decision", "Decided by the Managing Committee (MC). An operating setting within the limits of the "
-                          "adopted clause and society policy."),
+    1: ("Model Bye-Law adoption", ("Decided by the General Body (GBM). Adopt a clause of the 2011 Model Bye-Laws as-is, "
+                                  "adopt it with a variation, or - for non-statutory clauses only - not adopt it.")),
+    2: ("Society policy", ("Decided by the General Body (GBM). Tightens an adopted clause for your society; "
+                          "it can never loosen the Model Bye-Law.")),
+    3: ("Board decision", ("Decided by the Managing Committee (MC). An operating setting within the limits of the "
+                          "adopted clause and society policy.")),
 }
 CHOICE_LABELS = {"adopted_as_is": "Adopt as-is", "adopted_with_variation": "Adopt with variation",
                  "not_adopted": "Not adopted"}
@@ -154,7 +155,7 @@ def render_policy_section(society_id: int | None) -> list:
         return []
     try:
         pol = rra.list_society_policies(society_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
         pol = {}
     if not pol:
         return []
@@ -204,7 +205,7 @@ def render_bye_laws_form(society_id: int | None, p: str = "gov") -> html.Div:
     if not society_id:
         return html.Div()
 
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (today_ist() + timedelta(days=1)).isoformat()
     clause_opts = [{"label": f"{c[0]} — {c[1]}", "value": c[0]} for c in rra.MODEL_BYE_LAW_CLAUSES]
     layer_opts = [{"label": f"Layer {l} — {LAYER_HELP[l][0]}", "value": l} for l in (1, 2, 3)]
 
@@ -249,7 +250,7 @@ def render_meetings_sections(society_id: int | None = None) -> list:
     
     try:
         meetings = rra.list_meetings(society_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
         meetings = []
     
     meeting_rows = []
@@ -265,7 +266,7 @@ def render_meetings_sections(society_id: int | None = None) -> list:
     # Get resolutions
     try:
         resolutions = rra.list_resolutions(society_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
         resolutions = []
     
     resolution_rows = []
@@ -290,15 +291,18 @@ def render_meetings_sections(society_id: int | None = None) -> list:
     for m in meetings[:15]:
         sign_items.append(html.Details([html.Summary(f"Minutes of meeting #{m['id']} ({m['type']}) - sign / signatures", style={"fontSize": "12px"}),
                                         signature_panel("minutes", m["id"], "Sign minutes")], className="mb-2"))
-    from app.dash_apps.callbacks.ratification_callbacks import certificate_section, ratification_section
+    from app.dash_apps.callbacks.ratification_callbacks import (
+        certificate_section,
+        ratification_section,
+    )
     try:
         rat = html.Div([ratification_section(society_id), html.Hr(), certificate_section(society_id)])
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         rat = html.Div(f"Ratification register unavailable: {exc}", style={"fontSize": "12px", "color": "#b02a37"})
     from app.dash_apps.callbacks.dispute_callbacks import dispute_section
     try:
         dsp = dispute_section(society_id)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         dsp = html.Div(f"Disputed bills unavailable: {exc}", style={"fontSize": "12px", "color": "#b02a37"})
     return [
         _section("Meetings (GBM / EGM / MC)", "Record General Body and Managing Committee meetings.",
@@ -319,7 +323,7 @@ def render_meeting_form(society_id: int | None, p: str = "mrl") -> html.Div:
     if not society_id:
         return html.Div()
     
-    tomorrow = date.today().isoformat()
+    tomorrow = today_ist().isoformat()
     type_opts = [{"label": t, "value": t} for t in ("GBM", "EGM", "MC")]
     
     return _section(
@@ -327,7 +331,7 @@ def render_meeting_form(society_id: int | None, p: str = "mrl") -> html.Div:
         dbc.Row([
             dbc.Col([_label("Society"), dbc.Input(id=f"{p}-mtg-soc", type="text", value=str(society_id), readonly=True, size="sm")], md=3),
             dbc.Col([_label("Type"), dcc.Dropdown(id=f"{p}-mtg-type", options=type_opts, clearable=False, style={"fontSize": "12px"})], md=4),
-            dbc.Col([_label("Held on"), dbc.Input(id=f"{p}-mtg-date", type="date", size="sm", value=tomorrow, max=date.today().isoformat())], md=3),
+            dbc.Col([_label("Held on"), dbc.Input(id=f"{p}-mtg-date", type="date", size="sm", value=tomorrow, max=today_ist().isoformat())], md=3),
             dbc.Col([_label("Quorum met"), dbc.Checkbox(id=f"{p}-mtg-quorum", label="Yes", value=False)], md=2),
         ], className="mb-2"),
         dbc.Row([
@@ -346,13 +350,13 @@ def render_resolution_form(society_id: int | None, p: str = "mrl") -> html.Div:
     
     try:
         meetings = rra.list_meetings(society_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
         meetings = []
     meeting_opts = [{"label": f"#{m['id']} — {m['type']} ({m['held_on']})", "value": m["id"]} for m in meetings]
     
     try:
         decision_types = rra.list_decision_types()
-    except Exception:
+    except Exception:  # noqa: BLE001
         decision_types = []
     def _dt_label(dt):
         """Code - label [authority layer, majority, provisional?]: authority and majority are shown separately."""
@@ -364,12 +368,12 @@ def render_resolution_form(society_id: int | None, p: str = "mrl") -> html.Div:
     dt_opts = [{"label": _dt_label(dt), "value": dt["id"]} for dt in decision_types]
     try:
         _ratified = rra.thresholds_ratification(society_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
         _ratified = {"ratified": False}
     
     try:
         clauses = rra.MODEL_BYE_LAW_CLAUSES
-    except Exception:
+    except Exception:  # noqa: BLE001
         clauses = []
     clause_opts = [{"label": f"{c[0]} — {c[1]}", "value": c[0]} for c in clauses]
     clause_opts += [{"label": f"Rule: {o['label']}", "value": o["value"]} for o in editable_rule_options()]
@@ -419,7 +423,7 @@ def render_resolution_form(society_id: int | None, p: str = "mrl") -> html.Div:
         ], className="mb-2"),
         dbc.Row([
             dbc.Col([_label("Passed"), dbc.Checkbox(id=f"{p}-res-passed", label="Mark as passed", value=False)], md=4),
-            dbc.Col([_label("Passed on"), dbc.Input(id=f"{p}-res-passed-on", type="date", size="sm", value=date.today().isoformat())], md=4),
+            dbc.Col([_label("Passed on"), dbc.Input(id=f"{p}-res-passed-on", type="date", size="sm", value=today_ist().isoformat())], md=4),
         ], className="mb-2"),
         _label("Reason / Notes"),
         dbc.Textarea(id=f"{p}-res-reason", rows=2, size="sm", className="mb-2"),
@@ -434,7 +438,7 @@ def render_enactment_section(society_id: int | None, p: str = "mrl", can_execute
     
     try:
         pending = rra.list_pending_enactments(society_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
         pending = []
     
     if not pending:
@@ -520,7 +524,7 @@ def render_rule_decision_form(society_id: int | None, p: str = "gov") -> html.Di
     until a passed resolution naming the rule is recorded under Meetings & Resolutions, which activates it."""
     if not society_id:
         return html.Div()
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (today_ist() + timedelta(days=1)).isoformat()
     layer_opts = [{"label": f"Layer {l} - {LAYER_HELP[l][0]}", "value": l} for l in (1, 2, 3)]
     return _section(
         "Edit a Policy rule (your society)",
@@ -567,7 +571,7 @@ def catalog_edit_form(regime_code: str = REGIME) -> html.Div:
     """Master-only: edit a legal_instrument_catalog entry for `regime_code`. Ids stay mrl-cat-* (master callbacks)."""
     try:
         instruments = rra.list_instruments(regime_code)
-    except Exception:
+    except Exception:  # noqa: BLE001
         instruments = []
     inst_opts = [{"label": f"[{i['instrument_type']}] {i['title']} ({i['enactment_year'] or 'n/a'})", "value": i["id"]}
                  for i in instruments]
@@ -578,7 +582,7 @@ def catalog_edit_form(regime_code: str = REGIME) -> html.Div:
         dbc.Row([
             dbc.Col([_label("Status"), dcc.Dropdown(id="mrl-cat-status", clearable=False, style={"fontSize": "12px"},
                                                     options=[{"label": x, "value": x} for x in rra.CATALOG_STATUSES])], md=4),
-            dbc.Col([_label("Last verified"), dbc.Input(id="mrl-cat-ver", type="date", size="sm", max=date.today().isoformat())], md=4),
+            dbc.Col([_label("Last verified"), dbc.Input(id="mrl-cat-ver", type="date", size="sm", max=today_ist().isoformat())], md=4),
         ], className="mb-2"),
         _label("Applicability"), dbc.Textarea(id="mrl-cat-app", rows=2, size="sm", className="mb-2"),
         _label("Key provisions"), dbc.Textarea(id="mrl-cat-prov", rows=4, size="sm", className="mb-2"),
@@ -592,7 +596,7 @@ def catalog_edit_form(regime_code: str = REGIME) -> html.Div:
 
 
 def render_master_rules_page() -> html.Div:
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (today_ist() + timedelta(days=1)).isoformat()
     rule_opts = [{"label": f"{k} — {s.label}", "value": k} for k, s in rra.RULE_SPECS.items()]
     rule_form = _section(
         "Change a rule", "Creates a NEW dated version; the current value is closed the day before. Back-dating is refused. "

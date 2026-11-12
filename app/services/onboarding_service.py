@@ -25,11 +25,10 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from database.db_manager import db
-
-from app.services import pending_receivables as pr
-
 from app.dash_apps.pages.wizard_registry import DEPENDS, SKIPPED_WHEN
+from app.services import pending_receivables as pr
+from app.utils import today_ist
+from database.db_manager import db
 
 log = logging.getLogger(__name__)
 
@@ -175,7 +174,7 @@ def _check_evidence_file(filename: str, data: bytes) -> str:
     if not data or len(data) > EVIDENCE_MAX_BYTES:
         raise OnboardingError("The minutes file must be between 1 byte and 5 MB.")
     if not data.startswith(EVIDENCE_TYPES[ext]):
-        raise OnboardingError("The file does not look like a real %s." % ext.lstrip(".").upper())
+        raise OnboardingError("The file does not look like a real {}.".format(ext.lstrip(".").upper()))
     return ext
 
 
@@ -202,7 +201,7 @@ def _store_evidence(society_id: int, filename: str, data: bytes) -> tuple[str, s
         folder = ASSETS_ROOT / str(society_id) / "evidence"
         folder.mkdir(parents=True, exist_ok=True)
         (folder / f"{digest}{ext}").write_bytes(data)
-    except Exception:                                               # noqa: BLE001 - the hash is the evidence; the copy is a convenience
+    except Exception:
         log.exception("could not keep the evidence file for society %s", society_id)
     return f"{digest}{ext}", digest
 
@@ -222,7 +221,7 @@ def _store_signature(society_id: int, filename: str, data: bytes) -> str:
         folder.mkdir(parents=True, exist_ok=True)
         stored = f"{digest}.webp"
         (folder / stored).write_bytes(webp)
-    except Exception:                                               # noqa: BLE001
+    except Exception:
         log.exception("could not keep the signature file for society %s", society_id)
         stored = f"{digest}.webp"
     return stored
@@ -233,9 +232,10 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
                           evidence_bytes: bytes | None, signature_name: str | None = None,
                           signature_bytes: bytes | None = None, apartment_size: int | None = None) -> str:
     """Enrol the flat and login for one of the three office-bearers and seat them. Returns a message; raises OnboardingError."""
+    from werkzeug.security import generate_password_hash
+
     from app.security.password_policy import validate_password
     from app.services import committee_service as cs
-    from werkzeug.security import generate_password_hash
 
     if office_code not in CORE_OFFICES:
         raise OnboardingError("Only the President, Secretary and Treasurer are seated at this stage.")
@@ -258,8 +258,8 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
                      LIMIT 1""",
                  (society_id, list(CORE_OFFICES), office_code, society_id, flat, society_id, email_c))
     if clash:
-        raise OnboardingError("That flat or email already holds the %s seat. The President, Secretary and Treasurer must be "
-                              "three different people, each from a different flat." % OFFICE_LABEL.get(clash["office_code"], clash["office_code"]))
+        raise OnboardingError("That flat or email already holds the {} seat. The President, Secretary and Treasurer must be "
+                              "three different people, each from a different flat.".format(OFFICE_LABEL.get(clash["office_code"], clash["office_code"])))
     ref = (resolution_ref or "").strip()
     if len(ref) < 3:
         raise OnboardingError("Give the resolution reference under which this person was elected.")
@@ -296,7 +296,7 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
                          (society_id, email_c, generate_password_hash(password), apt["id"], name, actor_id))
             created_user = True
         ok, msg = cs.appoint(actor_id, "admin", society_id, apt["id"], office_code, name, user_id=login["id"],
-                             term_start=date.today(), resolution_ref=ref, actor_society_id=society_id,
+                             term_start=today_ist(), resolution_ref=ref, actor_society_id=society_id,
                              email=email_c, phone=phone_c, signature_image=sig_stored,
                              evidence_file=stored, evidence_hash=digest)
         if not ok:
@@ -304,7 +304,7 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
         # Item 10: link any pending opening receivable for this flat (idempotent).
         try:
             link_opening_receivable(society_id, apt["id"], flat)
-        except Exception:                                          # noqa: BLE001 - the seat stands even if linking fails
+        except Exception:
             log.exception("could not link opening receivable for flat %s in society %s", flat, society_id)
     except Exception:
         if created_user:
@@ -440,7 +440,7 @@ def validate_election_rows(rows: list[dict]) -> tuple[dict, list[str]]:
 def _area_int(v) -> int | None:
     """Flat area from the workbook ('1200', '1200.5' or blank) as whole square feet."""
     try:
-        return int(round(float(v))) if str(v if v is not None else "").strip() else None
+        return round(float(v)) if str(v if v is not None else "").strip() else None
     except (TypeError, ValueError):
         return None
 
@@ -513,7 +513,7 @@ def seat_founding_committee(actor_id: int, society_id: int, rows: list[dict], mi
             seat_founding_officer(actor_id, society_id, office, rec["flat"], rec["name"], rec["email"], rec["phone"],
                                   passwords.get(office) or "", rec["ref"], minutes_name, minutes_bytes,
                                   signature_name=sig_name, signature_bytes=sig_bytes, apartment_size=_area_int(rec.get("size")))
-        except Exception as exc:                                    # noqa: BLE001 - report what is already seated either way
+        except Exception as exc:
             reason = str(exc) if isinstance(exc, OnboardingError) else "an unexpected error stopped it (see the server log)."
             if not isinstance(exc, OnboardingError):
                 log.exception("seating %s for society %s from Election Results.xlsx failed", office, society_id)
@@ -534,7 +534,7 @@ def seat_founding_committee(actor_id: int, society_id: int, rows: list[dict], mi
         _audit(society_id, actor_id, "FOUNDING_COMMITTEE_SEATED_FROM_XLSX", "society", society_id,
                {"seated": done, "already_seated": [o for o in CORE_OFFICES if o not in todo],
                 "workbook_sha256": workbook_sha256 or ""})
-    except Exception:                                               # noqa: BLE001 - the seats stand; the per-seat audit is already written
+    except Exception:
         log.exception("could not audit the Election Results.xlsx seating for society %s", society_id)
     if done:
         msg = "Seated " + ", ".join(f"{data[o]['name']} as {OFFICE_LABEL[o]}" for o in done) + "."
@@ -570,7 +570,6 @@ def _save_declaration(society_id: int, d: dict, actor_id: int) -> None:
                 (society_id, json.dumps(d, default=str), actor_id))
 
 
-from app.dash_apps.pages.wizard_registry import DEPENDS, SKIPPED_WHEN
 
 
 def save_step(society_id: int, actor_id: int, step_key: str, values: dict, cleared=()) -> dict:
@@ -594,8 +593,9 @@ def save_step(society_id: int, actor_id: int, step_key: str, values: dict, clear
         confirm = values.pop("stepup_confirm", None)
         values.pop("stepup_hash", None)
         if plain not in (None, ""):
-            from app.security.password_policy import validate_signing_secret as _vss
             from werkzeug.security import generate_password_hash as _gph
+
+            from app.security.password_policy import validate_signing_secret as _vss
             if confirm is not None and plain != confirm:
                 pre_errors.append("The step-up password and its confirmation do not match.")
             elif _vss(str(plain)):
@@ -627,7 +627,7 @@ def save_step(society_id: int, actor_id: int, step_key: str, values: dict, clear
     errors = pre_errors + validate_step(step_key, draft, society_id)
 
     status = "done" if not errors else "todo"
-    steps[step_key] = {"status": status, "saved_at": date.today().isoformat(),
+    steps[step_key] = {"status": status, "saved_at": today_ist().isoformat(),
                        "needs_review": False}
 
     if changed:
@@ -687,7 +687,7 @@ def validate_step(step_key: str, draft: dict, society_id: int) -> list[str]:
         from app.services.statutory_rules import regime_for_society as _rfs
         try:
             _rfs(society_id, (draft.get("society_details") or {}).get("state") or None)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             errors.append(f"Legal regime could not be resolved: {exc}")
 
     elif step_key == "funds":
@@ -821,8 +821,9 @@ def _committee_complete(society_id: int) -> bool:
 
 def _audit(society_id: int, actor_id: int, action: str, resource_type: str, resource_id: int | None,
            extra: dict) -> None:
-    from app.security.pii_masking import redact_for_audit
     import json as _json
+
+    from app.security.pii_masking import redact_for_audit
     # Redact any PII values in the extra dict before storing in audit_events
     safe_extra = {}
     for k, v in (extra or {}).items():
@@ -849,15 +850,25 @@ def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
     """Build the fn_complete_society_setup call from the draft (fixes F2: TDS as rows,
     BF as bf_json, images/compliance flags all present)."""
     import json as _json
-    from database.db_manager import _to_pyformat
+
+    from app.dash_apps.callbacks.drilldown_callbacks import (
+        _move_temp_images,
+    )
+    from app.dash_apps.pages.setup_wizard import apt_charges_error as _apt_charges_error
+    from app.dash_apps.pages.setup_wizard import fund_plan as _fund_plan
+    from app.dash_apps.pages.setup_wizard import funds_error as _funds_error
     from app.services import regime_rules_admin as _rra
-    from app.services.auth_service import verify_password_with_lockout  # noqa: F401  (throttle+lockout shared)
-    from app.dash_apps.pages.setup_wizard import (apt_charges_error as _apt_charges_error,
-                                                  funds_error as _funds_error, fund_plan as _fund_plan)
-    from database.seed import tds_wizard_rows as _tds_wizard_rows, it2025_twin as _it2025_twin
+    from app.services.auth_service import (
+        verify_password_with_lockout,  # noqa: F401  (throttle+lockout shared)
+    )
+    from app.services.signing_service import ensure_society_keys as _ensure_society_keys
+    from app.services.signing_service import (
+        set_stepup_password_hash as _set_stepup_password_hash,
+    )
     from app.utils.fiscal import fy_start_date as _fy_start_date
-    from app.services.signing_service import ensure_society_keys as _ensure_society_keys, set_stepup_password_hash as _set_stepup_password_hash
-    from app.dash_apps.callbacks.drilldown_callbacks import _move_temp_images as _move_temp_images
+    from database.db_manager import _to_pyformat
+    from database.seed import it2025_twin as _it2025_twin
+    from database.seed import tds_wizard_rows as _tds_wizard_rows
 
     def _num_or_none(v):
         return None if v in (None, "") else float(v)
@@ -868,11 +879,11 @@ def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
 
     sd = draft.get("society_details") or {}
     admin = draft.get("administrator") or {}
-    regime = draft.get("legal_regime") or {}
+    draft.get("legal_regime") or {}
     funds = draft.get("funds") or {}
     tds = draft.get("tds") or {}
     gst = draft.get("gst") or {}
-    apt = draft.get("apartment") or {}
+    draft.get("apartment") or {}
     vend = draft.get("vendor") or {}
     accts = draft.get("accounts") or {}
     bf = draft.get("brought_forward") or {}
@@ -902,9 +913,11 @@ def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
     secret_enc = _set_stepup_password_hash(admin.get("stepup_hash") or "")
 
     try:
-        from app.services.up_aoa_actions import fill_after_enrolment as _fill_after_enrolment
+        from app.services.up_aoa_actions import (
+            fill_after_enrolment as _fill_after_enrolment,
+        )
         _fill_after_enrolment(society_id)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
     tds_rows = []
@@ -1091,7 +1104,7 @@ def link_opening_receivable(society_id: int, apartment_id: int, flat_number: str
         try:
             as_at = date.fromisoformat(str(row.get("as_at") or "")[:10])
         except ValueError:
-            as_at = date.today()
+            as_at = today_ist()
         cur.execute("""INSERT INTO receivables (society_id, entity_id, role, acc_id, description, period_month,
                                                  base_amount, interest_amount, interest_months_applied, amount,
                                                  paid_amount, paid_principal, due_date, status)
@@ -1143,7 +1156,7 @@ def save_bank_reconciliation(society_id: int, actor_id: int, values: dict) -> di
     rec.update(values)
     bf["reconciliation"] = rec
     steps = d.setdefault("steps", {})
-    steps["brought_forward"] = {"status": "done", "saved_at": date.today().isoformat()}
+    steps["brought_forward"] = {"status": "done", "saved_at": today_ist().isoformat()}
     db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s",
                 (json.dumps(d), society_id))
     return {"ok": True}
@@ -1255,7 +1268,7 @@ def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filen
     if not data or len(data) > EVIDENCE_MAX_BYTES:
         raise OnboardingError("The file must be between 1 byte and 5 MB.")
     if not data.startswith(EVIDENCE_TYPES[ext]):
-        raise OnboardingError("The file does not look like a real %s." % ext.lstrip(".").upper())
+        raise OnboardingError("The file does not look like a real {}.".format(ext.lstrip(".").upper()))
     digest = _sha(data)
     stored = f"{digest}{ext}"
     # The file name IS its SHA-256, so the stored copy can be checked at any time (evidence_service.verify_row).
@@ -1274,7 +1287,7 @@ def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filen
             path.write_bytes(data)
         if _sha(path.read_bytes()) != digest:                              # read-back: what is on disk is what was uploaded
             raise OSError("read-back hash mismatch")
-    except Exception:                                                      # noqa: BLE001
+    except Exception:
         log.exception("could not keep evidence file for society %s", society_id)
         raise OnboardingError("The file could not be stored safely. Please upload it again; if it keeps failing, "
                               "contact the platform operator.")
@@ -1342,16 +1355,29 @@ def submit_setup_draft(society_id: int, actor_id: int, data: dict) -> str:
     transaction with seed_accounts (A14 atomicity). Returns a success message; raises OnboardingError."""
     import json as _json
 
-    from database.seed import seed_accounts as _seed_accounts, tds_wizard_rows as _tds_wizard_rows, it2025_twin as _it2025_twin
+    from app.dash_apps.callbacks.drilldown_callbacks import (
+        _move_temp_images,
+    )
+    from app.security.password_policy import (
+        validate_signing_secret as _validate_signing_secret,
+    )
+    from app.services import regime_rules_admin as _rra
+    from app.services.auth_service import (
+        verify_password_with_lockout as _verify_password_with_lockout,
+    )
+    from app.services.signing_service import ensure_society_keys as _ensure_society_keys
+    from app.services.signing_service import (
+        set_stepup_password_hash as _set_stepup_password_hash,
+    )
+    from app.services.up_aoa_actions import (
+        fill_after_enrolment as _fill_after_enrolment,
+    )
+    from app.utils.fiscal import fy_start_date as _fy_start_date
     from database.db_manager import _to_pyformat
     from database.money import money as _money_val
-    from app.services import regime_rules_admin as _rra
-    from app.services.up_aoa_actions import fill_after_enrolment as _fill_after_enrolment
-    from app.security.password_policy import validate_signing_secret as _validate_signing_secret
-    from app.services.signing_service import ensure_society_keys as _ensure_society_keys, set_stepup_password_hash as _set_stepup_password_hash
-    from app.services.auth_service import verify_password_with_lockout as _verify_password_with_lockout
-    from app.dash_apps.callbacks.drilldown_callbacks import _move_temp_images as _move_temp_images
-    from app.utils.fiscal import fy_start_date as _fy_start_date
+    from database.seed import it2025_twin as _it2025_twin
+    from database.seed import seed_accounts as _seed_accounts
+    from database.seed import tds_wizard_rows as _tds_wizard_rows
 
     def _num_or_none(lst, i):
         v = lst[i] if i < len(lst) else None
@@ -1408,7 +1434,9 @@ def submit_setup_draft(society_id: int, actor_id: int, data: dict) -> str:
     apt_repair = (apt_repair or 0) if _flags["repair"] else 0
 
     # reuse wizard validation helpers
-    from app.dash_apps.pages.setup_wizard import apt_charges_error as _apt_charges_error, funds_error as _funds_error, fund_plan as _fund_plan
+    from app.dash_apps.pages.setup_wizard import apt_charges_error as _apt_charges_error
+    from app.dash_apps.pages.setup_wizard import fund_plan as _fund_plan
+    from app.dash_apps.pages.setup_wizard import funds_error as _funds_error
     _apt_err = (_apt_charges_error(apt_billing_basis, apt_budget, apt_rate, apt_amt)
                 or _funds_error(_fund_plan(society_id, s_state, constitution=s_constitution)["plan"], apt_sinking, apt_repair, apt_cost))
     if _apt_err:
@@ -1437,12 +1465,12 @@ def submit_setup_draft(society_id: int, actor_id: int, data: dict) -> str:
     try:
         _ensure_society_keys(society_id, actor_id)
         secret_enc = _set_stepup_password_hash(qr_secret)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise OnboardingError(f"Unable to create the society's signing keys: {e}")
 
     try:
         _fill_after_enrolment(society_id)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass  # undivided-interest fill is best-effort
 
     # build tds pairs — accept `tds` either as a list of dicts keyed by
@@ -1625,7 +1653,7 @@ def submit_setup_draft(society_id: int, actor_id: int, data: dict) -> str:
             _apply_tds_row_dates(cur, society_id, _setup_params["tds_effective_date"], tds_pairs)
     except OnboardingError:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise OnboardingError(f"Unable to save the society setup: {e}")
 
     return "Setup draft saved. Next: check and seal the annexes, then sign the Agreement."
@@ -1642,7 +1670,7 @@ def _ctl(passed: bool, reason: str, blocking: bool = True) -> dict:
 
 def _annex_a(society_id: int, soc: dict) -> tuple[dict, dict]:
     """Annex A: legal regime and hierarchy snapshot, sealed as part of the Agreement."""
-    from app.services.statutory_rules import instruments_for_regime, instrument_applies
+    from app.services.statutory_rules import instrument_applies, instruments_for_regime
     regime_row = _row("SELECT regime_code FROM society_legal_regime WHERE society_id=%s "
                       "AND effective_from <= CURRENT_DATE AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)", (society_id,))
     regime_code = (regime_row or {}).get("regime_code")
@@ -1659,7 +1687,7 @@ def _annex_a(society_id: int, soc: dict) -> tuple[dict, dict]:
     instruments = instruments_for_regime(regime_code or "UP_AOA_2010")
     hierarchy = []
     for r in instruments:
-        applies, reason = instrument_applies(r, answers)
+        applies, _reason = instrument_applies(r, answers)
         hierarchy.append({"layer": r.get("instrument_type") or "", "title": r.get("title") or "",
                           "year": r.get("enactment_year"), "type": r.get("instrument_type") or "",
                           "applicable": applies, "verification": r.get("verification") or "unverified",
@@ -1669,7 +1697,7 @@ def _annex_a(society_id: int, soc: dict) -> tuple[dict, dict]:
     unverified = [h for h in hierarchy if h["verification"] != "verified"]
     content = {"regime_code": regime_code or "", "answers": answers,
                "hierarchy": hierarchy, "catalog_digest": catalog_digest,
-               "generated_at": date.today().isoformat(),
+               "generated_at": today_ist().isoformat(),
                "note": "The Model Bye-Laws apply as notified. Adoption or variation by the General Body is recorded after activation "
                        "in Stage 6 (Adoption) and is between the Society and its members; the Operator is not a party to it."}
     controls = {"regime_assigned": _ctl(bool(regime_code), "A legal regime is assigned." if regime_code else
@@ -1728,7 +1756,7 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
     elif not bf.get("rows"):
         bf = {"fy": draft_bf.get("fy") or bf.get("fy"), "rows": []}
     inputs = decl.get("annex_c_inputs") or {}
-    fy = int(bf.get("fy") or date.today().year)
+    fy = int(bf.get("fy") or today_ist().year)
     accs = {a["id"]: a for a in _rows("SELECT id, name, tab_name, drcr_account FROM accounts WHERE society_id=%s", (society_id,))}
     lines, dr, cr, fund_cr, bank_dr, debtors_dr, bad = [], Decimal(0), Decimal(0), Decimal(0), Decimal(0), Decimal(0), []
     for r in bf.get("rows") or []:
@@ -1758,7 +1786,7 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
         import json as _j
         try:
             arrears = _j.loads(arrears)
-        except Exception:
+        except Exception:  # noqa: BLE001
             arrears = []
     arrears_total = sum((money(x["amount"]) for x in arrears), Decimal(0))
     bank_lines = [(l, accs[l["acc_id"]]) for l in lines if accs[l["acc_id"]]["tab_name"] in BANK_TABS and money(l["amount"]) > 0
@@ -1770,7 +1798,7 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
         bank_rec[str(a["id"])] = {"account": a["name"], "book": l["amount"], "statement_balance": r.get("statement_balance"),
                                   "evidence_sha256": r.get("sha256")}
         if not (st["agrees"] and st["evidenced"]):
-            unreconciled.append(a["name"] + (" (differs by Rs %s)" % st["diff"] if st["diff"] else
+            unreconciled.append(a["name"] + (" (differs by Rs {})".format(st["diff"]) if st["diff"] else
                                              " (no statement balance)" if not st["has_statement"] else " (no scan attached)"))
     audited = recon.get("audited_sha256") or inputs.get("audited_hash")
     as_on = draft_bf.get("as_on_date") or str(date(fy, 4, 1))
@@ -2024,7 +2052,7 @@ SIGNING_MODES = ("password", "esign", "paper")
 def signing_mode(society_id: int) -> str:
     try:
         r = _row("SELECT signing_mode, esign_required FROM societies WHERE id=%s", (society_id,))
-    except Exception as exc:                                           # noqa: BLE001
+    except Exception as exc:
         if "signing_mode" not in str(exc):
             raise
         _missing_column(exc, "signing_mode")
@@ -2074,6 +2102,7 @@ def appoint_adviser(actor_id: int, society_id: int, kind: str, name: str, firm: 
     passwords (adviser_appointment signing kind) before the adviser can act.
     """
     from werkzeug.security import generate_password_hash
+
     from app.security.password_policy import validate_password
     from app.services import committee_service as cs
 
@@ -2197,7 +2226,7 @@ def import_legacy_resolution(society_id: int, actor_id: int, held_on, meeting_ty
         held = held_on if isinstance(held_on, date) else date.fromisoformat(str(held_on)[:10])
     except ValueError:
         raise OnboardingError("Give the date of the old meeting as YYYY-MM-DD.")
-    if held > date.today():
+    if held > today_ist():
         raise OnboardingError("A legacy meeting must be in the past.")
     if meeting_type not in ("GBM", "EGM", "MC"):
         raise OnboardingError("Choose General Body, Extraordinary or Managing Committee meeting.")
@@ -2237,7 +2266,7 @@ def agreement_text(society_id: int, agreement_no: str, annex_hashes: dict, annex
     c = annexes.get("C", {})
     return (
         "ESTATEHUB SOFTWARE LICENCE, DATA PROCESSING AND DECLARATION AGREEMENT\n"
-        f"Agreement No: {agreement_no}\nDate: {date.today():%d %B %Y}\n\n"
+        f"Agreement No: {agreement_no}\nDate: {today_ist():%d %B %Y}\n\n"
         "PARTIES AND AUTHORITY\n"
         f"The Society: {soc.get('name')}, registered under number {soc.get('registration_number')}, PAN {soc.get('pan_number') or '____'}, "
         f"of {soc.get('address')}, acting through its President, Secretary and Treasurer (the \"Licensee\").\n"
@@ -2324,8 +2353,7 @@ def _image_data_uri(rel: str | None) -> str | None:
     import base64
     from pathlib import Path
     rel = (rel or "").strip().lstrip("/")
-    if rel.startswith("assets/"):
-        rel = rel[len("assets/"):]
+    rel = rel.removeprefix("assets/")
     mime = _IMG_MIME.get(Path(rel).suffix.lower())
     if not rel or not mime:
         return None
@@ -2462,7 +2490,7 @@ def _progress(progress, step: int, message: str) -> None:
     if progress:
         try:
             progress(step, message)
-        except Exception:                                              # noqa: BLE001 - progress must never break activation
+        except Exception:
             log.exception("progress callback failed")
 
 
@@ -2470,7 +2498,7 @@ def activate(society_id: int, actor_id: int, progress=None) -> str:
     _progress(progress, 4, "Opening the ledger and posting opening balances")
     try:
         r = _row("SELECT fn_activate_society(%s,%s) AS r", (society_id, actor_id))
-    except Exception as exc:                                           # noqa: BLE001
+    except Exception as exc:
         raise OnboardingError(str(exc).split("\n")[0].replace("ERROR:", "").strip() or "Activation failed.") from exc
     result = (r or {}).get("r") or "OK"
     _progress(progress, 5, "Creating opening receivables")
@@ -2482,13 +2510,13 @@ def activate(society_id: int, actor_id: int, progress=None) -> str:
         from app.services import dpdp_service
         dpdp_service.ensure_notice(society_id, actor_id)
         dpdp_service.init_dpdp_review(society_id, actor_id)
-    except Exception:                                                  # noqa: BLE001 - the notice can be published later from the register
+    except Exception:
         log.exception("could not publish the first privacy notice for society %s", society_id)
     _progress(progress, 7, "Taking the first ledger anchor")
     try:
         from app.security import ledger_anchor as _la
         _la.anchor_society(society_id, actor_id, method="manual")      # first ledger anchor, signed
-    except Exception:                                                  # noqa: BLE001 - no chain yet; the scheduled job anchors after the first entry
+    except Exception:
         log.exception("could not take the first ledger anchor for society %s", society_id)
     if result != "ALREADY_ACTIVE":
         _record_agreement_signed(society_id, actor_id)
@@ -2501,14 +2529,14 @@ def _record_agreement_signed(society_id: int, actor_id: int) -> None:
         if not _row("SELECT 1 AS x FROM onboarding_events WHERE society_id=%s AND event='agreement_signed'", (society_id,)):
             db._execute("INSERT INTO onboarding_events (society_id, event, payload) VALUES (%s,'agreement_signed','{}'::jsonb)",
                         (society_id,))
-    except Exception:                                                  # noqa: BLE001
+    except Exception:
         log.exception("could not record the agreement_signed event for society %s", society_id)
     try:
         for uid in _recipient_user_ids(society_id):
             db._execute("INSERT INTO notifications (user_id, society_id, title, body, notification_type) VALUES (%s,%s,%s,%s,'push')",
                         (uid, society_id, "Your society is live",
                          "The Agreement is signed and the society is active. Next: enrol your members."))
-    except Exception:                                                  # noqa: BLE001
+    except Exception:
         log.exception("could not alert the office-bearers for society %s", society_id)
 
 
@@ -2534,7 +2562,7 @@ def _missing_column(exc: Exception, what: str) -> None:
 def society_phase(society_id: int) -> str | None:
     try:
         r = _row("SELECT onboarding_phase FROM societies WHERE id=%s", (society_id,))
-    except Exception as exc:                                           # noqa: BLE001 - psycopg2 UndefinedColumn
+    except Exception as exc:
         if "onboarding_phase" not in str(exc):
             raise
         _missing_column(exc, "onboarding_phase")
@@ -2555,7 +2583,7 @@ def relink_pending_for_existing_flats(society_id: int) -> int:
         try:
             if link_opening_receivable(society_id, r["apt_id"], r["pf"]):
                 linked += 1
-        except Exception:                                              # noqa: BLE001 - leave it pending, never block the page
+        except Exception:
             log.exception("could not link the opening receivable for flat %s in society %s", r["pf"], society_id)
     return linked
 
@@ -2641,7 +2669,7 @@ def _annex_f_content(society_id: int) -> dict:
             try:
                 payload = _j.loads(row["after_value"] or "{}")
                 waiver_reason = payload.get("no_declaration_reason")
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
     apt_n, apt_sha = _roster_hash(society_id, "apartment")
     ven_n, ven_sha = _roster_hash(society_id, "vendor")
@@ -2752,7 +2780,7 @@ def _try_build_supplementary(society_id: int, code: str, actor_id: int | None) -
         return True
     except OnboardingError as exc:
         log.info("annexure %s not built for society %s: %s", code, society_id, exc)
-    except Exception:                                       # noqa: BLE001
+    except Exception:
         log.exception("could not build annexure %s for society %s", code, society_id)
     return False
 
@@ -2775,12 +2803,12 @@ def supplementary_checklist(society_id: int, user_id: int | None = None) -> list
                 if user_id and not sealed:
                     mine = [r[0] for r in ds._signer_roles(db, society_id, "supplementary_annex", int(row["id"]), user_id)
                             if r[0] in st["policy"]["eligible"] and r[0] not in signed]
-            except Exception:                               # noqa: BLE001
+            except Exception:
                 log.exception("could not read signatures of annexure %s", code)
         before = None
         if code != "F":
             before = SUPPLEMENTARY_ANNEX_CODES[SUPPLEMENTARY_ANNEX_CODES.index(code) - 1]
-        blocked_by = before if (before and not (status.get(before) or {}).get("status") == "sealed") else None
+        blocked_by = before if (before and (status.get(before) or {}).get("status") != "sealed") else None
         out.append({"code": code, "title": SUPPLEMENTARY_TITLES[code], "due": due,
                     "status": (row or {}).get("status") or "not built", "annex_id": (row or {}).get("id"),
                     "content_hash": (row or {}).get("content_hash"), "signed": signed, "mine": mine,

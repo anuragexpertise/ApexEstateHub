@@ -1,23 +1,26 @@
-from dash import Input, Output, State, no_update, html, ctx, ALL
+import logging
+
 import dash_bootstrap_components as dbc
-from datetime import datetime
-from app.services.qr_service import validate_qr_code
-from app.services.dpdp_service import GATE_NOTICE_LINE
+from dash import ALL, Input, Output, State, ctx, html, no_update
+
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
+from app.security.guards import require_session
 from app.services.alert_service import (
+    create_walk_in_visitor,
+    get_active_alerts,
+    get_presumed_visitors,
     trigger_channel_alert,
     trigger_visitor_alert,
-    create_walk_in_visitor,
-    get_presumed_visitors,
-    get_active_alerts,
 )
-from database.db_manager import db
-from app.security.guards import require_session
-from app.security.audit_context import (
-    get_current_user_id, get_current_user_role,
-    get_current_society_id, get_current_linked_id,
-)
+from app.services.dpdp_service import GATE_NOTICE_LINE
+from app.services.qr_service import validate_qr_code
+from app.utils import now_ist
 from app.utils.ux_toasts import error_toast
-import logging
+from database.db_manager import db
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +78,7 @@ def render_gate_alerts_section(society_id=None):
     # Channel alert cards
     channel_cards = []
     for alert in channel_alerts:
-        ctype = alert.get("type", "")
+        alert.get("type", "")
         state = alert.get("state", "pending")
         ch_id = alert.get("id")
         alert_event_id = alert.get("alert_event_id")
@@ -415,7 +418,7 @@ def register_security_callbacks(app):
                     toast_type = "info"
                 return {"type": toast_type, "message": msg}, render_gate_alerts_section(society_id)
             return {"type": "error", "message": msg}, no_update
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"trigger_gate_alert error: {e}")
             return error_toast(e, "Unable to update this alert. Please try again."), no_update
 
@@ -461,7 +464,7 @@ def register_security_callbacks(app):
                 {"type": "warning", "message": "Escalated: Calling owner for verbal confirmation"},
                 render_gate_alerts_section(society_id),
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"escalate_to_call error: {e}")
             return error_toast(e, "Unable to update this alert. Please try again."), no_update
 
@@ -494,11 +497,11 @@ def register_security_callbacks(app):
         society_id = get_current_society_id()
 
         try:
-            ok, msg, data = trigger_visitor_alert(visitor_id, user_id, society_id=society_id)
+            ok, msg, _data = trigger_visitor_alert(visitor_id, user_id, society_id=society_id)
             if ok:
                 return {"type": "success", "message": msg}, render_gate_alerts_section(society_id)
             return {"type": "error", "message": msg}, no_update
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"notify_presumed_visitor error: {e}")
             return error_toast(e, "Unable to update this alert. Please try again."), no_update
 
@@ -545,7 +548,7 @@ def register_security_callbacks(app):
                 {"type": "warning", "message": "Escalated: Calling owner for verbal confirmation"},
                 render_gate_alerts_section(society_id),
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"call_presumed_visitor error: {e}")
             return error_toast(e, "Unable to update this alert. Please try again."), no_update
 
@@ -606,14 +609,14 @@ def register_security_callbacks(app):
             if not visitor_id:
                 return {"type": "error", "message": msg}, no_update
 
-            ok, alert_msg, data = trigger_visitor_alert(visitor_id, user_id, society_id=society_id)
+            ok, alert_msg, _data = trigger_visitor_alert(visitor_id, user_id, society_id=society_id)
             if ok:
                 return (
                     {"type": "success", "message": f"Visitor created and owner notified: {alert_msg}"},
                     render_gate_alerts_section(society_id),
                 )
             return {"type": "error", "message": f"Visitor created but alert failed: {alert_msg}"}, no_update
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"create_walk_in_visitor_handler error: {e}")
             return error_toast(e, "Unable to register this visitor. Please try again."), no_update
 
@@ -648,7 +651,7 @@ def register_security_callbacks(app):
                 html.H4("Access Granted", style={"color": "#2ecc71"}),
                 html.P(f"Welcome {result.get('user', {}).get('name', 'Visitor')}!"),
                 html.Hr(),
-                html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                html.Small(f"Time: {now_ist().strftime('%Y-%m-%d %H:%M:%S')}")
             ]), {"backgroundColor": "#d4edda", "color": "#155724", "borderRadius": "10px"}
         else:
             return html.Div([
@@ -684,8 +687,8 @@ def register_security_callbacks(app):
         # An employee (security, accountant, supervisor or staff) clocking THEMSELVES in/out. Who they are comes from
         # the DB row behind the session (get_current_*), never the auth-store a tampered client could set to any
         # other employee's id. employee_attendance resolves guard vs team login and enforces Active.
-        from app.services import employee_attendance as ea
         from app.dash_apps.pages.attendance_panel import attendance_status_block
+        from app.services import employee_attendance as ea
         society_id = get_current_society_id()
         user_id = get_current_user_id()
         if not user_id or not society_id:
@@ -727,7 +730,7 @@ def register_security_callbacks(app):
             ok, msg = respond_to_alert(int(alert_event_id), user_id, action)
             toast = {"type": "success" if ok else "error", "message": msg or "Action failed"}
             return toast, render_gate_alerts_section(society_id)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"owner_respond_to_alert error: {e}")
             return error_toast(e, "Unable to update this alert. Please try again."), no_update
 

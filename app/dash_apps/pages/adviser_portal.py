@@ -2,12 +2,11 @@
 """The adviser's own screen (Auditor, CA, Advocate): the appointment, what the role may read, and the masked ledger export."""
 from __future__ import annotations
 
-from datetime import date
-
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
 from app.security import adviser_access as aa
+from app.utils import today_ist
 from database.db_manager import db
 
 _MUTED = {"fontSize": "12px", "color": "#667"}
@@ -18,11 +17,11 @@ def adviser_portal_page(user_id: int | None, society_id: int | None):
     cur = aa.in_force(user_id) if user_id else None
     if not cur:
         row = aa.appointment(user_id) if user_id else None
-        why = "Your appointment has ended or was revoked." if row and (not row["active"] or row["term_end"] < date.today()) else \
+        why = "Your appointment has ended or was revoked." if row and (not row["active"] or row["term_end"] < today_ist()) else \
               "Your appointment has not been signed by the President, Secretary and Treasurer yet."
         return html.Div([html.H5("Adviser access"), dbc.Alert(why + " Ask the society to appoint or renew you.", color="warning")], style={"padding": "16px"})
     appt = db._execute("SELECT * FROM adviser_appointments WHERE id=%s", (cur["appointment_id"],), fetch_one=True)
-    left = (appt["term_end"] - date.today()).days
+    left = (appt["term_end"] - today_ist()).days
     caps = aa.CAPABILITIES[cur["kind"]]
     sid = cur["society_id"]
     res = db._execute("""SELECT r.id, r.body, r.status, r.legacy, r.legacy_outcome, m.held_on, m.type FROM resolutions r JOIN meetings m ON m.id=r.meeting_id

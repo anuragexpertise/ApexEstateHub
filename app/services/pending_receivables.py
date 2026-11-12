@@ -37,7 +37,7 @@ _ALIASES = {
 def _blank(v) -> bool:
     if v is None:
         return True
-    if isinstance(v, float) and v != v:           # NaN (what pandas yields for an empty cell)
+    if isinstance(v, float) and v != v:           # NaN (what pandas yields for an empty cell)  # noqa: PLR0124
         return True
     return str(v).strip().lower() in ("", "nan", "none", "null")
 
@@ -70,13 +70,13 @@ def canonical_flat(v, known=()) -> str:
 def parse_amount(v) -> Decimal:
     """'30,000.50', '₹ 30000', 30000, 3e4 -> Decimal. Raises ValueError when not a finite number."""
     if isinstance(v, bool):
-        raise ValueError("not a number")
+        raise ValueError("not a number")  # noqa: TRY004
     if isinstance(v, (int, Decimal)):
         d = Decimal(v)
     elif isinstance(v, float):
         d = Decimal(repr(v))
     else:
-        s = re.sub(r"[₹\s]|^rs\.?|^inr", "", str(v).strip(), flags=re.I)
+        s = re.sub(r"[₹\s]|^rs\.?|^inr", "", str(v).strip(), flags=re.IGNORECASE)
         if s.startswith("(") and s.endswith(")"):
             s = "-" + s[1:-1]
         if "," in s:
@@ -149,7 +149,7 @@ def clean_rows(raw_rows, known_flats=(), first_row_number=1):
         try:
             days = _parse_days(days_raw)
             if days is not None and not 0 <= days <= MAX_DAYS:
-                row_errors.append("days overdue must be between 0 and %d" % MAX_DAYS)
+                row_errors.append("days overdue must be between 0 and %d" % MAX_DAYS)  # noqa: UP031
         except ValueError:
             row_errors.append("days overdue must be a whole number")
         if flat and flat_key(flat) in seen:
@@ -243,7 +243,7 @@ def _grid_from_xlsx(data: bytes):
     from openpyxl import load_workbook
     try:
         wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-    except Exception as exc:                                    # noqa: BLE001 - any parser failure
+    except Exception as exc:
         raise UploadError("This is not a valid .xlsx file.") from exc
     names = wb.sheetnames
     ws = wb["Receivables"] if "Receivables" in names else wb[names[0]]

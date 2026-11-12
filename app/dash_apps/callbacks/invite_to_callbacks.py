@@ -21,25 +21,24 @@ UI flow:
 
 from __future__ import annotations
 
-from dash import Input, Output, State, no_update, html, ctx, ALL, MATCH
-from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
-from database.db_manager import db
+from dash import ALL, Input, Output, State, ctx, html, no_update
+from dash.exceptions import PreventUpdate
+
 from app.dash_apps.drilldown.loaders import (
     get_concern_assignments,
-    list_invitable_vendors,
     list_invitable_security,
-    humanize_assignment,
+    list_invitable_vendors,
 )
-from app.security.guards import require_session
 from app.security.audit_context import (
+    get_current_society_id,
     get_current_user_id,
     get_current_user_role,
-    get_current_society_id,
 )
-from app.utils.ux_toasts import error_toast
+from app.security.guards import require_session
 from app.utils.field_config import DEFAULT_CONCERN_TYPE
-
+from app.utils.ux_toasts import error_toast
+from database.db_manager import db
 
 PORTAL_ROLE_LABEL = {
     "VND": "Vendor",
@@ -170,7 +169,7 @@ def register_invite_to_callbacks(app):
                     eid = a.get("entity_id")
                     if role in ("VND", "SEC") and eid:
                         selected[f"{role}-{eid}"] = True
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         return True, {"concern_id": int(concern_id), "selected": selected, "active_role": None}
 
@@ -237,7 +236,7 @@ def register_invite_to_callbacks(app):
                 rows = list_invitable_vendors(society_id, s, concern_id=concern_id)
             else:
                 rows = list_invitable_security(society_id, s, concern_id=concern_id)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # Same fix — see note above.
             return (
                 html.P(f"Error loading list: {e}", style={"color": "#de5c52"}),
@@ -338,7 +337,7 @@ def register_invite_to_callbacks(app):
                 list_children = html.Div(items, style={"maxHeight": "400px", "overflowY": "auto"}) if rows else html.P(
                     f"No {PORTAL_ROLE_LABEL[role].lower()}s found.", className="text-muted text-center", style={"padding": "30px"},
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass  # keep list_children = no_update rather than blank the list on a transient query error
 
         return store, summary, list_children
@@ -504,7 +503,7 @@ def register_invite_to_callbacks(app):
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).exception(
-                            "notify_concern_invited failed (concern_id=%s): %s", concern_id, e,
+                            "notify_concern_invited failed (concern_id=%s): %s", concern_id, e,  # noqa: TRY401
                         )
 
                 # Push-notify only the newly-assigned SEC entities.
@@ -524,12 +523,12 @@ def register_invite_to_callbacks(app):
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).exception(
-                            "notify_concern_assigned failed (concern_id=%s): %s", concern_id, e,
+                            "notify_concern_assigned failed (concern_id=%s): %s", concern_id, e,  # noqa: TRY401
                         )
 
             # Refresh the concern list/profile
             from app.dash_apps.callbacks.drilldown_callbacks import _render_current
-            content, breadcrumb, db_err = _render_current(drill_store or {}, auth or {})
+            content, breadcrumb, _db_err = _render_current(drill_store or {}, auth or {})
             return (
                 False,
                 {"type": "success", "message": f"Invitations sent: {inserted} invitee(s)."},
@@ -537,7 +536,7 @@ def register_invite_to_callbacks(app):
                 content,
                 breadcrumb,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return False, error_toast(e, "Unable to send invitations. Please try again."), no_update, no_update, no_update
 
     print("  ✓ Invite-to callbacks registered")

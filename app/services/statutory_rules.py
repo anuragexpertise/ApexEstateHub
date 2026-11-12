@@ -20,8 +20,8 @@ STATUTORY_ROWS = {
     "it_mutuality": (
         "Income Tax — Taxability & Mutuality",
         "Sec. 2(31), Sec. 4, Doctrine of Mutuality",
-        "Member maintenance is exempt under Mutuality; non-mutual income "
-        "(bank interest, rentals, cell towers) is taxable at AOP rates.",
+        ("Member maintenance is exempt under Mutuality; non-mutual income "
+        "(bank interest, rentals, cell towers) is taxable at AOP rates."),
         True,
         "Income accounts are tagged mutual / non-mutual; Mutuality Summary export.",
     ),
@@ -42,105 +42,105 @@ STATUTORY_ROWS = {
     "tds": (
         "TDS (Income Tax Act, 1961)",
         "Sec. 194A, 194C, 194H, 194-I, 194-IA/IB/IC, 194J",
-        "Deduct TDS on vendor payouts (contracts, professional fees, rent, "
-        "brokerage), remit it, and file 26Q.",
+        ("Deduct TDS on vendor payouts (contracts, professional fees, rent, "
+        "brokerage), remit it, and file 26Q."),
         True,
-        "Section / rate / PAN-vs-no-PAN engine, single-bill & annual thresholds, "
-        "structured 26Q-shaped export.",
+        ("Section / rate / PAN-vs-no-PAN engine, single-bill & annual thresholds, "
+        "structured 26Q-shaped export."),
     ),
     "labour": (
         "Labour & Safety Compliances",
         "EPF & MP Act 1952, ESI Act 1948, Contract Labour Act 1970",
-        "Minimum-wage / EPF / ESIC compliance for direct employees; manpower "
-        "agencies (security, housekeeping) must furnish monthly PF/ESIC challans.",
+        ("Minimum-wage / EPF / ESIC compliance for direct employees; manpower "
+        "agencies (security, housekeeping) must furnish monthly PF/ESIC challans."),
         True,
-        "Challan capture (EPF/ESIC) for direct employees and manpower agencies; "
-        "invoice-hold gate on missing challans; monthly compliance dashboard.",
+        ("Challan capture (EPF/ESIC) for direct employees and manpower agencies; "
+        "invoice-hold gate on missing challans; monthly compliance dashboard."),
     ),
     "gst": (
         "GST (CGST Act, 2017)",
         "Sec. 22(1), Notification 12/2017-CT(R) Entry 77",
-        "Up to ₹7,500/month/member is exempt; above that, 18% on the entire "
+        ("Up to ₹7,500/month/member is exempt; above that, 18% on the entire "
         "amount if society turnover exceeds ₹20L (₹10L in special-category "
-        "states). RCM applies on unregistered vendors.",
+        "states). RCM applies on unregistered vendors."),
         True,
-        "gst_rates table, registration-threshold gate, RCM accounts, "
-        "inter-state IGST via societies.state, GSTR-1/3B-shaped export.",
+        ("gst_rates table, registration-threshold gate, RCM accounts, "
+        "inter-state IGST via societies.state, GSTR-1/3B-shaped export."),
     ),
     "reserve": (
         "Reserve Fund",
         "UP Model Bye-Laws 2011 (common profits form the nucleus of the reserve funds)",
-        "Reserve from net surplus, for long-term solvency. The UP Act and Model "
+        ("Reserve from net surplus, for long-term solvency. The UP Act and Model "
         "Bye-Laws fix no percentage: the share set aside at FY close (default 25%) "
         "is society policy, edited by General Body resolution. The UP transfer fee "
-        "(1/2%, paid by the seller) goes to the Major Repair Fund, not here.",
+        "(1/2%, paid by the seller) goes to the Major Repair Fund, not here."),
         True,
         "Mapped to the RESERVE_FUND head; FY close appropriates the surplus.",
     ),
     "sinking": (
         "Sinking Fund",
         "Not prescribed by the UP Apartment Act 2010 or the 2011 Model Bye-Laws",
-        "Dedicated fund for structural overhauls, lifts and DG sets, levied under "
+        ("Dedicated fund for structural overhauls, lifts and DG sets, levied under "
         "a General Body resolution; any rate (e.g. 0.25–0.33%/yr of construction "
-        "cost) is a society or builder-agreement choice, not a UP statutory rate.",
+        "cost) is a society or builder-agreement choice, not a UP statutory rate."),
         True,
         "Dedicated ledger account, per-society rate basis, auto-billed monthly.",
     ),
     "repair": (
         "Repair & Maintenance Fund",
         "UP Apartment Act 2010 s.18 (common expenses charged by undivided interest)",
-        "Routine upkeep of common areas, plumbing and electricals, charged as "
+        ("Routine upkeep of common areas, plumbing and electricals, charged as "
         "common expenses. No minimum rate (such as 0.75%/yr of construction "
-        "cost) is fixed by the UP Act or Model Bye-Laws; it is a society choice.",
+        "cost) is fixed by the UP Act or Model Bye-Laws; it is a society choice."),
         True,
         "Dedicated ledger account, same rate config and billing as Sinking Fund.",
     ),
     "corpus": (
         "Corpus Fund (IFMS)",
-        "UP Apartment Act 2010 s.14(5) proviso; UP RERA General Regulations 2019 Reg. 47 as amended "
-        "(Notification 7098/U.P. RERA/Regulation/2026-27, 13.07.2026)",
-        "Interest-Free Maintenance Security collected by the promoter at registration of the deed and handed to the "
+        ("UP Apartment Act 2010 s.14(5) proviso; UP RERA General Regulations 2019 Reg. 47 as amended "
+        "(Notification 7098/U.P. RERA/Regulation/2026-27, 13.07.2026)"),
+        ("Interest-Free Maintenance Security collected by the promoter at registration of the deed and handed to the "
         "AOA at handover. One-time receipt, so it only ever appears as an opening balance (Brought Forward). Spend is "
         "limited to operation, maintenance, repair and replacement of common areas; it sits in a separate account with "
         "separate books and a CA audit. The 2026 category rates were taken from press / law-firm reports and are "
         "provisional until checked against the notification text. A corpus a society builds for itself, rather than "
-        "receives from the promoter, is an optional General Body choice, not a UP rule.",
+        "receives from the promoter, is an optional General Body choice, not a UP rule."),
         True,
         "Dedicated ledger account (3230); principal locked by policy via statutory_lock_pct.",
     ),
     "up_aoa_act": (
         "Governing Statute — UP Apartment Act, 2010",
-        "Sec. 3 (common areas), 12 (promoter's Declaration), 14 (AOA & "
-        "bye-laws), 18/20 (common expenses / common profits)",
-        "Every building with 4+ apartments must form an Association of "
+        ("Sec. 3 (common areas), 12 (promoter's Declaration), 14 (AOA & "
+        "bye-laws), 18/20 (common expenses / common profits)"),
+        ("Every building with 4+ apartments must form an Association of "
         "Apartment Owners with bye-laws adopted at a General Body; common "
-        "expenses and common profits are accounted for separately.",
+        "expenses and common profits are accounted for separately."),
         True,
-        "UP_AOA_2010 regime drives the statutory head mapping on the Balance "
-        "Sheet, the fund ledgers and the AOA compliance card.",
+        ("UP_AOA_2010 regime drives the statutory head mapping on the Balance "
+        "Sheet, the fund ledgers and the AOA compliance card."),
     ),
     "up_aoa_rules": (
         "UP Apartment Rules, 2011 & Model Bye-Laws",
-        "Rules notified 16-11-2011; Model Bye-laws on arrears (bye-law 7), "
+        ("Rules notified 16-11-2011; Model Bye-laws on arrears (bye-law 7), "
         "transfer fee ½% and No Dues (39), accounts & audit (49), "
         "Act prevails (54), adoption by 2/3rd majority (58). Numbers follow the "
-        "gazette; confirm against your society's adopted copy.",
-        "Procedural code under the Act — competent authority, Declaration and "
+        "gazette; confirm against your society's adopted copy."),
+        ("Procedural code under the Act — competent authority, Declaration and "
         "Deed of Apartment forms; bye-laws fix the financial framework "
         "(funds, accounts, audit); it does not fix sinking / repair / reserve "
-        "rates, which this wizard sets as society policy.",
+        "rates, which this wizard sets as society policy."),
         True,
-        "Fund bases and rates configured on the Society Compliance / "
-        "Apartment Charges steps; statutory_calendar tracks the filings.",
+        ("Fund bases and rates configured on the Society Compliance / "
+        "Apartment Charges steps; statutory_calendar tracks the filings."),
     ),
     "legal_instruments": (
         "Act / Rules / Bye-laws catalog",
         "legal_instrument_catalog (regime UP_AOA_2010)",
-        "The full tabulated list of Acts, Rules, Bye-laws and Notifications "
-        "governing this AOA, with applicability, key provisions and sources.",
+        ("The full tabulated list of Acts, Rules, Bye-laws and Notifications "
+        "governing this AOA, with applicability, key provisions and sources."),
         True,
-        "Full table on the Setup Wizard's 'Legal Regime & Compliance' step; Master "
-        "maintains it on Master Portal → RWA Compliance (UP).",
+        ("Full table on the Setup Wizard's 'Legal Regime & Compliance' step; Master "
+        "maintains it on Master Portal → RWA Compliance (UP)."),
     ),
 }
 
@@ -234,7 +234,7 @@ def normalize_state(value):
         for code, name in get_states().items():
             if code != "ALL" and (name or "").strip().lower() == wanted:
                 return code
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     return "UP"
 
@@ -259,7 +259,7 @@ def fund_collection_for_regime(regime_code):
         ) or []
         found = {r["rule_key"]: r["value_text"] for r in rows if r.get("value_text")}
         mode, basis = found.get("fund_collection_mode", mode), found.get("fund_allocation_basis", basis)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     return mode, basis
 
@@ -279,7 +279,7 @@ def scheme_for(state_code=None, constitution=None):
         if row and row.get("code"):
             return row["code"]
         return "GENERIC"
-    except Exception:
+    except Exception:  # noqa: BLE001
         return "UP_AOA_2010" if (code, const) == ("UP", "AOA") else "GENERIC"
 
 
@@ -293,7 +293,7 @@ def regime_reserve_pct(regime_code):
                ORDER BY effective_from DESC LIMIT 1""", (regime_code,), fetch_one=True)
         if row and row.get("value") is not None:
             return float(row["value"])
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     return 25.0
 
@@ -357,7 +357,7 @@ def regime_for_society(society_id=None, state_code=None):
             return row["regime_code"]
         row = db._execute("SELECT state FROM societies WHERE id=%s", (society_id,), fetch_one=True)
         return STATE_REGIME.get(normalize_state((row or {}).get("state")), DEFAULT_REGIME)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return DEFAULT_REGIME
 
 
@@ -366,7 +366,7 @@ def _seed_fallback_instruments(regime_code):
     legal_instrument_catalog hasn't been integrated yet."""
     try:
         from database.seed import LEGAL_INSTRUMENTS_UP_AOA
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
     out = []
     for (rc, itype, title, year, authority, applicability, provisions,
@@ -422,7 +422,7 @@ def instruments_for_regime(regime_code=DEFAULT_REGIME):
                ORDER BY display_order""",
             (regime_code,), fetch_all=True,
         ) or []
-    except Exception:
+    except Exception:  # noqa: BLE001
         central = []
         rows = []
     if not central and not rows:
@@ -513,7 +513,7 @@ def fund_rules_for_state(state_code=None):
                WHERE state = %s AND threshold_key IN (%s, %s) AND effective_to IS NULL""",
             (state, *FUND_THRESHOLD_KEYS.values()), fetch_all=True,
         ) or []
-    except Exception:
+    except Exception:  # noqa: BLE001
         rows = []
     if not rows:                      # table missing / not integrated: use the seed list
         try:
@@ -521,7 +521,7 @@ def fund_rules_for_state(state_code=None):
             rows = [{"threshold_key": k, "value": v, "notes": n}
                     for (st, k, v, _vt, _u, _ef, et, n) in STATE_COMPLIANCE_THRESHOLDS
                     if st == state and k in FUND_THRESHOLD_KEYS.values() and et is None]
-        except Exception:
+        except Exception:  # noqa: BLE001
             rows = []
     by_key = {v: k for k, v in FUND_THRESHOLD_KEYS.items()}
     for r in rows:
@@ -545,7 +545,7 @@ def regime_profile(regime_code):
                           (regime_code,), fetch_one=True)
         if row:
             return row["name"], row["status"]
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     return regime_code, None
 

@@ -23,8 +23,8 @@ _CARD = {"padding": "12px 14px", "margin": "8px 0 12px", "background": "#f6f8fb"
          "border": "1px solid #e1e7ef", "borderRadius": "8px"}
 _STATE = {"above": ("Above the threshold: GST is charged", "danger"),
           "below": ("Below the threshold even counting every unclassified amount: GST is not charged", "success"),
-          "indeterminate": ("The threshold falls between the classified and the unclassified amounts: GST is NOT being charged "
-                            "until the open accounts are classified", "warning")}
+          "indeterminate": (("The threshold falls between the classified and the unclassified amounts: GST is NOT being charged "
+                            "until the open accounts are classified"), "warning")}
 
 
 def pid(part: str, acc_id) -> dict:
@@ -100,5 +100,5 @@ def gst_accounts_tab(role: str, society_id: int | None):
             out.insert(0, html.Div("Read-only. The CA, the Treasurer (or the Secretary when no Treasurer is seated) classify the accounts.",
                                    style={**_MUTED, "margin": "8px 0"}))
         return html.Div(out)
-    except Exception:                      # one tab failing to load must not take the governance page down with it
+    except Exception:                      # one tab failing to load must not take the governance page down with it  # noqa: BLE001
         return html.Div("GST accounts could not be loaded just now. Please try again shortly.", style=_MUTED)

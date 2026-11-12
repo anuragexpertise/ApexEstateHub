@@ -1,5 +1,5 @@
 # app/routes/web.py — NEW FILE
-from flask import Blueprint, redirect, jsonify
+from flask import Blueprint, jsonify, redirect
 
 web_bp = Blueprint('web', __name__)
 
@@ -15,5 +15,5 @@ def health():
             return jsonify({'status': 'ok', 'db': 'connected'})
         else:
             return jsonify({'status': 'error', 'db': 'disconnected'}), 503
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({'status': 'error', 'db': str(e)}), 500

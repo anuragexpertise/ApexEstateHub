@@ -25,6 +25,8 @@ import logging
 import re
 from datetime import date, datetime
 
+from app.utils import today_ist
+
 log = logging.getLogger(__name__)
 
 LOUD_PREFIX = "DECISION REQUIRED"
@@ -60,18 +62,18 @@ def gate(society_id: int, kind: str, key: str, on: date | None = None, db=None) 
     """'not_required' | 'ok' | 'awaiting_approval' | 'missing'."""
     if kind not in KINDS:
         raise ValueError("kind must be 'decision' or 'rule'")
-    row = _db(db)._execute("SELECT fn_decision_gate(%s,%s,%s,%s) AS g", (society_id, kind, key, on or date.today()), fetch_one=True)
+    row = _db(db)._execute("SELECT fn_decision_gate(%s,%s,%s,%s) AS g", (society_id, kind, key, on or today_ist()), fetch_one=True)
     return row["g"] if row else "missing"
 
 
 def block_message(society_id: int, kind: str, key: str, on: date | None = None, db=None) -> str | None:
     """None if the engine may proceed; otherwise the loud DECISION REQUIRED text (what the database would raise)."""
     d = _db(db)
-    on = on or date.today()
+    on = on or today_ist()
     try:
         d._execute("SELECT fn_require_confirmed(%s,%s,%s,%s)", (society_id, kind, key, on), fetch_one=True)
         return None
-    except Exception as exc:                                    # noqa: BLE001
+    except Exception as exc:
         msg = loud_message(exc)
         if msg is None:
             raise
@@ -82,7 +84,7 @@ def block_message(society_id: int, kind: str, key: str, on: date | None = None, 
 def get_state(society_id: int, on: date | None = None, db=None) -> dict:
     """Everything the Adviser Decisions screen and the banner need."""
     d = _db(db)
-    on = on or date.today()
+    on = on or today_ist()
     items = d._execute("SELECT * FROM fn_society_decision_status(%s,%s)", (society_id, on), fetch_all=True) or []
     detail = {}
     for r in d._execute(
@@ -175,7 +177,7 @@ def save(society_id: int, kind: str, subject_id: int, *, on_behalf_of: str | Non
             sets.append(f"{col} = %s"); params.append(val)
     if start_date is not None:
         try:
-            sd = start_date if isinstance(start_date, date) else datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+            sd = start_date if isinstance(start_date, date) else datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()  # noqa: DTZ007
         except ValueError:
             return False, "Give the start date as YYYY-MM-DD."
         sets.append("start_date = %s"); params.append(sd)

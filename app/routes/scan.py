@@ -24,7 +24,7 @@ deploy on Render (apt-get install libzbar0 there) and reverting to pyzbar.
 import base64
 
 import numpy as np
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, jsonify, request
 from flask_login import current_user
 
 scan_bp = Blueprint("scan", __name__, url_prefix="/api")
@@ -55,7 +55,7 @@ def scan_qr():
     try:
         _header, encoded = image_data.split(",", 1)
         img_bytes = base64.b64decode(encoded)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return jsonify({"status": "error", "message": f"Decode error: {exc}"}), 400
 
     # OpenCV decode
@@ -65,14 +65,14 @@ def scan_qr():
         frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if frame is None:
             return jsonify({"status": "error", "message": "Could not decode image"}), 400
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return jsonify({"status": "error", "message": f"OpenCV error: {exc}"}), 500
 
     # QR detection — cv2's built-in detector, no native zbar library needed
     try:
         detector = cv2.QRCodeDetector()
-        qr_data, points, _ = detector.detectAndDecode(frame)
-    except Exception as exc:
+        qr_data, _points, _ = detector.detectAndDecode(frame)
+    except Exception as exc:  # noqa: BLE001
         return jsonify({"status": "error", "message": f"QR detect error: {exc}"}), 500
 
     if not qr_data:

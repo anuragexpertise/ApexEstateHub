@@ -46,6 +46,7 @@ SELECT + pure-per-row-group_fn shape the other tables use.
 from __future__ import annotations
 
 import re
+
 from database.db_manager import db
 
 # Physical tables this module is allowed to query. Mirrors the allowlist
@@ -348,7 +349,7 @@ def _fetch_account_leaves(society_id: int, drcr: str | None) -> list[dict]:
             "FROM accounts WHERE society_id=%s",
             (society_id,), fetch_all=True,
         ) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  _fetch_account_leaves: {e}")
         return []
 
@@ -409,7 +410,7 @@ def list_drillin_groups(
         query += f" AND {extra_filter}"
     try:
         rows = db._execute(query, tuple(params), fetch_all=True) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  list_drillin_groups({target_table}): {e}")
         return []
 
@@ -469,7 +470,7 @@ def list_drillin_items(
         query += f" AND {extra_filter}"
     try:
         rows = db._execute(query, tuple(params), fetch_all=True) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  list_drillin_items({target_table}): {e}")
         return []
 
@@ -507,7 +508,7 @@ def drillin_label_for(target_table: str, entity_id, society_id: int) -> str | No
             f"SELECT * FROM {target_table} WHERE id=%s AND society_id=%s",
             (entity_id, society_id), fetch_one=True,
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  drillin_label_for({target_table}): {e}")
         return None
     if not row:

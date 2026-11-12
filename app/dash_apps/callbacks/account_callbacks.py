@@ -27,12 +27,10 @@ import time
 from dash import Input, Output, State, no_update
 from dash.exceptions import PreventUpdate
 
-from app.security.guards import require_session
 from app.security.audit_context import (
     get_current_user_id,
-    get_current_user_role,
-    get_current_society_id,
 )
+from app.security.guards import require_session
 
 
 def register_account_callbacks(app):

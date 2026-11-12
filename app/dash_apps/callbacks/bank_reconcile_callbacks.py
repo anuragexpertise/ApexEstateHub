@@ -57,21 +57,25 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 
-import pandas as pd
-from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
-from dash import Input, Output, State, ALL, ctx, no_update, html, dcc
-from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
+import pandas as pd
+from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
+from dash.exceptions import PreventUpdate
 
-from database.db_manager import db
-from app.security.guards import require_session
+from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
 from app.security.audit_context import (
+    get_current_society_id,
     get_current_user_id,
     get_current_user_role,
-    get_current_society_id,
 )
-from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
+from app.security.guards import require_session
 from app.utils.ux_toasts import error_toast
+from database.db_manager import db
+from database.money import (  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
+    D,
+    money,
+    rupee,
+)
 
 # Defense-in-depth cap — same reasoning as bulk_enroll_callbacks.py's
 # MAX_BULK_ROWS: a huge statement file shouldn't trigger unbounded inserts.
@@ -142,7 +146,7 @@ def _landing_bank_accounts(entity: str, sid: int, row_ids: list[int]) -> dict[in
     if not side:
         return {}
     rows = db.execute(
-        f"""SELECT source_id, acc_id FROM transactions
+        """SELECT source_id, acc_id FROM transactions
             WHERE society_id=%s AND source_table=%s AND source_id = ANY(%s)
               AND entry_side=%s AND mode <> 'cash' AND status='paid'
             ORDER BY id ASC""",
@@ -369,15 +373,15 @@ def _render_bulk_results(results: dict, filename: str) -> html.Div:
     if fuzzy:
         children.append(html.Div([
             html.I(className="fas fa-question-circle me-2", style={"color": "#e59620"}),
-            f"{fuzzy} row(s) have a possible match but need your review — "
-            f"use the Reconcile button on the matching list row.",
+            (f"{fuzzy} row(s) have a possible match but need your review — "
+            f"use the Reconcile button on the matching list row."),
         ], style={"color": "#e59620", "fontWeight": "600", "marginBottom": "6px"}))
 
     if unmatched:
         children.append(html.Div([
             html.I(className="fas fa-circle-xmark me-2", style={"color": "#de5c52"}),
-            f"{unmatched} row(s) had no candidate at all — check for typos "
-            f"in amount/date, or these may not belong to this list.",
+            (f"{unmatched} row(s) had no candidate at all — check for typos "
+            f"in amount/date, or these may not belong to this list."),
         ], style={"color": "#de5c52", "fontWeight": "600"}))
 
     return html.Div(children)
@@ -414,7 +418,7 @@ def _apply_reconcile(entity: str, pk: int, sid: int, actor_id: int,
             )
         invalidate_kpi_cache()
         return True, "Reconciled."
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, f"Reconcile failed: {e}"
 
 
@@ -672,7 +676,7 @@ def register_bank_reconcile_callbacks(app):
 
         try:
             df = _parse_statement(contents, filename or "statement.xlsx")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return (
                 html.Div(error_toast(e, "Unable to read this bank statement. Please try again.")["message"], style={"color": "#de5c52"}),
                 no_update, no_update, no_update, no_update,
@@ -696,7 +700,7 @@ def register_bank_reconcile_callbacks(app):
 
         try:
             results = _match_and_insert(df, entity, sid, actor_id, bank_acc_id)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return (
                 html.Div(error_toast(e, "Unable to reconcile this bank statement. Please try again.")["message"], style={"color": "#de5c52"}),
                 no_update, no_update, no_update, no_update,
@@ -792,7 +796,7 @@ def register_bank_reconcile_callbacks(app):
 
         try:
             row_date = pd.to_datetime(store.get("row_date")).date()
-        except Exception:
+        except Exception:  # noqa: BLE001
             row_date = None
 
         query_params = [sid, amount, amount]

@@ -17,7 +17,8 @@ Required addition to app_shell.py / the permanent layout:
     dcc.Store(id='vendor-pass-action-store-pdf', storage_type='memory'),
     dcc.Store(id='vendor-pass-action-store-email', storage_type='memory'),
 """
-from dash import Output, Input, State, clientside_callback
+from dash import Input, Output, State, clientside_callback
+
 from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
 
 

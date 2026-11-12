@@ -13,15 +13,19 @@ Identity and society always come from the server session (callbacks re-check); n
 from __future__ import annotations
 
 import json
-from datetime import date
 
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
+from app.dash_apps.callbacks.onboarding_callbacks import _committee_view
+from app.dash_apps.pages.setup_wizard import (
+    CATEGORIES,
+    render_category_content,
+    step_label,
+)
 from app.services import document_signing as ds
 from app.services import onboarding_service as ob
-from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label, render_category_content
-from app.dash_apps.callbacks.onboarding_callbacks import _committee_view
+from app.utils import today_ist
 
 P = "onb"
 
@@ -325,8 +329,8 @@ def start_step(society_id: int) -> int:
     """Index into CATEGORIES where the wizard opens: step 0 for a fresh draft, otherwise the first step that is
     neither done nor skipped (the frontier). Used by BOTH the rendered DOM and the onb-setup-step store so
     they can never disagree (F3)."""
-    from app.services import onboarding_service as ob
     from app.dash_apps.pages.wizard_registry import status_of as _status_of
+    from app.services import onboarding_service as ob
     try:
         statuses = ob.step_statuses(society_id) or {}
     except Exception:                                                      # noqa: BLE001
@@ -641,9 +645,9 @@ def declaration_panel(society_id: int, role: str | None):
     hold = []
     if ud.billing_waits(society_id):
         hold = [dbc.Alert([html.I(className="fas fa-pause-circle me-2"),
-                           "Billing is on hold. This society bills by undivided interest, so no bills are raised until the "
+                           ("Billing is on hold. This society bills by undivided interest, so no bills are raised until the "
                            "Declaration is on file or Enrollment is completed with a recorded reason that the building has none. "
-                           "Bills then catch up from the billing start month."], color="warning", className="py-2 mb-2",
+                           "Bills then catch up from the billing start month.")], color="warning", className="py-2 mb-2",
                           style={"fontSize": "12.5px"})]
     kids = hold + [html.Div([html.Strong("Builder's Declaration of undivided interest "),
                       dbc.Badge("done" if ok else "needed", color="success" if ok else "warning", text_color=None if ok else "dark")]),
@@ -796,7 +800,7 @@ def legacy_resolutions_section(society_id: int, role: str | None) -> list:
         out.append(html.Div([
             html.Strong("Import a legacy resolution"),
             dbc.Row([
-                dbc.Col(_field("Date of the old meeting", dbc.Input(id=fid("held"), size="sm", type="date", max=str(date.today()))), md=3),
+                dbc.Col(_field("Date of the old meeting", dbc.Input(id=fid("held"), size="sm", type="date", max=str(today_ist()))), md=3),
                 dbc.Col(_field("Meeting", dbc.Select(id=fid("mtype"), size="sm", value="GBM", options=[
                     {"label": "General Body", "value": "GBM"}, {"label": "Extraordinary General", "value": "EGM"},
                     {"label": "Managing Committee", "value": "MC"}])), md=3),

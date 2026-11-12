@@ -4,9 +4,9 @@ Shared UX primitives for toasts, confirm dialogs, loading states, and error hand
 """
 
 from functools import wraps
-from dash import html, no_update
-import dash_bootstrap_components as dbc
 
+import dash_bootstrap_components as dbc
+from dash import html, no_update
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TOAST HELPERS
@@ -314,7 +314,7 @@ def _type_to_confirm_modal(
                 dbc.ModalBody(
                     [
                         html.P(
-                            f"This action is irreversible. To confirm, type the entity name exactly:",
+                            "This action is irreversible. To confirm, type the entity name exactly:",
                             style={"fontSize": "13px", "color": "#7d8ea3", "marginBottom": "12px"},
                         ),
                         html.Code(type_target, style={"display": "block", "marginBottom": "8px", "fontSize": "14px"}),

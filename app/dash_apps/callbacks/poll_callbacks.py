@@ -1,15 +1,20 @@
-from dash import Input, Output, State, html, no_update
-import dash_bootstrap_components as dbc
-from database.db_manager import db
-import app.services.push_service as PushService
-from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
-from app.utils.ux_toasts import error_toast
 import json
 import logging
-from app.security.guards import require_session
-from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
+
+from dash import Input, Output, State, html, no_update
+
+import app.services.push_service as PushService
+from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.authorization import Cap
+from app.security.guards import require_session
 from app.security.service_guard import audit_event, authorize_resource, blocks, check
+from app.utils.ux_toasts import error_toast
+from database.db_manager import db
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +150,7 @@ def register_poll_callbacks(app):
                   c1, c2, c3, c4, c5, ends_at, open_to, vote_basis, custom_weights, auth_data):
         """Handles both Create Poll (poll_id empty) and Edit Poll
         (poll_id set — the hidden field from poll_page.poll_form)."""
-        user_id, society_id, auth_error = _require_auth(auth_data, required_role="admin")
+        _user_id, society_id, auth_error = _require_auth(auth_data, required_role="admin")
         if auth_error:
             return auth_error
         if not n_clicks or not title:
@@ -172,7 +177,7 @@ def register_poll_callbacks(app):
         import datetime as _dt
         if ends_at:
             try:
-                _naive = _dt.datetime.strptime(ends_at, "%Y-%m-%dT%H:%M")
+                _naive = _dt.datetime.strptime(ends_at, "%Y-%m-%dT%H:%M")  # noqa: DTZ007
                 _utc = _naive.astimezone().astimezone(_dt.timezone.utc)
                 if _utc <= _dt.datetime.now(_dt.timezone.utc):
                     return html.Div([
@@ -188,12 +193,12 @@ def register_poll_callbacks(app):
 
         def _publish_schedule_update():
             try:
-                from app.services.redis_broker import redis_sync, _REDIS_URL
+                from app.services.redis_broker import _REDIS_URL, redis_sync
                 if redis_sync and _REDIS_URL:
                     r = redis_sync.Redis.from_url(_REDIS_URL, socket_timeout=2)
                     r.publish("poll_schedule_update", '{"type":"message"}')
                     r.close()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error(f"Failed to publish schedule update: {e}")
 
         try:
@@ -251,7 +256,7 @@ def register_poll_callbacks(app):
                         permission_used=Cap.POLL_MANAGE)
             try:
                 PushService.notify_poll_created(society_id, title)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error(f"Poll creation push notify failed: {e}")
             _publish_schedule_update()
             invalidate_kpi_cache()
@@ -259,7 +264,7 @@ def register_poll_callbacks(app):
                 html.I(className="fas fa-check-circle me-2", style={"color": "#2ecc71"}),
                 f"Poll '{title}' created successfully! (ID: {new_poll_id})",
             ], className="alert alert-success mt-2")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Error saving poll (edit={is_edit}): {e}")
             return html.Div(error_toast(e, "Unable to save this poll. Please try again.")["message"], className="alert alert-danger mt-2")
 
@@ -290,8 +295,12 @@ def register_poll_callbacks(app):
     )
 
     # ── Poll Profile Print/PDF/Email ──────────────────────────────────────
-    from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, LETTERHEAD_JS, clientside_iife
     from dash import clientside_callback
+
+    from app.dash_apps.callbacks.print_letterhead import (
+        LETTERHEAD_JS,
+        clientside_iife,
+    )
     
     def _poll_to_html_js() -> str:
         return """

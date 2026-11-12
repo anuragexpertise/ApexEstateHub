@@ -10,20 +10,20 @@ yet active. Because of that every callback decides for itself, from the SERVER s
   * the platform signature, and retrying a held activation: the master login only.
 """
 import base64
-import io
-import json
 import logging
 import time
 
-from flask import session
-
 import dash_bootstrap_components as dbc
-import pandas as pd
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
+from flask import session
 
 from app.dash_apps.pages import onboarding_page as op
-from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.guards import require_session
 from app.services import document_signing as ds
 from app.services import onboarding_service as ob
@@ -229,7 +229,7 @@ def register_onboarding_callbacks(app):
                 phone = item.get("value")
                 break
         sig_contents = sig_filename = None
-        for idx, item in enumerate((ctx.states_list[1] or [])):
+        for idx, item in enumerate(ctx.states_list[1] or []):
             iid = item.get("id")
             if isinstance(iid, dict) and iid.get("office") == office and iid.get("field") == "sig":
                 sig_contents = item.get("value")
@@ -731,7 +731,7 @@ def register_onboarding_callbacks(app):
         from app.services import onboarding_jobs as jobs
         try:
             job = jobs.get(job_id, society_id=sid)
-        except Exception:                                              # noqa: BLE001 - a transient DB error must not 500 every tick
+        except Exception:
             log.exception("job poll failed for job %s", job_id)
             return no_update, no_update
         if not job:
@@ -816,7 +816,7 @@ def register_onboarding_callbacks(app):
             msg = ud.apply(sid, uid, xlsx_n or "", xlsx, pdf_n or "", pdf)
         except ob.OnboardingError as exc:
             return no_update, _alert(str(exc), False), no_update
-        except Exception:                                                  # noqa: BLE001
+        except Exception:
             log.exception("applying the Declaration failed for society %s", sid)
             return no_update, _alert("The Declaration could not be saved. Nothing was changed; try again.", False), no_update
         body, mk = _body(sid, uid, role)
@@ -1011,7 +1011,7 @@ def register_onboarding_callbacks(app):
             return no_update
         if s[2] != "admin":
             return _alert("Only the society's administrator can upload the registration certificate.", False)
-        sid, uid, role = s
+        sid, uid, _role = s
         raw = _decode(contents)
         if not raw:
             return _alert("Upload the registration certificate (PDF, PNG or JPG).", False)
@@ -1122,7 +1122,7 @@ def register_onboarding_callbacks(app):
             try:
                 ob._audit(sid, uid, "EVIDENCE_INTEGRITY_FAILED", "onboarding_evidence", None,
                           {"via": "verify", "failed": len(failed), "checked": len(results)})
-            except Exception:                                              # noqa: BLE001
+            except Exception:
                 log.exception("could not audit the integrity failure")
             summary = dbc.Alert(f"{len(failed)} of {len(results)} checked file(s) failed the integrity check. Re-upload the "
                                 "original scan to restore it, and tell the platform operator.", color="danger", className="py-2 mb-0",

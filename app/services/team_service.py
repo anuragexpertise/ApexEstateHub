@@ -31,11 +31,11 @@ from database.db_manager import db
 # (role, label, colour, what the role can do) - the colours are the portal themes.
 TEAM_ROLES = (
     ("accountant", "Accountant", "#7c3aed",
-     "Prepares receipts, expenses and cashbook entries; reads dues, ledgers and the year-end reports. "
-     "Cannot approve payments or close a year."),
+     ("Prepares receipts, expenses and cashbook entries; reads dues, ledgers and the year-end reports. "
+     "Cannot approve payments or close a year.")),
     ("supervisor", "Supervisor", "#ea580c",
-     "Runs the gate and security staff: sets the shift roster and watches concerns, events and alert channels. "
-     "No finance access."),
+     ("Runs the gate and security staff: sets the shift roster and watches concerns, events and alert channels. "
+     "No finance access.")),
     ("staff", "Staff", "#94a3b8",
      "Read-only view of day-to-day concerns and events. No finance, no member data."),
     ("auditor", "Auditor", "#dc2626",
@@ -58,7 +58,7 @@ def _invalidate_permission_cache() -> None:
     try:
         from app.security import policy
         policy._invalidate_cache()
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
 
@@ -124,7 +124,7 @@ def create_login(actor_id, actor_role, society_id, role, name, email, password, 
                         "                                   granted_by) VALUES (%s, %s, %s, 'grant', 'active', %s)",
                         (uid, rd["id"], sid, actor_id))
             _audit(cur, "team.login.create", uid, {"role": role, "society_id": sid})
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return False, _db_message(exc)
     _invalidate_permission_cache()
     return True, (f"{ROLE_LABEL[role]} login created for {name}. They sign in with {email} and must choose a new "
@@ -142,7 +142,7 @@ def set_active(actor_id, actor_role, society_id, user_id, active: bool, actor_so
             cur.execute("UPDATE users SET active = %s WHERE id = %s AND society_id = %s AND role = ANY(%s)",
                         (bool(active), member["id"], int(society_id), list(ROLE_CODES)))
             _audit(cur, "team.login.enable" if active else "team.login.disable", member["id"], {"role": member["role"]})
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return False, _db_message(exc)
     who = member.get("name") or member["email"]
     return True, (f"{who} can sign in again." if active else f"{who} is disabled and can no longer sign in.")
@@ -165,7 +165,7 @@ def reset_password(actor_id, actor_role, society_id, user_id, new_password, acto
                 " WHERE id = %s AND society_id = %s AND role = ANY(%s)",
                 (generate_password_hash(new_password), member["id"], int(society_id), list(ROLE_CODES)))
             _audit(cur, "team.login.reset_password", member["id"], {"role": member["role"]})
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return False, _db_message(exc)
     return True, f"Password reset for {member.get('name') or member['email']}. They must choose a new one at next sign-in."
 
@@ -209,6 +209,6 @@ def update_member(actor_id, actor_role, society_id, user_id, name=None, active=N
                     " WHERE id = %s AND society_id = %s AND role = ANY(%s)",
                     (generate_password_hash(pw), member["id"], int(society_id), list(ROLE_CODES)))
                 _audit(cur, "team.login.reset_password", member["id"], {"role": member["role"]})
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return False, _db_message(exc)
     return True, f"{ROLE_LABEL[member['role']]} login updated."

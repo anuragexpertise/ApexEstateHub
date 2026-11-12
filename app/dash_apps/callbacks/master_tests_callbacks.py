@@ -32,7 +32,9 @@ def _allowed_tests() -> list:
     Never trust the test name in the callback payload (or tests-list-store):
     Dash ids and Store data come from the client and can be forged.
     """
-    from app.dash_apps.pages.portal_pages import _discover_tests  # lazy: avoids import cycle
+    from app.dash_apps.pages.portal_pages import (
+        _discover_tests,  # lazy: avoids import cycle
+    )
     return [t["file"] for t in _discover_tests()]
 
 
@@ -267,7 +269,7 @@ def register_master_tests_callbacks(app):
         started = time.monotonic()
         try:
             rc, output = _run_pytest(test_file)
-        except Exception as exc:  # never leave the run paused on an unexpected error
+        except Exception as exc:  # never leave the run paused on an unexpected error  # noqa: BLE001
             rc, output = 1, f"Runner error: {exc}\n"
         failed = rc != 0
         result = {

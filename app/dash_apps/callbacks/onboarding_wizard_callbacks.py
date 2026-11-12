@@ -17,14 +17,29 @@ import dash_bootstrap_components as dbc
 from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
 from app.dash_apps.pages import onboarding_page as op
-from app.dash_apps.pages.setup_wizard import CATEGORIES, step_label, render_review, legal_hierarchy_rows, legal_regime_live
-from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
+from app.dash_apps.pages.setup_wizard import (
+    CATEGORIES,
+    legal_hierarchy_rows,
+    legal_regime_live,
+    render_review,
+    step_label,
+)
+from app.dash_apps.pages.wizard_registry import draft_key as _draft_key
+from app.dash_apps.pages.wizard_registry import status_of as _status_of
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.guards import require_session
 from app.services import onboarding_service as ob
-from app.services.onboarding_service import money
 from app.services import regime_rules_admin as rra
-from app.dash_apps.pages.wizard_registry import draft_key as _draft_key, status_of as _status_of
-from app.services.xlsx_templates import build_tds_template, build_bf_template, parse_upload
+from app.services.onboarding_service import money
+from app.services.xlsx_templates import (
+    build_bf_template,
+    build_tds_template,
+    parse_upload,
+)
 from app.utils.fiscal import fy_start_date as _fy_start_date
 
 P = op.P
@@ -229,7 +244,7 @@ def _rail_item_styles(statuses, current):
     for i, cat in enumerate(CATEGORIES):
         st = _status_of(statuses, cat)
         is_skipped = st == "skipped"
-        dot_color = _STATUS_DOT_COLOR.get(st, "#b8c2cf")
+        _STATUS_DOT_COLOR.get(st, "#b8c2cf")
         styles.append({"display": "flex", "alignItems": "center", "gap": "8px", "padding": "8px 10px",
                        "borderRadius": "8px", "border": "1px solid transparent", "fontSize": "12px",
                        "cursor": "default" if is_skipped else "pointer"})
@@ -464,6 +479,7 @@ def register_onboarding_wizard_callbacks(app):
     @require_session
     def bf_recv_grid_update(add_clicks, contents, clear_clicks, filename, mode, rows):
         import base64
+
         from app.services import pending_receivables as pr
         trig = ctx.triggered_id
         rows = rows or []
@@ -481,7 +497,7 @@ def register_onboarding_wizard_callbacks(app):
         except Exception:                                                  # noqa: BLE001
             return no_update, _alert("Could not read the uploaded file.", ok=False)
         try:
-            incoming, errors, info = pr.parse_upload(data, filename or "", known)
+            incoming, errors, _info = pr.parse_upload(data, filename or "", known)
         except pr.UploadError as exc:
             return no_update, _alert(str(exc), ok=False)
         if errors:
@@ -525,9 +541,8 @@ def register_onboarding_wizard_callbacks(app):
                 a = meta.get(acc_id)
                 if a and (a[5] or "Dr") == "Dr" and a[2] in ob.RECEIVABLE_TABS and v not in (None, ""):
                     sdr += Decimal(str(v))
-        except Exception:                                                  # noqa: BLE001 - never break typing
-            pass
-        # What Next saves: the cleaned rows when everything is valid; otherwise every non-blank typed row, so the
+        except Exception:  # noqa: BLE001, S110
+            pass        # What Next saves: the cleaned rows when everything is valid; otherwise every non-blank typed row, so the
         # step validator reports the same problems the admin sees here (a duplicate must not vanish silently).
         typed = [r for r in (rows or []) if r and any(r.get(k) not in (None, "") for k in pr.FIELDS)]
         stored = typed if errors else clean
@@ -577,7 +592,7 @@ def register_onboarding_wizard_callbacks(app):
         s = _session()
         if not s or not s[0]:
             return no_update
-        sid, uid, role = s
+        sid, _uid, _role = s
         ids = [it["id"]["acc_id"] for it in (ctx.inputs_list[0] or [])]
         live = {int(i): money(v) for i, v in zip(ids, amts or []) if v not in (None, "")}
         accs = {a["id"]: a for a in ob._rows("SELECT id, name, tab_name, drcr_account FROM accounts WHERE society_id=%s", (sid,))}
@@ -642,7 +657,7 @@ def register_onboarding_wizard_callbacks(app):
         trig = ctx.triggered_id
         if not s or not s[0] or not isinstance(trig, dict):
             return no_update, no_update, no_update
-        sid, uid, role = s
+        sid, uid, _role = s
         acc_ids = [it["id"]["acc_id"] for it in (ctx.states_list[1] or [])]
         book_of = dict(zip(acc_ids, books or []))
         rec = dict(rec_json or {})
@@ -708,7 +723,7 @@ def register_onboarding_wizard_callbacks(app):
         s = _session()
         if not s or not s[0]:
             return no_update, no_update
-        sid, uid, role = s
+        sid, _uid, _role = s
         answers = {"central_it_tan": bool(it_tan), "central_tds": bool(tds),
                    "central_gst": bool(gst), "central_rera": bool(rera),
                    "has_employees": bool(employees), "has_security_agency": bool(security)}
@@ -800,7 +815,7 @@ def register_onboarding_wizard_callbacks(app):
         s = _session()
         if not s or not s[0]:
             return no_update, no_update
-        sid, uid, role = s
+        sid, _uid, _role = s
         # step is the index into CATEGORIES; Review is the last one.
         if step is None or int(step) != NCAT - 1:
             return no_update, no_update
@@ -846,7 +861,8 @@ def register_onboarding_wizard_callbacks(app):
 
 # ── items 6 and 9: TDS-rate and Brought-Forward xlsx template / upload ─────────────────
 import re as _re
-from decimal import Decimal as _D, InvalidOperation as _IO
+from decimal import Decimal as _D
+from decimal import InvalidOperation as _IO
 
 _TAN_RE = _re.compile(r"^[A-Z]{4}[0-9]{5}[A-Z]$")
 

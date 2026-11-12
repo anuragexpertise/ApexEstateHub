@@ -38,13 +38,11 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
 
-from database.db_manager import db
-
-import app.security.policy as policy
+from app.security import policy
 from app.security.policy import Permission
-
+from app.utils import now_ist
+from database.db_manager import db
 
 # ── 1. authorization gate ────────────────────────────────────────────────────
 #
@@ -68,7 +66,7 @@ def _rbac_state() -> tuple[bool, str | None]:
     """(policy evaluable, reason-if-not). Reason is the denial text."""
     try:
         row = db._execute("SELECT id FROM role_definitions LIMIT 1", fetch_one=True)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return False, f"RBAC tables unavailable ({exc.__class__.__name__}) — denying"
     if not row:
         return False, ("no role_definitions seeded — run database/seed.py "
@@ -155,7 +153,7 @@ def log_concern_transition(actor_id, assignment_id, concern_id,
         "comment":        comment,
         "evidence":       json.dumps(payload) if payload else None,
         "correlation_id": correlation_id or str(uuid.uuid4()),
-        "created_at":     datetime.utcnow(),
+        "created_at":     now_ist(),
     }
     return append_audit("concern_transitions", row,
                         dedup_cols=["assignment_id", "to_state"])

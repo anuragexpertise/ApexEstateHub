@@ -1,4 +1,4 @@
-import re, sys
+import re
 
 files = {
     "shell_callbacks.py":        "/home/at/Documents/ApexEstateHub/app/dash_apps/callbacks/shell_callbacks.py",

@@ -14,13 +14,13 @@ The society always comes from the caller's server-side session. Nothing here tru
 Any edit puts the figures back to "pending" until someone entitled confirms them again.
 """
 from __future__ import annotations
-from database.money import D
 
 from datetime import date, datetime, timedelta
 
 from app.security.authorization import Cap
 from app.security.service_guard import audit_event, check, current_principal
 from database.db_manager import db
+from database.money import D
 
 RESOURCE = "tax_rate_config"
 

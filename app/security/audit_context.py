@@ -31,7 +31,7 @@ def get_current_user_id() -> int | None:
         from flask_login import current_user
         if current_user and current_user.is_authenticated:
             return int(current_user.get_id())
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         # No request context, flask_login not initialised, etc.
         pass
     return None
@@ -46,7 +46,7 @@ def get_current_user_role() -> str | None:
         from flask_login import current_user
         if current_user and current_user.is_authenticated:
             return getattr(current_user, 'role', None)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     return None
 
@@ -64,7 +64,7 @@ def get_current_society_id() -> int | None:
         from flask_login import current_user
         if current_user and current_user.is_authenticated:
             return getattr(current_user, 'society_id', None)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     return None
 
@@ -89,7 +89,7 @@ def get_current_linked_id() -> int | None:
         from flask_login import current_user
         if current_user and current_user.is_authenticated:
             return getattr(current_user, 'linked_id', None)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     return None
 
@@ -144,18 +144,18 @@ def _server_user_type(uid: int) -> str | None:
             cached_uid, cached = g._server_user_type
             if cached_uid == uid:
                 return cached
-    except Exception:
+    except Exception:  # noqa: BLE001
         has_request_context = None
     try:
         from database.db_manager import db
         row = db._execute("SELECT user_type FROM users WHERE id=%s", (uid,), fetch_one=True)
         value = (row or {}).get("user_type")
-    except Exception:
+    except Exception:  # noqa: BLE001
         value = None
     try:
         from flask import g, has_request_context
         if has_request_context():
             g._server_user_type = (uid, value)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     return value

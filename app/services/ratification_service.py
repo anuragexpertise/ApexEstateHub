@@ -52,7 +52,7 @@ def raise_item(society_id, kind, description, amount, user_id, source_table=None
     try:
         r = d._execute("SELECT fn_raise_ratification(%s,%s,%s,%s,%s,%s,%s,%s) AS id",
                        (society_id, kind, source_table, source_id, amount, description, user_id, ratify_by), fetch_one=True)
-    except Exception as exc:                                              # noqa: BLE001
+    except Exception as exc:
         raise RatificationRefused(_clean(exc)) from exc
     return r["id"]
 
@@ -65,7 +65,7 @@ def decide(society_id, item_id, ratify: bool, resolution_id, user_id, note=None,
         raise RatificationRefused("Item not found.")
     try:
         r = d._execute("SELECT fn_decide_ratification(%s,%s,%s,%s,%s) AS msg", (item_id, ratify, resolution_id, user_id, note), fetch_one=True)
-    except Exception as exc:                                              # noqa: BLE001
+    except Exception as exc:
         raise RatificationRefused(_clean(exc)) from exc
     return r["msg"]
 

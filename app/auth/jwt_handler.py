@@ -1,9 +1,11 @@
-import jwt
+import logging
 import os
 import time
-import logging
 from functools import wraps
-from flask import request, jsonify, current_app
+
+import jwt
+from flask import jsonify, request
+
 from app.models.user import User
 
 log = logging.getLogger(__name__)
@@ -24,11 +26,11 @@ log = logging.getLogger(__name__)
 # two can never drift apart again. In production a missing, known-default or
 # short key refuses to boot; elsewhere it falls back to a random per-process key
 # (never a constant that is identical on every machine).
-from app.security.secret_policy import resolve_secret, is_production  # noqa: E402,F401
+from app.security.secret_policy import is_production, resolve_secret  # noqa: F401
 
 JWT_SECRET = resolve_secret('JWT_SECRET_KEY')
-JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', 3600))  # 1 hour
-JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', 2592000))  # 30 days
+JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', 3600))  # 1 hour  # noqa: PLW1508
+JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', 2592000))  # 30 days  # noqa: PLW1508
 
 
 def generate_tokens_for(user_id, email, role, society_id=None):
@@ -119,7 +121,7 @@ def refresh_access_token(refresh_token):
 
 def _bearer_from_request():
     header = request.headers.get('Authorization', '')
-    return header[7:] if header.startswith('Bearer ') else header
+    return header.removeprefix('Bearer ')
 
 
 def token_required(f):

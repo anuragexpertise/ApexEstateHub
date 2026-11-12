@@ -7,9 +7,8 @@ Layouts:
   login_layout(society_name) → Stage 2: email/password + PIN + pattern tabs
 """
 
-from dash import html, dcc
 import dash_bootstrap_components as dbc
-
+from dash import dcc, html
 
 # ── Stage 1: Society selection ────────────────────────────────
 

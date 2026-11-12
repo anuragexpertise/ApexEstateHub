@@ -1,4 +1,4 @@
-from dash import clientside_callback, Input, Output, State
+from dash import Input, Output, State, clientside_callback
 
 # ── 1. Map init + pin drop ───────────────────────────────────────────────────
 #

@@ -1,7 +1,8 @@
 # app/models/user.py
 from flask_login import UserMixin
-from database.db_manager import db
+
 from app.security.roles import resolve_role
+from database.db_manager import db
 
 
 def _resolve_role(raw_role: str, society_id, is_master_admin_flag: bool) -> str:
@@ -28,7 +29,7 @@ def active_select() -> str:
             "WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'active'",
             fetch_one=True)
         _ACTIVE_COL["has"] = bool(row)
-    except Exception:
+    except Exception:  # noqa: BLE001
         _ACTIVE_COL["has"] = False
     _ACTIVE_COL["checked_at"] = time.monotonic()
     return ", active" if _ACTIVE_COL["has"] else ""
@@ -70,7 +71,7 @@ class User(UserMixin):
                     society_id=result.get('society_id'),
                     linked_id=result.get('linked_id'),
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Error loading user {user_id}: {e}")
         return None
 
@@ -91,7 +92,7 @@ class User(UserMixin):
                     society_id=result.get('society_id'),
                     linked_id=result.get('linked_id'),
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Error finding user: {e}")
         return None
 
@@ -108,7 +109,7 @@ class User(UserMixin):
             )
             if result:
                 return User.get(result['id'])
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Error creating user: {e}")
         return None
     

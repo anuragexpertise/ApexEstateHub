@@ -41,13 +41,17 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any, Callable, Mapping, Optional
+from typing import Any
 
 from app.security import authorization as az
 from app.security.authorization import (
-    AuthorizationDecision, Cap, PolicyUnavailable, Principal,
+    AuthorizationDecision,
+    Cap,
+    PolicyUnavailable,
+    Principal,
 )
 
 log = logging.getLogger(__name__)
@@ -115,12 +119,12 @@ def correlation_id() -> str:
     return str(uuid.uuid4())
 
 
-def _session_user_id() -> Optional[int]:
+def _session_user_id() -> int | None:
     from app.security.audit_context import get_current_user_id
     return get_current_user_id()
 
 
-def current_principal() -> Optional[Principal]:
+def current_principal() -> Principal | None:
     """Server-resolved principal for the current request, or None when there is
     no session / the user row is gone. Raises PolicyUnavailable if the
     assignment lookup fails (callers deny)."""
@@ -161,7 +165,7 @@ def _clear_principal_cache() -> None:
 # ── audit ────────────────────────────────────────────────────────────────────
 _SENSITIVE_KEY = re.compile(
     r"(pass(word)?|secret|token|pin|pattern|hash|otp|signing|credential|authorization|cvv|"
-    r"aadhaar|pan(_?number)?)", re.I)
+    r"aadhaar|pan(_?number)?)", re.IGNORECASE)
 
 
 def redact(value: Any, _depth: int = 0) -> Any:
@@ -176,18 +180,18 @@ def redact(value: Any, _depth: int = 0) -> Any:
     return value
 
 
-def _json(value: Any) -> Optional[str]:
+def _json(value: Any) -> str | None:
     if value is None:
         return None
     return json.dumps(redact(value), default=str, sort_keys=True)
 
 
-def _client_ip() -> Optional[str]:
+def _client_ip() -> str | None:
     try:
         from flask import has_request_context, request
         if has_request_context():
             return (request.remote_addr or "")[:45] or None
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001, S110
         pass
     return None
 
@@ -200,9 +204,9 @@ _AUDIT_SQL = (
 
 
 def audit_event(action: str, resource_type: str, resource_id: Any = None, *,
-                before: Any = None, after: Any = None, reason: Optional[str] = None,
-                permission_used: Optional[str] = None, principal: Optional[Principal] = None,
-                actor_role: Optional[str] = None, society_id: Optional[int] = None,
+                before: Any = None, after: Any = None, reason: str | None = None,
+                permission_used: str | None = None, principal: Principal | None = None,
+                actor_role: str | None = None, society_id: int | None = None,
                 source: str = "app", cur=None) -> bool:
     """Append one audit row. Actor and society come from the SERVER principal.
 
@@ -239,8 +243,8 @@ def audit_event(action: str, resource_type: str, resource_id: Any = None, *,
 
 # ── check / ensure / decorator ───────────────────────────────────────────────
 def check(action: str, resource_type: str, resource_id: Any = None, *,
-          target_society_id: Optional[int] = None,
-          attributes: Optional[Mapping[str, Any]] = None,
+          target_society_id: int | None = None,
+          attributes: Mapping[str, Any] | None = None,
           audit_denials: bool = True) -> AuthorizationDecision:
     """Authorize the current request's principal. Never raises for a policy
     outcome; a policy-store outage is a denial."""
@@ -270,8 +274,8 @@ def blocks(decision: AuthorizationDecision) -> bool:
 
 
 def ensure(action: str, resource_type: str, resource_id: Any = None, *,
-           target_society_id: Optional[int] = None,
-           attributes: Optional[Mapping[str, Any]] = None) -> AuthorizationDecision:
+           target_society_id: int | None = None,
+           attributes: Mapping[str, Any] | None = None) -> AuthorizationDecision:
     """check() + raise AuthorizationDenied when the action's mode is enforce.
     In shadow mode a denial is logged and the (legacy-guarded) call proceeds."""
     d = check(action, resource_type, resource_id, target_society_id=target_society_id,
@@ -282,8 +286,8 @@ def ensure(action: str, resource_type: str, resource_id: Any = None, *,
 
 
 def require_action(action: str, resource_type: str, *,
-                   resolve: Optional[Callable[..., Mapping[str, Any]]] = None,
-                   on_deny: Optional[Callable[[AuthorizationDecision], Any]] = None):
+                   resolve: Callable[..., Mapping[str, Any]] | None = None,
+                   on_deny: Callable[[AuthorizationDecision], Any] | None = None):
     """Decorator for Dash callbacks and domain-service functions.
 
     `resolve(*args, **kwargs)` may return {"resource_id", "target_society_id",
@@ -321,7 +325,7 @@ def require_action(action: str, resource_type: str, *,
 
 # ── tenant-scoped resource primitives ────────────────────────────────────────
 class TenantTable:
-    __slots__ = ("name", "pk", "tenant_col", "columns", "updatable")
+    __slots__ = ("columns", "name", "pk", "tenant_col", "updatable")
 
     def __init__(self, name: str, columns, updatable, pk: str = "id", tenant_col: str = "society_id"):
         for ident in (name, pk, tenant_col, *columns, *updatable):
@@ -373,8 +377,8 @@ def _run(sql: str, params: tuple, cur, one: bool = True):
     return _db()._execute(sql, params, fetch_one=one, fetch_all=not one)
 
 
-def scoped_get(table: str, pk_value: Any, society_id: Optional[int], *, columns=None,
-               for_update: bool = False, cur=None) -> Optional[dict]:
+def scoped_get(table: str, pk_value: Any, society_id: int | None, *, columns=None,
+               for_update: bool = False, cur=None) -> dict | None:
     """SELECT one row by primary key AND tenant. A foreign-tenant id and a
     nonexistent id are indistinguishable (both None), so ids cannot be probed
     across societies. A missing society_id fails closed."""
@@ -392,9 +396,9 @@ def scoped_get(table: str, pk_value: Any, society_id: Optional[int], *, columns=
     return _run(sql, (pk_value, society_id), cur)
 
 
-def scoped_update(table: str, pk_value: Any, society_id: Optional[int],
-                  values: Mapping[str, Any], *, expect: Optional[Mapping[str, Any]] = None,
-                  cur=None) -> Optional[dict]:
+def scoped_update(table: str, pk_value: Any, society_id: int | None,
+                  values: Mapping[str, Any], *, expect: Mapping[str, Any] | None = None,
+                  cur=None) -> dict | None:
     """UPDATE ... WHERE pk AND tenant [AND expected-state] RETURNING pk.
     `expect` makes the state transition atomic (a conditional update): it
     returns None when the row is missing, belongs to another tenant, or is no
@@ -427,9 +431,9 @@ def scoped_update(table: str, pk_value: Any, society_id: Optional[int],
 
 
 def authorize_resource(action: str, resource_type: str, table: str, pk_value: Any, *,
-                       attr_map: Optional[Mapping[str, str]] = None,
-                       extra: Optional[Mapping[str, Any]] = None
-                       ) -> tuple[AuthorizationDecision, Optional[dict]]:
+                       attr_map: Mapping[str, str] | None = None,
+                       extra: Mapping[str, Any] | None = None
+                       ) -> tuple[AuthorizationDecision, dict | None]:
     """Resolve the record in the principal's OWN society, derive authorization
     attributes from the ROW (attr_map: attribute -> column), then authorize.
     Returns (decision, row). A missing / foreign-tenant record is a denial with

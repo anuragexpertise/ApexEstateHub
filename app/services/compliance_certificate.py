@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date, datetime
+from datetime import date
 
 from app.services import auditor_checks as ac
 from app.services import signing_service
+from app.utils import today_ist
 
 CHECK_LABELS = {
     "ledger_chain": "Ledger hash chain", "anchors": "Signed ledger anchors", "integrity": "Ledger integrity (balances)",
@@ -33,7 +34,7 @@ def _db(db=None):
 
 
 def fy_label(today: date | None = None) -> str:
-    t = today or date.today()
+    t = today or today_ist()
     y = t.year if t.month >= 4 else t.year - 1
     return f"{y}-{str(y + 1)[2:]}"
 
@@ -59,7 +60,7 @@ def collect(society_id: int, db=None) -> dict:
             st, note = _status(r.get("status")), (r.get("note") or "")[:300]
         except Exception as exc:                                          # noqa: BLE001  a check that cannot run is an exception, never a pass
             st, note = "fail", f"Check could not run: {str(exc)[:200]}"
-        checks.append({"key": key, "label": CHECK_LABELS.get(key, key), "result": st, "note": note, "on": date.today().isoformat()})
+        checks.append({"key": key, "label": CHECK_LABELS.get(key, key), "result": st, "note": note, "on": today_ist().isoformat()})
     provisional = []
     for r in d._execute("SELECT title, notification_no FROM legal_instrument_catalog WHERE verification <> 'verified' ORDER BY id", fetch_all=True) or []:
         provisional.append({"kind": "statute_unverified", "item": r["title"]})
@@ -91,7 +92,7 @@ def generate(society_id: int, user_id: int, fy: str | None = None, db=None) -> d
     if u.get("role") not in ("admin", "auditor") and not ds.serving_offices(society_id, user_id, db=d):
         raise CertificateRefused("Only the administrator, an auditor or a serving office-bearer can generate the certificate.")
     body = collect(society_id, d)
-    text = _canonical(society_id, fy, date.today().isoformat(), body)
+    text = _canonical(society_id, fy, today_ist().isoformat(), body)
     h = hashlib.sha256(text.encode("utf-8")).hexdigest()
     sig = signing_service.sign(society_id, "SIGNING_LEDGER", f"compliance|{society_id}|{fy}|{h}", db=d)
     d._execute("UPDATE compliance_certificates SET status='superseded' WHERE society_id=%s AND fy=%s AND status='valid'", (society_id, fy))
