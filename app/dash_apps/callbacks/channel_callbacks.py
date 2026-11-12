@@ -8,20 +8,20 @@
 # ============================================================
 
 import logging
-from dash import Input, Output, State, ALL, ctx, html, no_update
-from dash.exceptions import PreventUpdate
-import dash_bootstrap_components as dbc
 
-from app.security.guards import require_session
+from dash import ALL, Input, Output, State, ctx, html, no_update
+from dash.exceptions import PreventUpdate
+
 from app.security.audit_context import (
+    get_current_linked_id,
+    get_current_society_id,
     get_current_user_id,
     get_current_user_role,
-    get_current_society_id,
-    get_current_linked_id,
 )
-from app.utils.ux_toasts import error_toast
 from app.security.authorization import Cap
+from app.security.guards import require_session
 from app.security.service_guard import audit_event, authorize_resource, blocks
+from app.utils.ux_toasts import error_toast
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +32,8 @@ def render_channels_page(society_id: int, auth: dict) -> html.Div:
     DEPRECATED: inline rendering removed from portal_pages.py; kept
     as a utility in case external callers still reference it.
     """
-    from app.services.alert_service import list_channels, get_active_alerts
     from app.dash_apps.drilldown.renderers import render_subscribable_alert_manager
+    from app.services.alert_service import get_active_alerts, list_channels
 
     apartment_id = get_current_linked_id()
     channels = list_channels(society_id or 1, apartment_id=apartment_id, is_admin=False)
@@ -79,13 +79,15 @@ def register_channel_callbacks(app):
             return False, html.Div("Not authorized.", style={"color": "#de5c52"})
         society_id = get_current_society_id()
         try:
+            from app.dash_apps.drilldown.renderers import (
+                render_channel_subscriber_profiles,
+            )
             from app.services.alert_service import get_channel_subscribers
-            from app.dash_apps.drilldown.renderers import render_channel_subscriber_profiles
             result = get_channel_subscribers(channel_id=channel_id, society_id=society_id)
             channel_name = result.get("channel_name", "Channel")
             subscribers = result.get("subscribers", [])
             return True, render_channel_subscriber_profiles(channel_name, subscribers)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"open_subscribers_modal error: {e}")
             return False, html.Div(error_toast(e, "Unable to load subscribers.")["message"], style={"color": "#de5c52"})
 
@@ -156,12 +158,12 @@ def register_channel_callbacks(app):
                                     url="/dashboard/channels",
                                     society_id=society_id,
                                 )
-                            except Exception:
+                            except Exception:  # noqa: BLE001, S110
                                 pass
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.error(f"Channel approval push notify failed: {e}")
             return toast, store
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"approve_channel_alert error: {e}")
             return error_toast(e, "Unable to approve this alert. Please try again."), no_update
 
@@ -203,7 +205,10 @@ def register_channel_callbacks(app):
             return {"type": "error", "message": "You cannot change subscriptions for this channel."}
         try:
             from app.services.alert_service import (
-                get_channel_subscribers, subscribe_channel, unsubscribe_channel)
+                get_channel_subscribers,
+                subscribe_channel,
+                unsubscribe_channel,
+            )
             result = get_channel_subscribers(channel_id=channel_id, society_id=society_id)
             subscribers = result.get("subscribers", [])
             is_subscribed = any(s.get("apartment_id") == apartment_id for s in subscribers)
@@ -220,7 +225,7 @@ def register_channel_callbacks(app):
                             after={"apartment_id": apartment_id},
                             permission_used=Cap.CHANNEL_SUBSCRIBE)
             return {"type": "success" if ok else "error", "message": msg or "Action failed"}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"toggle_channel_subscription error: {e}")
             return error_toast(e, "Unable to update your subscription. Please try again.")
 
@@ -247,12 +252,14 @@ def register_channel_callbacks(app):
             return False, html.Div("Not authorized.", style={"color": "#de5c52"})
         society_id = get_current_society_id()
         try:
+            from app.dash_apps.drilldown.renderers import (
+                render_channel_subscriber_profiles,
+            )
             from app.services.alert_service import get_channel_subscribers
-            from app.dash_apps.drilldown.renderers import render_channel_subscriber_profiles
             result = get_channel_subscribers(channel_id=channel_id, society_id=society_id)
             channel_name = result.get("channel_name", "Channel")
             subscribers = result.get("subscribers", [])
             return True, render_channel_subscriber_profiles(channel_name, subscribers)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"open_subscribers_from_alert error: {e}")
             return False, html.Div(error_toast(e, "Unable to load subscribers.")["message"], style={"color": "#de5c52"})

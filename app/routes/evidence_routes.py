@@ -19,7 +19,11 @@ from html import escape
 
 from flask import Blueprint, Response, abort, request, send_file
 
-from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.services import evidence_service as ev
 from app.services import onboarding_service as ob
 
@@ -47,7 +51,7 @@ def _private(resp):
 def _audit(sid: int, uid: int, action: str, eid: int | None, extra: dict) -> None:
     try:
         ob._audit(sid, uid, action, "onboarding_evidence", eid, extra)
-    except Exception:                                                      # noqa: BLE001  (an audit hiccup must not block the read)
+    except Exception:
         log.exception("could not audit %s", action)
 
 
@@ -72,9 +76,8 @@ def evidence_file(evidence_id: int):
         _audit(sid, uid, "EVIDENCE_INTEGRITY_FAILED", evidence_id, {"status": exc.status, "via": "view"})
         body = ("<!doctype html><meta charset=utf-8><title>Integrity check failed</title>"
                 "<body style='font-family:sans-serif;max-width:560px;margin:60px auto'>"
-                "<h3>Integrity check failed</h3><p>%s</p>"
-                "<p>Please tell the platform operator. Uploading the original scan again restores the record.</p></body>"
-                % escape(str(exc)))
+                f"<h3>Integrity check failed</h3><p>{escape(str(exc))}</p>"
+                "<p>Please tell the platform operator. Uploading the original scan again restores the record.</p></body>")
         return _private(Response(body, status=409, mimetype="text/html"))
 
     name = row["filename"] or f"evidence_{evidence_id}"

@@ -6,17 +6,11 @@ Password / PIN / pattern authentication.
 """
 
 import dash
-from dash import Input, Output, State, no_update, html, ctx
+from dash import Input, Output, State, no_update
 from dash.exceptions import PreventUpdate
 
-from app.services.auth_service import authenticate_user
-from app.security.guards import require_session
 from app.security.roles import portal_home
-from app.security.audit_context import (
-    get_current_user_id,
-    get_current_user_role,
-    get_current_society_id,
-)
+from app.services.auth_service import authenticate_user
 
 
 def _login_response(user: dict):
@@ -25,7 +19,7 @@ def _login_response(user: dict):
 
     # A13: refuse the login of an expired society BEFORE any session is created.
     if role != "master":
-        from app.security.plan_guard import society_plan_expired, PLAN_EXPIRED_MESSAGE
+        from app.security.plan_guard import PLAN_EXPIRED_MESSAGE, society_plan_expired
         if society_plan_expired(society_id):
             return _login_error(PLAN_EXPIRED_MESSAGE)
 
@@ -42,7 +36,7 @@ def _login_response(user: dict):
         )
         user["access_token"] = access_token
         user["refresh_token"] = refresh_token
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"⚠️  JWT generation failed: {exc}")
 
     return (
@@ -60,6 +54,7 @@ def _login_error(message: str):
 def _establish_server_session(user: dict) -> None:
     try:
         from flask_login import login_user
+
         from app.models.user import User
 
         uid = user.get("user_id") or user.get("id")
@@ -72,7 +67,7 @@ def _establish_server_session(user: dict) -> None:
             society_id=user.get("society_id"),
             linked_id=user.get("linked_id"),
         ), remember=True)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"⚠️  Could not establish server-side session for user_id={user.get('user_id')}: {exc}")
 
 
@@ -158,8 +153,8 @@ def register_login_callbacks(app):
         society_id = (auth or {}).get("society_id")
         try:
             user = authenticate_user(email.strip(), password, society_id)
-        except Exception:
-            print(f"❌ Database connection error during password login")
+        except Exception:  # noqa: BLE001
+            print("❌ Database connection error during password login")
             return _login_error("No Database connection")
         if not user:
             print(f"❌ Password login failed: {email}")
@@ -203,8 +198,8 @@ def register_login_callbacks(app):
         from app.services.auth_service import authenticate_pin
         try:
             user = authenticate_pin(email.strip(), pin, society_id)
-        except Exception:
-            print(f"❌ Database connection error during PIN login")
+        except Exception:  # noqa: BLE001
+            print("❌ Database connection error during PIN login")
             return _login_error("No Database connection")
         if not user:
             print(f"❌ PIN login failed: {email}")
@@ -233,8 +228,8 @@ def register_login_callbacks(app):
         from app.services.auth_service import authenticate_pattern
         try:
             user = authenticate_pattern(email.strip(), pattern, society_id)
-        except Exception:
-            print(f"❌ Database connection error during pattern login")
+        except Exception:  # noqa: BLE001
+            print("❌ Database connection error during pattern login")
             return _login_error("No Database connection")
         if not user:
             print(f"❌ Pattern login failed: {email}")
@@ -260,8 +255,8 @@ def register_login_callbacks(app):
         print(f"\n👑 Master admin login: {email}")
         try:
             user = authenticate_user(email.strip(), password, society_id=None)
-        except Exception:
-            print(f"❌ Database connection error during master admin login")
+        except Exception:  # noqa: BLE001
+            print("❌ Database connection error during master admin login")
             return _login_error("No Database connection")
         if not user or user.get("role") != "master":
             return _login_error("Invalid master admin credentials")

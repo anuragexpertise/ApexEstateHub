@@ -27,11 +27,11 @@ the evidence_ref holds the scanned paper's SHA-256 and stamp-duty receipt
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Callable, Optional
 
+from app.utils import now_ist
 from database.db_manager import db
 
 log = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class EsignError(RuntimeError):
 
 
 def _now() -> datetime:
-    return datetime.utcnow()
+    return now_ist()
 
 
 def sha256(text: str) -> str:
@@ -64,7 +64,7 @@ def create_request(
     method: str,
     doc_hash: str,
     actor_id: int,
-    http_post: Optional[Callable[[str, dict], dict]] = None,
+    http_post: Callable[[str, dict], dict] | None = None,
     signer_user_id: int | None = None,
 ) -> dict:
     """Create (or return the existing, idempotent) eSign request.
@@ -108,9 +108,9 @@ def create_request(
     error = None
     if http_post is not None:
         try:
-            vendor_resp = http_post(f"https://api.leegality.com/v1/esign/request", payload)
+            vendor_resp = http_post("https://api.leegality.com/v1/esign/request", payload)
             status = "sent" if vendor_resp else "pending"
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.exception("eSign create request failed")
             status = "failed"
             error = str(exc)
@@ -130,7 +130,7 @@ def create_request(
     return _request_dict(row)
 
 
-def check_status(request_id: int, http_get: Optional[Callable[[str], dict]] = None) -> dict:
+def check_status(request_id: int, http_get: Callable[[str], dict] | None = None) -> dict:
     """Poll the vendor for the request status and update esign_requests."""
     row = db._execute("SELECT * FROM esign_requests WHERE id=%s", (request_id,), fetch_one=True)
     if not row:
@@ -144,19 +144,19 @@ def check_status(request_id: int, http_get: Optional[Callable[[str], dict]] = No
         try:
             vendor_resp = http_get(f"https://api.leegality.com/v1/esign/request/{row['vendor_request_id']}")
             status = vendor_resp.get("status", row["status"]).lower()
-        except Exception as exc:  # noqa: BLE001
+        except Exception:
             log.exception("eSign status check failed")
             return _request_dict(row)
 
     if status in ("completed", "failed", "expired"):
-        completed_at = datetime.utcnow() if status == "completed" else None
+        completed_at = now_ist() if status == "completed" else None
         db._execute(
             "UPDATE esign_requests SET status=%s, completed_at=%s WHERE id=%s",
             (status, completed_at, request_id))
     return {**_request_dict(row), "status": status}
 
 
-def fetch_signed_document(request_id: int, http_get: Optional[Callable[[str], bytes]] = None) -> dict:
+def fetch_signed_document(request_id: int, http_get: Callable[[str], bytes] | None = None) -> dict:
     """Fetch the signed document from the vendor and verify its hash."""
     row = db._execute("SELECT * FROM esign_requests WHERE id=%s", (request_id,), fetch_one=True)
     if not row:
@@ -184,7 +184,7 @@ def fetch_signed_document(request_id: int, http_get: Optional[Callable[[str], by
 # ── callback (authenticated, idempotent) ───────────────────────────────────
 
 def process_callback(vendor_request_id: str, callback_payload: dict,
-                     verify_signature: Optional[Callable[[dict], bool]] = None) -> dict:
+                     verify_signature: Callable[[dict], bool] | None = None) -> dict:
     """Handle a vendor callback.
 
     * Authenticates the callback (verify_signature, when provided).
@@ -214,7 +214,7 @@ def process_callback(vendor_request_id: str, callback_payload: dict,
         raise EsignError("Callback document hash is missing or does not match the request hash.")
 
     if status in ("completed", "failed", "expired"):
-        completed_at = datetime.utcnow() if status == "completed" else None
+        completed_at = now_ist() if status == "completed" else None
         evidence_ref = callback_payload.get("evidence_ref") or f"vendor:{vendor_request_id}"
         db._execute(
             """UPDATE esign_requests
@@ -240,7 +240,7 @@ def expire_stale_requests(ttl_hours: int = 72) -> int:
 # ── the signing gate (used by document_signing.sign) ───────────────────────
 
 SIGNABLE_KINDS = ("agreement", "adviser_appointment")
-SANDBOX = lambda: __import__("os").getenv("ESIGN_SANDBOX") == "1"   # noqa: E731  (a demo vendor that completes on request)
+SANDBOX = lambda: __import__("os").getenv("ESIGN_SANDBOX") == "1"
 
 
 def is_required(society_id: int) -> bool:
@@ -293,7 +293,8 @@ def simulate_completion(request_id: int) -> dict:
 
 def verify_callback_signature(raw_body: bytes, header_value: str | None) -> bool:
     """HMAC-SHA256 of the raw body with ESIGN_CALLBACK_SECRET. No secret configured means every callback is refused."""
-    import hmac, os
+    import hmac
+    import os
     secret = os.getenv("ESIGN_CALLBACK_SECRET", "")
     if not secret or not header_value:
         return False

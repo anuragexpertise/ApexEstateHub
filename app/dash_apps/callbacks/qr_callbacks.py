@@ -1,17 +1,30 @@
 # app/dash_apps/callbacks/qr_callbacks.py (COMPLETE WITH CAMERA)
 
-from dash import Input, Output, State, dcc, html, no_update, clientside_callback, ctx, MATCH, ALL
-from dash.exceptions import PreventUpdate
-import dash_bootstrap_components as dbc
 import base64
-from datetime import datetime
 
+import dash_bootstrap_components as dbc
+from dash import (
+    ALL,
+    Input,
+    Output,
+    State,
+    clientside_callback,
+    ctx,
+    dcc,
+    html,
+    no_update,
+)
+from dash.exceptions import PreventUpdate
+
+from app.security.audit_context import (
+    get_current_linked_id,
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.guards import require_session
 from app.security.pii_masking import mask_mobile
-from app.security.audit_context import (
-    get_current_user_id, get_current_user_role,
-    get_current_society_id, get_current_linked_id,
-)
+from app.utils import now_ist
 from app.utils.ux_toasts import error_toast
 
 
@@ -465,7 +478,7 @@ def _open_entity_profile(entity, entity_id, society_id, auth_data, banner):
             filters={"society_id": society_id},
         )
         return html.Div([banner, profile])
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  _open_entity_profile({entity}, {entity_id}): {e}")
         return banner
 
@@ -776,8 +789,12 @@ def register_qr_callbacks(app):
         if not entity_store or entity_store.get('role') != 'attendance_entry':
             raise PreventUpdate
 
-        from app.services.qr_service import generate_time_qr, ATTENDANCE_QR_EXPIRY_SECONDS
         import time as _time
+
+        from app.services.qr_service import (
+            ATTENDANCE_QR_EXPIRY_SECONDS,
+            generate_time_qr,
+        )
 
         remaining = int(entity_store.get('expires_at', 0) - _time.time())
 
@@ -833,7 +850,7 @@ def register_qr_callbacks(app):
                 pass
 
         result = validate_qr_code(qr_payload.strip(), society_id, scanning_user_id, lat=lat, lon=lon, mode=mode)
-        now_s = datetime.now().strftime("%H:%M:%S")
+        now_s = now_ist().strftime("%H:%M:%S")
         log = list(scan_log or [])
         
         # Map role to gate_access code
@@ -919,7 +936,7 @@ def register_qr_callbacks(app):
                             # guard let this person in".
                             (society_id, role_code, user.get("linked_id") if role_code in ["APT", "VND", "SEC"] else user_id, scanning_user_id),
                         )
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         print(f"Gate log error: {e}")
                         gate_msg = "⚠️ Log failed"
                 elif role == "event_ticket":
@@ -933,16 +950,16 @@ def register_qr_callbacks(app):
                 # Pick the profile entity to open (if any).
                 if role in GATE_PERSON_ROLES:
                     profile_entity, profile_pk = role, user_id
-                    sub = f"Flat {flat}" if flat else role.title()
+                    f"Flat {flat}" if flat else role.title()
                 elif role == "event_ticket":
                     profile_entity, profile_pk = "event", result.get("event_id")
-                    sub = f"{user.get('ticket_type','')} — {user.get('event_title','')}"
+                    f"{user.get('ticket_type','')} — {user.get('event_title','')}"
                 elif role == "patrol_location":
                     profile_entity, profile_pk = "patrol_location", user_id
-                    sub = user.get("name", "Patrol Point")
+                    user.get("name", "Patrol Point")
                 else:
                     profile_entity, profile_pk = None, None
-                    sub = role.title() or gate_msg
+                    role.title() or gate_msg
 
                 banner = _scan_banner("Access Granted", user_name,
                                       "fa-check-circle", "#27ae60", now_s,
@@ -988,7 +1005,7 @@ def register_qr_callbacks(app):
         elif mode == "exit":
             user = result.get("user", {}) or {}
             user_id = user.get("id")
-            user_name = user.get("name", "Unknown") if user else "Unknown" or "Unknown"
+            user_name = user.get("name", "Unknown") if user else "Unknown"
             role = user.get("role", "") if user else ""
 
             gate_msg = "🔴 EXITED"
@@ -1011,7 +1028,7 @@ def register_qr_callbacks(app):
                         # ATD self-clock-out path which already sets it.
                         (scanning_user_id, society_id, user_id, role_code),
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     print(f"Gate exit log error: {e}")
                     gate_msg = "🔴 EXIT (log failed)"
             elif role in GATE_EMPLOYEE_ROLES and result.get("status") == "PASS" and user_id:
@@ -1035,7 +1052,7 @@ def register_qr_callbacks(app):
                 "patrol_location": ("patrol_location", user_id),
             }
             profile_entity, profile_pk = profile_map.get(role, (None, None))
-            sub = f"Flat {user.get('flat_number','')}" if (role in GATE_PERSON_ROLES and user.get("flat_number")) else role.title()
+            f"Flat {user.get('flat_number','')}" if (role in GATE_PERSON_ROLES and user.get("flat_number")) else role.title()
             banner = _scan_banner(gate_msg, user_name, "fa-sign-out-alt", color, now_s)
             body = (
                 _open_entity_profile(profile_entity, profile_pk, society_id, auth_data, banner)
@@ -1166,7 +1183,7 @@ def register_qr_callbacks(app):
                     html.H4("Admitted", style={"color": "#2ecc71", "marginTop": "10px"}),
                     html.P(user.get("name", "Unknown")),
                     html.P(f"Flat {user.get('flat_number','')}" if user.get("flat_number") else ""),
-                    html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", style={"color": "#95a5a6"}),
+                    html.Small(f"Time: {now_ist().strftime('%Y-%m-%d %H:%M:%S')}", style={"color": "#95a5a6"}),
                 ], className="text-center p-3", style={"backgroundColor": "#d4edda", "borderRadius": "10px"})
                 return _finish(card, default_toast, default_sound)
 
@@ -1176,7 +1193,7 @@ def register_qr_callbacks(app):
                 html.H4("Valid", style={"color": "#2ecc71", "marginTop": "10px"}),
                 html.P(user.get("name", "Unknown")),
                 html.Hr(),
-                html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
+                html.Small(f"Time: {now_ist().strftime('%Y-%m-%d %H:%M:%S')}"),
             ], className="text-center p-3", style={"backgroundColor": "#d4edda", "borderRadius": "10px"})
             return _finish(card, default_toast, default_sound)
 
@@ -1186,7 +1203,7 @@ def register_qr_callbacks(app):
             html.H4("Not Found", style={"color": "#e74c3c", "marginTop": "10px"}),
             html.P(reason),
             html.Hr(),
-            html.Small(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"),
+            html.Small(f"Time: {now_ist().strftime('%Y-%m-%d %H:%M:%S')}"),
         ], className="text-center p-3", style={"backgroundColor": "#f8d7da", "borderRadius": "10px"})
         return _finish(card, default_toast, default_sound)
 
@@ -1263,7 +1280,7 @@ def register_qr_callbacks(app):
             img_bytes = base64.b64decode(b64_data)
 
             return dcc.send_bytes(img_bytes, filename)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"QR PNG save error: {e}")
             raise PreventUpdate
 
@@ -1344,7 +1361,7 @@ def register_qr_callbacks(app):
                 (society_id, user_id)
             )
             return {"type": "warning", "message": "🚨 EMERGENCY ALERT SENT TO ALL"}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return error_toast(e, "Unable to trigger the emergency alert. Please contact support if this continues.")
 
 
@@ -1508,7 +1525,7 @@ def register_qr_callbacks(app):
             
             return True, "No admin contact found"
             
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return True, error_toast(e, "Unable to load the admin contact. Please try again.")["message"]
 
     print("✓ QR callbacks registered (static QR + camera + emergency)")

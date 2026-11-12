@@ -5,9 +5,10 @@ import hashlib
 import hmac
 import os
 import time
-from datetime import datetime
 from io import BytesIO
+
 import qrcode
+
 from app.security.roles import ALWAYS_PASS_CODES
 from database.db_manager import db
 
@@ -223,7 +224,7 @@ def revoke_and_reissue(
     entity_id: int,
     reason: str,
     actor_user_id: int,
-    entity_label: str = None,
+    entity_label: str | None = None,
 ):
     """
     The ONLY function that changes qr_version after initial issuance.
@@ -424,8 +425,8 @@ def parse_qr_payload(qr_data: str) -> dict:
             result["qr_version"] = int(parts[3])
             result["sig"] = parts[4]
         return result
-    except Exception as e:
-        return {"error": f"Parse failure: {str(e)}"}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"Parse failure: {e!s}"}
 
 
 def generate_qr_code(society_id: int, role_code: str, entity_id: int):
@@ -460,7 +461,7 @@ def generate_qr_code(society_id: int, role_code: str, entity_id: int):
         img_str = base64.b64encode(buffered.getvalue()).decode()
 
         return f"data:image/png;base64,{img_str}", qr_payload
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # Fails closed: an infrastructure fault (no DB pool, unreachable
         # database, unreadable secret) returns (None, error) so the caller
         # shows a generation failure. It must never fall through to the legacy
@@ -506,7 +507,7 @@ def generate_own_qr_code(role: str, user_id, linked_id, society_id):
     return generate_qr_code(society_id, role_code, entity_id)
 
 
-def validate_event_ticket_qr(ticket_item_id: int, society_id: int, security_user_id: int = None) -> dict:
+def validate_event_ticket_qr(ticket_item_id: int, society_id: int, security_user_id: int | None = None) -> dict:
     """Check event_ticket_items row, verify validity and mark as used on gate scan.
 
     Single-use: a scanned ticket is stamped 'used' immediately (events are
@@ -565,8 +566,8 @@ def validate_event_ticket_qr(ticket_item_id: int, society_id: int, security_user
             "message": f"Valid {item['ticket_type']} Pass admitted for {item['event_title']}",
             "gate_action": "allow",
         }
-    except Exception as e:
-        return {"status": "FAIL", "reason": f"Event ticket scan error: {str(e)}", "gate_action": "deny"}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "FAIL", "reason": f"Event ticket scan error: {e!s}", "gate_action": "deny"}
 
 
 
@@ -587,7 +588,7 @@ def _visitor_user(vis, society_id: int) -> dict:
     }
 
 
-def validate_visitor_qr(visitor_id: int, society_id: int, security_user_id: int = None) -> dict:
+def validate_visitor_qr(visitor_id: int, society_id: int, security_user_id: int | None = None) -> dict:
     """Validate a scanned visitor QR.
 
     Two-actor enforcement: a visitor is NEVER auto-admitted by the gate scan
@@ -670,11 +671,14 @@ def validate_visitor_qr(visitor_id: int, society_id: int, security_user_id: int 
             "needs_owner_approval": True,
             "user": _visitor_user(vis, society_id),
         }
-    except Exception as e:
-        return {"status": "FAIL", "reason": f"Visitor validation error: {str(e)}", "gate_action": "deny"}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "FAIL", "reason": f"Visitor validation error: {e!s}", "gate_action": "deny"}
 
 
 import math
+
+from app.utils import now_ist
+
 
 def _haversine(lat1, lon1, lat2, lon2):
     if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
@@ -688,7 +692,7 @@ def _haversine(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int = None, lat: float = None, lon: float = None, mode: str = "entry") -> dict:
+def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int | None = None, lat: float | None = None, lon: float | None = None, mode: str = "entry") -> dict:
     """Log security patrol point scan with anti-spoofing checks."""
     try:
         loc = db._execute("""
@@ -728,7 +732,7 @@ def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int 
             
             if last_scan and last_scan.get("latitude") and lat is not None:
                 travel_dist = _haversine(lat, lon, last_scan["latitude"], last_scan["longitude"])
-                time_diff = (datetime.now() - last_scan["scanned_at"]).total_seconds()
+                time_diff = (now_ist() - last_scan["scanned_at"]).total_seconds()
                 
                 if time_diff > 0 and travel_dist is not None:
                     speed = travel_dist / time_diff  # meters per second
@@ -762,11 +766,11 @@ def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int 
             "message": f"Patrol Scan Logged: {loc['location_name']}",
             "gate_action": "allow",
         }
-    except Exception as e:
-        return {"status": "FAIL", "reason": f"Patrol scan error: {str(e)}", "gate_action": "deny"}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "FAIL", "reason": f"Patrol scan error: {e!s}", "gate_action": "deny"}
 
 
-def validate_concern_qr(concern_id: int, society_id: int, security_user_id: int = None) -> dict:
+def validate_concern_qr(concern_id: int, society_id: int, security_user_id: int | None = None) -> dict:
     try:
         concern = db._execute(
             "SELECT id, concern_type, status FROM concerns WHERE id = %s AND society_id = %s",
@@ -785,11 +789,11 @@ def validate_concern_qr(concern_id: int, society_id: int, security_user_id: int 
             "message": "Valid Concern",
             "gate_action": "allow",
         }
-    except Exception as e:
-        return {"status": "FAIL", "reason": f"Concern validation error: {str(e)}", "gate_action": "deny"}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "FAIL", "reason": f"Concern validation error: {e!s}", "gate_action": "deny"}
 
 
-def validate_receipt_qr(receipt_id: int, society_id: int, security_user_id: int = None) -> dict:
+def validate_receipt_qr(receipt_id: int, society_id: int, security_user_id: int | None = None) -> dict:
     try:
         receipt = db._execute(
             "SELECT id, particulars, amount, status FROM receipts WHERE id = %s AND society_id = %s",
@@ -810,11 +814,11 @@ def validate_receipt_qr(receipt_id: int, society_id: int, security_user_id: int 
             "message": f"Valid Receipt — {receipt.get('status', '')}",
             "gate_action": "allow",
         }
-    except Exception as e:
-        return {"status": "FAIL", "reason": f"Receipt validation error: {str(e)}", "gate_action": "deny"}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "FAIL", "reason": f"Receipt validation error: {e!s}", "gate_action": "deny"}
 
 
-def validate_expense_qr(expense_id: int, society_id: int, security_user_id: int = None) -> dict:
+def validate_expense_qr(expense_id: int, society_id: int, security_user_id: int | None = None) -> dict:
     try:
         expense = db._execute(
             "SELECT id, particulars, amount, status FROM expenses WHERE id = %s AND society_id = %s",
@@ -835,11 +839,11 @@ def validate_expense_qr(expense_id: int, society_id: int, security_user_id: int 
             "message": f"Valid Expense — {expense.get('status', '')}",
             "gate_action": "allow",
         }
-    except Exception as e:
-        return {"status": "FAIL", "reason": f"Expense validation error: {str(e)}", "gate_action": "deny"}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "FAIL", "reason": f"Expense validation error: {e!s}", "gate_action": "deny"}
 
 
-def validate_asset_qr(asset_id: int, society_id: int, security_user_id: int = None) -> dict:
+def validate_asset_qr(asset_id: int, society_id: int, security_user_id: int | None = None) -> dict:
     try:
         asset = db._execute(
             "SELECT id, asset_name, purchase_value, disposed FROM assets WHERE id = %s AND society_id = %s",
@@ -860,11 +864,11 @@ def validate_asset_qr(asset_id: int, society_id: int, security_user_id: int = No
             "message": f"Valid Asset — {'Disposed' if asset.get('disposed') else 'Active'}",
             "gate_action": "allow",
         }
-    except Exception as e:
-        return {"status": "FAIL", "reason": f"Asset validation error: {str(e)}", "gate_action": "deny"}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "FAIL", "reason": f"Asset validation error: {e!s}", "gate_action": "deny"}
 
 
-def validate_noc_qr(noc_id: int, society_id: int, security_user_id: int = None) -> dict:
+def validate_noc_qr(noc_id: int, society_id: int, security_user_id: int | None = None) -> dict:
     """
     Verifies a printed NOC by its persisted nocs.id. status is derived here
     rather than trusted from the stored column for the 'valid'/'expired'
@@ -891,7 +895,7 @@ def validate_noc_qr(noc_id: int, society_id: int, security_user_id: int = None) 
         stored_status = noc.get("status")
         if stored_status == "revoked":
             effective_status = "revoked"
-        elif noc.get("valid_until") and noc["valid_until"] < _date.today():
+        elif noc.get("valid_until") and noc["valid_until"] < _date.today():  # noqa: DTZ011
             effective_status = "expired"
         else:
             effective_status = "valid"
@@ -912,8 +916,8 @@ def validate_noc_qr(noc_id: int, society_id: int, security_user_id: int = None) 
             "message": f"NOC is {effective_status}",
             "gate_action": "allow" if passed else "deny",
         }
-    except Exception as e:
-        return {"status": "FAIL", "reason": f"NOC validation error: {str(e)}", "gate_action": "deny"}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "FAIL", "reason": f"NOC validation error: {e!s}", "gate_action": "deny"}
 
 
 def verify_scanned_qr(qr_data: str, society_id: int) -> dict:
@@ -1079,8 +1083,8 @@ def resolve_entity_for_reissue(role_code: str, entity_id: int, society_id: int,
         # an expired/revoked NOC still returns a user dict above, so
         # reaching here means a genuine "not found".
         return {"error": result.get("reason", "Entity not found")}
-    except Exception as e:
-        return {"error": f"Lookup error: {str(e)}"}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"Lookup error: {e!s}"}
 
 
 ATTENDANCE_QR_EXPIRY_SECONDS = 60
@@ -1100,7 +1104,7 @@ def generate_time_qr(society_id: int):
     return img_src, payload, issued_at, issued_at + ATTENDANCE_QR_EXPIRY_SECONDS
 
 
-def validate_attendance_qr(issued_at: int, society_id: int, security_user_id: int = None) -> dict:
+def validate_attendance_qr(issued_at: int, society_id: int, security_user_id: int | None = None) -> dict:
     """
     Validate a time-boxed ATD QR and toggle the SCANNING employee's own duty
     status (clock in if not on duty, clock out if already on duty).
@@ -1177,7 +1181,7 @@ def _platform_pass(role_code: str, role: str, gate_society_id) -> dict:
     }
 
 
-def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int = None, lat: float = None, lon: float = None, mode: str = "entry") -> dict:
+def validate_qr_code(qr_data: str, society_id: int | None = None, security_user_id: int | None = None, lat: float | None = None, lon: float | None = None, mode: str = "entry") -> dict:
     """
     Server-side validation with standard hyphenated format (<society_id>-<ROLE_CODE>-<entity_id>).
     Dispatches to role-specific validators.
@@ -1378,8 +1382,8 @@ def validate_qr_code(qr_data: str, society_id: int = None, security_user_id: int
             }
 
     except ValueError as e:
-        return {"status": "FAIL", "reason": f"Parse error: {str(e)}", "gate_action": "deny"}
-    except Exception as e:
+        return {"status": "FAIL", "reason": f"Parse error: {e!s}", "gate_action": "deny"}
+    except Exception as e:  # noqa: BLE001
         print(f"QR validation error: {e}")
         import traceback
         traceback.print_exc()

@@ -1,17 +1,19 @@
 # app/routes/auth.py
-from flask import Blueprint, request, jsonify, session
-from flask_login import login_user, logout_user, login_required, current_user
-from database.db_manager import db
-from app.models.user import User
-from app.security.roles import portal_home
+
+import jwt
+from flask import Blueprint, jsonify, request, session
+from flask_login import current_user, login_required, login_user, logout_user
+
 # SECURITY (fixed 2026-08): JWT_SECRET and token generation now come from
 # app.auth.jwt_handler — the single source of truth. This module used to
 # define its own JWT_SECRET with a different fallback default, which risked
 # login-minted tokens and @token_required-verified tokens using different
 # signing keys if JWT_SECRET_KEY was ever unset in an environment.
-from app.auth.jwt_handler import JWT_SECRET, generate_tokens_for as generate_tokens
-import jwt
-from datetime import datetime, timedelta
+from app.auth.jwt_handler import JWT_SECRET
+from app.auth.jwt_handler import generate_tokens_for as generate_tokens
+from app.models.user import User
+from app.security.roles import portal_home
+from database.db_manager import db
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
@@ -46,7 +48,7 @@ def login():
             user_dict = authenticate_pattern(email, pattern, society_id)
         else:
             return jsonify({'success': False, 'message': 'Invalid authentication method'}), 400
-    except Exception as exc:
+    except Exception:
         # DB/network failure during auth — never let this 500 uncaught.
         # A bare 500 has no JSON body, which login.html's fetch().then(r=>r.json())
         # can't parse; it falls into a generic catch and mislabels a DB outage
@@ -63,7 +65,7 @@ def login():
 
     # A13: expired society plans cannot log in (master has no society and is exempt).
     if user_dict.get('role') != 'master':
-        from app.security.plan_guard import society_plan_expired, PLAN_EXPIRED_MESSAGE
+        from app.security.plan_guard import PLAN_EXPIRED_MESSAGE, society_plan_expired
         if society_plan_expired(user_dict.get('society_id')):
             return jsonify({'success': False, 'message': PLAN_EXPIRED_MESSAGE}), 403
 
@@ -103,7 +105,7 @@ def refresh_token():
             raise ValueError('Not a refresh token')
     except jwt.ExpiredSignatureError:
         return jsonify({'success': False, 'message': 'Refresh token expired'}), 401
-    except Exception:
+    except Exception:  # noqa: BLE001
         return jsonify({'success': False, 'message': 'Invalid refresh token'}), 401
 
     try:
@@ -175,7 +177,7 @@ def subscribe_push():
         from app.services.push_service import save_push_subscription
         ok = save_push_subscription(current_user.id, subscription)
         return jsonify({'success': ok})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -183,10 +185,13 @@ def subscribe_push():
 @login_required
 def unsubscribe_push():
     try:
-        from app.services.push_service import get_push_subscriptions, remove_push_subscription
+        from app.services.push_service import (
+            get_push_subscriptions,
+            remove_push_subscription,
+        )
         subs = get_push_subscriptions(current_user.id)
         for sub in subs:
             remove_push_subscription(current_user.id, sub["endpoint"])
         return jsonify({'success': True})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({'success': False, 'error': str(e)}), 500

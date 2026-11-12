@@ -27,6 +27,7 @@ def decode_upload(contents: str | None) -> bytes | None:
 
 def validate_scan(filename: str | None, raw: bytes | None) -> tuple[str, bytes]:
     from pathlib import Path
+
     from app.services import onboarding_service as ob
     ext = Path(filename or "").suffix.lower()
     if ext not in ALLOWED_EXT:
@@ -34,5 +35,5 @@ def validate_scan(filename: str | None, raw: bytes | None) -> tuple[str, bytes]:
     if not raw or len(raw) > MAX_SCAN_BYTES:
         raise ob.OnboardingError("The scan must be between 1 byte and 5 MB.")
     if not raw.startswith(ALLOWED_EXT[ext]):
-        raise ob.OnboardingError("The file does not look like a real %s." % ext.lstrip(".").upper())
+        raise ob.OnboardingError("The file does not look like a real {}.".format(ext.lstrip(".").upper()))
     return ext, raw

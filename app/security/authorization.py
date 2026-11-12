@@ -27,9 +27,12 @@ DB-grant engine in `app/security/policy.py`.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any
+
+from app.utils import now_ist
 
 log = logging.getLogger(__name__)
 
@@ -228,22 +231,22 @@ assert DEFAULT_CAPABILITIES[PLATFORM_OPERATOR] == frozenset(
 class Assignment:
     """One row of user_role_assignments, already filtered/shaped by the loader."""
     role_code: str
-    society_id: Optional[int]
+    society_id: int | None
     status: str = "active"
-    effective_to: Optional[datetime] = None
-    effective_from: Optional[datetime] = None
+    effective_to: datetime | None = None
+    effective_from: datetime | None = None
 
 
 @dataclass(frozen=True)
 class Principal:
     """Immutable, SERVER-resolved identity. Never construct from browser data."""
-    user_id: Optional[int]
-    society_id: Optional[int]
-    base_role: Optional[str]            # any PERSISTED_ROLES value, or master
-    user_type: Optional[str] = None     # owner/family/tenant/visitor (apartment only)
-    linked_unit_id: Optional[int] = None
-    linked_vendor_id: Optional[int] = None
-    linked_security_id: Optional[int] = None
+    user_id: int | None
+    society_id: int | None
+    base_role: str | None            # any PERSISTED_ROLES value, or master
+    user_type: str | None = None     # owner/family/tenant/visitor (apartment only)
+    linked_unit_id: int | None = None
+    linked_vendor_id: int | None = None
+    linked_security_id: int | None = None
     assignments: tuple[Assignment, ...] = field(default_factory=tuple)
     is_active: bool = True
 
@@ -254,7 +257,7 @@ class AuthorizationDecision:
     reason: str
     action: str
     resource_type: str
-    role: Optional[str] = None          # the role whose capability allowed it
+    role: str | None = None          # the role whose capability allowed it
     policy_version: str = POLICY_VERSION
 
     def __bool__(self) -> bool:         # `if authorize(...)` is safe
@@ -265,11 +268,11 @@ class PolicyUnavailable(RuntimeError):
     """Assignment lookup failed. Enforcement must treat this as deny."""
 
 
-def effective_roles(principal: Principal, now: Optional[datetime] = None) -> frozenset[str]:
+def effective_roles(principal: Principal, now: datetime | None = None) -> frozenset[str]:
     """Composite roles: base role + verified user_type + ACTIVE assignments
     held in the principal's own society. Expired/revoked/foreign-society/
     unknown assignments contribute nothing."""
-    now = now or datetime.utcnow()
+    now = now or now_ist()
     roles: set[str] = set()
     base = principal.base_role
     if base == "master" and principal.society_id is None:
@@ -301,7 +304,7 @@ def effective_roles(principal: Principal, now: Optional[datetime] = None) -> fro
     return frozenset(roles)
 
 
-def capabilities_of(principal: Principal, now: Optional[datetime] = None) -> frozenset[str]:
+def capabilities_of(principal: Principal, now: datetime | None = None) -> frozenset[str]:
     caps: set[str] = set()
     roles = effective_roles(principal, now)
     for r in roles:
@@ -340,7 +343,7 @@ def _deny(reason, action, resource_type) -> AuthorizationDecision:
     return AuthorizationDecision(False, reason, action, resource_type)
 
 
-def _self_scope_ok(principal: Principal, action: str, attrs: Mapping[str, Any]) -> Optional[str]:
+def _self_scope_ok(principal: Principal, action: str, attrs: Mapping[str, Any]) -> str | None:
     """Return None when scope is satisfied, else a denial reason."""
     if action == Cap.FINANCE_SELF_VIEW:
         for key, pfield in _FINANCE_SELF_ATTRS:
@@ -360,10 +363,10 @@ def _self_scope_ok(principal: Principal, action: str, attrs: Mapping[str, Any]) 
     return None
 
 
-def authorize(principal: Optional[Principal], action: str, resource_type: str,
-              resource_id: Any = None, target_society_id: Optional[int] = None,
-              attributes: Optional[Mapping[str, Any]] = None,
-              now: Optional[datetime] = None) -> AuthorizationDecision:
+def authorize(principal: Principal | None, action: str, resource_type: str,
+              resource_id: Any = None, target_society_id: int | None = None,
+              attributes: Mapping[str, Any] | None = None,
+              now: datetime | None = None) -> AuthorizationDecision:
     """The single decision point. Always returns a decision; never raises for
     a policy outcome. `attributes` carries facts the CALLER resolved from the
     DB (record owner, maker_user_id, invited_vendor_id, target_user_id, ...).
@@ -399,7 +402,7 @@ def authorize(principal: Optional[Principal], action: str, resource_type: str,
 
     allowing = [r for r in sorted(roles) if action in DEFAULT_CAPABILITIES.get(r, frozenset())]
     if not allowing and action in _BASELINE and PLATFORM_OPERATOR not in roles:
-        allowing = [sorted(roles)[0]]
+        allowing = [min(roles)]
     if not allowing:
         return _deny("no role grants this action", action, resource_type)
 
@@ -430,7 +433,7 @@ def load_assignments(db, user_id, society_id) -> tuple[Assignment, ...]:
                   AND ura.status = 'active'
                   AND ura.society_id = :sid""",
             {"uid": user_id, "sid": society_id}, fetch_all=True)
-    except Exception as exc:  # noqa: BLE001 - deliberate: fail closed
+    except Exception as exc:
         log.error("assignment lookup failed for user %s: %s", user_id, exc)
         raise PolicyUnavailable("assignment lookup failed") from exc
     if rows is None:
@@ -440,7 +443,7 @@ def load_assignments(db, user_id, society_id) -> tuple[Assignment, ...]:
 
 
 def build_principal(user_row: Mapping[str, Any], assignments: Iterable[Assignment] = (),
-                    linked: Optional[Mapping[str, Any]] = None) -> Principal:
+                    linked: Mapping[str, Any] | None = None) -> Principal:
     """Build a Principal from a DB-loaded users row (NOT from browser state).
     `linked` carries server-resolved unit/vendor/security ids."""
     from app.security.roles import resolve_role

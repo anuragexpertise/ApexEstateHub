@@ -23,14 +23,15 @@ Entity map for load_list():
 """
 
 from __future__ import annotations
-from database.money import D
 
 from datetime import date
 
 import psycopg2
 
-from database.db_manager import db
 from app.dash_apps.drilldown import curated as _cur
+from app.utils import today_ist
+from database.db_manager import db
+from database.money import D
 
 PAGE_SIZE = 15
 
@@ -84,7 +85,7 @@ def get_concern_assignments(concern_id: int) -> list[dict]:
         return db._execute(
             "SELECT * FROM fn_concern_assignments(%s)", (concern_id,), fetch_all=True
         ) or []
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
 
 
@@ -404,8 +405,11 @@ def decline_concern_assignment(concern_id: int, society_id: int, role: str, enti
         return False, "Only vendors or admins can decline a concern"
     if role == "SEC":
         return False, "Security staff cannot decline a concern"
-    from app.services.workflow_service import (authorize, log_concern_transition,
-                                                Permission)
+    from app.services.workflow_service import (
+        Permission,
+        authorize,
+        log_concern_transition,
+    )
     from_status = "assigned" if role == "ADM" else "invited"
     # ADM decline is an admin action on the security-critical surface; the
     # granting/delegation check runs through can_do. VND 'Decline' is
@@ -443,8 +447,11 @@ def accept_concern_assignment(concern_id: int, society_id: int, entity_id: int) 
     resolve_concern_assignment / the caller in drilldown_callbacks.py),
     which is enabled only once an admin's row on the same concern reaches
     this state."""
-    from app.services.workflow_service import (authorize, log_concern_transition,
-                                                Permission)
+    from app.services.workflow_service import (
+        Permission,
+        authorize,
+        log_concern_transition,
+    )
     allowed, reason = authorize(int(entity_id), Permission.CONCERN_RESOLVE,
                                 society_id)
     if not allowed:
@@ -486,8 +493,11 @@ def assign_concern(concern_id: int, society_id: int, role: str, entity_id: int, 
     slot that's already filled. Different-role rows (e.g. a separately
     assigned SEC row) are untouched.
     """
-    from app.services.workflow_service import (authorize, log_concern_transition,
-                                                Permission)
+    from app.services.workflow_service import (
+        Permission,
+        authorize,
+        log_concern_transition,
+    )
     allowed, reason = authorize(assigned_by, Permission.CONCERN_ASSIGN, society_id)
     if not allowed:
         return False, f"Permission denied: {reason}"
@@ -539,8 +549,11 @@ def resolve_concern_assignment(concern_id: int, society_id: int, role: str, enti
     `resolved_by` is optional for backward compatibility with any existing
     callers."""
     from_status = "accepted" if role == "ADM" else "assigned"
-    from app.services.workflow_service import (authorize, log_concern_transition,
-                                                Permission)
+    from app.services.workflow_service import (
+        Permission,
+        authorize,
+        log_concern_transition,
+    )
     # ADM leg is an admin/owner action on the security-critical surface: enforce
     # the delegation-aware grant. VND/SEC legs are self-service (the caller's
     # OWN assigned row) — they carry no grant requirement, so authorize() with
@@ -618,7 +631,7 @@ def close_concern(concern_id: int, society_id: int, closed_by: int | None = None
 def _current_fy() -> int:
     """Financial-year start year for 'today' (1-Apr..31-Mar cycle). Mirrors
     fn_current_financial_year() in estatehub.sql — keep both in sync."""
-    today = date.today()
+    today = today_ist()
     return today.year - 1 if today.month < 4 else today.year
 
 
@@ -664,8 +677,7 @@ def get_available_financial_years(society_id: int) -> list[int]:
         return [_current_fy()]
     start_fy = calc_start.year - 1 if calc_start.month < 4 else calc_start.year
     end_fy = _current_fy()
-    if start_fy > end_fy:
-        start_fy = end_fy
+    start_fy = min(start_fy, end_fy)
     return list(range(start_fy, end_fy + 1))
 
 
@@ -695,7 +707,7 @@ def get_month_options() -> list[dict]:
 def _current_fy_month() -> int:
     """Today's plain calendar month (1-12) — default selection for the
     Cashbook KPI card's Month Selector."""
-    return date.today().month
+    return today_ist().month
 
 
 def get_account_options(society_id: int) -> list[dict]:
@@ -724,7 +736,7 @@ def get_income_tax_mutuality_summary(society_id: int, fy: int) -> dict | None:
             "SELECT * FROM fn_income_tax_summary_fy(%s,%s)",
             (society_id, fy), fetch_all=True,
         ) or []
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
     totals = {
@@ -759,7 +771,7 @@ def get_fy_closing_report(society_id: int, fy: int) -> tuple[list[dict], str | N
             (society_id, fy), fetch_all=True,
         ) or []
         return rows, None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return [], str(e)
 
 
@@ -793,7 +805,7 @@ def get_fy_close_preview(society_id: int, fy: int,
             (society_id, fy, reserve_pct), fetch_one=True,
         )
         return (row or None), None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return None, str(e)
 
 
@@ -822,7 +834,7 @@ def close_fy_with_reserve_appropriation(society_id: int, fy: int,
             (society_id, fy, reserve_pct, created_by), fetch_one=True,
         )
         return (row or None), None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return None, str(e)
 
 
@@ -858,7 +870,7 @@ def get_fy_closure_history(society_id: int, limit: int = 10) -> list[dict]:
         for c in closures:
             c["closed_by_username"] = names.get(c.get("closed_by"))
         return closures
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_fy_closure_history: {e}")
         return []
 
@@ -874,7 +886,7 @@ def get_receipts_payments_fy(society_id: int, fy: int) -> tuple[list[dict], str 
             (society_id, fy), fetch_all=True,
         ) or []
         return rows, None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return [], str(e)
 
 
@@ -889,7 +901,7 @@ def get_income_expenditure_fy(society_id: int, fy: int) -> tuple[list[dict], str
             (society_id, fy), fetch_all=True,
         ) or []
         return rows, None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return [], str(e)
 
 
@@ -904,14 +916,14 @@ def get_balance_sheet_fy(society_id: int, fy: int) -> tuple[list[dict], str | No
             (society_id, fy), fetch_all=True,
         ) or []
         return rows, None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return [], str(e)
 
 
 def get_member_ledger(
     society_id: int, entity_id: int, role: str,
     page: int = 1, page_size: int = 50,
-    financial_year: int = None
+    financial_year: int | None = None
 ) -> tuple[list[dict], int, str | None]:
     """
     "My Transactions" passbook — every entry posted against this member's
@@ -981,7 +993,7 @@ def get_member_ledger(
         rows = db._execute(query, tuple(params), fetch_all=True) or []
         total_count = rows[0]["total_count"] if rows else 0
         return rows, total_count, None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return [], 0, str(e)
 
 
@@ -1263,8 +1275,8 @@ def _build_list_sql(entity: str, filters: dict, page: int = 1,
         if sec_uid and not eid:
             where = "WHERE user_id = %s" + date_where + status_where
             return (
-                f"SELECT * FROM fn_receipts_list(%s,%s,NULL,NULL) {where} "
-                f"ORDER BY receipt_date DESC LIMIT %s OFFSET %s",
+                (f"SELECT * FROM fn_receipts_list(%s,%s,NULL,NULL) {where} "
+                f"ORDER BY receipt_date DESC LIMIT %s OFFSET %s"),
                 tuple(base_params + [sec_uid] + date_params + [page_size, offset]),
             )
         if status:
@@ -2447,7 +2459,7 @@ def load_list(
 
         return [], 0
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ load_list({entity}): {e}")
         return [], 0
 
@@ -2469,7 +2481,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                     "WHERE a.id=%s AND a.society_id=%s",
                     (pk, society_id), fetch_one=True,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 r = db._execute(
                     "SELECT a.*, u.email, 0 AS pending_dues, 0 AS overdue_dues, "
                     "FALSE AS gate_pass, FALSE AS noc_eligible "
@@ -2500,7 +2512,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                     "WHERE v.id=%s AND v.society_id=%s",
                     (pk, society_id), fetch_one=True,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 r = db._execute(
                     "SELECT v.id, u.id AS user_id, u.email, v.society_id, "
                     "  v.id AS vendor_id, v.name, v.service_type, v.mobile, "
@@ -2530,7 +2542,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                     "WHERE s.id=%s AND s.society_id=%s",
                     (pk, society_id), fetch_one=True,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 r = db._execute(
                     "SELECT s.id, u.id AS user_id, u.email, s.society_id, "
                     "  s.id AS staff_id, s.name, s.mobile, s.shift, "
@@ -2903,7 +2915,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
 
         return None
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ load_profile({entity_singular}, {pk}): {e}")
         return None
 
@@ -2927,7 +2939,7 @@ def evaluate_gate_pass(role: str, entity_id: int) -> dict:
             (role, entity_id), fetch_one=True,
         )
         return dict(r) if r else {"passed": False, "reason": "Evaluation error", "amount_due": 0}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return {"passed": False, "reason": str(e), "amount_due": 0}
 
 
@@ -2942,7 +2954,7 @@ def check_noc_eligibility(apartment_id: int) -> dict:
             "SELECT * FROM fn_check_noc_eligibility(%s)", (apartment_id,), fetch_one=True,
         )
         return dict(r) if r else {"eligible": False, "reason": "Error", "outstanding": 0}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return {"eligible": False, "reason": str(e), "outstanding": 0}
 
 
@@ -3067,7 +3079,7 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
 
         return False, f"No delete handler for '{entity_plural}'"
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # psycopg2 appends CONTEXT / DETAIL / HINT blocks after a newline.
         # Strip them so only the human-readable RAISE message reaches the toast.
         msg = str(e).split("\nCONTEXT:")[0].split("\nDETAIL:")[0].strip()
@@ -3087,11 +3099,11 @@ def verify_receivable(receivable_id: int, confirmed_by: int, mode: str = "cash",
         )
         msg = (r or {}).get("msg", "Done")
         return not str(msg).lower().startswith("error"), msg
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, str(e)
 
 
-def verify_receivable_bill_group(bill_group_id: str, confirmed_by: int, mode: str = "cash", amount: float = None) -> tuple[bool, str, int | None]:
+def verify_receivable_bill_group(bill_group_id: str, confirmed_by: int, mode: str = "cash", amount: float | None = None) -> tuple[bool, str, int | None]:
     try:
         r = db._execute(
             "SELECT * FROM fn_verify_receivable_by_bill_group(%s, %s, %s, %s)",
@@ -3100,7 +3112,7 @@ def verify_receivable_bill_group(bill_group_id: str, confirmed_by: int, mode: st
         msg = (r or {}).get("msg", "Done")
         receipt_id = (r or {}).get("receipt_id")
         return not str(msg).lower().startswith("error"), msg, receipt_id
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, str(e), None
 
 
@@ -3112,7 +3124,7 @@ def reject_receivable_bill_group(bill_group_id: str, confirmed_by: int, penalty_
         )
         msg = (r or {}).get("msg", "Done")
         return not str(msg).lower().startswith("error"), msg
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, str(e)
 
 
@@ -3125,7 +3137,7 @@ def verify_payment(payment_id: int, confirmed_by: int, mode: str = "cash") -> tu
         msg = (r or {}).get("msg", "Done")
         expense_id = (r or {}).get("expense_id")
         return not str(msg).lower().startswith("error"), msg, expense_id
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, str(e), None
 
 
@@ -3174,7 +3186,7 @@ def toggle_security_duty(security_id: int, society_id: int) -> tuple[bool, str]:
                 (society_id, security_id, _upd_by),
             )
             return True, "Marked ON duty — shift started"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, f"Could not toggle duty status: {e}"
 
 
@@ -3186,8 +3198,8 @@ def pay_apartment_dues_fifo(
     apartment_id: int,
     amount: float,
     mode: str = "cash",
-    confirmed_by: int = None,
-    particulars: str = None,
+    confirmed_by: int | None = None,
+    particulars: str | None = None,
 ) -> tuple[bool, str, dict]:
     """
     Returns (ok, message, {transaction_id, allocated, unallocated}).
@@ -3207,7 +3219,7 @@ def pay_apartment_dues_fifo(
         if unalloc > 0:
             msg += f"; Rs.{unalloc:,.2f} credited as advance"
         return True, msg, result
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, str(e), {}
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -3236,7 +3248,7 @@ def load_vendor_pass_rates(vendor_user_id: int, society_id: int) -> dict:
             "1mth": D(row.get("vendor_1mth") or 0),
             "free_1mth": 0.0,
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ load_vendor_pass_rates: {e}")
         return {"1day": 0, "7day": 0, "1mth": 0, "free_1mth": 0.0}
 
@@ -3244,7 +3256,7 @@ def load_vendor_pass_rates(vendor_user_id: int, society_id: int) -> dict:
 # VERIFY RECEIPT
 # ════════════════════════════════════════════════════════════════════════════
 
-def verify_receipt(receipt_id: int, confirmed_by: int, mode: str = None) -> tuple[bool, str]:
+def verify_receipt(receipt_id: int, confirmed_by: int, mode: str | None = None) -> tuple[bool, str]:
     """Admin verifies a pending receipt (created by security) → posts to transactions.
 
     Self-reported apartment FIFO due payments (from fn_report_apartment_payment_fifo)
@@ -3289,14 +3301,14 @@ def verify_receipt(receipt_id: int, confirmed_by: int, mode: str = None) -> tupl
             msg = f"{msg} (SHA256: {receipt_number[:16]}...)"
         msg = f"{msg} [[receipt:{receipt_id}]]"
         return not str(msg).lower().startswith("error"), msg
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, str(e)
 
 # ════════════════════════════════════════════════════════════════════════════════
 # VERIFY EXPENSE
 # ════════════════════════════════════════════════════════════════════════════════
 
-def verify_expense(expense_id: int, confirmed_by: int, mode: str = None, emergency: bool = False) -> tuple[bool, str]:
+def verify_expense(expense_id: int, confirmed_by: int, mode: str | None = None, emergency: bool = False) -> tuple[bool, str]:
     """Admin verifies a pending expense → posts to transactions. Above the society's approval threshold the
     committee's signatures and resolution reference are required first (expense_approval)."""
     try:
@@ -3315,14 +3327,14 @@ def verify_expense(expense_id: int, confirmed_by: int, mode: str = None, emergen
             msg = f"{msg} (SHA256: {receipt_number[:16]}...)"
         msg = f"{msg} [[expense:{expense_id}]]"
         return not str(msg).lower().startswith("error"), msg
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, str(e)
 
 # ════════════════════════════════════════════════════════════════════════════
 # VERIFY EVENT TICKET
 # ════════════════════════════════════════════════════════════════════════════
 
-def verify_event_ticket(event_ticket_id: int, confirmed_by: int, mode: str = None) -> tuple[bool, str]:
+def verify_event_ticket(event_ticket_id: int, confirmed_by: int, mode: str | None = None) -> tuple[bool, str]:
     """Admin verifies a pending event ticket purchase → verifies receipt and activates tickets."""
     try:
         r = db._execute(
@@ -3333,7 +3345,7 @@ def verify_event_ticket(event_ticket_id: int, confirmed_by: int, mode: str = Non
         msg = (r or {}).get("msg", "Done")
         msg = f"{msg} [[event_ticket:{event_ticket_id}]]"
         return not str(msg).lower().startswith("error"), msg
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, str(e)
 
 
@@ -3355,7 +3367,7 @@ def verify_event_ticket_item(item_id: int, confirmed_by: int, society_id: int) -
             (et_id,),
         )
         return True, f"Verified event ticket item #{item_id}"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, str(e)
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -3458,7 +3470,7 @@ def load_entity_options(role: str, society_id: int) -> list[dict]:
             ]
 
         return []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ load_entity_options({role}): {e}")
         return []
 
@@ -3492,7 +3504,7 @@ def get_depreciation_account(society_id: int, fy: int) -> list[dict]:
                 (society_id, fy), fetch_all=True,
             ) or []
         return rows
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_depreciation_account: {e}")
         return []
 
@@ -3504,7 +3516,7 @@ def get_receipts_payments(society_id: int, fy: int) -> list[dict]:
             "SELECT * FROM fn_receipts_payments_fy(%s,%s)",
             (society_id, fy), fetch_all=True,
         ) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_receipts_payments: {e}")
         return []
 
@@ -3516,7 +3528,7 @@ def get_income_expenditure(society_id: int, fy: int) -> list[dict]:
             "SELECT * FROM fn_income_expenditure_fy(%s,%s)",
             (society_id, fy), fetch_all=True,
         ) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_income_expenditure: {e}")
         return []
 
@@ -3533,7 +3545,7 @@ def get_capital_account(society_id: int, fy: int) -> list[dict]:
             sp = cap_ac.get("sort_path") or ""
             return [r for r in rows if r.get("sort_path") == sp or (sp and r.get("sort_path", "").startswith(sp + "."))]
         return [r for r in rows if r.get("drcr_account") == "Cr" and "capital" in (r.get("account_name") or "").lower()]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_capital_account: {e}")
         return []
 
@@ -3546,7 +3558,7 @@ def get_balance_sheet(society_id: int, fy: int) -> list[dict]:
             "SELECT * FROM fn_fy_closing_report(%s,%s) ORDER BY sort_path",
             (society_id, fy), fetch_all=True,
         ) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_balance_sheet: {e}")
         return []
 
@@ -3555,11 +3567,11 @@ def get_depreciation_account_fy(society_id: int, fy: int) -> tuple[list[dict], s
     rows = get_depreciation_account(society_id, fy)
     return rows, None if rows else f"No depreciation data for FY {fy}"
 
-def get_receipts_payments_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+def get_receipts_payments_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:  # noqa: F811
     rows = get_receipts_payments(society_id, fy)
     return rows, None if rows else f"No R&P data for FY {fy}"
 
-def get_income_expenditure_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+def get_income_expenditure_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:  # noqa: F811
     rows = get_income_expenditure(society_id, fy)
     return rows, None if rows else f"No I&E data for FY {fy}"
 
@@ -3567,7 +3579,7 @@ def get_capital_account_fy(society_id: int, fy: int) -> tuple[list[dict], str | 
     rows = get_capital_account(society_id, fy)
     return rows, None if rows else f"No Capital Account data for FY {fy}"
 
-def get_balance_sheet_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:
+def get_balance_sheet_fy(society_id: int, fy: int) -> tuple[list[dict], str | None]:  # noqa: F811
     rows = get_balance_sheet(society_id, fy)
     return rows, None if rows else f"No Balance Sheet data for FY {fy}"
 
@@ -3644,7 +3656,7 @@ def get_fund_balances(society_id: int) -> list[dict]:
         """
         params = (society_id, "%Equity%", society_id, society_id, society_id)
         return db._execute(query, params, fetch_all=True) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_fund_balances: {e}")
         return []
 
@@ -3678,7 +3690,7 @@ def get_expense_bank_accounts(society_id: int) -> list[dict]:
             """,
             (society_id, "%Bank Accounts%"), fetch_all=True,
         ) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_expense_bank_accounts: {e}")
         return []
 
@@ -3702,7 +3714,7 @@ def get_fund_utilization_log(society_id: int, limit: int = 20) -> list[dict]:
             """,
             (society_id, limit), fetch_all=True,
         ) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_fund_utilization_log: {e}")
         return []
 
@@ -3784,7 +3796,7 @@ def get_income_accounts_for_appropriation(society_id: int) -> list[dict]:
             (society_id, "%Income%", society_id, society_id, society_id),
             fetch_all=True,
         ) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_income_accounts_for_appropriation: {e}")
         return []
 
@@ -3828,7 +3840,7 @@ def get_fund_bank_mappings(society_id: int) -> list[dict]:
             (society_id, "%Equity%", society_id, society_id, society_id, society_id),
             fetch_all=True,
         ) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_fund_bank_mappings: {e}")
         return []
 
@@ -3862,7 +3874,7 @@ def get_fund_appropriation_log(society_id: int, limit: int = 20) -> list[dict]:
             """,
             (society_id, limit), fetch_all=True,
         ) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_fund_appropriation_log: {e}")
         return []
 
@@ -3881,7 +3893,7 @@ def get_funds_account(society_id: int, fy: int) -> list[dict]:
             "SELECT * FROM fn_funds_account_fy(%s,%s)",
             (society_id, fy), fetch_all=True,
         ) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_funds_account: {e}")
         return []
 
@@ -3901,7 +3913,7 @@ def get_asset_holdings(society_id: int, fy: int | None = None) -> list[dict]:
             "SELECT * FROM fn_asset_holdings_fy(%s,%s)",
             (society_id, fy), fetch_all=True,
         ) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_asset_holdings: {e}")
         return []
 
@@ -3923,7 +3935,7 @@ def get_deposit_holdings(society_id: int, fy: int | None = None) -> list[dict]:
             "SELECT * FROM fn_deposit_holdings_fy(%s,%s)",
             (society_id, fy), fetch_all=True,
         ) or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ get_deposit_holdings: {e}")
         return []
 
@@ -3943,8 +3955,9 @@ def export_xlsx(entity: str, filters: dict) -> bytes:
     rows, _ = load_list(entity, filters, page=1, page_size=10_000)
     if not rows:
         return b""
-    import pandas as pd
     import io
+
+    import pandas as pd
     df = pd.DataFrame(rows)
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as writer:

@@ -7,9 +7,11 @@ Password hashing uses werkzeug (consistent with auth_service + seed).
 
 import logging
 import re
+
 from werkzeug.security import generate_password_hash
-from database.db_manager import db
+
 from app.security.audit_context import get_current_user_id
+from database.db_manager import db
 
 log = logging.getLogger(__name__)
 
@@ -100,7 +102,7 @@ def create_society_checked(data: dict) -> int:
     if constitution not in ("AOA", "REG_SOCIETY", "COOP", "GENERIC"):
         raise SocietyCreateError("Constitution must be one of: AOA, REG_SOCIETY, COOP, GENERIC.")
 
-    today = __import__("datetime").date.today().isoformat()
+    today = __import__("datetime").today_ist().isoformat()
     try:
         result = db._execute(
             """INSERT INTO societies
@@ -186,7 +188,7 @@ def store_registration_certificate(filename: str, data: bytes) -> tuple[str, str
     if not data or len(data) > _CERT_MAX_BYTES:
         raise SocietyCreateError("The certificate file must be between 1 byte and 5 MB.")
     if not data.startswith(_CERT_TYPES[ext]):
-        raise SocietyCreateError("The file does not look like a real %s." % ext.lstrip(".").upper())
+        raise SocietyCreateError("The file does not look like a real {}.".format(ext.lstrip(".").upper()))
     digest = hashlib.sha256(data).hexdigest()
     folder = _cert_folder()
     folder.mkdir(parents=True, exist_ok=True)

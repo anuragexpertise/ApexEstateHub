@@ -18,8 +18,7 @@ drcr_account semantics:
 Running balance = SUM(Cr transactions) - SUM(Dr transactions) + BF balance.
 """
 
-from dash import html, dcc
-import dash_bootstrap_components as dbc
+from dash import html
 
 # ════════════════════════════════════════════════════════════════════════════
 # KPI CARDS — each entry has:
@@ -890,20 +889,6 @@ KPI_CARDS = {
         "icon": "fa-id-card", "color": "#b98a07",
         "title": "Pass Expiry", "group": "Passes",
     },
-    
-    "kpi_apt_charges_count": {
-        "query": "SELECT COUNT(*) AS v FROM apt_charges_fines_basis WHERE society_id=%s AND apt_status=TRUE",
-        "params": 1, "format": "number",
-        "icon": "fa-file-invoice", "color": "#1859b8",
-        "title": "Apt Charge Rules", "group": "Settings",
-    },
- 
-    "kpi_ven_charges_count": {
-        "query": "SELECT COUNT(*) AS v FROM ven_charges_fines_basis WHERE society_id=%s AND ven_status=TRUE",
-        "params": 1, "format": "number",
-        "icon": "fa-file-invoice", "color": "#b98a07",
-        "title": "Vendor Charge Rules", "group": "Settings",
-    },
  
     "kpi_sec_charges_count": {
         "query": "SELECT COUNT(*) AS v FROM payables WHERE society_id=%s AND role='security' AND status='pending'",
@@ -1044,17 +1029,6 @@ KPI_CARDS = {
         "icon": "fa-list-alt", "color": "#b63b3b",
         "title": "Security Pay Records", "group": "Financials",
     },
-  
-    "kpi_security_salaries_paid": {
-        "query": """
-            SELECT COALESCE(SUM(amount), 0) AS v
-            FROM payables
-            WHERE society_id=%s AND role='security' AND status='verified'
-        """,
-        "params": 1, "format": "currency",
-        "icon": "fa-check-double", "color": "#17976e",
-        "title": "Security Salary Paid", "group": "Financials",
-    },
     "kpi_security_paid_for_month": {
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
@@ -1133,7 +1107,7 @@ KPI_CARDS = {
         "title": "First Apt Added", "group": "Settings",
     },
  
-    "kpi_receipts_total": {
+    "kpi_receipts_total": {  # noqa: F601
         "query": """
             SELECT COALESCE(SUM(amount), 0) AS v
             FROM receipts WHERE society_id=%s AND status='confirmed'
@@ -1150,7 +1124,11 @@ KPI_CARDS = {
 
 def _register_kpi_cards() -> dict:
     """One count card per read-only register, generated from curated.REGISTERS (single source of truth)."""
-    from app.dash_apps.drilldown.curated import REGISTERS, register_kpi_id, register_kpi_sql
+    from app.dash_apps.drilldown.curated import (
+        REGISTERS,
+        register_kpi_id,
+        register_kpi_sql,
+    )
     return {
         register_kpi_id(plural): {
             "query": register_kpi_sql(plural), "params": 1, "format": "number",

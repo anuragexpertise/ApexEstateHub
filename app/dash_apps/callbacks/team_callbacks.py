@@ -11,7 +11,11 @@ import dash_bootstrap_components as dbc
 from dash import Input, Output, State, ctx, no_update
 
 from app.dash_apps.pages import team_page as tp
-from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.authorization import Cap
 from app.security.guards import require_session
 from app.security.service_guard import blocks, check
@@ -72,7 +76,7 @@ def register_team_callbacks(app):
             ok, msg = ts.create_login(uid, "admin", sid, role, name, email, password, actor_society_id=sid)
         except PermissionError as exc:
             return (_alert(str(exc), "danger"),) + (no_update,) * 5
-        except Exception as exc:         # never a blank page
+        except Exception as exc:         # never a blank page  # noqa: BLE001
             return (_alert(f"Could not save: {exc}", "danger"),) + (no_update,) * 5
         if not ok:
             return (_alert(msg, "warning"),) + (no_update,) * 5
@@ -103,7 +107,7 @@ def register_team_callbacks(app):
                 ok, msg = ts.set_active(uid, "admin", sid, member, trig == f"{P}-enable", actor_society_id=sid)
         except PermissionError as exc:
             return (_alert(str(exc), "danger"),) + (no_update,) * 3
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             return (_alert(f"Could not save: {exc}", "danger"),) + (no_update,) * 3
         if not ok:
             return (_alert(msg, "warning"),) + (no_update,) * 3

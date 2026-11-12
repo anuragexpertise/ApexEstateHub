@@ -8,12 +8,14 @@ that lets the CA (or the Treasurer, or the Secretary when no Treasurer is seated
 do it without SQL.
 
 The database function checks the account is a credit account of this society, and the table's own check demands a
-reference to the CA's or advocate's advice for every class except 'taxable'. This module adds who may act, a clear message
+reference to the CA's or advocate's advice for every class except 'taxable'. This module adds who may act, a clear message  # noqa: S110
 for each refusal, and the audit row.
 """
 from __future__ import annotations
 
 from datetime import date
+
+from app.utils import today_ist
 
 CLASSES = (
     ("taxable", "Taxable supply"),
@@ -36,7 +38,7 @@ def _db(db=None):
 
 def current_fy(today: date | None = None) -> int:
     """The financial year (starting 1 April) that `today` falls in."""
-    today = today or date.today()
+    today = today or today_ist()
     return today.year if today.month >= 4 else today.year - 1
 
 
@@ -93,13 +95,13 @@ def classify(society_id: int, acc_id: int, supply_class: str | None, ref: str | 
     before = d._execute("SELECT gst_supply_class, gst_class_ref FROM accounts WHERE society_id=%s AND id=%s", (society_id, acc_id), fetch_one=True)
     try:
         d._execute("SELECT fn_set_gst_supply_class(%s,%s,%s,%s)", (society_id, int(acc_id), supply_class, ref), fetch_one=True)
-    except Exception as exc:                                               # noqa: BLE001
+    except Exception as exc:
         first = str(exc).strip().splitlines()[0].replace("ERROR:", "").strip() if str(exc).strip() else "Could not save."
         raise ValueError("Only a credit-natured account of this society can be classified." if "No credit-natured account" in first else first) from exc
     try:
         from app.security.service_guard import audit_event
         audit_event("gst.class.set", RESOURCE, acc_id, before=dict(before) if before else None,
                     after={"gst_supply_class": supply_class, "gst_class_ref": ref}, society_id=society_id)
-    except Exception:                                                      # noqa: BLE001  an audit outage must not hide the result
+    except Exception:  # noqa: BLE001, S110
         pass
     return "Classification cleared; the default for the ledger head applies." if supply_class is None else f"Saved as {LABEL[supply_class].split(' (')[0].lower()}."

@@ -8,8 +8,8 @@ Settings → Society governance → Meetings & Resolutions.
 """
 from __future__ import annotations
 
-from dash import dcc, html
 import dash_bootstrap_components as dbc
+from dash import dcc, html
 
 from app.services import regime_rules_admin as rra
 
@@ -110,9 +110,9 @@ def render_adoption_panel(society_id: int | None) -> html.Div:
         paper_card,
         dbc.Alert([html.I(className="fas fa-scale-balanced me-2"),
                    "Record which Model Bye-Laws 2011 clauses your Association is adopting. These are ",
-                   html.Strong("provisional"), " — nothing changes in how EstateHub treats dues, voting, NOC or filings "
+                   html.Strong("provisional"), (" — nothing changes in how EstateHub treats dues, voting, NOC or filings "
                    "until you record the General Body meeting and its passed resolution. Clauses you leave alone follow the "
-                   "Model Bye-Laws and the Act as written."], color="info", className="mb-3", style={"fontSize": "13px"}),
+                   "Model Bye-Laws and the Act as written.")], color="info", className="mb-3", style={"fontSize": "13px"}),
         html.Div([
             html.Div([html.Strong("Who can change what"), html.Br(),
                       html.Small("Act & Rules (locked) → Model Bye-Laws (this step; GBM resolution, 2/3) → Society Policy "

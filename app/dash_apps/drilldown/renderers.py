@@ -11,16 +11,21 @@ Portal-aware CRUD buttons:
 """
 
 from __future__ import annotations
-from datetime import datetime, date, time, timezone
-from pathlib import Path
-from decimal import Decimal
-from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 
-from dash import html, dcc, no_update
+from datetime import date, datetime, time, timezone
+from decimal import Decimal
+
 import dash_bootstrap_components as dbc
-from database.db_manager import db
+from dash import dcc, html
+
 from app.dash_apps.drilldown.profile_actions import PROFILE_ACTIONS
 from app.dash_apps.drilldown.registry import to_singular
+from database.db_manager import db
+from database.money import (  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
+    D,
+    money,
+    rupee,
+)
 
 # ════════════════════════════════════════════════════════════════════════════
 # COLORS & STYLES
@@ -278,6 +283,7 @@ def _may_edit_tax_rates_cached() -> bool:
     """One lookup per request: _perms_for is called many times while a card renders."""
     try:
         from flask import g, has_request_context
+
         from app.security.audit_context import get_current_society_id
         sid = get_current_society_id()
         if has_request_context():
@@ -305,7 +311,7 @@ def _perms_for(role: str, entity: str, user_type: str | None = None) -> set[str]
         
     # TDS rates: CA (accountant), Treasurer, or Secretary while there is no Treasurer. Never Admin (Setup Wizard is the
     # Admin's route), never Auditor. Decided server-side per request; see app/services/tax_rate_service.py.
-    if entity in _TDS_RATE_ENTITIES and role in ("accountant", "apartment"):
+    if entity in _TDS_RATE_ENTITIES and role in ("accountant", "apartment"):  # noqa: SIM102
         if _may_edit_tax_rates_cached():
             perms |= {"view", "edit", "new"}
 
@@ -315,7 +321,7 @@ def _perms_for(role: str, entity: str, user_type: str | None = None) -> set[str]
                 perms = set()  # No view or new
             elif entity in ("receivables", "payables", "cashbook", "financials", "receipts", "apartment_users"):
                 perms = set()
-        elif user_type == "tenant":
+        elif user_type == "tenant":  # noqa: SIM102
             if entity in ("receivables", "payables", "cashbook", "financials", "receipts"):
                 perms = set()
                 
@@ -360,6 +366,9 @@ _FIELD_FORMATTERS = {
 }
 
 import re as _re
+
+from app.utils import today_ist
+
 _SNAKE_CASE_RE = _re.compile(r"^[a-z0-9]+(_[a-z0-9]+)+$")
 
 
@@ -395,7 +404,7 @@ def _format_datetime(val) -> str:
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y",
                     "%d-%m-%Y", "%Y/%m/%d"):
             try:
-                d = datetime.strptime(s, fmt)
+                d = datetime.strptime(s, fmt)  # noqa: DTZ007
                 return d.strftime("%d/%m/%Y %H:%M:%S" if " " in fmt else "%d/%m/%Y")
             except ValueError:
                 continue
@@ -415,7 +424,7 @@ def _format_date_entry(val) -> str:
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y",
                     "%d-%m-%Y", "%Y/%m/%d"):
             try:
-                return datetime.strptime(s, fmt).strftime("%d/%m/%Y")
+                return datetime.strptime(s, fmt).strftime("%d/%m/%Y")  # noqa: DTZ007
             except ValueError:
                 continue
     return str(val)
@@ -434,7 +443,7 @@ def _parse_date_entry(val):
         return None
     for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%y"):
         try:
-            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")  # noqa: DTZ007
         except ValueError:
             continue
     return None
@@ -493,14 +502,12 @@ def _rcm_monthly_total(selected_fy: int | None, society_id: int | None) -> float
     """Current-month RCM liability total for the register card."""
     if not selected_fy or not society_id:
         return 0.0
-    fy = selected_fy
-    from database.db_manager import db as _db
     from database import db_manager
     db_instance = db_manager.db
     if db_instance is None:
         return 0.0
     import datetime
-    today = datetime.date.today()
+    today = datetime.today_ist()
     month_start = today.replace(day=1)
     try:
         rows = db_instance._execute(
@@ -514,7 +521,7 @@ def _rcm_monthly_total(selected_fy: int | None, society_id: int | None) -> float
             fetch_one=True,
         ) or {}
         return float(rows.get("total", 0) or 0)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return 0.0
 
 
@@ -543,7 +550,7 @@ def _field_visible(entity_plural: str, field: str, role: str) -> bool:
 # ════════════════════════════════════════════════════════════════════════════
 
 def get_image_url(image_path: str | None, society_id: int | None = None,
-                  entity: str = None, pk: int | None = None) -> str | None:
+                  entity: str | None = None, pk: int | None = None) -> str | None:
     if not image_path or str(image_path).strip() == "":
         return None
     path = str(image_path).strip()
@@ -1001,7 +1008,7 @@ def render_list_card(card_id: str, title: str, icon: str,
 
     auth_data  = auth_data or {}
     role  = auth_data.get("role", "guest")
-    society_id = auth_data.get("society_id")
+    auth_data.get("society_id")
 
     sort = sort or {}
     sort_col   = sort.get("column")
@@ -1739,7 +1746,7 @@ def render_profile_card(card_id: str, title: str, icon: str,
         if entity == "poll" and rec.get("id") and rec.get("status") == "results_declared":
             return html.Div([card, html.Div(_signature_panel_for("poll", rec["id"], approve_label="Sign result"),
                                             style={"padding": "0 16px 12px"})])
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"poll signature panel skipped: {exc}")
     return card
 
@@ -1838,7 +1845,7 @@ def _render_profile_card_inner(card_id: str, title: str, icon: str,
                         "border": "1px solid rgba(200,215,235,0.4)",
                     })
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"⚠️  concern QR render failed: {e}")
 
     # ── Event ticket QR — rendered live from the stored qr_payload so the
@@ -1866,7 +1873,10 @@ def _render_profile_card_inner(card_id: str, title: str, icon: str,
                 )
                 is_provisional = status == "pending"
 
-                from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
+                from app.dash_apps.callbacks.print_letterhead import (
+                    QR_CAPTION,
+                    get_letterhead_assets,
+                )
                 society_row = db._execute(
                     "SELECT name, address, logo, login_background, secretary_sign, secretary_name "
                     "FROM societies WHERE id = %s",
@@ -1953,7 +1963,7 @@ def _render_profile_card_inner(card_id: str, title: str, icon: str,
                         "border": "1px solid rgba(200,215,235,0.4)",
                     })
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"⚠️  event ticket QR render failed: {e}")
 
     # ── Vendor Pass QR — rendered live for the active vendor pass so the
@@ -1964,8 +1974,11 @@ def _render_profile_card_inner(card_id: str, title: str, icon: str,
     vendor_pass_section = []
     if entity in ("vendor", "vendor_pass") and pk_val:
         try:
+            from app.dash_apps.callbacks.print_letterhead import (
+                QR_CAPTION,
+                get_letterhead_assets,
+            )
             from app.services.qr_service import generate_qr_code
-            from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
 
             if entity == "vendor":
                 vendor_pk = pk_val
@@ -2073,7 +2086,7 @@ def _render_profile_card_inner(card_id: str, title: str, icon: str,
                         "border": "1px solid rgba(200,215,235,0.4)",
                     })
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"⚠️  vendor pass QR render failed: {e}")
 
     # ── Image gallery (full-width, above the 2-col grid) ────────────────
@@ -2248,7 +2261,7 @@ def _render_profile_card_inner(card_id: str, title: str, icon: str,
         # Edit: only while the poll is still active AND nobody has voted
         # yet — changing choices out from under existing votes would
         # corrupt the tally (server-side guarded too, see fn_edit_poll).
-        if act_id == "edit" and entity == "poll":
+        if act_id == "edit" and entity == "poll":  # noqa: SIM102
             if record_dict.get("status") != "active" or (record_dict.get("total_votes") or 0) > 0:
                 continue
         # Close Poll only makes sense from 'active'.
@@ -2468,8 +2481,11 @@ def _render_profile_card_inner(card_id: str, title: str, icon: str,
         poll_print_data = {}
         if show_results:
             try:
+                from app.dash_apps.callbacks.print_letterhead import (
+                    QR_CAPTION,
+                    get_letterhead_assets,
+                )
                 from app.services.qr_service import generate_qr_code
-                from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
                 qr_society_id = record_dict.get("society_id") or society_id
                 qr_img, qr_payload = generate_qr_code(qr_society_id, "POL", pk_val)
                 society_row = db._execute(
@@ -2491,7 +2507,7 @@ def _render_profile_card_inner(card_id: str, title: str, icon: str,
                     "logo_url": letterhead["logo_url"], "background_url": letterhead["background_url"],
                     "signature_url": letterhead["signature_url"], "secretary_name": letterhead["secretary_name"],
                 }
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"⚠️  poll QR/letterhead render failed: {e}")
                 poll_print_data = {}
 
@@ -2642,12 +2658,11 @@ def render_account_profile_card(card_id: str, title: str, icon: str,
     pk_val = record_dict.get("id", "")
 
     # ── Resolve the society_id used for asset URL construction ───────────
-    img_society_id = (
+    (
         record_dict.get("society_id")
         if record_dict.get("society_id") is not None
         else society_id
     )
-    img_entity_pk = pk_val
 
     visible_fields = [
         f for f in fields
@@ -2925,7 +2940,8 @@ def render_form_card(card_id: str, title: str, icon: str,
 
     # Apply field_config visibility rules
     try:
-        from app.utils.field_config import is_visible as fc_visible, get_tooltip, get_default
+        from app.utils.field_config import get_default, get_tooltip  # noqa: F401
+        from app.utils.field_config import is_visible as fc_visible
         fields = [f for f in fields if fc_visible(entity_plural, f.get("id"), role or "admin")]
     except ImportError:
         pass
@@ -3027,7 +3043,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                     "background": "rgba(248,251,255,0.7)", "borderRadius": "10px",
                     "border": "1px solid rgba(200,215,235,0.4)",
                 }))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"⚠️  concern QR render failed on edit form: {e}")
 
     for f in fields:
@@ -3048,7 +3064,8 @@ def render_form_card(card_id: str, title: str, icon: str,
         # Build label with tooltip
         label_children = [label_txt]
         try:
-            from app.utils.field_config import get_tooltip as fc_tooltip, is_editable as fc_editable
+            from app.utils.field_config import get_tooltip as fc_tooltip
+            from app.utils.field_config import is_editable as fc_editable
             tooltip_text = fc_tooltip(entity_plural, fid)
             if tooltip_text:
                 label_children.append(
@@ -3061,7 +3078,9 @@ def render_form_card(card_id: str, title: str, icon: str,
             pass
 
         if ftype == "select" and f.get("dynamic_options"):
-            from app.dash_apps.drilldown.schema_introspect import load_dynamic_select_options
+            from app.dash_apps.drilldown.schema_introspect import (
+                load_dynamic_select_options,
+            )
             opts = load_dynamic_select_options(f["dynamic_options"], society_id)
             ctrl = dcc.Dropdown(
                 id={"type": "form-field", "entity": entity, "field": fid},
@@ -3125,7 +3144,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                 _iso_pre = _parse_date_entry(_format_date_entry(pre_val))
             ctrl = dcc.DatePickerSingle(
                 id={"type": "form-field-date", "entity": entity, "field": fid},
-                date=_iso_pre or date.today().isoformat(),
+                date=_iso_pre or today_ist().isoformat(),
                 display_format="DD/MM/YYYY",
                 style={"fontSize": "13px", "borderRadius": "10px"},
             )
@@ -3144,7 +3163,9 @@ def render_form_card(card_id: str, title: str, icon: str,
             # flat FK dropdown. See app/dash_apps/drilldown/drillin.py and
             # drillin_callbacks.py for the modal + its wiring.
             from app.dash_apps.drilldown.drillin import (
-                role_target_table, drillin_label_for, TABLE_ICON_COLOR,
+                TABLE_ICON_COLOR,
+                drillin_label_for,
+                role_target_table,
             )
             drillin_cfg = f.get("drillin") or {}
             d_mode = drillin_cfg.get("mode")
@@ -3417,7 +3438,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                         {"label": f"{r['id']} — {r['name']}", "value": r["id"]}
                         for r in _rows
                     ]
-                except Exception as _e:
+                except Exception as _e:  # noqa: BLE001
                     print(f"⚠️  event ticket account dropdown load error: {_e}")
             _pre_acc = int(pre_val) if pre_val not in (None, "", "None") else None
             ctrl = dcc.Dropdown(
@@ -3460,7 +3481,7 @@ def render_form_card(card_id: str, title: str, icon: str,
                         }
                         for r in _rows
                     ]
-                except Exception as _e:
+                except Exception as _e:  # noqa: BLE001
                     print(f"⚠️  account dropdown load error: {_e}")
             # Resolve pre_val: could be an int id already, or None
             _pre_acc = int(pre_val) if pre_val not in (None, "", "None") else None
@@ -3678,7 +3699,7 @@ def _account_is_credit(acc_id, society_id) -> bool:
             (acc_id, society_id), fetch_one=True,
         )
         return (row or {}).get("drcr_account") == "Cr"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"_account_is_credit error: {e}")
         return False
 
@@ -3718,7 +3739,7 @@ def render_payment_qr_widget(society_id, label: str = "Scan to pay the society")
                 },
             ),
         ], style={"flex": "0 0 auto", "maxWidth": "220px", "float": "right"})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"render_payment_qr_widget error: {e}")
         return None
 
@@ -3742,7 +3763,10 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
     if entity_plural != "compliance_settings":
         return None
 
-    from app.services.kpi_rule_links_service import get_links_for_categories, get_categories
+    from app.services.kpi_rule_links_service import (
+        get_categories,
+        get_links_for_categories,
+    )
 
     categories = get_categories()
     cat_keys = list(categories.keys())
@@ -3809,21 +3833,21 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
         dbc.Alert([
             html.I(className="fas fa-scale-balanced me-2"),
             html.Strong("General information, not legal or tax advice. "),
-            "These toggles change how the system calculates GST, TDS, and fund "
+            ("These toggles change how the system calculates GST, TDS, and fund "
             "contributions — confirm each choice against your society's own "
-            "registered bye-laws and your CA before relying on it for a filing.",
+            "registered bye-laws and your CA before relying on it for a filing."),
         ], color="warning", style={"fontSize": "12px", "padding": "8px 12px",
                                      "marginBottom": "12px"}),
 
         _rule_block(
             categories.get("sinking_fund", "Sinking Fund / Repair Fund Rate Basis"),
             [
-                "Statutory minimums vary by state — Maharashtra's Model Bye-Laws "
+                ("Statutory minimums vary by state — Maharashtra's Model Bye-Laws "
                 "set 0.25% of construction cost/year for the Sinking Fund and 0.75% "
                 "for the Repair & Maintenance Fund, while UP's Apartment Rules 2011 "
                 "set no fixed percentage (the rate is whatever the AOA's own bye-laws "
                 "or General Body decide). Cooperative societies are a State subject — "
-                "check your own state's Act and your society's registered bye-laws.",
+                "check your own state's Act and your society's registered bye-laws."),
             ],
             "sinking_fund",
         ),
@@ -3831,12 +3855,12 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
         _rule_block(
             categories.get("fund_gst", "Fund GST Exempt"),
             [
-                "Whether Sinking/Repair Fund collections sit outside GST at all, "
+                ("Whether Sinking/Repair Fund collections sit outside GST at all, "
                 "or are treated like any other RWA collection subject to the same "
                 "₹7,500/member/month threshold below, is genuinely unsettled — "
                 "CBIC's circular treats them as consideration for future services "
                 "in some readings, contested in others. Default here is exempt; "
-                "verify with a GST practitioner before filing on that basis.",
+                "verify with a GST practitioner before filing on that basis."),
             ],
             "fund_gst",
         ),
@@ -3844,10 +3868,10 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
         _rule_block(
             categories.get("fund_interest", "Fund Charges Interest"),
             [
-                "Whether overdue Sinking/Repair Fund contributions accrue the "
+                ("Whether overdue Sinking/Repair Fund contributions accrue the "
                 "same late-payment interest as overdue maintenance is a bye-law "
                 "question, not a fixed rule — check what your society's own "
-                "registered bye-laws specify.",
+                "registered bye-laws specify."),
             ],
             "fund_interest",
         ),
@@ -3855,7 +3879,7 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
         _rule_block(
             categories.get("gst_registered", "GST Registered / GSTIN / GST Filing Cadence"),
             [
-                "GST applies only when BOTH hold: society turnover exceeds ₹20 "
+                ("GST applies only when BOTH hold: society turnover exceeds ₹20 "
                 "lakh/year AND a member's own monthly maintenance exceeds ₹7,500. "
                 "Both conditions must be crossed — one alone doesn't trigger it. "
                 "Per CBIC's Circular 109/28/2019-GST, once a member's charge "
@@ -3863,7 +3887,7 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
                 "excess (a Madras HC ruling has gone the other way on this point — "
                 "treat it as contested, not settled). Filing cadence (monthly vs. "
                 "QRMP/quarterly) is chosen at GST registration, not decided by "
-                "this system.",
+                "this system."),
             ],
             "gst_registered",
         ),
@@ -3871,7 +3895,7 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
         _rule_block(
             categories.get("tds_no_pan", "TDS No-PAN Action (warn vs. block)"),
             [
-                "Under Section 206AA, TDS can still be deducted from a vendor "
+                ("Under Section 206AA, TDS can still be deducted from a vendor "
                 "with no PAN on file — at the higher no-PAN rate (typically 20%) "
                 "rather than the normal Section 194C/194J rate. That means "
                 "\"warn\" is usually the right default: blocking the payment isn't "
@@ -3880,7 +3904,7 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
                 "194C: ₹30,000/bill or ₹1,00,000/year; 194J: recently raised to "
                 "₹50,000/year (from ₹30,000) — are revised periodically, so check "
                 "the official page rather than relying on a number fixed in this "
-                "banner.",
+                "banner."),
             ],
             "tds_no_pan",
         ),
@@ -3888,11 +3912,11 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
         _rule_block(
             categories.get("rera", "RERA"),
             [
-                "The Real Estate (Regulation and Development) Act, 2016 operates "
+                ("The Real Estate (Regulation and Development) Act, 2016 operates "
                 "alongside state apartment/cooperative laws. Homeowners can approach "
                 "the state RERA authority for legal action on matters like builder "
                 "maintenance obligations even where the state's own dispute-resolution "
-                "mechanisms apply.",
+                "mechanisms apply."),
             ],
             "rera",
         ),
@@ -3900,12 +3924,12 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
         _rule_block(
             categories.get("apartment_act", "Apartment Act / AOAs"),
             [
-                "State-specific apartment acts (e.g., UP Apartment Act 2010) regulate "
+                ("State-specific apartment acts (e.g., UP Apartment Act 2010) regulate "
                 "construction, ownership, and maintenance of apartment buildings with "
                 "four or more units, mandating formation of an Apartment Owners "
                 "Association (AOA). An AOA under such an Act isn't itself the "
                 "registration mechanism — the Registrar of Societies registers it as "
-                "a society under the Societies Registration Act 1860.",
+                "a society under the Societies Registration Act 1860."),
             ],
             "apartment_act",
         ),
@@ -3913,10 +3937,10 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
         _rule_block(
             categories.get("cooperative_act", "Cooperative Societies Act"),
             [
-                "The older, parallel registration route for cooperative housing "
+                ("The older, parallel registration route for cooperative housing "
                 "societies specifically (as opposed to apartment/condominium-style "
                 "AOAs). Each state has its own Cooperative Societies Act providing "
-                "for registration, operation, and management of cooperative societies.",
+                "for registration, operation, and management of cooperative societies."),
             ],
             "cooperative_act",
         ),
@@ -3924,12 +3948,12 @@ def _compliance_rules_banner(entity_plural: str, society_state: str = "ALL") -> 
         _rule_block(
             categories.get("income_tax_mutuality", "Income Tax — Mutuality Principle"),
             [
-                "Mutual (member-sourced: maintenance, parking, transfer fees) vs. "
+                ("Mutual (member-sourced: maintenance, parking, transfer fees) vs. "
                 "non-mutual (tower rent, hall rental, FD interest) income "
                 "classification is a judicially-developed doctrine (Principle of "
                 "Mutuality), not a single numbered section — get this one checked "
                 "against your society's actual income mix, since it determines "
-                "what's taxable at all.",
+                "what's taxable at all."),
             ],
             "income_tax_mutuality",
         ),
@@ -4572,8 +4596,8 @@ def render_reserve_appropriation_panel(
     elif not balanced:
         banner = dbc.Alert(
             [html.I(className="fas fa-exclamation-triangle me-2"),
-             f"Books are out of balance by ₹{float(preview.get('imbalance_amount') or 0):,.2f}. "
-             "The close is blocked — fix the ledger first."],
+             (f"Books are out of balance by ₹{float(preview.get('imbalance_amount') or 0):,.2f}. "
+             "The close is blocked — fix the ledger first.")],
             color="danger", style={"borderRadius": "8px", "fontSize": "11px",
                                    "marginBottom": "10px"})
     elif not can_close:
@@ -4586,24 +4610,24 @@ def render_reserve_appropriation_panel(
         if proposed > 0:
             banner = dbc.Alert(
                 [html.I(className="fas fa-user-lock me-2"),
-                 f"₹{proposed:,.2f} would be transferred from Income & Expenditure A/c "
-                 f"to {reserve_name}. Only an admin can post this."],
+                 (f"₹{proposed:,.2f} would be transferred from Income & Expenditure A/c "
+                 f"to {reserve_name}. Only an admin can post this.")],
                 color="info", style={"borderRadius": "8px", "fontSize": "11px",
                                      "marginBottom": "10px"})
         else:
             banner = dbc.Alert(
                 [html.I(className="fas fa-user-lock me-2"),
-                 f"This year would be closed with no reserve appropriation. "
-                 f"Only an admin can post this."],
+                 ("This year would be closed with no reserve appropriation. "
+                 "Only an admin can post this.")],
                 color="info", style={"borderRadius": "8px", "fontSize": "11px",
                                      "marginBottom": "10px"})
     else:
         banner = dbc.Alert(
             [html.I(className="fas fa-arrow-right me-2"),
-             f"₹{proposed:,.2f} (={pct:g}% of the ₹{surplus:,.2f} net surplus) will be "
+             (f"₹{proposed:,.2f} (={pct:g}% of the ₹{surplus:,.2f} net surplus) will be "
              f"transferred from Income & Expenditure A/c to {reserve_name}. "
              f"The remaining ₹{surplus - proposed:,.2f} stays in the P&L and continues "
-             f"to be reported as Reserves & Surplus on the Balance Sheet."],
+             f"to be reported as Reserves & Surplus on the Balance Sheet.")],
             color="warning", style={"borderRadius": "8px", "fontSize": "11px",
                                     "marginBottom": "10px"})
 
@@ -4799,8 +4823,8 @@ def render_fy_lock_panel(state: dict | None, fy, can_lock: bool = False) -> html
             when = f" ({_fin_date(this_lock['locked_at'])}{who})"
         parts = [_title(), dbc.Alert(
             [html.I(className="fas fa-lock me-2"),
-             f"FY {label} is locked{when}. No entry can be posted into it; a correction is a reversal "
-             "dated in an open period."], color="success", style={"borderRadius": "8px", "fontSize": "11px"})]
+             (f"FY {label} is locked{when}. No entry can be posted into it; a correction is a reversal "
+             "dated in an open period.")], color="success", style={"borderRadius": "8px", "fontSize": "11px"})]
         if this_lock and this_lock.get("notes"):
             parts.append(html.Div(f"Reason recorded: {this_lock['notes']}",
                                   style={"fontSize": "10.5px", "color": "#555", "marginBottom": "6px"}))
@@ -4874,9 +4898,9 @@ def _fin_fy_label(fy):
 def render_financial_statements_card(
     *args,
     error: str | None = None,
-    fy_options: list = None, selected_fy = None,
+    fy_options: list | None = None, selected_fy = None,
     society_name: str = "Society",
-    society_id: int = None,
+    society_id: int | None = None,
     society_row: dict | None = None,
     **kwargs
 ) -> html.Div:
@@ -5748,11 +5772,11 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
     try:
         from app.services.qr_service import generate_qr_code
         qr_img, qr_payload_text = generate_qr_code(1, "FIN", selected_fy or 2026)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
     import hashlib
-    payload_hash = hashlib.sha256(f"FIN-CERT-{selected_fy or 2026}-{society_name}".encode("utf-8")).hexdigest()[:16].upper()
+    payload_hash = hashlib.sha256(f"FIN-CERT-{selected_fy or 2026}-{society_name}".encode()).hexdigest()[:16].upper()
 
     # ── Letterhead data for Print / Password-Protected PDF / Email ──
     # Reuses the shared letterhead (print_letterhead.py) so the printed
@@ -5760,7 +5784,10 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
     # secretary signature and verification QR as every other document.
     # The optional password field on the card locks the PDF via
     # pdf-lib.js — no server-side PDF library required.
-    from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
+    from app.dash_apps.callbacks.print_letterhead import (
+        QR_CAPTION,
+        get_letterhead_assets,
+    )
     # society_row lets a caller supply the societies row it already has, which
     # keeps this renderer free of an ambient database round-trip (it is
     # otherwise a pure function of its arguments). Only fall back to a query
@@ -5772,7 +5799,7 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
             _society_row = _db._execute(
                 "SELECT * FROM societies WHERE id=%s", (society_id,), fetch_one=True
             )
-        except Exception:
+        except Exception:  # noqa: BLE001
             _society_row = None
     _society_row = _society_row or {"name": society_name, "address": ""}
     _letterhead = get_letterhead_assets(_society_row, society_id)
@@ -5782,7 +5809,7 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
             from app.services.qr_service import generate_qr_code
             _qr_img, _ = generate_qr_code(society_id, "FIN", selected_fy or 2026)
             _fin_qr_url = _qr_img or ""
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
     # ──────────────────────────────────────────────────────────────────
@@ -6026,7 +6053,7 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
     def _build_bs_html(rows):
         """Balance Sheet HTML, two-column format, Dr/Cr coloured by nature."""
         color = _FIN_NAVY
-        has_hierarchy = any(r.get("parent_account_id") is not None or r.get("sort_path") for r in rows)
+        any(r.get("parent_account_id") is not None or r.get("sort_path") for r in rows)
         children_by_parent = {}
         for r in rows:
             pid = r.get("parent_account_id")
@@ -6056,10 +6083,10 @@ html.Strong("6 Statements", style={"fontSize": "14px"}),
                          or node.get("total_closing") or 0)
 
         def _build_side(nodes, section_title, default_nature):
-            out = [f'<tr><th colspan="2" style="padding:7px 8px;background:{color};'
+            out = [(f'<tr><th colspan="2" style="padding:7px 8px;background:{color};'
                    f'color:#fff;font-size:9.5px;font-weight:700;'
                    f'text-transform:uppercase;letter-spacing:0.5px;'
-                   f'border:1px solid {color}">{section_title}</th></tr>']
+                   f'border:1px solid {color}">{section_title}</th></tr>')]
             for n in nodes:
                 n_name = n.get("account_name") or n.get("name") or ""
                 n_amt = _amt(n)
@@ -6239,8 +6266,8 @@ def render_member_ledger_card(
     rows: list, total_count: int, error: str | None,
     member_label: str, color: str = "#18794e",
     page: int = 1, page_size: int = 50,
-    fy_options: list[int] = None, selected_fy: int = None,
-    entity_id: int = None
+    fy_options: list[int] | None = None, selected_fy: int | None = None,
+    entity_id: int | None = None
 ) -> html.Div:
     """
     Read-only "My Transactions" passbook (loaders.get_member_ledger) —
@@ -6314,11 +6341,10 @@ def render_member_ledger_card(
     
     # Calculate final balance using the first row if available (since DESC order)
     # Wait, the SQL is ordered DESC, so rows[0] is the newest entry on the current page.
-    final_balance = 0
     if rows and page == 1:
-        final_balance = float(rows[0].get("running_balance") or 0)
+        float(rows[0].get("running_balance") or 0)
 
-    toolbar = html.Div([
+    html.Div([
         html.Div([
             dbc.Select(
                 id={"type": "drill-filter", "field": "financial_year"},
@@ -6413,8 +6439,8 @@ def render_verify_receivable_card(
                                   "textAlign": "center", "padding": "10px", "marginBottom": "12px"}),
             dbc.Alert([
                 html.I(className="fas fa-info-circle me-2"),
-                "Enter the amount actually received. Leave as-is to confirm in full — "
-                "a lower amount leaves the balance outstanding as 'partial'.",
+                ("Enter the amount actually received. Leave as-is to confirm in full — "
+                "a lower amount leaves the balance outstanding as 'partial'."),
             ], color="info", style={"fontSize": "12px", "padding": "8px 14px",
                                     "borderRadius": "10px", "marginBottom": "12px"}),
             dcc.Input(id={"type": "form-field", "entity": "verify_receivable_amt", "field": "entity_id"},
@@ -6688,8 +6714,8 @@ def render_pay_dues_card(
             dues_summary,
             dbc.Alert([
                 html.I(className="fas fa-info-circle me-2"),
-                f"Payment applied FIFO — oldest dues first. "
-                f"Excess beyond ₹{pending_dues:,.2f} credited as advance. ",
+                (f"Payment applied FIFO — oldest dues first. "
+                f"Excess beyond ₹{pending_dues:,.2f} credited as advance. "),
                 html.Br(), html.Br(),
                 html.Strong("Note: "),
                 "Interest on overdue amounts is calculated on a daily pro-rata basis using a standard 30-day banking month."
@@ -6977,7 +7003,7 @@ def render_vendor_pass_card(
     society_id=None,
     prefill_mode: str = "cash",
     caller_role: str = "admin",   # "admin" → Sell Pass, "vendor" → Buy Pass
-) -> "html.Div":
+) -> html.Div:
     """
     Dedicated form card for Sell Vendor Pass (admin) / Buy Vendor Pass (vendor).
  
@@ -6989,8 +7015,8 @@ def render_vendor_pass_card(
       receipts       → status='confirmed' (immediate) — acc_id = ven_pass_acc_id
       transactions   → source_table='receipts', source_id=receipt.id
     """
-    from dash import html, dcc
     import dash_bootstrap_components as dbc
+    from dash import dcc, html
   
     color        = "#17976e"
     action_label = "Sell Pass" if caller_role in ("admin", "master") else "Buy Pass"
@@ -7203,8 +7229,9 @@ def render_asset_dispose_card(asset: dict, society_id=None) -> html.Div:
       transactions → double-entry (Dr cash/bank, Cr asset class, gain/loss)
     """
     from datetime import date as _date
-    from dash import html, dcc
+
     import dash_bootstrap_components as dbc
+    from dash import dcc, html
 
     color        = "#de5c52"
     asset_id     = asset.get("id", "")
@@ -7212,14 +7239,14 @@ def render_asset_dispose_card(asset: dict, society_id=None) -> html.Div:
     asset_sno    = asset.get("asset_SNo", "—")
     purchase_val = float(asset.get("purchase_value") or 0)
     sale_value   = asset.get("sale_value") or ""
-    sale_date    = asset.get("disposed_at") or _date.today().isoformat()
+    sale_date    = asset.get("disposed_at") or _date.today().isoformat()  # noqa: DTZ011
     mode         = asset.get("mode", "cash") or "cash"
     particulars  = asset.get("particulars") or ""
     acc_id       = asset.get("acc_id") or ""
     acc_name     = asset.get("acc_name") or "Tap to select…"
     acc_color    = "#2a3b52" if acc_id else "#9aa7b8"
 
-    today_str = _date.today().isoformat()
+    _date.today().isoformat()  # noqa: DTZ011
 
     return dbc.Card([
         dbc.CardHeader(
@@ -7404,7 +7431,7 @@ def render_event_ticket_card(
     open_to: str = "all",
     prefill_mode: str = "cash",
     caller_role: str = "admin",   # "admin" -> Sell Tickets, "apartment"/"vendor"/"security" -> Buy Tickets
-) -> "html.Div":
+) -> html.Div:
     """
     Dedicated form card for Sell Event Ticket (admin) / Buy Event Ticket
     (apartment/vendor/security) -- mirrors render_vendor_pass_card's
@@ -7432,8 +7459,8 @@ def render_event_ticket_card(
     here; `open_to` is only used below for the small caption under the
     picker button.
     """
-    from dash import html, dcc
     import dash_bootstrap_components as dbc
+    from dash import dcc, html
 
     color        = "#c8781f"
     is_admin     = caller_role in ("admin", "master")
@@ -7681,7 +7708,7 @@ def render_noc_card(apt: dict, society: dict,
     owner     = apt.get("owner_name", "____")
     society_nm = society.get("name", "____")
     sec_name  = society.get("secretary_name") or society.get("contact_person", "____")
-    today     = _date.today().strftime("%d %B %Y")
+    today     = _date.today().strftime("%d %B %Y")  # noqa: DTZ011
     cert_no   = (noc_record or {}).get("certificate_no") or "PREVIEW — not yet issued"
 
     # A reused (previously issued, still-valid) NOC keeps its original
@@ -7721,13 +7748,16 @@ def render_noc_card(apt: dict, society: dict,
                     "UPDATE nocs SET body_text=%s WHERE id=%s",
                     (noc_text, noc_record["id"]),
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"⚠️  NOC body_text persist failed: {e}")
 
     # Letterhead branding + verification QR (NOC role) — same shared
     # helper used by receipts; see print_letterhead.py. No QR is rendered
     # for a not-yet-eligible preview since there's no noc_record yet.
-    from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
+    from app.dash_apps.callbacks.print_letterhead import (
+        QR_CAPTION,
+        get_letterhead_assets,
+    )
     society_id = apt.get("society_id") or society.get("id")
     letterhead = get_letterhead_assets(society, society_id)
     qr_url = ""
@@ -7736,7 +7766,7 @@ def render_noc_card(apt: dict, society: dict,
             from app.services.qr_service import generate_qr_code
             qr_img, _payload = generate_qr_code(society_id, "NOC", noc_record["id"])
             qr_url = qr_img or ""
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"⚠️  NOC QR render failed: {e}")
     noc_letterhead_data = {
         "id": (noc_record or {}).get("id"),
@@ -7858,7 +7888,7 @@ def _signature_panel_for(kind, subject_id):
     try:
         from app.dash_apps.callbacks.signature_callbacks import signature_panel
         return signature_panel(kind, subject_id)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"signature panel unavailable: {exc}")
         return html.Div()
 
@@ -7885,7 +7915,7 @@ def render_agreement_card(society: dict, agreement_record: dict) -> html.Div:
     sec_name = society.get("secretary_name") or "____"
     sec_email = society.get("secretary_email") or "____"
     from datetime import date as _date
-    today_str = _date.today().strftime("%d %B %Y")
+    today_str = _date.today().strftime("%d %B %Y")  # noqa: DTZ011
     agreement_no = (agreement_record or {}).get("agreement_no") or "PREVIEW — not yet issued"
 
     # A reused (already-generated) agreement keeps its original wording —
@@ -7959,7 +7989,7 @@ def render_agreement_card(society: dict, agreement_record: dict) -> html.Div:
                     "UPDATE society_agreements SET body_text=%s WHERE id=%s",
                     (agreement_text, agreement_record["id"]),
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"⚠️  Agreement body_text persist failed: {e}")
 
     from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets
@@ -8068,7 +8098,7 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
 
     color      = "#17976e"
     receipt_no = receipt.get("id", "—")
-    r_date     = receipt.get("receipt_date") or _date.today().isoformat()
+    r_date     = receipt.get("receipt_date") or _date.today().isoformat()  # noqa: DTZ011
     payer      = receipt.get("entity_name") or "—"
     role_lbl   = (receipt.get("role") or "").title() or "—"
     particulars = receipt.get("particulars", "—")
@@ -8083,7 +8113,10 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
 
     # Letterhead branding (logo / watermark background / secretary signature)
     # — shared with NOC and event-ticket prints, see print_letterhead.py.
-    from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
+    from app.dash_apps.callbacks.print_letterhead import (
+        QR_CAPTION,
+        get_letterhead_assets,
+    )
     letterhead = get_letterhead_assets(society, society_id)
 
     # Verification QR — RPT role, points scanners at validate_receipt_qr()
@@ -8095,7 +8128,7 @@ def render_receipt_card(receipt: dict, society: dict) -> html.Div:
             from app.services.qr_service import generate_qr_code
             qr_img, _payload = generate_qr_code(society_id, "RPT", int(receipt_no))
             qr_url = qr_img or ""
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"⚠️  receipt QR render failed: {e}")
             
     # Task 1.6: a receipt/invoice that relies on the fund GST exemption names its authority (resolution, opinion, who gave it).
@@ -8204,7 +8237,7 @@ def render_expense_card(expense: dict, society: dict) -> html.Div:
 
     color      = "#de5c52"
     expense_no = expense.get("id", "—")
-    e_date     = expense.get("expense_date") or _date.today().isoformat()
+    e_date     = expense.get("expense_date") or _date.today().isoformat()  # noqa: DTZ011
     payee      = expense.get("entity_name") or "—"
     role_lbl   = (expense.get("role") or "").title() or "—"
     particulars = expense.get("particulars", "—")
@@ -8218,7 +8251,10 @@ def render_expense_card(expense: dict, society: dict) -> html.Div:
     society_id = expense.get("society_id") or society.get("id")
     tds_pct    = expense.get("tds_pct")
 
-    from app.dash_apps.callbacks.print_letterhead import get_letterhead_assets, QR_CAPTION
+    from app.dash_apps.callbacks.print_letterhead import (
+        QR_CAPTION,
+        get_letterhead_assets,
+    )
     letterhead = get_letterhead_assets(society, society_id)
 
     qr_url = ""
@@ -8227,7 +8263,7 @@ def render_expense_card(expense: dict, society: dict) -> html.Div:
             from app.services.qr_service import generate_qr_code
             qr_img, _payload = generate_qr_code(society_id, "EXP", int(expense_no))
             qr_url = qr_img or ""
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"⚠️  expense QR render failed: {e}")
 
     tds_pct = float(expense.get("tds_pct") or 0)                  # a percentage, shown and put in the JSON store
@@ -8323,13 +8359,13 @@ def render_expense_card(expense: dict, society: dict) -> html.Div:
 # EVENT MOBILE TICKET PASS VIEW & SUBSCRIBABLE ALERTS RENDERERS
 # ════════════════════════════════════════════════════════════════════════════
 
-def render_event_mobile_ticket_view(booking: dict) -> "html.Div":
+def render_event_mobile_ticket_view(booking: dict) -> html.Div:
     """
     Renders an in-app, mobile-responsive view of an event booking ticket pass.
     Includes individual scannable QR ticket items (Adult & Child) for gate entry.
     """
-    from dash import html, dcc
     import dash_bootstrap_components as dbc
+    from dash import html
 
     event_title = booking.get("event_title", "Event Pass")
     event_date = booking.get("event_date", "—")
@@ -8389,7 +8425,7 @@ def render_event_mobile_ticket_view(booking: dict) -> "html.Div":
     ], style={"borderRadius": "16px", "boxShadow": "0 4px 16px rgba(0,0,0,0.08)"})
 
 
-def render_subscribable_alert_manager(channels: list, active_alerts: list, is_admin: bool = False, apartment_id=None, society_id=None) -> "html.Div":
+def render_subscribable_alert_manager(channels: list, active_alerts: list, is_admin: bool = False, apartment_id=None, society_id=None) -> html.Div:
     """
     Renders Subscribable Alert Manager + Gate KPI Alert Cards.
     Admin: active + inactive channels. Owner: active only + subscribe toggle.
@@ -8403,8 +8439,8 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
     rejected by the ownership check even if found). School Bus channels are
     broadcast-to-subscribers and don't need this field.
     """
-    from dash import html
     import dash_bootstrap_components as dbc
+    from dash import html
 
     # For owner view, filter alerts to only show their apartment's alerts
     # plus any broadcast alerts (School Bus has no apartment_id).
@@ -8433,7 +8469,7 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
         cstyle = color_map.get(alert["color"], color_map["gray"])
         phone = alert.get("owner_phone") or ""
         state_label = cstyle["label"]
-        alert_type = alert.get("type", "")
+        alert.get("type", "")
         alert_event_id = alert.get("alert_event_id")
         state = alert.get("state", "pending")
 
@@ -8536,7 +8572,7 @@ def render_subscribable_alert_manager(channels: list, active_alerts: list, is_ad
     ])
 
 
-def render_channel_subscriber_profiles(channel_name: str, subscribers: list) -> "html.Div":
+def render_channel_subscriber_profiles(channel_name: str, subscribers: list) -> html.Div:
     """
     Renders subscriber profile cards for a channel.
     Border color indicates arrival status:
@@ -8544,8 +8580,8 @@ def render_channel_subscriber_profiles(channel_name: str, subscribers: list) -> 
       Yellow (#eab308): Pending
       Red (#ef4444): Denied
     """
-    from dash import html
     import dash_bootstrap_components as dbc
+    from dash import html
 
     profile_cards = []
     for sub in subscribers:
@@ -8667,7 +8703,7 @@ def _master_form_constitutions() -> list:
     return list(CONSTITUTION_LABELS.items())
 
 
-def render_form_master_society_new() -> "html.Div":
+def render_form_master_society_new() -> html.Div:
     """Dedicated form to create a new society from the master portal."""
     return html.Div([
         dbc.Form([
@@ -8743,14 +8779,14 @@ def render_form_master_society_new() -> "html.Div":
         ], className="p-2"),
     ])
 
-def render_form_channel_new(society_id: int | None = None, apartment_options: list | None = None, caller_apartment_id: int | None = None) -> "html.Div":
+def render_form_channel_new(society_id: int | None = None, apartment_options: list | None = None, caller_apartment_id: int | None = None) -> html.Div:
     """
     Dedicated New Channel form for the drilldown system.
     Uses generic form-field pattern so handle_form_submit in
     drilldown_callbacks.py processes the submission.
     """
-    from dash import html
     import dash_bootstrap_components as dbc
+    from dash import html
 
     apartment_options = apartment_options or []
     is_locked_apartment = bool(caller_apartment_id)
@@ -8844,9 +8880,9 @@ def render_form_channel_new(society_id: int | None = None, apartment_options: li
 
 def render_fund_management_card(
     fund_balances: list, utilization_log: list, error: str | None = None,
-    expense_accounts: list = None, society_name: str = "Society",
-    income_accounts: list = None, fund_mappings: list = None,
-    appropriation_log: list = None, bank_account_options: list = None,
+    expense_accounts: list | None = None, society_name: str = "Society",
+    income_accounts: list | None = None, fund_mappings: list | None = None,
+    appropriation_log: list | None = None, bank_account_options: list | None = None,
 ) -> html.Div:
     """
     Admin-only card for viewing fund balances, utilizing funds, routing fund

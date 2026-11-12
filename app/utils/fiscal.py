@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from datetime import date
 
+from app.utils import today_ist
+
 
 def fy_start_year(today: date | None = None) -> int:
     """Calendar year in which the financial year containing `today` starts."""
-    today = today or date.today()
+    today = today or today_ist()
     return today.year if today.month >= 4 else today.year - 1
 
 

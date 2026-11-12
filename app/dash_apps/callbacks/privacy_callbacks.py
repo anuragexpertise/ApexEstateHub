@@ -8,12 +8,15 @@ work the register, erase, log a breach or publish a notice (dpdp_service re-chec
 """
 import logging
 
+import dash_bootstrap_components as dbc
 from dash import ALL, Input, Output, State, ctx, no_update
 
-import dash_bootstrap_components as dbc
-
 from app.dash_apps.pages import privacy_page as pp
-from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.guards import require_session
 from app.services import dpdp_service as dp
 
@@ -100,7 +103,7 @@ def register_privacy_callbacks(app):
         sid, uid, role = s
         try:
             return True, pp.rights_body(sid, uid, role)
-        except Exception:                                                  # noqa: BLE001
+        except Exception:
             log.exception("Privacy & data rights panel failed to load (society %s, user %s)", sid, uid)
             return True, _msg("The privacy panel could not be loaded just now. Please try again; if it keeps happening, "
                               "contact support.", ok=False)

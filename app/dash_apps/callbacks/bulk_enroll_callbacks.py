@@ -38,27 +38,30 @@ reported without rolling back rows already committed earlier in the file.
 """
 from __future__ import annotations
 
-from app.security.password_policy import validate_password
 import base64
 import io
-import pandas as pd
-from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 
-from app.services import onboarding_service as ob
-
-from dash import Input, Output, State, ALL, ctx, no_update, html, dcc
-from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
+import pandas as pd
+from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
+from dash.exceptions import PreventUpdate
 from werkzeug.security import generate_password_hash
 
-from database.db_manager import db
-from app.security.guards import require_session
 from app.security.audit_context import (
+    get_current_society_id,
     get_current_user_id,
     get_current_user_role,
-    get_current_society_id,
 )
+from app.security.guards import require_session
+from app.security.password_policy import validate_password
+from app.services import onboarding_service as ob
 from app.utils.ux_toasts import error_toast
+from database.db_manager import db
+from database.money import (  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
+    D,
+    money,
+    rupee,
+)
 
 # Defense-in-depth cap: a huge Excel file (accidental or malicious) would otherwise
 # trigger unbounded serial INSERTs with no upper bound.
@@ -328,7 +331,7 @@ def _find_flat(sid: int, flat: str) -> dict | None:
         (sid, key), fetch_one=True)
 
 
-def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> dict:
+def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int | None = None) -> dict:
     """
     For each Excel row:
       1. Insert into apartments → get apartments.id
@@ -385,8 +388,8 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
             failed.append((i, f"Flat {_have['flat_number']} is already enrolled with a different login", _em))
             continue
         if not _have and _declared_only:
-            failed.append((i, f"Flat {flat} is not in the builder's Declaration. Upload a corrected Declaration "
-                              "(Stage 5) before enrolling it", _em))
+            failed.append((i, (f"Flat {flat} is not in the builder's Declaration. Upload a corrected Declaration "
+                              "(Stage 5) before enrolling it"), _em))
             continue
         if not _have and slots_left <= 0:
             failed.append((i, f"Society plan '{_plan}' limit reached ({_limit} apartments)"))
@@ -451,7 +454,7 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
                     apt_r = cur.fetchone()
                     apt_id = apt_r["id"] if apt_r else None
                     if not apt_id:
-                        raise Exception("Apartment insert failed")
+                        raise Exception("Apartment insert failed")  # noqa: TRY002
 
                     cur.execute(
                         "INSERT INTO users"
@@ -459,7 +462,7 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
                         "VALUES (%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
                         (sid, email, generate_password_hash(password), apt_id, user_id),
                     )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             failed.append((i, _friendly_error(e), _em))
             continue
 
@@ -469,7 +472,7 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
         # Item 10: link any pending opening receivable for this flat (idempotent).
         try:
             ob.link_opening_receivable(sid, apt_id, flat)
-        except Exception:                                          # noqa: BLE001 - enrolment stands even if linking fails
+        except Exception:
             import logging
             logging.getLogger(__name__).exception("could not link opening receivable for flat %s in society %s", flat, sid)
 
@@ -477,12 +480,12 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int = None) -> 
         try:   # Plan v3 2.8: keep flats' undivided-interest shares summing to 100% (unless typed from the Declaration)
             from app.services.up_aoa_actions import fill_after_enrolment
             fill_after_enrolment(sid)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"undivided-interest fill after enrolment skipped: {exc}")
     return {"success": success, "failed": failed, "skipped": skipped, "warnings": warnings}
 
 
-def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dict:
+def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int | None = None) -> dict:
     """
     For each Excel row:
       1. Insert into vendors
@@ -547,7 +550,7 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
                 ven_r = cur.fetchone()
                 ven_id = ven_r["id"] if ven_r else None
                 if not ven_id:
-                    raise Exception("Vendor record insert failed")
+                    raise Exception("Vendor record insert failed")  # noqa: TRY002
 
                 cur.execute(
                     "INSERT INTO users"
@@ -555,7 +558,7 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
                     "VALUES (%s,%s,%s,'vendor','password',%s,%s)",
                     (sid, email, generate_password_hash(password), ven_id, user_id),
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             failed.append((i, _friendly_error(e), _em))
             continue
 
@@ -564,7 +567,7 @@ def _bulk_insert_vendors(rows: list[dict], sid: int, user_id: int = None) -> dic
     return {"success": success, "failed": failed, "skipped": skipped}
 
 
-def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> dict:
+def _bulk_insert_security(rows: list[dict], sid: int, user_id: int | None = None) -> dict:
     """
     For each Excel row:
       1. Insert into security_staff
@@ -621,7 +624,7 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
                 sec_r = cur.fetchone()
                 sec_id = sec_r["id"] if sec_r else None
                 if not sec_id:
-                    raise Exception("Security staff record insert failed")
+                    raise Exception("Security staff record insert failed")  # noqa: TRY002
 
                 cur.execute(
                     "INSERT INTO users"
@@ -629,7 +632,7 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
                     "VALUES (%s,%s,%s,'security','password',%s,%s)",
                     (sid, email, generate_password_hash(password), sec_id, user_id),
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             failed.append((i, _friendly_error(e), _em))
             continue
 
@@ -638,7 +641,7 @@ def _bulk_insert_security(rows: list[dict], sid: int, user_id: int = None) -> di
     return {"success": success, "failed": failed, "skipped": skipped}
 
 
-def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None) -> dict:
+def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int | None = None) -> dict:
     required = _BULK_TEMPLATES["apartment_users"]["required"]
     success  = 0
     failed: list[tuple] = []
@@ -692,7 +695,7 @@ def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None
                 )
                 apt_r = cur.fetchone()
                 if not apt_r:
-                    raise Exception(f"Apartment '{flat}' not found")
+                    raise Exception(f"Apartment '{flat}' not found")  # noqa: TRY002
                 apt_id = apt_r["id"]
                 
                 cur.execute(
@@ -701,12 +704,12 @@ def _bulk_insert_apartment_users(rows: list[dict], sid: int, user_id: int = None
                     (sid, email, generate_password_hash(password), apt_id, name, user_type, user_id),
                 )
             success += 1
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             failed.append((i, _friendly_error(e), _em))
 
     return {"success": success, "failed": failed, "skipped": skipped}
 
-def _bulk_insert_assets(rows: list[dict], sid: int, user_id: int = None) -> dict:
+def _bulk_insert_assets(rows: list[dict], sid: int, user_id: int | None = None) -> dict:
     required = _BULK_TEMPLATES["assets"]["required"]
     success  = 0
     failed: list[tuple[int, str]] = []
@@ -733,14 +736,14 @@ def _bulk_insert_assets(rows: list[dict], sid: int, user_id: int = None) -> dict
                 ),
             )
             success += 1
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             failed.append((i, f"Asset insert failed: {e}"))
 
     return {"success": success, "failed": failed}
 
 
 
-def _bulk_insert_team_role(rows: list[dict], sid: int, user_id: int = None, role_name: str = "staff") -> dict:
+def _bulk_insert_team_role(rows: list[dict], sid: int, user_id: int | None = None, role_name: str = "staff") -> dict:
     from werkzeug.security import generate_password_hash
     required = _BULK_TEMPLATES[role_name]["required"]
     success, failed = 0, []
@@ -764,7 +767,7 @@ def _bulk_insert_team_role(rows: list[dict], sid: int, user_id: int = None, role
                            VALUES (%s,%s,%s,%s,'password',NULL,%s,%s,TRUE)""",
                         (sid,email,generate_password_hash(pw),role_name,name,user_id))
             success += 1
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             failed.append((i, _friendly_error(e)))
     return {"success": success, "failed": failed}
 # ══════════════════════════════════════════════════════════════════════════════
@@ -913,7 +916,7 @@ def register_bulk_enroll_callbacks(app):
 
         try:
             rows = _parse_upload(contents, filename)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return (
                 html.Div(error_toast(e, "Unable to read this file. Please try again.")["message"], style={"color": "#de5c52"}),
                 no_update, no_update, no_update, no_update,

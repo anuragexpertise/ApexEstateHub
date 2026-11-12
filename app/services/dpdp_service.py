@@ -18,8 +18,9 @@ in the plan and are held here as constants so they can be changed in one place.
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import timedelta
 
+from app.utils import today_ist
 from database.db_manager import db
 
 log = logging.getLogger(__name__)
@@ -258,7 +259,7 @@ def record_visitor_notice(society_id: int, visitor_id: int, recorded_by: int | N
                 RETURNING id""",
              (society_id, f"visitor:{visitor_id}", n["version"], basis, recorded_by, society_id, f"visitor:{visitor_id}"))
         return True
-    except Exception:                                                    # noqa: BLE001
+    except Exception:
         log.exception("record_visitor_notice failed")
         return False
 
@@ -297,7 +298,7 @@ def raise_request(society_id: int, user_id: int, request_type: str, subject: str
     apt = p["linked_id"] if p["role"] == "apartment" else None
     return _row("""INSERT INTO rights_requests (society_id, requester_key, request_type, subject, due_date, outcome, requester_user_id, apartment_id)
                    VALUES (%s,%s,%s,%s,%s,'pending',%s,%s) RETURNING *""",
-                (society_id, p["person_key"], request_type, subject[:2000], date.today() + timedelta(days=RESPONSE_DAYS), user_id, apt))
+                (society_id, p["person_key"], request_type, subject[:2000], today_ist() + timedelta(days=RESPONSE_DAYS), user_id, apt))
 
 
 def can_manage(society_id: int, user_id: int, role: str | None) -> bool:
@@ -361,7 +362,7 @@ def erase(society_id: int, request_id: int, actor_id: int, role: str | None) -> 
         raise DpdpError("This request is not linked to a flat.")
     try:
         out = _row("SELECT fn_erase_person_profile(%s,%s,%s,%s) AS r", (society_id, r["apartment_id"], request_id, actor_id))
-    except Exception as exc:                                           # noqa: BLE001
+    except Exception as exc:
         raise DpdpError(str(exc).split("\n")[0].replace("ERROR:", "").strip() or "Erasure failed.") from exc
     return (out or {}).get("r") or "OK"
 
@@ -372,7 +373,7 @@ def log_breach(society_id: int, actor_id: int, role: str | None, occurred_at, de
     if len((description or "").strip()) < 20:
         raise DpdpError("Describe what happened (at least 20 characters).")
     return _row("INSERT INTO breach_register (society_id, occurred_at, description, affected_persons, created_by) "
-                "VALUES (%s,%s,%s,%s,%s) RETURNING *", (society_id, occurred_at or date.today(), description.strip()[:4000], max(int(affected or 0), 0), actor_id))
+                "VALUES (%s,%s,%s,%s,%s) RETURNING *", (society_id, occurred_at or today_ist(), description.strip()[:4000], max(int(affected or 0), 0), actor_id))
 
 
 def update_breach(society_id: int, breach_id: int, actor_id: int, role: str | None, status: str, intimation_sent: bool) -> None:
@@ -392,7 +393,7 @@ def list_breaches(society_id: int) -> list[dict]:
         if disc is not None and not isinstance(disc, datetime):
             try:
                 disc = datetime.fromisoformat(str(disc).replace("Z", "+00:00"))
-            except Exception:
+            except Exception:  # noqa: BLE001
                 disc = None
         if disc is not None:
             now = datetime.now(timezone.utc)

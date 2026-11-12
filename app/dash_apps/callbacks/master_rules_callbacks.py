@@ -11,10 +11,10 @@ from dash import ALL, Input, Output, State, ctx, no_update
 
 from app.dash_apps.pages.master_rules_page import REGIME, render_rules_sections
 from app.security.audit_context import get_current_user_id, get_current_user_role
-from app.services import regime_rules_admin as rra
-from app.security.guards import require_session
 from app.security.authorization import Cap
+from app.security.guards import require_session
 from app.security.service_guard import require_action
+from app.services import regime_rules_admin as rra
 
 _TOAST = Output("mrl-toast", "children", allow_duplicate=True)
 _BODY = Output("mrl-body", "children", allow_duplicate=True)
@@ -37,7 +37,7 @@ def _run(fn):
         ok, msg = fn(get_current_user_id())
     except PermissionError as exc:
         return _alert(str(exc), "danger"), no_update
-    except Exception as exc:   # surface DB / constraint errors, never a blank page
+    except Exception as exc:   # surface DB / constraint errors, never a blank page  # noqa: BLE001
         return _alert(f"Could not save: {exc}", "danger"), no_update
     return _alert(msg, "success" if ok else "warning"), (render_rules_sections() if ok else no_update)
 
@@ -105,7 +105,8 @@ def register_master_rules_callbacks(app):
             return _alert("Master role required.", "danger")
         ids = [it["id"]["id"] for it in (ctx.states_list[2] or [])]
         items = [{"id": i, "notification_no": a, "source_url": b} for i, t, a, b in zip(ids, sel or [], notif or [], url or []) if t]
-        from app.services import document_signing as ds, instrument_verification as iv
+        from app.services import document_signing as ds
+        from app.services import instrument_verification as iv
         try:
             done = iv.verify_many_as_master(get_current_user_id(), items, opinion, on)
         except ds.SigningRefused as exc:

@@ -13,9 +13,9 @@ Required additions to app_shell.py / the permanent layout:
     dcc.Store(id='fin-stmt-action-store-pdf', storage_type='memory'),
     dcc.Store(id='fin-stmt-action-store-email', storage_type='memory'),
 """
-from dash import Output, Input, State, clientside_callback, no_update
-from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
+from dash import Input, Output, State, clientside_callback
 
+from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
 
 # ──────────────────────────────────────────────────────────────────────────────
 # JS: build body HTML from the data stored in fin-stmt-letterhead-data

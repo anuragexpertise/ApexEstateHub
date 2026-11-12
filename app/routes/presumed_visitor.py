@@ -8,9 +8,10 @@ get_presumed_visitors() query already surfaces these, so no new reader
 is needed there.
 """
 
-from flask import Blueprint, request, jsonify
-from flask_login import current_user, login_required
 import logging
+
+from flask import Blueprint, jsonify, request
+from flask_login import current_user, login_required
 
 from app.services.alert_service import create_walk_in_visitor, get_presumed_visitors
 from app.services.redis_broker import broker
@@ -92,7 +93,7 @@ def create_presumed_visitor():
 
         return jsonify({'success': True, 'visitor_id': visitor_id, 'message': 'Presumed visitor pre-registered'}), 201
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Create presumed visitor error: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -100,7 +101,7 @@ def create_presumed_visitor():
 @presumed_bp.route('/api/owner/presumed-visitors', methods=['GET'])
 @login_required
 def list_presumed_visitors():
-    user_id = int(current_user.get_id())
+    int(current_user.get_id())
     role = getattr(current_user, 'role', '')
     if role != 'apartment':
         return jsonify({'success': False, 'message': 'Only apartment owners can view presumed visitors'}), 403

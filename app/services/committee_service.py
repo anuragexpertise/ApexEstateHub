@@ -27,6 +27,7 @@ from flask import has_request_context
 from app.security.authorization import Cap
 from app.security.service_guard import audit_event
 from app.services.regime_rules_admin import _require_writer
+from app.utils import today_ist
 from database.db_manager import db
 
 # (office_code, label, single_seat, role_definitions.code the seat confers)
@@ -77,9 +78,8 @@ def _invalidate_permission_cache() -> None:
     try:
         from app.security import policy
         policy._invalidate_cache()
-    except Exception:       # a cache that is not there cannot be stale
+    except Exception:       # a cache that is not there cannot be stale  # noqa: BLE001, S110
         pass
-
 
 def _flag_stepup_review(sid: int, actor_id: int) -> None:
     """A core office changed: the step-up password needs review within 7 days. Notify the serving office-bearers and the admin."""
@@ -95,9 +95,8 @@ def _flag_stepup_review(sid: int, actor_id: int) -> None:
                         "VALUES (%s,%s,%s,%s,'push')",
                         (uid, sid, "Step-up password review required",
                          "A core office-bearer (President / Secretary / Treasurer) changed. Replace the step-up password within 7 days."))
-    except Exception:                                    # noqa: BLE001 - the seat change stands even if the alert can't be written
+    except Exception:  # noqa: BLE001, S110
         pass
-
 
 def _audit(cur, action: str, office_id, after: dict) -> None:
     """Append the audit row INSIDE the caller's transaction, so the change and its record commit or roll back together
@@ -233,7 +232,7 @@ def appoint(actor_id, actor_role, society_id, apartment_id, office_code, holder_
     name = (holder_name or "").strip()
     if not name:
         return False, "The office-bearer's name is required."
-    start = _date(term_start) or date.today()
+    start = _date(term_start) or today_ist()
     end = _date(term_end)
     if term_end and end is None:
         return False, "The term end is not a valid date."
@@ -272,14 +271,14 @@ def appoint(actor_id, actor_role, society_id, apartment_id, office_code, holder_
                    {"office": office_code, "apartment_id": aid, "user_id": uid, "term_start": str(start),
                     "term_end": str(end) if end else None, "resolution_ref": ref,
                     "evidence_file": ev_file, "evidence_hash": ev_hash, "role_conferred": role_code})
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return False, _db_message(exc)
     _invalidate_permission_cache()
     if office_code in CORE_OFFICES:
         _flag_stepup_review(sid, actor_id)
     try:                                       # plan v5 stage 2: all three core offices seated with evidence -> 'committee seated'
         db._execute("SELECT fn_mark_committee_seated(%s) AS ok", (sid,), fetch_one=True)
-    except Exception:                          # noqa: BLE001 - the seat is recorded; the state move can be retried
+    except Exception:  # noqa: BLE001, S110
         pass
     powers = "" if uid is not None else (" No login is linked, so this office-bearer cannot sign or approve "
                                          "anything until a flat owner login is chosen.")
@@ -321,7 +320,7 @@ def end_office(actor_id, actor_role, society_id, office_id, reason, actor_societ
                               AND ura.status = 'active'""",
                         (role_code, uid, sid, SOURCE))
             _audit(cur, "committee.end", oid, {"office": office["office_code"], "user_id": uid, "reason": why})
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return False, _db_message(exc)
     _invalidate_permission_cache()
     if office["office_code"] in CORE_OFFICES:
@@ -368,6 +367,6 @@ def update_office(actor_id, actor_role, society_id, office_id, holder_name=None,
                         "WHERE id = %s AND society_id = %s AND status = 'active'", (name, end, ref, em, ph, sg, oid, sid))
             _audit(cur, "committee.update", oid, {"holder_name": name, "term_end": str(end) if end else None,
                                                   "resolution_ref": ref})
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return False, _db_message(exc)
     return True, "Office details updated."

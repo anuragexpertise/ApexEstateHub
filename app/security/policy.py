@@ -43,11 +43,12 @@ moment a write touches user_role_assignments / role_permissions / delegations,
 so a grant/revoke within the same request is visible to the next can() call.
 """
 from __future__ import annotations
-from database.money import D
 
 import logging
 
+from app.utils import now_ist
 from database.db_manager import db
+from database.money import D
 
 log = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ def _invalidate_cache() -> None:
         if has_request_context():
             setattr(g, _INVALIDATE_FLAG, True)
             g.__dict__.pop(_CACHE_ATTR, None)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
 
@@ -116,7 +117,7 @@ def _user_grants(user_id, society_id):
         cache = getattr(g, _CACHE_ATTR, None) if has_request_context() else None
         if cache is not None and (user_id, society_id) in cache:
             return cache[(user_id, society_id)]
-    except Exception:
+    except Exception:  # noqa: BLE001
         cache = None
 
     grants = _query_grants(user_id, society_id)
@@ -287,8 +288,7 @@ def _denial_reason(grants, resource, action, society_id):
 
 
 def _now():
-    from datetime import datetime
-    return datetime.utcnow()
+    return now_ist()
 
 
 def effective_roles(user_id, society_id=None) -> list[dict]:

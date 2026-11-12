@@ -15,7 +15,12 @@ from decimal import Decimal
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
-from app.services.up_aoa_actions import NODUES_ACTIONS, PAY_MODES, S22_STEPS, TRANSFER_TYPES
+from app.services.up_aoa_actions import (
+    NODUES_ACTIONS,
+    PAY_MODES,
+    S22_STEPS,
+    TRANSFER_TYPES,
+)
 
 COLOR = "#7a4f01"
 _STATUS_COLOR = {"done": "#17976e", "overdue": "#c0392b", "due_soon": "#d68910", "upcoming": "#566573",
@@ -90,9 +95,9 @@ def _tax_audit_notice(data: dict):
     word = "has reached" if t["flag"] == "flag" else "is approaching"
     return dbc.Alert([
         html.Strong("Tax audit (Sec. 44AB): ask your CA. "),
-        f"This year's receipts of \u20b9{float(t['total_income']):,.0f} {word} the provisional limit of \u20b9{float(t['threshold']):,.0f} "
+        (f"This year's receipts of \u20b9{float(t['total_income']):,.0f} {word} the provisional limit of \u20b9{float(t['threshold']):,.0f} "
         f"({float(t['pct_of_threshold']):.0f}%). The figure is provisional and unconfirmed, and whether a mutual association's receipts "
-        "count as turnover is for the CA to say.",
+        "count as turnover is for the CA to say."),
     ], id="upc-tax-audit", color="danger" if t["flag"] == "flag" else "warning", style={"fontSize": "12px", "marginTop": "8px", "marginBottom": "0"})
 
 

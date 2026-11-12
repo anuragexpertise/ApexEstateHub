@@ -1,8 +1,9 @@
 # app/dash_apps/drilldown/image_utils.py
-from PIL import Image
+import time
 from io import BytesIO
 from pathlib import Path
-import time
+
+from PIL import Image
 
 MAX_IMAGE_SIZE = 50 * 1024  # 50 KB
 MAX_DIMENSION  = 800
@@ -56,7 +57,7 @@ def cleanup_temp_images(max_age_hours: float = 2.0) -> int:
             if f.stat().st_mtime < cutoff:
                 f.unlink()
                 removed += 1
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
     if removed:
         print(f"🧹 Cleaned {removed} stale temp image(s) from {default_dir}")

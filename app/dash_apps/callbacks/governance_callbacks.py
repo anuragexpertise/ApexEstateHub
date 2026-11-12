@@ -13,7 +13,11 @@ from dash import ALL, Input, Output, State, ctx, no_update
 
 from app.dash_apps.pages import governance_settings as gs
 from app.dash_apps.pages import master_rules_page as mrp
-from app.security.audit_context import get_current_society_id, get_current_user_id, get_current_user_role
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.guards import require_session
 from app.services import regime_rules_admin as rra
 from app.services import rule_params
@@ -45,7 +49,7 @@ def _run(fn, refresh, n_outputs):
         ok, msg = fn(uid, role, sid)
     except PermissionError as exc:
         return (_alert(str(exc), "danger"),) + (no_update,) * n_outputs
-    except Exception as exc:   # surface DB / constraint errors, never a blank page
+    except Exception as exc:   # surface DB / constraint errors, never a blank page  # noqa: BLE001
         return (_alert(f"Could not save: {exc}", "danger"),) + (no_update,) * n_outputs
     toast = _alert(msg, "success" if ok else "warning")
     return (toast,) + (tuple(refresh(sid)) if ok else (no_update,) * n_outputs)
@@ -54,7 +58,7 @@ def _run(fn, refresh, n_outputs):
 def _meeting_options(sid):
     try:
         return [{"label": f"#{m['id']} — {m['type']} ({m['held_on']})", "value": m["id"]} for m in rra.list_meetings(sid)]
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
 
 

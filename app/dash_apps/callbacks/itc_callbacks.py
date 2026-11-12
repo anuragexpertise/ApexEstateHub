@@ -15,6 +15,7 @@ from dash import MATCH, Input, Output, State, ctx, dcc, html, no_update
 from app.security.audit_context import get_current_society_id, get_current_user_id
 from app.security.guards import require_session
 from app.services import itc_reversal_service as itc
+from app.utils import today_ist
 
 _OK, _BAD = {"color": "#17976e"}, {"color": "#b02a37"}
 _MUTED = {"fontSize": "11px", "color": "#888"}
@@ -24,7 +25,7 @@ _FIGURES = (("t", "T  total credit"), ("t1", "T1  non-business only"), ("t2", "T
 
 
 def current_fy(today: date | None = None) -> int:
-    today = today or date.today()
+    today = today or today_ist()
     return today.year if today.month >= 4 else today.year - 1
 
 
@@ -51,7 +52,7 @@ def _confirm_form(st: dict, accounts: list[dict]) -> html.Div:
         dbc.Row([
             dbc.Col(dbc.Input(id="itc-ca-by", type="text", placeholder="CA name and firm", size="sm", value=st.get("by") or ""), md=3),
             dbc.Col(dbc.Input(id="itc-ca-ref", type="text", placeholder="Reference of the confirmation", size="sm", value=st.get("ref") or ""), md=3),
-            dbc.Col(dbc.Input(id="itc-ca-on", type="date", size="sm", value=str(st.get("on_date") or date.today())), md=2),
+            dbc.Col(dbc.Input(id="itc-ca-on", type="date", size="sm", value=str(st.get("on_date") or today_ist())), md=2),
             dbc.Col(dbc.Input(id="itc-ca-pct", type="number", min=0, max=100, step="0.01", size="sm", placeholder="Non-business %",
                               value=float(st.get("nonbusiness_pct") or 0)), md=2),
         ], className="mb-1 mt-1"),

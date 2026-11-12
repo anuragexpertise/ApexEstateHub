@@ -1,12 +1,13 @@
-from database.money import money
 import json
-import os
-from pywebpush import webpush, WebPushException
-from dotenv import load_dotenv
 import logging
+import os
 
-from database.db_manager import db
+from dotenv import load_dotenv
+from pywebpush import WebPushException, webpush
+
 from app.services.redis_broker import notify_kpi_update
+from database.db_manager import db
+from database.money import money
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def _send_fcm(fcm_token, title, body, data=None):
         response = messaging.send(message)
         logger.info(f"FCM sent to {fcm_token}: {response}")
         return True, response
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"FCM send error: {e}")
         return False, str(e)
 
@@ -63,7 +64,7 @@ def save_push_subscription(user_id, subscription_info):
         )
         logger.info(f"Push subscription saved for user {user_id}")
         return True
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Push save error: {e}")
         return False
 
@@ -77,7 +78,7 @@ def get_push_subscriptions(user_id):
             fetch_all=True,
         )
         return rows or []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Push get error: {e}")
         return []
 
@@ -90,7 +91,7 @@ def remove_push_subscription(user_id, endpoint):
             (user_id, endpoint),
         )
         return True
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Push remove error: {e}")
         return False
 
@@ -109,7 +110,7 @@ def _create_notification(user_id, title, body, society_id=None, url=None):
                VALUES (%s, %s, %s, %s, %s, 'push', FALSE, NOW())""",
             (user_id, society_id, title, body, url or '/dashboard/')
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"create_notification error: {e}")
 
 
@@ -166,7 +167,7 @@ def send_push_notification(user_id, title, body, icon=None, url=None, society_id
             last_error = str(e)
             if e.response and e.response.status_code in (404, 410):
                 db._execute("DELETE FROM push_subscriptions WHERE id = %s", (sub["id"],))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Push notification error for user {user_id} sub {sub['id']}: {e}")
             last_error = str(e)
 
@@ -217,7 +218,7 @@ def get_notification_targets(society_id, roles=None, exclude_user_id=None):
             params["exclude_id"] = exclude_user_id
         rows = db._execute(query, params, fetch_all=True) or []
         return [r["id"] for r in rows]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"get_notification_targets error: {e}")
         return []
 
@@ -230,7 +231,7 @@ def send_bulk_push(user_ids, title, body, url=None, society_id=None):
             ok, _ = send_push_notification(uid, title, body, url=url, society_id=society_id)
             sent += 1 if ok else 0
             failed += 0 if ok else 1
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"send_bulk_push error for user {uid}: {e}")
             failed += 1
     return sent, failed
@@ -569,7 +570,6 @@ def notify_channel_created(society_id, channel_name, channel_type, apartment_id=
     Taxi/Visitor: notify the linked apartment owner only.
     """
     notify_kpi_update(society_id, "channels")
-    from app.services.alert_service import get_channel_subscribers
     if channel_type == "school_bus":
         targets = get_notification_targets(society_id, roles=["apartment"])
         if not targets:

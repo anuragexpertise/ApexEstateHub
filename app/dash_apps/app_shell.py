@@ -5,9 +5,8 @@ All dynamic content injected by callbacks.
 
 """
 
-from dash import html, dcc
 import dash_bootstrap_components as dbc
-
+from dash import dcc, html
 
 # ── Login modal body base style ────────────────────────────────────────────
 # Shared with shell_callbacks.py's inject_stage2/back_to_stage1, which swap
@@ -170,9 +169,9 @@ ROLE_CONFIG = {
 
 def _login_modal() -> html.Div:
     from app.dash_apps.pages.login_system import (
-        society_select_layout,
         forgot_password_modal,
         reset_password_modal,
+        society_select_layout,
     )
     return html.Div([
         dbc.Modal(

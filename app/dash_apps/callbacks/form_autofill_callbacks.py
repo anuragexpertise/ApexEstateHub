@@ -35,9 +35,10 @@ NOTE (2026-08, two bugs fixed):
      so its value lives in a {"type":"form-field-hidden",...} component,
      not {"type":"form-field",...} — the Input below is updated to match.
 """
-from dash import Input, Output, State, MATCH, no_update, callback_context
-from app.security.guards import require_session
+from dash import MATCH, Input, Output, State, callback_context, no_update
 
+from app.security.guards import require_session
+from app.utils import today_ist
 
 _APPLIES_TO = {"receipt", "expense"}
 
@@ -69,8 +70,8 @@ def register_form_autofill_callbacks(app):
             return no_update
 
         try:
-            from database.db_manager import db
             from app.security.audit_context import get_current_society_id
+            from database.db_manager import db
             sid = get_current_society_id()
             if not sid:
                 return no_update
@@ -83,9 +84,8 @@ def register_form_autofill_callbacks(app):
             acc_name = (row or {}).get("name")
             if not acc_name:
                 return no_update
-            from datetime import date
-            return f"{acc_name} — {date.today().strftime('%d/%m/%Y')}"
-        except Exception as e:
+            return f"{acc_name} — {today_ist().strftime('%d/%m/%Y')}"
+        except Exception as e:  # noqa: BLE001
             print(f"suggest_particulars error: {e}")
             return no_update
 

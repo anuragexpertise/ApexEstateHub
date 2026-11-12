@@ -13,16 +13,16 @@ society sees both the UP Apartment Act links AND the CBIC/Income Tax links.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+
+from dataclasses import dataclass
 from datetime import date
-from typing import Optional
 
 from database.db_manager import db
 
 
 @dataclass
 class KpiRuleLink:
-    id: Optional[int] = None
+    id: int | None = None
     category: str = "other"
     state: str = "ALL"
     label: str = ""
@@ -30,8 +30,8 @@ class KpiRuleLink:
     description: str = ""
     sort_order: int = 100
     is_active: bool = True
-    effective_from: Optional[date] = None
-    effective_to: Optional[date] = None
+    effective_from: date | None = None
+    effective_to: date | None = None
 
 
 _CATEGORIES = {

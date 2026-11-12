@@ -14,9 +14,9 @@ for the target user or society.
 from __future__ import annotations
 
 import json
-import time
 import logging
 import threading
+import time
 
 from flask import Blueprint, Response, stream_with_context
 from flask_login import current_user

@@ -7,10 +7,10 @@ SIGNING_LEDGER / SECRET_VAULT_KEY, and the tamper statements that must only ever
 """
 from __future__ import annotations
 
-from datetime import date
-
 import dash_bootstrap_components as dbc
 from dash import dcc, html
+
+from app.utils import today_ist
 
 # (key, title, what it proves, extra-input kind)
 CHECKS = (
@@ -84,7 +84,7 @@ def render_result(res: dict | None):
 def _card(key, title, blurb, extra):
     controls = []
     if extra == "day":
-        controls.append(dcc.DatePickerSingle(id="aud-day", date=date.today(), display_format="DD MMM YYYY",
+        controls.append(dcc.DatePickerSingle(id="aud-day", date=today_ist(), display_format="DD MMM YYYY",
                                              className="me-2"))
     elif extra == "acc":
         controls.append(dbc.Input(id="aud-acc", type="number", min=1, step=1, placeholder="account id",
@@ -110,7 +110,7 @@ def _stored_runs_table(sid):
         rows = audit_runs.latest(sid, 18)
         body = [html.Tr([html.Td(str(r["run_at"])[:16]), html.Td(r["check_key"]), html.Td(r["status"]),
                          html.Td(audit_runs.verify_run(r["id"], sid)["status"])]) for r in rows]
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return html.Div(f"Stored results unavailable: {exc}", style={"fontSize": "12px", "color": "#b02a37"})
     if not body:
         return html.Div("No stored results yet.", style={"fontSize": "12px", "color": "#888", "marginTop": "6px"})
@@ -124,7 +124,7 @@ def _instrument_verify_card():
         from database.db_manager import db
         rows = db._execute("SELECT id, title, enactment_year, verification FROM legal_instrument_catalog ORDER BY (verification='verified'), display_order, title",
                            fetch_all=True) or []
-    except Exception:
+    except Exception:  # noqa: BLE001
         rows = []
     opts = [{"label": f"{r['title']} ({r['enactment_year'] or 'n/a'}) - {r['verification']}", "value": r["id"]} for r in rows]
     return dbc.Card(dbc.CardBody([
@@ -145,9 +145,9 @@ def render_auditor_body(sid, color: str, page_title) -> html.Div:
     return html.Div([
         page_title("fa-search", color, "Auditor Portal", "Read-only verification of this society's books"),
         dbc.Alert([html.Strong("Verify it yourself. "),
-                   "You do not have to take any of this on trust. Every check below is a read-only query against the "
+                   ("You do not have to take any of this on trust. Every check below is a read-only query against the "
                    "society's own data. Findings, disagreements with our reading of a provision, and corrections are "
-                   "welcome; the rules are data so they can be fixed without a redeploy."],
+                   "welcome; the rules are data so they can be fixed without a redeploy.")],
                   color="light", style={"fontSize": "13px"}),
         html.Div(dbc.Button([html.I(className="fas fa-play me-2"), "Run all checks"], id="aud-run-all",
                             color="danger", size="sm"), className="mb-3"),

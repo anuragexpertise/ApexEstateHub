@@ -115,7 +115,7 @@ def _log_export(entity: str, sid: int, fy, scope: dict) -> None:
     try:
         uid = get_current_user_id()
         role = get_current_user_role()
-    except Exception:                                                   # pragma: no cover - outside a request
+    except Exception:                                                   # pragma: no cover - outside a request  # noqa: BLE001
         return
     if not uid or not sid:
         return
@@ -135,13 +135,13 @@ def _log_export(entity: str, sid: int, fy, scope: dict) -> None:
         rows = scope.get("_export_rows")
         if rows is not None:
             row_count = len(rows)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     watermark = None
     try:
         me = db._execute("SELECT name FROM users WHERE id=%s", (uid,), fetch_one=True)
         watermark = (me or {}).get("name")
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     try:
         db._execute(
@@ -150,13 +150,13 @@ def _log_export(entity: str, sid: int, fy, scope: dict) -> None:
                VALUES (%s,%s,%s,%s::jsonb,%s,%s,%s)""",
             (sid, uid, export_kind, json.dumps(scope or {}), int(row_count or 0),
              watermark if is_adviser else None, is_adviser))
-    except Exception:                                                   # noqa: BLE001 - an export log outage must not block the export
+    except Exception:
         log.exception("export_log write failed for society %s kind %s", sid, export_kind)
 
 
 def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) -> dict:
     """Return extra filter dict for time-relative KPIs."""
-    today = dt_date.today()
+    today = dt_date.today()  # noqa: DTZ011
     
     if card_id == "kpi_receipts_month":
         # This month: 1st to today
@@ -173,7 +173,7 @@ def _compute_dynamic_filter(card_id: str, static_filter: dict, society_id: int) 
     
     if card_id == "kpi_receipts_last_30_days":
         return {
-            "date_from": (today - relativedelta(days=30)).isoformat(),
+            "date_from": (today - relativedelta(days=30)).isoformat(),  # noqa: F823
             "date_to": today.isoformat(),
         }
     
@@ -208,7 +208,6 @@ import app.services.push_service as PushService
 from app.dash_apps.callbacks.card_catalogue_callbacks import invalidate_kpi_cache
 from app.dash_apps.drilldown import loaders, renderers
 from app.dash_apps.drilldown import state as nav_state
-from app.security.audit_context import get_current_user_id
 
 DB_ERROR_KEYWORDS = [
     "no database connection",
@@ -249,6 +248,7 @@ def _has_any_image(form_data: dict) -> bool:
 from app.dash_apps.drilldown.schema_introspect import (
     get_entity_meta,
 )
+from app.utils import now_ist, today_ist
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SERVER-SIDE PERMISSION GUARDS
@@ -294,14 +294,14 @@ def _handle_list_delete(entity, pk, sid, store, auth):
         )
     try:
         ok, msg = loaders.delete_entity(entity, pk, sid)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         ok, msg = False, error_toast(e, "Unable to delete this record.")["message"]
     if ok:
         invalidate_kpi_cache()
     store["refresh"] = True
     try:
         content, bc, db_err = _render_current(store, auth)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         content, bc, db_err = _empty_state(error_toast(e, "Unable to refresh this view.")["message"]), [], error_toast(e, "Unable to refresh this view.")["message"]
     store["refresh"] = False
     hide_kpis = len(store.get("stack", [])) > 1
@@ -338,14 +338,14 @@ def _handle_list_confirm(entity, pk, sid, store, auth):
         # session exists yet (see app/security/audit_context.py).
         user_id = get_current_user_id()
         ok, msg = loaders.verify_receipt(int(pk), confirmed_by=user_id)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         ok, msg = False, error_toast(e, "Unable to confirm this record.")["message"]
     if ok:
         invalidate_kpi_cache()
     store["refresh"] = True
     try:
         content, bc, db_err = _render_current(store, auth)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         content, bc, db_err = _empty_state(error_toast(e, "Unable to refresh this view.")["message"]), [], error_toast(e, "Unable to refresh this view.")["message"]
     store["refresh"] = False
     hide_kpis = len(store.get("stack", [])) > 1
@@ -381,14 +381,14 @@ def _handle_list_confirm_bill_group(entity, bg_id, sid, store, auth):
     try:
         user_id = get_current_user_id()
         ok, msg, receipt_id = loaders.verify_receivable_bill_group(str(bg_id), confirmed_by=user_id)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         ok, msg, receipt_id = False, error_toast(e, "Unable to confirm this bill group.")["message"], None
     if ok:
         invalidate_kpi_cache()
     store["refresh"] = True
     try:
         content, bc, db_err = _render_current(store, auth)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         content, bc, db_err = _empty_state(error_toast(e, "Unable to refresh this view.")["message"]), [], error_toast(e, "Unable to refresh this view.")["message"]
     store["refresh"] = False
     hide_kpis = len(store.get("stack", [])) > 1
@@ -427,14 +427,14 @@ def _handle_list_reject_bill_group(entity, bg_id, sid, store, auth):
     try:
         user_id = get_current_user_id()
         ok, msg = loaders.reject_receivable_bill_group(str(bg_id), confirmed_by=user_id)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         ok, msg = False, error_toast(e, "Unable to reject this bill group.")["message"]
     if ok:
         invalidate_kpi_cache()
     store["refresh"] = True
     try:
         content, bc, db_err = _render_current(store, auth)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         content, bc, db_err = _empty_state(error_toast(e, "Unable to refresh this view.")["message"]), [], error_toast(e, "Unable to refresh this view.")["message"]
     store["refresh"] = False
     hide_kpis = len(store.get("stack", [])) > 1
@@ -466,7 +466,7 @@ def _fund_bank_mapping_options(sid) -> list[dict]:
             _bank_account_options_for_mapping,
         )
         return _bank_account_options_for_mapping(sid)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
 
 
@@ -497,7 +497,7 @@ def _save_captured_image(decoded: bytes, entity: str, field_name: str, society_i
     try:
         from app.dash_apps.drilldown.image_utils import cleanup_temp_images
         cleanup_temp_images(max_age_hours=2.0)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
     if society_id:
@@ -512,7 +512,7 @@ def _save_captured_image(decoded: bytes, entity: str, field_name: str, society_i
         return (html.Small("✗ Could not compress image below 50 KB",
                             style={"color": "red"}), None)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = now_ist().strftime("%Y%m%d_%H%M%S")
     safe_filename = f"{field_name}_{timestamp}.webp"   # built AFTER compression, always webp
     file_path = target_dir / safe_filename
     with open(file_path, "wb") as f:
@@ -556,14 +556,14 @@ def register_drilldown_callbacks(app):
             entity = field_id.get("entity") if isinstance(field_id, dict) else None
             field_name = field_id.get("field", "image")
 
-            content_type, content_string = contents.split(",")
+            _content_type, content_string = contents.split(",")
             decoded = base64.b64decode(content_string)
 
             preview, safe_filename = _save_captured_image(decoded, entity, field_name, society_id, filename)
             if safe_filename is None:
                 return preview, no_update
             return preview, safe_filename
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return html.Small(f"✗ {error_toast(e, 'Unable to process this image.')['message']}", style={"color": "red"}), no_update
 
     # ── 0c. Registration certificate upload (master society creation) ──────────
@@ -610,14 +610,14 @@ def register_drilldown_callbacks(app):
             entity = field_id.get("entity") if isinstance(field_id, dict) else None
             field_name = field_id.get("field", "image")
 
-            content_type, content_string = hidden_value.split(",", 1)
+            _content_type, content_string = hidden_value.split(",", 1)
             decoded = base64.b64decode(content_string)
 
             preview, safe_filename = _save_captured_image(decoded, entity, field_name, society_id, "Camera capture")
             if safe_filename is None:
                 return preview, no_update
             return preview, safe_filename
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return html.Small(f"✗ {error_toast(e, 'Unable to process this image.')['message']}", style={"color": "red"}), no_update
     # ── 1. MAIN ROUTER ────────────────────────────────────────────────────────
     @app.callback(
@@ -684,7 +684,7 @@ def register_drilldown_callbacks(app):
 
         try:
             id_dict = json.loads(trig["prop_id"].split(".")[0])
-        except Exception:
+        except Exception:  # noqa: BLE001
             return no_update, no_update, no_update, no_update, no_update
 
         trig_type = id_dict.get("type", "")
@@ -966,7 +966,7 @@ def register_drilldown_callbacks(app):
                 entity_name = record.get("owner_name") or record.get("name") or record.get("location_name") or entity
 
                 qr_entity_id = pk
-                if entity_singular in ("apartment", "vendor", "security", "patrol_location"):
+                if entity_singular in ("apartment", "vendor", "security", "patrol_location"):  # noqa: SIM102
                     if not qr_entity_id:
                         return no_update, no_update, no_update, no_update, no_update
 
@@ -1075,7 +1075,7 @@ def register_drilldown_callbacks(app):
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).exception(
-                            "notify_concern_declined failed (concern_id=%s): %s", pk, e,
+                            "notify_concern_declined failed (concern_id=%s): %s", pk, e,  # noqa: TRY401
                         )
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -1109,7 +1109,7 @@ def register_drilldown_callbacks(app):
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).exception(
-                            "notify_concern_accepted failed (concern_id=%s): %s", pk, e,
+                            "notify_concern_accepted failed (concern_id=%s): %s", pk, e,  # noqa: TRY401
                         )
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -1146,7 +1146,7 @@ def register_drilldown_callbacks(app):
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).exception(
-                            "notify_concern_declined_by_admin failed (concern_id=%s): %s", pk, e,
+                            "notify_concern_declined_by_admin failed (concern_id=%s): %s", pk, e,  # noqa: TRY401
                         )
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -1183,7 +1183,7 @@ def register_drilldown_callbacks(app):
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).exception(
-                            "notify_concern_resolved_by_admin failed (concern_id=%s): %s", pk, e,
+                            "notify_concern_resolved_by_admin failed (concern_id=%s): %s", pk, e,  # noqa: TRY401
                         )
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -1239,7 +1239,7 @@ def register_drilldown_callbacks(app):
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).exception(
-                            "notify_concern_resolved failed (concern_id=%s): %s", pk, e,
+                            "notify_concern_resolved failed (concern_id=%s): %s", pk, e,  # noqa: TRY401
                         )
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -1269,7 +1269,7 @@ def register_drilldown_callbacks(app):
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).exception(
-                            "notify_poll_closed failed (poll_id=%s): %s", pk, e,
+                            "notify_poll_closed failed (poll_id=%s): %s", pk, e,  # noqa: TRY401
                         )
                 invalidate_kpi_cache()
                 store["refresh"] = True
@@ -1311,7 +1311,7 @@ def register_drilldown_callbacks(app):
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).exception(
-                            "notify_poll_results_declared failed (poll_id=%s): %s", pk, e,
+                            "notify_poll_results_declared failed (poll_id=%s): %s", pk, e,  # noqa: TRY401
                         )
                 invalidate_kpi_cache()
                 store["refresh"] = True
@@ -1353,7 +1353,7 @@ def register_drilldown_callbacks(app):
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).exception(
-                            "notify_concern_closed failed (concern_id=%s): %s", pk, e,
+                            "notify_concern_closed failed (concern_id=%s): %s", pk, e,  # noqa: TRY401
                         )
                 store["refresh"] = True
                 toast = {"_toast": {"type": "success" if ok else "error", "message": msg}}
@@ -1732,7 +1732,7 @@ def register_drilldown_callbacks(app):
                     content, bc, db_err = _render_current(store, auth)
                     kpi_style = {"display": "none"}
                     return store, content, bc, kpi_style, toast
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     toast = {"_toast": error_toast(e, "Unable to trigger this alert.")}
                     return store, content, bc, {"display": "none"}, toast
 
@@ -1887,17 +1887,16 @@ def register_drilldown_callbacks(app):
                 or "expense" in target
                 or "transaction" in target
                 or "cashbook" in target
-            ):
-                if not prefill.get("entity_id"):
-                    for fk, etype in (
-                        ("apartment_id", "apartment"),
-                        ("vendor_id", "vendor"),
-                        ("security_id", "security"),
-                    ):
-                        if cur_filters.get(fk):
-                            prefill["entity_id"] = cur_filters.get(fk)
-                            prefill["role"] = etype
-                            break
+            ) and not prefill.get("entity_id"):
+                for fk, etype in (
+                    ("apartment_id", "apartment"),
+                    ("vendor_id", "vendor"),
+                    ("security_id", "security"),
+                ):
+                    if cur_filters.get(fk):
+                        prefill["entity_id"] = cur_filters.get(fk)
+                        prefill["role"] = etype
+                        break
 
             store = nav_state.navigate_to(
                 store,
@@ -1973,7 +1972,7 @@ def register_drilldown_callbacks(app):
             store = nav_state.navigate_to(store, "list_receipts", "Receipts", filters=filters)
 
         hide_kpis = len(store.get("stack", [])) > 1
-        content, bc, db_err = _render_current(store, auth)
+        content, bc, _db_err = _render_current(store, auth)
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
         return store, content, bc, kpi_style
 
@@ -2003,7 +2002,7 @@ def register_drilldown_callbacks(app):
         trig = ctx.triggered[0]
         try:
             id_dict = json.loads(trig["prop_id"].split(".")[0])
-        except Exception:
+        except Exception:  # noqa: BLE001
             return no_update, no_update, no_update, no_update, no_update
 
         entity_singular = _resolve_entity_singular(id_dict)
@@ -2087,7 +2086,7 @@ def register_drilldown_callbacks(app):
         for key, val in ctx.states.items():
             try:
                 k_dict = json.loads(key.split(".")[0])
-            except Exception:
+            except Exception:  # noqa: BLE001, S112
                 continue
             if k_dict.get("type") not in ("form-field", "form-field-date"):
                 continue
@@ -2110,7 +2109,7 @@ def register_drilldown_callbacks(app):
         for key, val in ctx.states.items():
             try:
                 k_dict = json.loads(key.split(".")[0])
-            except Exception:
+            except Exception:  # noqa: BLE001, S112
                 continue
             if k_dict.get("type") != "form-field-hidden":
                 continue
@@ -2148,11 +2147,11 @@ def register_drilldown_callbacks(app):
                     else:
                         _dir = (ASSETS_ROOT / "default") / entity_singular
                     _dir.mkdir(parents=True, exist_ok=True)
-                    _fname = f"{field}_cam_{datetime.now().strftime('%Y%m%d_%H%M%S')}.webp"
+                    _fname = f"{field}_cam_{now_ist().strftime('%Y%m%d_%H%M%S')}.webp"
                     with open(_dir / _fname, "wb") as _f:
                         _f.write(_webp_bytes)
                     form_data[field] = _fname
-                except Exception as _cam_err:
+                except Exception as _cam_err:  # noqa: BLE001
                     print(f"⚠️  Camera image save error [{field}]: {_cam_err}")
                     del form_data[field]
         # ── 5. Merge with prefill from store ──────────────────────────────────
@@ -2255,8 +2254,8 @@ def register_drilldown_callbacks(app):
                             cert = d
                             break
                     if cert:
-                        from app.services.paper_evidence import decode_upload
                         from app.services import onboarding_service as obsvc
+                        from app.services.paper_evidence import decode_upload
                         raw = decode_upload(cert["contents"])
                         if raw:
                             ev = obsvc.store_evidence_file(
@@ -2271,7 +2270,7 @@ def register_drilldown_callbacks(app):
                                    WHERE id=%s""",
                                 (cert.get("filename") or "registration_certificate.pdf", ev["sha256"], nsid),
                             )
-                except Exception as _ev_exc:  # noqa: BLE001
+                except Exception as _ev_exc:
                     log.exception("could not store registration certificate evidence for society %s", nsid)
                     # Non-fatal: society is created; the certificate can still be uploaded in the onboarding hub.
 
@@ -2291,7 +2290,7 @@ def register_drilldown_callbacks(app):
                 return (store, no_update, no_update,
                         {"type": "error", "message": str(e)},
                         no_update)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 return (store, no_update, no_update,
                         error_toast(e, "Unable to create the society. Please try again."),
                         no_update)
@@ -2314,7 +2313,7 @@ def register_drilldown_callbacks(app):
         if entity_singular in ("receipt", "expense") and "edit" not in card_id:
             _date_field = "receipt_date" if entity_singular == "receipt" else "expense_date"
             if not merged.get(_date_field):
-                merged[_date_field] = datetime.today().strftime("%Y-%m-%d")
+                merged[_date_field] = now_ist().strftime("%Y-%m-%d")
 
             # Default account = first Cr/Dr account named 'Society Charges'
             if not merged.get("acc_id") and sid:
@@ -2328,7 +2327,7 @@ def register_drilldown_callbacks(app):
                             (sid, _drcr),
                             fetch_one=True,
                         )
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         _acc = None
                 if _acc:
                     merged["acc_id"] = _acc["id"]
@@ -2375,7 +2374,7 @@ def register_drilldown_callbacks(app):
                         {"type": "error", "message": f"Society plan '{soc_plan}' limit reached ({limit} apartments). Cannot add more."},
                         no_update,
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"⚠️  Error checking apartment limit: {e}")
 
         # ── 7. Call the appropriate save handler ──────────────────────────────
@@ -2510,7 +2509,7 @@ def register_drilldown_callbacks(app):
         filters["society_id"] = get_current_society_id()
         filters = _apply_portal_filters(filters, auth or {})
         xlsx_bytes = loaders.export_xlsx(entity, filters)
-        return dcc.send_bytes(xlsx_bytes, filename=f"{entity}_{dt_date.today()}.xlsx")
+        return dcc.send_bytes(xlsx_bytes, filename=f"{entity}_{dt_date.today()}.xlsx")  # noqa: DTZ011
 
     # ── 3a. EXPENSE-FORM TDS AUTOFILL (Phase 4.3) ─────────────────────────────
     # When the account (acc_id) or the linked entity (entity_id) drill-in
@@ -2674,7 +2673,7 @@ def register_drilldown_callbacks(app):
             except (TypeError, ValueError):
                 pass
         from datetime import date as _date
-        month = _date.today().month
+        month = _date.today().month  # noqa: DTZ011
         # FY runs Apr-Mar: Q1=Apr-Jun, Q2=Jul-Sep, Q3=Oct-Dec, Q4=Jan-Mar.
         return ((month - 4) % 12) // 3 + 1
 
@@ -2849,11 +2848,11 @@ def register_drilldown_callbacks(app):
             return no_update
         df = pd.DataFrame(rows)
         try:
-            uid = get_current_user_id()
+            get_current_user_id()
             role = get_current_user_role()
             is_adviser = role in ("auditor", "adviser", "accountant")
-        except Exception:
-            uid, is_adviser = None, False
+        except Exception:  # noqa: BLE001
+            _uid, is_adviser = None, False
         if is_adviser:
             for col in ("owner_name", "name", "holder_name", "contact_name", "email", "mobile", "phone"):
                 if col in df.columns:
@@ -2865,10 +2864,10 @@ def register_drilldown_callbacks(app):
         try:
             _log_export(entity, sid, None, {"entity": entity, "filters": dict(filters or {}),
                                             "_export_rows": df})
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
         return dcc.send_bytes(
-            output.getvalue(), filename=f"{entity}_{dt_date.today()}.xlsx"
+            output.getvalue(), filename=f"{entity}_{dt_date.today()}.xlsx"  # noqa: DTZ011
         )
 
     # ── RCM: Mark GSTR Filed ────────────────────────────────────
@@ -2886,7 +2885,7 @@ def register_drilldown_callbacks(app):
         if not sid:
             return no_update
         import datetime
-        today = datetime.date.today()
+        today = datetime.today_ist()
         month_start = today.replace(day=1)
         month_end = (month_start + datetime.timedelta(days=32)).replace(day=1) - datetime.timedelta(days=1)
         db._execute(
@@ -2963,7 +2962,7 @@ def register_drilldown_callbacks(app):
             parsed = json.loads(prop_id)
             poll_id = int(parsed["poll_id"])
             choice = int(parsed["choice"])
-        except Exception:
+        except Exception:  # noqa: BLE001
             return no_update, no_update, no_update, no_update
 
         if store is None:
@@ -2981,7 +2980,7 @@ def register_drilldown_callbacks(app):
         _decision, _ = _authz_res(_Cap.POLL_VOTE, "poll", "polls", poll_id,
                                   extra={"voter_unit_id": _linked()})
         if _blocks(_decision):
-            content, bc, db_err = _render_current(store, auth)
+            content, bc, db_err = _render_current(store, auth)  # noqa: RUF059
             banner = dbc.Alert(
                 [html.I(className="fas fa-lock me-2"), "You are not eligible to vote on this poll."],
                 color="warning",
@@ -3012,10 +3011,10 @@ def register_drilldown_callbacks(app):
                 banner_color, banner_icon, banner_text = "warning", "fa-exclamation-triangle", msg
         except Exception as e:
             import logging
-            logging.getLogger(__name__).exception(f"Poll vote failed (poll_id={poll_id}): {e}")
+            logging.getLogger(__name__).exception(f"Poll vote failed (poll_id={poll_id}): {e}")  # noqa: TRY401
             banner_color, banner_icon, banner_text = "danger", "fa-exclamation-circle", "Something went wrong recording your vote. Please try again."
 
-        content, bc, db_err = _render_current(store, auth)
+        content, bc, _db_err = _render_current(store, auth)
         banner = dbc.Alert(
             [html.I(className=f"fas {banner_icon} me-2"), banner_text],
             color=banner_color,
@@ -3052,7 +3051,7 @@ def _render_current(store: dict, auth: dict) -> tuple:
         content = _render_card(active, filters, prefill, store, auth)
         breadcrumb = renderers.render_breadcrumb(store.get("stack", []))
         return content, breadcrumb, None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         error_str = str(e).lower()
         friendly = error_toast(e, "Unable to load this view.")["message"]
         if any(kw in error_str for kw in DB_ERROR_KEYWORDS):
@@ -3106,7 +3105,7 @@ def _render_card(
     # so the loader's WHERE id=%s returns the single row they're allowed to see.
     # Every other role (apartment/vendor/security) must be blocked — they have no
     # business viewing the societies list at all.
-    if card_id.startswith("list_societies"):
+    if card_id.startswith("list_societies"):  # noqa: SIM102
         if get_current_user_role() not in ("master", "admin"):
             return html.Div(
                 "Access denied — only master admin can view societies",
@@ -3252,7 +3251,7 @@ def _render_card(
                 rev = sort.get("direction", "asc") == "desc"
                 try:
                     rows = sorted(rows, key=lambda x: _sort_key(x, col), reverse=rev)
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
             # The filtered/sorted set size is now the authoritative total.
@@ -3412,7 +3411,7 @@ def _render_card(
                     lock_state = fy_lock_service.get_lock_state(sid_val, selected_fy)
                     can_lock = _sg.check(_LockCap.FINANCE_PERIOD_CLOSE, "fy_lock", target_society_id=sid_val,
                                          audit_denials=False).allowed
-                except Exception:  # noqa: BLE001 - the panel is optional; the card must still render
+                except Exception:
                     import logging as _lg
                     _lg.getLogger(__name__).exception("FY lock panel unavailable")
             return renderers.render_fy_closing_card(
@@ -3442,9 +3441,9 @@ def _render_card(
             fy_options = loaders.get_available_financial_years(sid_val) if sid_val else []
             selected_fy = prefill.get("fy") or (fy_options[-1] if fy_options else None)
 
-            holdings_rows, holdings_err = (loaders.get_asset_holdings_fy(sid_val, selected_fy)
+            holdings_rows, _holdings_err = (loaders.get_asset_holdings_fy(sid_val, selected_fy)
                                            if sid_val else ([], "Society not resolved"))
-            deposits_rows, deposits_err = (loaders.get_deposit_holdings_fy(sid_val, selected_fy)
+            deposits_rows, _deposits_err = (loaders.get_deposit_holdings_fy(sid_val, selected_fy)
                                            if sid_val else ([], "Society not resolved"))
             dep_rows, dep_err = (loaders.get_depreciation_account_fy(sid_val, selected_fy)
                                    if sid_val and selected_fy else ([], "Society not resolved"))
@@ -3595,7 +3594,7 @@ def _render_card(
                          GROUP BY bill_group_id
                          ORDER BY MIN(period_month) ASC
                     """, (sid_val, apt_id), fetch_all=True) or []
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     print(f"Error fetching bill groups: {e}")
                     
             return renderers.render_pay_dues_card(
@@ -3647,7 +3646,7 @@ def _render_card(
                         "1mth": D(row.get("vendor_1mth") or 0),
                         "free_1mth": 0.0,
                     }
-                except Exception as _e:
+                except Exception as _e:  # noqa: BLE001
                     print(f"⚠️  vendor pass rates: {_e}")
             return renderers.render_vendor_pass_card(
                 user_id=vendor_user_id,
@@ -3786,7 +3785,7 @@ def _render_card(
             if eligible and apt_id and sid_val:
                 try:
                     noc_record = _get_or_create_active_noc(db, sid_val, apt_id)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     print(f"⚠️  NOC issuance failed: {e}")
             return renderers.render_noc_card(
                 apt=apt,
@@ -3834,7 +3833,7 @@ def _render_card(
                         "SELECT id, flat_number FROM apartments WHERE society_id=%s ORDER BY flat_number",
                         (sid_val,), fetch_all=True,
                     ) or []
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
             return renderers.render_form_channel_new(
                 society_id=sid_val,
@@ -3967,7 +3966,7 @@ def _move_temp_images(entity, new_id, society_id, form_data):
     else:
         final_dir = ASSETS_ROOT / str(society_id) / f"{entity}_{new_id}"
     final_dir.mkdir(parents=True, exist_ok=True)
-    for field, filename in form_data.items():
+    for filename in form_data.values():
         if isinstance(filename, str) and "/" not in filename and "." in filename:
             src = temp_dir / filename
             if src.exists():
@@ -3995,7 +3994,7 @@ def _build_receipt_prefill(
     p = dict(prefill)
 
     # ── Date default ─────────────────────────────────────────────────────────
-    p.setdefault("trx_date", _date.today().isoformat())
+    p.setdefault("trx_date", _date.today().isoformat())  # noqa: DTZ011
 
     # ── Find the right income account ────────────────────────────────────────
     acc = None
@@ -4092,7 +4091,7 @@ def _save_entity(entity, card_id, data):
             return _save_patrol_location(db, data, sid, is_edit, pk)
         # ────────────────────────────────────────────────────────────────
         return False, f"No save handler for '{entity}'", None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, _clean_pg_error(e), None
 
 def _save_patrol_location(db, data, sid, is_edit, pk):
@@ -4161,7 +4160,7 @@ def _notify_receipt_saved(db, sid, d, amt, particulars, use_pending):
             PushService.notify_payment_received(payer_user_id, amt, particulars)
         if use_pending:
             PushService.notify_admin_payment_recorded(sid, amt, particulars, exclude_user_id=d.get("user_id"))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  payment push notify failed: {e}")
 
 
@@ -4196,13 +4195,13 @@ def _save_receipt_v3(db, d, sid):
     except (ValueError, TypeError):
         return False, "Invalid entity ID", None
 
-    receipt_date = d.get("receipt_date") or dt_date.today().isoformat()
+    receipt_date = d.get("receipt_date") or dt_date.today().isoformat()  # noqa: DTZ011
     try:
         soc_info = db._execute("SELECT calc_start_date FROM societies WHERE id = %s", (sid,), fetch_one=True)
-        if soc_info and soc_info.get("calc_start_date"):
+        if soc_info and soc_info.get("calc_start_date"):  # noqa: SIM102
             if receipt_date < str(soc_info["calc_start_date"]):
                 return False, f"Receipt date cannot be earlier than {soc_info['calc_start_date']}", None
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
     try:
@@ -4236,7 +4235,7 @@ def _save_receipt_v3(db, d, sid):
         if cash_warning:
             msg += f" ⚠️ {cash_warning}"
         return True, msg, receipt_id
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, _clean_pg_error(e), None
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -4350,19 +4349,19 @@ def _save_expense_v3(db, d, sid):
     if tds_sug["is_capital"] and dep["is_depreciable"] and not d.get("depreciation_confirmed"):
         return (
             False,
-            f"This expense is CAPITAL (Balance-Sheet asset) against a depreciable "
+            (f"This expense is CAPITAL (Balance-Sheet asset) against a depreciable "
             f"account ({dep['depreciation_percent']}% depreciation). Confirm the "
-            f"depreciation rate before saving so the asset isn't left under-depreciated.",
+            f"depreciation rate before saving so the asset isn't left under-depreciated."),
             None,
         )
 
-    expense_date = d.get("expense_date") or dt_date.today().isoformat()
+    expense_date = d.get("expense_date") or dt_date.today().isoformat()  # noqa: DTZ011
     try:
         soc_info = db._execute("SELECT calc_start_date FROM societies WHERE id = %s", (sid,), fetch_one=True)
-        if soc_info and soc_info.get("calc_start_date"):
+        if soc_info and soc_info.get("calc_start_date"):  # noqa: SIM102
             if expense_date < str(soc_info["calc_start_date"]):
                 return False, f"Expense date cannot be earlier than {soc_info['calc_start_date']}", None
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
     try:
@@ -4405,7 +4404,7 @@ def _save_expense_v3(db, d, sid):
                 tds_sug.get("tds_discriminator"), expense_date)
             msg += " ⚠️ No TDS rate is configured for this section; no TDS was deducted. Flagged for the CA."
         return True, msg, expense_id
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, _clean_pg_error(e), None
 
 
@@ -4497,7 +4496,7 @@ def _save_pay_dues(db, d, sid):
             if ok and receipt_id:
                 msg = f"{msg} [[receipt:{receipt_id}]]"
             return ok, msg, None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return False, error_toast(e, "Unable to record this payment. Please try again.")["message"], None
 
     ok, msg, result = loaders.pay_apartment_dues_fifo(
@@ -4517,7 +4516,7 @@ def _save_pay_dues(db, d, sid):
             )
             if payer_user:
                 PushService.notify_payment_received(payer_user["id"], amt, d.get("particulars"))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"⚠️  notify_payment_received (pay_dues) failed: {e}")
     return ok, msg, trx_id
 
@@ -4528,7 +4527,7 @@ def _save_pay_due_bg(db, d, sid):
     amt = d.get("amount")
     if not amt: return False, "Amount is required", None
     try: amt = D(amt)
-    except: return False, "Invalid amount", None
+    except: return False, "Invalid amount", None  # noqa: E722
 
     mode = d.get("mode", "cash")
     ref = d.get("reference") or ""
@@ -4540,7 +4539,7 @@ def _save_pay_due_bg(db, d, sid):
             ref = (ref + " — " if ref else "") + " / ".join(ref_bits)
     user_id = d.get("user_id")
     try: user_id = int(user_id) if user_id else None
-    except: user_id = None
+    except: user_id = None  # noqa: E722
 
     actor_role = None
     if user_id:
@@ -4570,7 +4569,7 @@ def _save_pay_due_bg(db, d, sid):
         if msg.startswith("Success"):
             return True, msg, None
         return False, msg, None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, error_toast(e, "Unable to process this payment. Please try again.")["message"], None
 
 def _save_pay_due_selective(db, d, sid):
@@ -4583,7 +4582,7 @@ def _save_pay_due_selective(db, d, sid):
     try:
         rec_ids = [int(x.strip()) for x in rec_ids_raw.split(",") if x.strip()]
         if not rec_ids: raise ValueError
-    except:
+    except:  # noqa: E722
         return False, "Invalid receivable IDs (must be comma separated integers)", None
 
     amt = d.get("amount")
@@ -4591,7 +4590,7 @@ def _save_pay_due_selective(db, d, sid):
     try:
         amt = D(amt)
         if amt <= 0: return False, "Amount must be > 0", None
-    except:
+    except:  # noqa: E722
         return False, "Invalid amount", None
 
     mode = d.get("mode", "cash")
@@ -4605,7 +4604,7 @@ def _save_pay_due_selective(db, d, sid):
             
     user_id = d.get("user_id")
     try: user_id = int(user_id) if user_id else None
-    except: user_id = None
+    except: user_id = None  # noqa: E722
 
     actor_role = None
     if user_id:
@@ -4619,7 +4618,7 @@ def _save_pay_due_selective(db, d, sid):
                 (apt_id, amt, rec_ids, mode, user_id, ref), fetch_one=True
             )
             return True, f"Success: Selective payment posted — transaction #{res['transaction_id']}", res['transaction_id']
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return False, error_toast(e, "Unable to process this payment. Please try again.")["message"], None
 
     # Owner self-reporting
@@ -4629,7 +4628,7 @@ def _save_pay_due_selective(db, d, sid):
             (apt_id, amt, rec_ids, mode, user_id, d.get("cheque_no"), d.get("transaction_id")), fetch_one=True
         )
         return True, f"Success: Payment reported (pending confirmation) [[receipt:{res['receipt_id']}]]", None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, error_toast(e, "Unable to process this payment. Please try again.")["message"], None
 
 def _save_verify_receivable_amt(db, d, sid):
@@ -4679,11 +4678,11 @@ def _save_reject_receivable_amt(db, d, sid):
     
     penalty = d.get("penalty_amount")
     try: penalty = D(penalty) if penalty else 0
-    except: penalty = 0
+    except: penalty = 0  # noqa: E722
     
     confirmed_by = d.get("user_id")
     try: confirmed_by = int(confirmed_by) if confirmed_by else None
-    except: confirmed_by = None
+    except: confirmed_by = None  # noqa: E722
     
     is_uuid = "-" in str(p_id)
     p_type = 'bill_group' if is_uuid else 'receipt'
@@ -4696,7 +4695,7 @@ def _save_reject_receivable_amt(db, d, sid):
         msg = res["msg"] if res else "Unknown error"
         if msg.startswith("Success"): return True, msg, None
         return False, msg, None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, error_toast(e, "Unable to process this payment. Please try again.")["message"], None
 
 
@@ -4760,7 +4759,7 @@ def _save_asset_dispose(db, d, sid):
                 sale_value,
                 mode,
                 d.get("user_id"),
-                d.get("sale_date") or dt_date.today().isoformat(),
+                d.get("sale_date") or dt_date.today().isoformat(),  # noqa: DTZ011
                 particulars,
                 acc_id,
                 tds_amount
@@ -4770,7 +4769,7 @@ def _save_asset_dispose(db, d, sid):
         receipt_id = (r or {}).get("receipt_id")
         msg = f"Asset disposed — receipt #{receipt_id} [[receipt:{receipt_id}]]"
         return True, msg, receipt_id
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, _clean_pg_error(e), None
 
 
@@ -4851,7 +4850,7 @@ def _save_vendor_pass(db, d, sid):
                 acc_id,
                 mode,
                 created_by,
-                d.get("issued_date") or dt_date.today().isoformat(),
+                d.get("issued_date") or dt_date.today().isoformat(),  # noqa: DTZ011
                 particulars,
             ),
             fetch_one=True,
@@ -4873,7 +4872,7 @@ def _save_vendor_pass(db, d, sid):
         if receipt_id:
             msg += f" [[receipt:{receipt_id}]]"
         return True, msg, pass_id
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, _clean_pg_error(e), None
 
 
@@ -4896,7 +4895,7 @@ def _save_event_ticket(db, d, sid):
                     "SELECT id FROM users WHERE role=%s AND linked_id=%s AND society_id=%s",
                     (role, entity_id, sid), fetch_one=True,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 return False, _clean_pg_error(e), None
             if not urow:
                 return False, f"No {role} user account found for the selected {role}", None
@@ -4946,7 +4945,7 @@ def _save_event_ticket(db, d, sid):
             quantity_child=quantity_child,
             mode=mode,
             created_by=created_by,
-            issued_date=d.get("issued_date") or dt_date.today().isoformat(),
+            issued_date=d.get("issued_date") or dt_date.today().isoformat(),  # noqa: DTZ011
             particulars=particulars,
             cheque_no=cheque_no,
             transaction_id=transaction_id,
@@ -4971,7 +4970,7 @@ def _save_event_ticket(db, d, sid):
         if receipt_id:
             msg += f" [[receipt:{receipt_id}]]"
         return True, msg, ticket_id
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, _clean_pg_error(e), None
 
 
@@ -5030,7 +5029,7 @@ def _save_asset(db, d, sid, is_edit, pk):
                 d.get("asset_SNo"),
                 purchase_value,
                 acc_id,
-                d.get("purchase_date") or dt_date.today().isoformat(),
+                d.get("purchase_date") or dt_date.today().isoformat(),  # noqa: DTZ011
                 d.get("installation_date") or None,
                 d.get("mode", "cash"),
                 d.get("user_id"),
@@ -5046,7 +5045,7 @@ def _save_asset(db, d, sid, is_edit, pk):
         if expense_id:
             msg += f" [[expense:{expense_id}]]"
         return True, msg, asset_id
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, _clean_pg_error(e), None
 
 def _safe_int(val, default=0):
@@ -5153,25 +5152,25 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 r = cur.fetchone()
                 apt_id = r["id"] if r else None
                 if not apt_id:
-                    raise Exception("Apartment insert failed")
+                    raise Exception("Apartment insert failed")  # noqa: TRY002
 
                 cur.execute(
                     "INSERT INTO users(society_id,email,password_hash,role,login_method,linked_id,created_by) "
                     "VALUES(%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
                     (sid, email, generate_password_hash(pw), apt_id, d.get("user_id")),
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return False, f"User account creation failed (rolled back): {_clean_pg_error(e)}", None
 
         try:        # same two follow-ups as bulk enrolment: opening receivable for this flat, undivided-interest shares
             from app.services import onboarding_service as _ob
             _ob.link_opening_receivable(sid, apt_id, flat)
-        except Exception:                                              # noqa: BLE001 - enrolment stands; the Hub re-links later
+        except Exception:
             logging.getLogger(__name__).exception("could not link opening receivable for flat %s in society %s", flat, sid)
         try:
             from app.services.up_aoa_actions import fill_after_enrolment
             fill_after_enrolment(sid)
-        except Exception:                                              # noqa: BLE001
+        except Exception:
             logging.getLogger(__name__).exception("undivided-interest fill after enrolment skipped for society %s", sid)
 
         _move_temp_images("apartment", apt_id, sid, d)
@@ -5182,7 +5181,6 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     # fn_security_list.id, and receivables/payables/receipts/expenses
     # .entity_id for these roles). The linked login lives in `users`,
     # resolved via linked_id — same pattern as the apartment branch above.
-    domain_table = "security_staff" if role == "security" else "vendors"
 
     if is_edit:
         email = (d.get("email") or "").strip().lower()
@@ -5283,7 +5281,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
 
             domain_id = dr["id"] if dr else None
             if not domain_id:
-                raise Exception(f"{role.title()} insert failed")
+                raise Exception(f"{role.title()} insert failed")  # noqa: TRY002
 
             cur.execute(
                 "INSERT INTO users(society_id,email,password_hash,role,login_method,linked_id,created_by) "
@@ -5292,7 +5290,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             )
     except ValueError as ve:
         return False, str(ve), None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, f"User account creation failed ({role} rolled back): {_clean_pg_error(e)}", None
 
     _move_temp_images(role, domain_id, sid, d)
@@ -5373,7 +5371,7 @@ def _save_apartment_user(db, d, sid, is_edit, pk):
                 fetch_one=True,
             )
             return True, f"Member '{email}' added as {user_type.title()}", r["id"]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return False, f"Creation failed: {_clean_pg_error(e)}", None
 
 def _save_event(db, d, sid, is_edit, pk):
@@ -5433,7 +5431,7 @@ def _save_event(db, d, sid, is_edit, pk):
         )
         try:    
             PushService.notify_event_created(sid, title or "Event", d.get("open_to", "all"), d.get("event_date"))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"⚠️  notify_event_created failed: {e}")
         return True, "Event updated", pk
     if not title:
@@ -5459,7 +5457,7 @@ def _save_event(db, d, sid, is_edit, pk):
 
     try:
         PushService.notify_event_created(sid, title, d.get("open_to", "all"), d.get("event_date"))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  notify_event_created failed: {e}")
     return True, f"Event '{title}' created", event_id
 
@@ -5610,7 +5608,7 @@ def _save_concern(db, d, sid, is_edit, pk):
     if new_id:
         try:
             PushService.notify_concern_created(sid, d.get("apartment_id"), concern_type)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"⚠️  notify_concern_created failed: {e}")
     return True, "Concern submitted", new_id
 
@@ -5651,7 +5649,7 @@ def _save_channel(db, d, sid, is_edit, pk):
         try:
             import app.services.push_service as PushService
             PushService.notify_channel_created(sid, ch_name, ch_type, apartment_id=apartment_id)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"⚠️  Channel creation push notify failed: {e}")
         return True, "Channel created", None
     return False, msg or "Failed to create channel.", None
@@ -5682,7 +5680,7 @@ def _get_or_create_active_noc(db, society_id, apartment_id):
     if existing:
         return dict(existing)
 
-    issued = date.today()
+    issued = today_ist()
     last_day = calendar.monthrange(issued.year, issued.month)[1]
     valid_until = date(issued.year, issued.month, last_day)
     row = db._execute(
@@ -5751,8 +5749,7 @@ def _get_or_create_agreement(db, society_id):
         fetch_one=True,
     )
     agreement_id = row["id"]
-    from datetime import date
-    agreement_no = f"AGR/{society_id}/{date.today().year}/{agreement_id}"
+    agreement_no = f"AGR/{society_id}/{today_ist().year}/{agreement_id}"
     updated = db._execute(
         "UPDATE society_agreements SET agreement_no=%s WHERE id=%s RETURNING *",
         (agreement_no, agreement_id), fetch_one=True,
@@ -5764,7 +5761,7 @@ def _save_gate_log(db, d, sid):
     eid = d.get("entity_id")
     if not eid:
         return False, "Entity ID required", None
-    r = db._execute(
+    db._execute(
         "INSERT INTO gate_access(society_id,role,entity_id,time_in,time_out,created_by) "
         "VALUES(%s,%s,%s,COALESCE(%s::timestamp, NOW()),%s,%s)",
         (sid, d.get("role", "v"), eid, d.get("time_in"), d.get("time_out"), d.get("user_id")),
@@ -5806,7 +5803,6 @@ def _save_society(db, d, sid, is_edit, pk):
                     _missing_files.append(field)
                     d[field] = ""
         caller_role = d.get("caller_role", "admin")
-        immutable_cols = {"name", "pan_number", "gstin", "plan_validity", "calc_start_date"}
         if caller_role == "master":
             db._execute(
                 "UPDATE societies SET name=%s,email=%s,phone=%s,address=%s,plan=%s,"
@@ -5882,7 +5878,7 @@ def _save_society(db, d, sid, is_edit, pk):
 def _current_fy() -> int:
     """Financial-year start year for 'today' (1-Apr..31-Mar cycle). Mirrors
     fn_current_financial_year() in estatehub.sql — keep both in sync."""
-    today = date.today()
+    today = today_ist()
     return today.year - 1 if today.month < 4 else today.year
 
 
@@ -5990,7 +5986,7 @@ def _save_tds_rate(db, d, sid, is_edit, pk):
         return True, "TDS rate added. Pending confirmation.", None
     except (ValueError, PermissionError) as e:
         return False, str(e), None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, _clean_pg_error(e), None
 
 
@@ -6136,7 +6132,7 @@ def _save_apt_charge(db, d, sid, is_edit, pk):
         return True, "Apartment charge rule updated", pk
 
     apt_id = d.get("apt_id")
-    start_date = d.get("start_date") or dt_date.today().isoformat()
+    start_date = d.get("start_date") or dt_date.today().isoformat()  # noqa: DTZ011
 
     r = db._execute(
         "INSERT INTO apt_charges_fines_basis(society_id, apt_id, start_date, end_date,"
@@ -6195,7 +6191,7 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
         )
         return True, "Vendor charge rule updated", pk
     ven_id = d.get("ven_id")
-    start_date = d.get("start_date") or dt_date.today().isoformat()
+    start_date = d.get("start_date") or dt_date.today().isoformat()  # noqa: DTZ011
     try:
         v1day = D(d.get("vendor_1day") or 0)
         v7day = D(d.get("vendor_7day") or 0)
@@ -6212,7 +6208,7 @@ def _save_ven_charge(db, d, sid, is_edit, pk):
     )
     return (
         True,
-        f"Charge rule created",
+        "Charge rule created",
         (r or {}).get("id"),
     )
 
@@ -6231,9 +6227,9 @@ def _save_payable_shift_fraction(db, d, pk):
         return False, "Salary entry not found", None
     try:
         frac = Decimal(str(d.get("shift_fraction")).strip())
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False, "Shift Fraction must be a number", None
-    if not (Decimal("0") < frac <= Decimal("1")):
+    if not (Decimal(0) < frac <= Decimal(1)):
         return False, "Shift Fraction must be above 0 and at most 1 (for example 0.5 for a half shift)", None
     row = db._execute(
         "SELECT role, status, description FROM payables WHERE id=%s AND society_id=%s",
@@ -6390,7 +6386,7 @@ def _get_account_by_name(society_id, account_name):
             (society_id, f"%{account_name}%"),
             fetch_one=True,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -6421,7 +6417,7 @@ def _validate_transaction_account(db, acc_id, society_id, transaction_type):
         if transaction_type == "expense" and drcr == "Cr":
             return False, f"Cannot use Income account '{name}' for expenses."
         return True, ""
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return False, error_toast(e, "Unable to validate this account.")["message"]
 
 
@@ -6579,11 +6575,11 @@ def register_fy_close_callbacks(app):
             import logging
             logging.getLogger(__name__).exception(
                 f"FY close failed (society={society_id}, fy={fy}): {message}")
-            banner_color, banner_icon = "danger", "fa-exclamation-circle"
+            banner_color, _banner_icon = "danger", "fa-exclamation-circle"
         else:
             status = result.get("status")
             if status == "closed":
-                banner_color, banner_icon = "success", "fa-check-circle"
+                banner_color, _banner_icon = "success", "fa-check-circle"
                 message = (
                     f"FY {fy}-{str(fy + 1)[-2:]} closed. "
                     f"₹{D(result.get('reserve_transferred') or 0):,.2f} appropriated "
@@ -6594,17 +6590,17 @@ def register_fy_close_callbacks(app):
                 # Not an error: a double-click or a second admin racing the
                 # first. The SQL guard posted nothing, so say so plainly
                 # rather than implying a second appropriation happened.
-                banner_color, banner_icon = "info", "fa-info-circle"
+                banner_color, _banner_icon = "info", "fa-info-circle"
                 message = (
                     f"FY {fy}-{str(fy + 1)[-2:]} was already closed — nothing was "
                     "posted a second time."
                 )
             elif status == "no_surplus":
-                banner_color, banner_icon = "warning", "fa-exclamation-triangle"
+                banner_color, _banner_icon = "warning", "fa-exclamation-triangle"
                 message = ("There is no net surplus for this year, so there is "
                            "nothing to appropriate. The year is still marked closed.")
             else:
-                banner_color, banner_icon = "warning", "fa-exclamation-triangle"
+                banner_color, _banner_icon = "warning", "fa-exclamation-triangle"
                 message = result.get("message") or f"Unexpected close status: {status}."
 
         store["trigger"] = store.get("trigger", 0) + 1

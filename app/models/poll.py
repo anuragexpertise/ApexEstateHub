@@ -1,6 +1,6 @@
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Any
 
 
 @dataclass
@@ -11,23 +11,23 @@ class Poll:
     # role=="admin"), so tracking WHICH admin added no value — the DB
     # column was dropped 2026-09.
     title: str = ""
-    description: Optional[str] = None
+    description: str | None = None
     status: str = "active"
     choice_count: int = 2
     choice_1: str = ""
     choice_2: str = ""
-    choice_3: Optional[str] = None
-    choice_4: Optional[str] = None
-    choice_5: Optional[str] = None
-    results_announced_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    ends_at: Optional[datetime] = None
-    reminder_sent_at: Optional[datetime] = None
+    choice_3: str | None = None
+    choice_4: str | None = None
+    choice_5: str | None = None
+    results_announced_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    ends_at: datetime | None = None
+    reminder_sent_at: datetime | None = None
     total_votes: int = 0
     has_voted: bool = False
-    user_vote: Optional[int] = None
-    vote_counts: Optional[Dict[str, Any]] = field(default_factory=dict)
+    user_vote: int | None = None
+    vote_counts: dict[str, Any] | None = field(default_factory=dict)
 
     def to_dict(self):
         return asdict(self)
@@ -55,7 +55,7 @@ class PollVote:
     poll_id: int
     user_id: int
     choice: int
-    cast_at: Optional[datetime] = None
+    cast_at: datetime | None = None
 
     def to_dict(self):
         return asdict(self)

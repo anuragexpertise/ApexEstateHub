@@ -421,11 +421,6 @@ DRILLDOWN_MAP: dict = {
         "label": "Security Salary",
     },
     "kpi_security_shift": {"target": "list_gate_logs", "label": "Completed Shifts"},
-    # ── SETTINGS TAB KPIs → LIST ──────────────────────────────────────────────
-    "kpi_societies_calc_start_date": {
-        "target": "list_societies",
-        "label": "Calc Start Date",
-    },
     "kpi_plan_validity": {"target": "list_societies", "label": "Society Plan Validity"},
     "kpi_accounts_count": {"target": "list_accounts", "label": "Chart of Accounts"},
     "kpi_ledger_open": {"target": "list_ledger_index", "label": "Ledger Index"},
@@ -764,12 +759,11 @@ try:
             "payables",
             "cashbook",
             "transactions",
-        ):
-            if "show_transactions" not in actions:
-                actions["show_transactions"] = {
-                    "target": "list_cashbook",
-                    "prefill": {},
-                }
+        ) and "show_transactions" not in actions:
+            actions["show_transactions"] = {
+                "target": "list_cashbook",
+                "prefill": {},
+            }
         # write back
         DRILLDOWN_MAP[profile_key]["actions"] = actions
     # also ensure list-level receivables mapping exists
@@ -783,11 +777,11 @@ try:
             "target": "profile_tds_rate",
             "label": "TDS Rate Details",
         }
-except Exception:
+except Exception:  # noqa: BLE001, S110
     pass
 
 
-def propagate_filters(auth_data: dict, extra: dict = None) -> dict:
+def propagate_filters(auth_data: dict, extra: dict | None = None) -> dict:
     """Merge auth filters with extra filters."""
     filters = {
         "society_id": auth_data.get("society_id"),

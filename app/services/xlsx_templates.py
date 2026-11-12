@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
-from typing import Any
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Protection
@@ -211,8 +209,8 @@ def build_bye_laws_template(clauses, current: dict | None = None, locked=()) -> 
         ws.cell(row=r, column=3, value=cur.get("choice") or "")
         ws.cell(row=r, column=4, value=cur.get("variation_text") or "")
         ws.cell(row=r, column=5, value="Enforced by the engine: cannot be 'not_adopted'" if cid in locked else "")
-    dv = DataValidation(type="list", formula1='"%s"' % ",".join(BYE_LAW_CHOICES), allow_blank=True)
-    dv.add("C2:C%d" % (len(clauses) + 1))
+    dv = DataValidation(type="list", formula1='"{}"'.format(",".join(BYE_LAW_CHOICES)), allow_blank=True)
+    dv.add("C2:C%d" % (len(clauses) + 1))  # noqa: UP031
     ws.add_data_validation(dv)
     ws.freeze_panes = "A2"
     wi = wb.create_sheet("Instructions")
@@ -276,7 +274,7 @@ def parse_upload(contents: str, filename: str, sheet: str, required: list[str], 
         return ParseResult(rows=[], errors=["File exceeds 1 MB."])
     try:
         wb = load_workbook(io.BytesIO(raw), data_only=True)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return ParseResult(rows=[], errors=[f"Could not open xlsx: {exc}"])
     if sheet not in wb.sheetnames:
         return ParseResult(rows=[], errors=[f"Sheet '{sheet}' not found."])

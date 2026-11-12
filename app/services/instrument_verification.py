@@ -9,6 +9,7 @@ import re
 from datetime import date
 
 from app.services import document_signing as ds
+from app.utils import today_ist
 
 
 def _db(db=None):
@@ -36,12 +37,12 @@ def verify(society_id, user_id, instrument_id, notification_no, source_url, opin
     try:
         r = d._execute("SELECT fn_verify_instrument(%s,%s,%s,%s,%s,%s,%s) AS r",
                        (int(instrument_id), user_id, role, (notification_no or "").strip(), (source_url or "").strip(),
-                        (opinion_ref or "").strip(), verified_on or date.today()), fetch_one=True)
-    except Exception as exc:                                              # noqa: BLE001
+                        (opinion_ref or "").strip(), verified_on or today_ist()), fetch_one=True)
+    except Exception as exc:
         raise ds.SigningRefused(str(exc).split("\n")[0].replace("ERROR:", "").strip()) from exc
     d._execute("INSERT INTO audit_events (society_id, actor_id, action, resource_type, resource_id, after_value, source) "
                "VALUES (%s,%s,'INSTRUMENT_VERIFIED','legal_instrument_catalog',%s,%s::jsonb,'app')",
-               (society_id, user_id, str(instrument_id), '{"role": "%s", "notification_no": "%s"}' % (role, (notification_no or "").replace('"', ""))))
+               (society_id, user_id, str(instrument_id), '{{"role": "{}", "notification_no": "{}"}}'.format(role, (notification_no or "").replace('"', ""))))
     return r["r"]
 
 
@@ -65,7 +66,7 @@ def verify_many_as_master(user_id, items, opinion_ref, verified_on=None, db=None
     if not items:
         raise ds.SigningRefused("Select at least one instrument.")
     opinion = (opinion_ref or "").strip()
-    on = verified_on or date.today()
+    on = verified_on or today_ist()
     if isinstance(on, str):
         try:
             on = date.fromisoformat(on[:10])
@@ -74,7 +75,7 @@ def verify_many_as_master(user_id, items, opinion_ref, verified_on=None, db=None
     problems = []
     if not opinion:
         problems.append("Enter the opinion reference (advocate or CA).")
-    if on > date.today():
+    if on > today_ist():
         problems.append("The verified date must not be in the future.")
     ids = [int(i["id"]) for i in items]
     known = {r["id"]: r for r in (d._execute(
@@ -88,7 +89,7 @@ def verify_many_as_master(user_id, items, opinion_ref, verified_on=None, db=None
             problems.append(f"{label}: already verified.")
         if not (i.get("notification_no") or "").strip():
             problems.append(f"{label}: notification number is required.")
-        if not re.match(r"^https?://\S+$", (i.get("source_url") or "").strip(), re.I):
+        if not re.match(r"^https?://\S+$", (i.get("source_url") or "").strip(), re.IGNORECASE):
             problems.append(f"{label}: a link (https://) to the source text is required.")
     if problems:
         raise ds.SigningRefused("Nothing was verified. " + " ".join(problems[:12]) + (f" (+{len(problems) - 12} more)" if len(problems) > 12 else ""))
@@ -104,7 +105,7 @@ def verify_many_as_master(user_id, items, opinion_ref, verified_on=None, db=None
                          __import__("json").dumps({"opinion_ref": opinion, "verified_on": str(on), "count": len(ids)})))
     except ds.SigningRefused:
         raise
-    except Exception as exc:                                              # noqa: BLE001
+    except Exception as exc:
         msg = str(exc).split("\n")[0].replace("ERROR:", "").strip()
         if "Only the Treasurer or an Auditor" in msg or "verifier_role" in msg:
             msg += " (apply database/migrations/002_master_instrument_verification.sql first)"

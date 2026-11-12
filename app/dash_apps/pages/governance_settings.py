@@ -19,7 +19,6 @@ Component ids are prefixed `gov-` so Master's `mrl-` callbacks (platform-gated) 
 from __future__ import annotations
 
 from dash import dcc, html
-import dash_bootstrap_components as dbc
 
 from app.dash_apps.pages import master_rules_page as mrp
 from app.security.audit_context import get_current_society_id
@@ -70,7 +69,7 @@ def policy_choice_ui(society_id, policy_key):
     label, clause, choices = spec
     try:
         st = rra.list_society_policies(society_id).get(policy_key, {})
-    except Exception:
+    except Exception:  # noqa: BLE001
         st = {}
     names = dict(choices)
     now = names.get(st.get("value"), st.get("value"))
@@ -154,7 +153,7 @@ def render_governance_summary(role: str, sid):
         mc = _cs.summary(society_id)
         mc_txt = f"{mc['seated']} seated" + (f" · vacant: {', '.join(mc['vacant_core'])}" if mc["vacant_core"] else "")
         mc_warn = bool(mc["vacant_core"])
-    except Exception:
+    except Exception:  # noqa: BLE001
         mc_txt, mc_warn = "unavailable", False
 
     def _stat(label, value, warn=False):
@@ -197,7 +196,7 @@ def render_governance_tabs(role: str, sid, color: str = "#1859b8"):
     # ── Rules ───────────────────────────────────────────────────────────────
     try:
         cur_mode = rra.society_cash_mode(society_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
         cur_mode = None
     rules = [html.Div(rules_body(society_id, can_edit=is_admin), id=f"{P}-body")]
     if is_admin:

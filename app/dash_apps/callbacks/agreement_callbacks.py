@@ -27,11 +27,12 @@ Required addition to app_shell.py / the permanent layout
 plus the agreement-modal itself (see _agreement_modal() in app_shell.py).
 """
 
-from dash import Output, Input, State, clientside_callback, no_update
+from dash import Input, Output, State, clientside_callback, no_update
+
 from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
+from app.security.audit_context import get_current_society_id
 from app.security.guards import require_session
 from app.security.stamp_scope import stamp_document
-from app.security.audit_context import get_current_society_id
 
 
 def _agreement_to_html_js() -> str:
@@ -198,9 +199,8 @@ def register_agreement_callbacks(app):
         if not n_clicks or not agreement_id or not sid:
             return no_update
         try:
-            from database.db_manager import db
             stamp_document("society_agreements", agreement_id, "last_printed_at")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"agreement last_printed_at stamp error: {e}")
         return no_update
 
@@ -217,9 +217,8 @@ def register_agreement_callbacks(app):
         if not n_clicks or not agreement_id or not sid:
             return no_update
         try:
-            from database.db_manager import db
             stamp_document("society_agreements", agreement_id, "last_emailed_at")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"agreement last_emailed_at stamp error: {e}")
         return no_update
 

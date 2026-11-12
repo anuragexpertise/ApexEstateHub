@@ -10,10 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import date
 
 from app.services import auditor_checks as ac
 from app.services import signing_service
+from app.utils import today_ist
 
 CHECKS = ("ledger_chain", "integrity", "tieout", "cash_vouchers", "cashbook", "receipt_chains", "tamper_guards", "resolution", "legal", "anchors")
 MAX_STORED_ROWS = 50
@@ -44,9 +44,9 @@ def run_all(society_id: int, user_id: int, day=None, db=None) -> dict:
     batch = str(uuid.uuid4())
     out = []
     for key in CHECKS:
-        r = ac.run(key, society_id, day=day or date.today(), resolution_id=(res or {}).get("id"))
+        r = ac.run(key, society_id, day=day or today_ist(), resolution_id=(res or {}).get("id"))
         body = {"check": key, "status": r["status"], "note": r.get("note", ""), "total": r.get("total", 0), "columns": r.get("columns", []),
-                "rows": r.get("rows", [])[:MAX_STORED_ROWS], "run_on": date.today().isoformat()}
+                "rows": r.get("rows", [])[:MAX_STORED_ROWS], "run_on": today_ist().isoformat()}
         text = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
         h = hashlib.sha256(text.encode("utf-8")).hexdigest()
         # sign first (the signature covers the run time), then insert once: rows are append-only

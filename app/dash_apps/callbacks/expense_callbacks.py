@@ -16,11 +16,12 @@ Required addition to app_shell.py / the permanent layout:
 (same "dummy Output anchor" trick as receipt-action-store, since this card is
 rendered dynamically inside drill-content, not the permanent shell layout.)
 """
-from dash import Output, Input, State, clientside_callback, no_update
+from dash import Input, Output, State, clientside_callback, no_update
+
 from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
+from app.security.audit_context import get_current_society_id
 from app.security.guards import require_session
 from app.security.stamp_scope import stamp_document
-from app.security.audit_context import get_current_society_id
 
 
 def _expense_html_js() -> str:
@@ -188,9 +189,8 @@ def register_expense_callbacks(app):
         if not n_clicks or not expense_no or not sid:
             return no_update
         try:
-            from database.db_manager import db
             stamp_document("expenses", expense_no, "last_printed_at")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"expense last_printed_at stamp error: {e}")
         return no_update
 
@@ -207,9 +207,8 @@ def register_expense_callbacks(app):
         if not n_clicks or not expense_no or not sid:
             return no_update
         try:
-            from database.db_manager import db
             stamp_document("expenses", expense_no, "last_emailed_at")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"expense last_emailed_at stamp error: {e}")
         return no_update
 

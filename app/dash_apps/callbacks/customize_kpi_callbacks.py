@@ -5,17 +5,20 @@ FIXED VERSION — duplicate-key-safe KPI_PORTAL_MAP using list-of-tuples.
 """
 
 from __future__ import annotations
+
 import time
-import json
-from dash import Input, Output, State, html, dcc, ctx, no_update
+
 import dash_bootstrap_components as dbc
-from app.dash_apps.pages.card_catalogue import KPI_CARDS
+from dash import Input, Output, State, dcc, html, no_update
+
 from app.dash_apps.callbacks.drilldown_callbacks import get_entity_meta
-from app.security.guards import require_session
-from app.security.authorization import Cap
-from app.security.service_guard import audit_event, require_action
+from app.dash_apps.pages.card_catalogue import KPI_CARDS
 from app.security.audit_context import get_current_society_id, get_current_user_role
+from app.security.authorization import Cap
+from app.security.guards import require_session
+from app.security.service_guard import audit_event, require_action
 from app.utils.ux_toasts import error_toast
+
 # ════════════════════════════════════════════════════════════════
 # KPI METADATA — list-of-tuples so duplicate card_ids are preserved
 # Each entry: (card_id, portal, tab, group)
@@ -386,15 +389,15 @@ def register_customize_kpi_callbacks(app):
                     after={"sql": sql_text.strip()[:2000]}, permission_used=Cap.PLATFORM_SQL_INSPECT)
 
         sql_upper = sql_text.upper()
-        if "DELETE " in sql_upper or "DROP " in sql_upper:
+        if "DELETE " in sql_upper or "DROP " in sql_upper:  # noqa: SIM102
             if "-- DELETE THIS SOCIETY" not in sql_upper:
                 return dbc.Alert(
                     "Destructive query detected. Append '-- DELETE THIS SOCIETY' to confirm.",
                     color="danger", className="mt-2 py-2", style={"fontSize": "12px"}
                 )
                 
-        from database.db_manager import db
         from app.dash_apps.callbacks.card_catalogue_callbacks import format_kpi_value
+        from database.db_manager import db
 
         sid = get_current_society_id()
         cfg = KPI_CARDS.get(kpi_id or "", {})
@@ -441,7 +444,7 @@ def register_customize_kpi_callbacks(app):
                 className="mt-2 py-2",
                 style={"fontSize": "12px"},
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             elapsed = (time.perf_counter() - t0) * 1000
             return dbc.Alert(
                 [

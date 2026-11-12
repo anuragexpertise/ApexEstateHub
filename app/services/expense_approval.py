@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from app.services import document_signing as ds
 
-DEFAULT_THRESHOLD = Decimal("20000")
+DEFAULT_THRESHOLD = Decimal(20000)
 DEFAULT_MIN = 2
 AGGREGATE_DAYS = 30
 

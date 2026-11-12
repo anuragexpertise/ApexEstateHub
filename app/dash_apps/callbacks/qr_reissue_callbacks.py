@@ -25,13 +25,17 @@ qr-reissue-resolved-store shape: {"role_code", "entity_id", "label"} or
 produced it.
 """
 
+import dash_bootstrap_components as dbc
 from dash import Input, Output, State, html, no_update
 from dash.exceptions import PreventUpdate
-import dash_bootstrap_components as dbc
-from app.utils.ux_toasts import error_toast
 
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.guards import require_session
-from app.security.audit_context import get_current_user_role, get_current_user_id, get_current_society_id
+from app.utils.ux_toasts import error_toast
 
 
 def _resolved_ok_display(label: str, role_code: str, entity_id: int) -> html.Div:
@@ -108,7 +112,10 @@ def register_qr_reissue_callbacks(app):
         if not (qr_data or "").strip():
             return _resolved_error_display("Paste or scan a QR string first."), None
 
-        from app.services.qr_service import verify_scanned_qr, resolve_entity_for_reissue
+        from app.services.qr_service import (
+            resolve_entity_for_reissue,
+            verify_scanned_qr,
+        )
         society_id = get_current_society_id()
         verified = verify_scanned_qr(qr_data.strip(), society_id)
         if "error" in verified:
@@ -153,14 +160,14 @@ def register_qr_reissue_callbacks(app):
         if not reason:
             return dbc.Alert("Select a reason.", color="warning"), no_update, no_update
 
-        from app.services.qr_service import verify_signing_secret, revoke_and_reissue
+        from app.services.qr_service import revoke_and_reissue, verify_signing_secret
         society_id = get_current_society_id()
         if not verify_signing_secret(society_id, typed_secret or ""):
             return dbc.Alert("Signing Secret did not match.", color="danger"), no_update, ""
 
         actor_user_id = get_current_user_id()
         try:
-            src, payload, old_nonce, new_nonce = revoke_and_reissue(
+            src, payload, _old_nonce, _new_nonce = revoke_and_reissue(
                 society_id, resolved["role_code"], resolved["entity_id"],
                 reason, actor_user_id, resolved.get("label"),
             )

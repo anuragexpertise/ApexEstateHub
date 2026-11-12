@@ -14,10 +14,10 @@ memory.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
-import logging
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ _REDIS_URL = os.getenv("REDIS_URL") or os.getenv("KV_URL") or ""
 try:
     import redis as redis_sync
     _HAS_REDIS = True
-except Exception:
+except Exception:  # noqa: BLE001
     _HAS_REDIS = False
     redis_sync = None
 
@@ -71,7 +71,7 @@ class RedisBroker:
             r = redis_sync.Redis.from_url(_REDIS_URL, socket_timeout=2, socket_connect_timeout=2)
             r.publish(self.CHANNEL, json.dumps(payload))
             r.close()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.debug("Redis publish failed (non-fatal): %s", exc)
 
     def start(self, on_message):
@@ -108,16 +108,16 @@ class RedisBroker:
                         continue
                     try:
                         payload = json.loads(message["data"])
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S112
                         continue
                     if self._on_message_cb:
                         try:
                             self._on_message_cb(payload)
-                        except Exception as exc:
+                        except Exception as exc:  # noqa: BLE001
                             logger.debug("on_message handler error: %s", exc)
                 pubsub.close()
                 r.close()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.debug("Redis subscribe loop error (will retry): %s", exc)
                 time.sleep(2)
 
@@ -134,7 +134,7 @@ class RedisBroker:
                 for stream_society_id, stream in self._listeners.get(target_user, []):
                     try:
                         stream(payload)
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         dead.append((target_user, stream))
             if society_id:
                 for uid, entries in self._listeners.items():
@@ -145,7 +145,7 @@ class RedisBroker:
                             continue
                         try:
                             stream(payload)
-                        except Exception:
+                        except Exception:  # noqa: BLE001
                             dead.append((uid, stream))
         for uid, stream in dead:
             self.unregister(uid, stream)
@@ -153,7 +153,7 @@ class RedisBroker:
 
 broker = RedisBroker()
 
-def notify_kpi_update(society_id: int, workflow_group: str, exclude_user_id: int = None):
+def notify_kpi_update(society_id: int, workflow_group: str, exclude_user_id: int | None = None):
     """
     Publish a KPI update event to all active streams for a given society.
     workflow_group: e.g. "financials", "concerns", "events", "polls"

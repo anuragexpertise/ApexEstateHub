@@ -130,5 +130,5 @@ def adviser_tab(role: str, society_id: int | None):
                  "people) then each approve with their own password. Until then it is provisional and what depends on it is blocked.")
         return html.Div([html.Div(id=f"{P}-toast"), html.Div(intro, style={**_MUTED, "margin": "8px 0"}),
                          html.Div(adviser_body(society_id, can_prepare, roles), id=f"{P}-body")])
-    except Exception:                      # one tab failing to load must not take the governance page down with it
+    except Exception:                      # one tab failing to load must not take the governance page down with it  # noqa: BLE001
         return html.Div("Adviser decisions could not be loaded just now. Please try again shortly.", style=_MUTED)

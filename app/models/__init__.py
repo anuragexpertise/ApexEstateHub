@@ -4,13 +4,14 @@ OOP Models for EstateHub
 Uses dataclasses with validation and type safety
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, List
 from enum import Enum
+from typing import List, Optional  # noqa: UP035, F401
 
 from app.models.poll import Poll, PollVote
+from app.utils import IST, now_ist, today_ist  # noqa: F401
 
 # ════════════════════════════════════════════════════════════════
 # ENUMS
@@ -67,39 +68,39 @@ class SocietyPlan(str, Enum):
 class Society:
     id: int
     name: str
-    email: Optional[str]
-    phone: Optional[str]
-    address: Optional[str]
-    logo: Optional[str] = None
-    login_background: Optional[str] = None
+    email: str | None
+    phone: str | None
+    address: str | None
+    logo: str | None = None
+    login_background: str | None = None
     plan: SocietyPlan = SocietyPlan.FREE
     plan_validity: date = field(default_factory=date.today)
     calc_start_date: date = field(default_factory=date.today)
-    secretary_name: Optional[str] = None
-    secretary_phone: Optional[str] = None
-    secretary_sign: Optional[str] = None
-    created_at: Optional[datetime] = None
-    _image_society_id: Optional[int] = None  # For image resolution
+    secretary_name: str | None = None
+    secretary_phone: str | None = None
+    secretary_sign: str | None = None
+    created_at: datetime | None = None
+    _image_society_id: int | None = None  # For image resolution
     
     def to_dict(self):
         return asdict(self)
     
     def is_plan_active(self) -> bool:
-        return self.plan_validity >= date.today()
+        return self.plan_validity >= today_ist()
 
 @dataclass
 class User:
     id: int
     email: str
     role: UserRole
-    society_id: Optional[int] = None
-    name: Optional[str] = None
-    linked_id: Optional[int] = None
+    society_id: int | None = None
+    name: str | None = None
+    linked_id: int | None = None
     login_method: str = "password"
     is_master_admin: bool = False
     push_enabled: bool = False
-    last_login: Optional[datetime] = None
-    created_at: Optional[datetime] = None
+    last_login: datetime | None = None
+    created_at: datetime | None = None
     
     def to_dict(self):
         data = asdict(self)
@@ -115,21 +116,21 @@ class Apartment:
     id: int
     society_id: int
     flat_number: str
-    owner_name: Optional[str] = None
-    owner_photo: Optional[str] = None
-    id_proof: Optional[str] = None
-    mobile: Optional[str] = None
+    owner_name: str | None = None
+    owner_photo: str | None = None
+    id_proof: str | None = None
+    mobile: str | None = None
     apartment_size: int = 0
     active: bool = True
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
     
     # Calculated fields from list view
-    months_due: Optional[int] = None
-    total_maintenance: Optional[Decimal] = None
-    paid_amount: Optional[Decimal] = None
-    pending_amount: Optional[Decimal] = None
-    late_fee: Optional[Decimal] = None
-    grand_total: Optional[Decimal] = None
+    months_due: int | None = None
+    total_maintenance: Decimal | None = None
+    paid_amount: Decimal | None = None
+    pending_amount: Decimal | None = None
+    late_fee: Decimal | None = None
+    grand_total: Decimal | None = None
     
     def to_dict(self, include_calculated=False):
         data = asdict(self)
@@ -152,19 +153,19 @@ class Vendor:
     id: int
     society_id: int
     name: str
-    service_type: Optional[str] = None
-    mobile: Optional[str] = None
-    logo: Optional[str] = None
-    license: Optional[str] = None
-    photo: Optional[str] = None
-    service_description: Optional[str] = None
+    service_type: str | None = None
+    mobile: str | None = None
+    logo: str | None = None
+    license: str | None = None
+    photo: str | None = None
+    service_description: str | None = None
     active: bool = True
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
     
     # From list view
-    pending_dues: Optional[Decimal] = None
-    paid_amount: Optional[Decimal] = None
-    active_passes: Optional[int] = None
+    pending_dues: Decimal | None = None
+    paid_amount: Decimal | None = None
+    active_passes: int | None = None
     
     def to_dict(self, include_calculated=False):
         data = asdict(self)
@@ -182,23 +183,23 @@ class SecurityStaff:
     id: int
     society_id: int
     name: str
-    mobile: Optional[str] = None
-    photo: Optional[str] = None
-    id_proof: Optional[str] = None
+    mobile: str | None = None
+    photo: str | None = None
+    id_proof: str | None = None
     joining_date: date = field(default_factory=date.today)
-    shift: Optional[str] = None
-    salary_per_shift: Optional[Decimal] = None
+    shift: str | None = None
+    salary_per_shift: Decimal | None = None
     active: bool = True
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
     
     # From list view
-    days_worked: Optional[int] = None
-    salary_due: Optional[Decimal] = None
-    salary_paid: Optional[Decimal] = None
-    salary_pending: Optional[Decimal] = None
-    active_fines: Optional[Decimal] = None
-    current_status: Optional[str] = None
-    today_duty: Optional[str] = None
+    days_worked: int | None = None
+    salary_due: Decimal | None = None
+    salary_paid: Decimal | None = None
+    salary_pending: Decimal | None = None
+    active_fines: Decimal | None = None
+    current_status: str | None = None
+    today_duty: str | None = None
     
     def to_dict(self, include_calculated=False):
         data = asdict(self)
@@ -217,19 +218,19 @@ class Account:
     id: int
     society_id: int
     name: str
-    tab_name: Optional[str] = None
-    header: Optional[str] = None
-    parent_account_id: Optional[int] = None
-    drcr_account: Optional[str] = None  # 'Dr' or 'Cr'
+    tab_name: str | None = None
+    header: str | None = None
+    parent_account_id: int | None = None
+    drcr_account: str | None = None  # 'Dr' or 'Cr'
     bf_amount: Decimal = Decimal('0.00')
     depreciation_percent: Decimal = Decimal('100.00')
     is_depreciable: bool = False
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
     
     # From list/profile view
-    current_balance: Optional[Decimal] = None
-    parent_account_name: Optional[str] = None
-    transaction_count: Optional[int] = None
+    current_balance: Decimal | None = None
+    parent_account_name: str | None = None
+    transaction_count: int | None = None
     
     def to_dict(self, include_calculated=False):
         data = asdict(self)
@@ -245,20 +246,20 @@ class Transaction:
     trx_date: date
     acc_id: int
     amount: Decimal
-    particulars: Optional[str] = None
-    entity_id: Optional[int] = None
+    particulars: str | None = None
+    entity_id: int | None = None
     mode: str = "cash"
     status: TransactionStatus = TransactionStatus.PAID
-    payment_gateway_id: Optional[str] = None
-    created_by: Optional[int] = None
-    created_at: Optional[datetime] = None
+    payment_gateway_id: str | None = None
+    created_by: int | None = None
+    created_at: datetime | None = None
     
     # From cashbook view
-    account_name: Optional[str] = None
-    account_group: Optional[str] = None
-    debit: Optional[Decimal] = None
-    credit: Optional[Decimal] = None
-    balance: Optional[Decimal] = None
+    account_name: str | None = None
+    account_group: str | None = None
+    debit: Decimal | None = None
+    credit: Decimal | None = None
+    balance: Decimal | None = None
     
     def to_dict(self, include_calculated=False):
         data = asdict(self)
@@ -280,18 +281,18 @@ class Receivable:
     role: str  # 'apartment', 'vendor', 'security'
     charge_type: str  # 'maintenance', 'fine', 'vendor_pass', etc.
     amount: Decimal
-    description: Optional[str] = None
-    due_date: Optional[date] = None
+    description: str | None = None
+    due_date: date | None = None
     status: ReceivableStatus = ReceivableStatus.PENDING
-    source_table: Optional[str] = None
-    source_id: Optional[int] = None
-    confirmed_by: Optional[int] = None
-    confirmed_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
+    source_table: str | None = None
+    source_id: int | None = None
+    confirmed_by: int | None = None
+    confirmed_at: datetime | None = None
+    created_at: datetime | None = None
     
     # From list view
-    entity_name: Optional[str] = None
-    days_overdue: Optional[int] = None
+    entity_name: str | None = None
+    days_overdue: int | None = None
     
     def to_dict(self, include_calculated=False):
         data = asdict(self)
@@ -309,17 +310,17 @@ class Payment:
     role: str
     amount: Decimal
     status: payablestatus = payablestatus.PENDING
-    user_id: Optional[int] = None
-    payment_type: Optional[str] = None
-    payment_method: Optional[str] = None
-    transaction_id: Optional[str] = None
-    due_date: Optional[date] = None
-    paid_at: Optional[datetime] = None
-    source_table: Optional[str] = None
-    source_id: Optional[int] = None
-    confirmed_by: Optional[int] = None
-    confirmed_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
+    user_id: int | None = None
+    payment_type: str | None = None
+    payment_method: str | None = None
+    transaction_id: str | None = None
+    due_date: date | None = None
+    paid_at: datetime | None = None
+    source_table: str | None = None
+    source_id: int | None = None
+    confirmed_by: int | None = None
+    confirmed_at: datetime | None = None
+    created_at: datetime | None = None
     
     def to_dict(self):
         data = asdict(self)
@@ -336,14 +337,14 @@ class Event:
     society_id: int
     title: str
     event_date: date
-    description: Optional[str] = None
-    event_time: Optional[str] = None
-    venue: Optional[str] = None
+    description: str | None = None
+    event_time: str | None = None
+    venue: str | None = None
     open_to: str = "all"
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
     
     # From list view
-    attendees_count: Optional[int] = None
+    attendees_count: int | None = None
     
     def to_dict(self, include_calculated=False):
         data = asdict(self)
@@ -357,15 +358,15 @@ class Concern:
     society_id: int
     apartment_id: int
     concern_type: str
-    description: Optional[str] = None
-    preferred_time: Optional[str] = None
+    description: str | None = None
+    preferred_time: str | None = None
     status: ConcernStatus = ConcernStatus.OPEN
-    assigned_to: Optional[str] = None
-    created_at: Optional[datetime] = None
+    assigned_to: str | None = None
+    created_at: datetime | None = None
     
     # From list view
-    priority: Optional[str] = None
-    days_open: Optional[int] = None
+    priority: str | None = None
+    days_open: int | None = None
     
     def to_dict(self, include_calculated=False):
         data = asdict(self)
@@ -440,12 +441,12 @@ class ConcernInvite:
     society_id: int
     role: str
     entity_id: int
-    bid_amount: Optional[Decimal] = None
+    bid_amount: Decimal | None = None
     status: str = "invited"
-    invited_by: Optional[int] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    entity_name: Optional[str] = None
+    invited_by: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    entity_name: str | None = None
 
     def to_dict(self, include_calculated: bool = False) -> dict:
         data = asdict(self)

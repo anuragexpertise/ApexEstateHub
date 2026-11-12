@@ -2,17 +2,17 @@
 from __future__ import annotations
 
 import time
-import json
-from dash import Input, Output, State, html, dcc, no_update
-import dash_bootstrap_components as dbc
 
-from app.dash_apps.drilldown.registry import to_singular, to_plural
+import dash_bootstrap_components as dbc
+from dash import Input, Output, State, html, no_update
+
 from app.dash_apps.callbacks.drilldown_callbacks import get_entity_meta
 from app.dash_apps.drilldown import renderers
-from app.security.guards import require_session
-from app.security.authorization import Cap
-from app.security.service_guard import audit_event, require_action
+from app.dash_apps.drilldown.registry import to_plural, to_singular
 from app.security.audit_context import get_current_user_role
+from app.security.authorization import Cap
+from app.security.guards import require_session
+from app.security.service_guard import require_action
 from app.utils.ux_toasts import error_toast
 
 
@@ -31,7 +31,7 @@ def register_form_inspector_callbacks(app):
         meta_dict = get_entity_meta()
         for entity_plural, meta in meta_dict.items():
             forms = meta.get("form_fields", {})
-            for action in forms.keys():
+            for action in forms:
                 form_id = f"form_{to_singular(entity_plural)}_{action}"
                 opts.append({"label": f"{entity_plural.title()} - {action.title()} ({form_id})", "value": form_id})
         
@@ -119,7 +119,7 @@ def register_form_inspector_callbacks(app):
                 society_id=None,
                 role=get_current_user_role()
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             preview = dbc.Alert(error_toast(e, "Unable to render this form.")["message"], color="danger", style={"fontSize": "12px"})
 
         return details, preview
@@ -165,7 +165,7 @@ def register_form_inspector_callbacks(app):
                     fields=fields, submit_label="Test",
                     prefill={}, color="#000", society_id=None, role="admin"
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 err_msg = error_toast(e, "Unable to render this form.")["message"]
 
             ms = int((time.perf_counter() - t0) * 1000)

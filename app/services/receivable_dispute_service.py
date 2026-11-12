@@ -60,9 +60,8 @@ def _audit(action, dispute_id, society_id, user_id, after, reason):
     try:
         from app.security.service_guard import audit_event
         audit_event(action, "receivable_disputes", dispute_id, after=after, reason=reason, society_id=society_id)
-    except Exception:                                                     # noqa: BLE001  (an audit outage must not hide the result)
+    except Exception:  # noqa: BLE001, S110
         pass
-
 
 def raise_dispute(society_id, receivable_id, user_id, reason, resolution_ref, db=None) -> int:
     d = _db(db)
@@ -71,7 +70,7 @@ def raise_dispute(society_id, receivable_id, user_id, reason, resolution_ref, db
     try:
         r = d._execute("SELECT fn_raise_receivable_dispute(%s,%s,%s,%s,%s) AS id",
                        (society_id, receivable_id, user_id, reason, resolution_ref), fetch_one=True)
-    except Exception as exc:                                              # noqa: BLE001
+    except Exception as exc:
         raise DisputeRefused(_clean(exc)) from exc
     _audit("receivable.dispute.raise", r["id"], society_id, user_id, {"receivable_id": receivable_id, "resolution_ref": resolution_ref}, reason)
     return r["id"]
@@ -86,7 +85,7 @@ def decide(society_id, dispute_id, outcome, user_id, reason, resolution_ref, db=
     try:
         r = d._execute("SELECT fn_decide_receivable_dispute(%s,%s,%s,%s,%s,%s) AS msg",
                        (society_id, dispute_id, outcome, user_id, reason, resolution_ref), fetch_one=True)
-    except Exception as exc:                                              # noqa: BLE001
+    except Exception as exc:
         raise DisputeRefused(_clean(exc)) from exc
     _audit("receivable.dispute.decide", dispute_id, society_id, user_id, {"outcome": outcome, "resolution_ref": resolution_ref}, reason)
     return r["msg"]

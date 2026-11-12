@@ -1,13 +1,17 @@
 import logging
 import os
-
-from dash import html, dcc, dash_table, Input, Output, State, ALL, callback, no_update
-from app.utils.fiscal import fy_start_date, fy_start_year
-import dash_bootstrap_components as dbc
-from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 from decimal import Decimal
-from database.db_manager import db
 
+import dash_bootstrap_components as dbc
+from dash import dash_table, dcc, html
+
+from app.utils.fiscal import fy_start_date, fy_start_year
+from database.db_manager import db
+from database.money import (  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
+    D,
+    money,
+    rupee,
+)
 
 # ── Defaults requested for first-time setup ────────────────────────────────
 # Sinking and Repair & Maintenance Fund rates have NO default and NO cap: the figure is whatever the society's General
@@ -124,7 +128,7 @@ def _existing_society_images(society_id):
             "SELECT logo, login_background, payment_qr, secretary_sign FROM societies WHERE id = :id",
             {"id": society_id}, fetch_one=True,
         ) or {}
-    except Exception:
+    except Exception:  # noqa: BLE001
         return {}
     return {
         "logo": row.get("logo"), "bg": row.get("login_background"),
@@ -151,9 +155,13 @@ def build_rules_panel(step, society_id=None, state=None):
     admin was looking at a freshly-chosen one.
     """
     from app.services.statutory_rules import (
-        rows_for_step, STEP_LINK_CATEGORIES, STEP_INSTRUMENTS,
-        instruments_for_society, grouped_instruments, INSTRUMENT_BADGE_COLOR,
+        INSTRUMENT_BADGE_COLOR,
+        STEP_INSTRUMENTS,
+        STEP_LINK_CATEGORIES,
+        grouped_instruments,
+        instruments_for_society,
         normalize_state,
+        rows_for_step,
     )
 
     if state:
@@ -164,7 +172,7 @@ def build_rules_panel(step, society_id=None, state=None):
             try:
                 row = db._execute("SELECT state FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
                 state = normalize_state((row or {}).get("state"))
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
     cards = []
@@ -212,7 +220,7 @@ def build_rules_panel(step, society_id=None, state=None):
         try:
             from app.services.kpi_rule_links_service import get_links_for_categories
             by_cat = get_links_for_categories(cats, state=state)
-        except Exception:
+        except Exception:  # noqa: BLE001
             by_cat = {}
         seen = set()
         for cat in cats:
@@ -257,7 +265,7 @@ def load_conversation_data():
             # Replace NaNs with empty strings
             df = df.fillna('')
             data = df.to_dict('records')
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Error loading conversation.xlsx: {e}")
     return data
 
@@ -454,8 +462,8 @@ def _render_banner(title, text):
 def pending_ca_banner(what):
     """Warning shown wherever the admin types TDS / GST figures: they are provisional until the CA confirms them."""
     return dbc.Alert([html.I(className="fas fa-exclamation-triangle me-2"), html.Strong("Pending CA confirmation. "),
-                      f"The {what} you enter here is provisional. Enter what your Chartered Accountant has advised; the CA "
-                      "can edit and confirm it later after logging in. A blank row is not saved (no figure is assumed)."],
+                      (f"The {what} you enter here is provisional. Enter what your Chartered Accountant has advised; the CA "
+                      "can edit and confirm it later after logging in. A blank row is not saved (no figure is assumed).")],
                      color="warning", className="py-2 mb-3", style={"fontSize": "12.5px"})
 
 
@@ -517,7 +525,7 @@ def _society_state(society_id):
     try:
         row = db._execute("SELECT state FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
         return (row or {}).get("state") or None
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -536,8 +544,11 @@ FUND_BASES = ("per_sq_ft", "construction_cost", "undivided_interest")
 
 # UP AOA fund catalogue (status, rate, applicability) lives in app/services/up_aoa_fund_catalog.py so the Funds step
 # and the Brought Forward step read one source. UP_AOA_FUNDS keeps its old name and legacy keys.
-from app.services.up_aoa_fund_catalog import (UP_AOA_FUNDS, bf_info as _bf_fund_info, fund_facts as _fund_facts,  # noqa: E402
-                                              status_spec as _fund_status_spec, verify_spec as _fund_verify_spec)
+from app.services.up_aoa_fund_catalog import UP_AOA_FUNDS
+from app.services.up_aoa_fund_catalog import bf_info as _bf_fund_info
+from app.services.up_aoa_fund_catalog import fund_facts as _fund_facts
+from app.services.up_aoa_fund_catalog import status_spec as _fund_status_spec
+from app.services.up_aoa_fund_catalog import verify_spec as _fund_verify_spec
 
 
 def _fund_badge(text, colour, **kw):
@@ -574,8 +585,8 @@ _SUPPORT_ORDER = ("automatic", "partial", "manual")
 
 def _fund_register_card(fp, sink_rate, repair_rate, dep_opted=False):
     """Funds this society holds (prescribed + opted), their live parameters and where each is appropriated."""
-    from database.seed import ACCOUNTS
     from app.services.up_aoa_fund_catalog import FUNDS, register_rows
+    from database.seed import ACCOUNTS
     modes = {k: fp["plan"][k]["mode"] for k in ("sinking", "repair")}
     modes["depreciation"] = "fy_close" if dep_opted else "none"      # appropriated once a year, only if opted
     names = {a[0]: a[1] for a in ACCOUNTS}      # a[1] is accounts.name
@@ -608,7 +619,11 @@ def _fund_register_card(fp, sink_rate, repair_rate, dep_opted=False):
 
 def _ifms_slab_card():
     """UP RERA Reg. 47(d) IFMS rates by project type and house category, with what the text does not say."""
-    from app.services.up_aoa_fund_catalog import IFMS_NOTES, IFMS_PROJECT_TYPES, IFMS_SLABS
+    from app.services.up_aoa_fund_catalog import (
+        IFMS_NOTES,
+        IFMS_PROJECT_TYPES,
+        IFMS_SLABS,
+    )
 
     def area(r):
         lo, hi = r["area_sqm_from"], r["area_sqm_to"]
@@ -681,8 +696,12 @@ def fund_plan(society_id=None, state=None, chosen=None, constitution=None):
 
     `chosen` ({policy_key: value}) overrides what is stored: the Funds step passes the live drop-down values so the
     screen follows the admin's clicks; everything else reads the saved (provisional or active) choice."""
-    from app.services.statutory_rules import fund_rules_for_state, fund_collection_for_regime, scheme_for
     from app.services import regime_rules_admin as rra
+    from app.services.statutory_rules import (
+        fund_collection_for_regime,
+        fund_rules_for_state,
+        scheme_for,
+    )
     picked_state = state if state else _society_state(society_id)
     rules = fund_rules_for_state(picked_state)
     if not constitution and society_id:      # the live dropdown wins; otherwise what the society has saved
@@ -693,7 +712,7 @@ def fund_plan(society_id=None, state=None, chosen=None, constitution=None):
     chosen = chosen or {}
 
     def pick(key):
-        if key in chosen and chosen[key]:
+        if chosen.get(key):
             return chosen[key]
         return rra.policy_intent(society_id, key) if society_id else rra.policy_default(key)
 
@@ -801,8 +820,8 @@ def regime_badge(state_code, constitution=None):
 
 def state_thresholds_rows(state_code):
     """Society Compliance: thresholds for ALL-India plus only the picked state (was: every state's)."""
-    from database.seed import STATE_COMPLIANCE_THRESHOLDS
     from app.services.statutory_rules import normalize_state
+    from database.seed import STATE_COMPLIANCE_THRESHOLDS
     st = normalize_state(state_code)
     rows = []
     for (state, key, val, val_text, unit, eff_from, eff_to, notes) in STATE_COMPLIANCE_THRESHOLDS:
@@ -888,7 +907,7 @@ def _office_bearer_status(society_id):
             """SELECT v.office_code, v.holder_name, v.complete, v.missing, a.flat_number
                  FROM v_office_bearer_completeness v LEFT JOIN apartments a ON a.id = v.apartment_id
                 WHERE v.society_id = :s ORDER BY v.office_code, v.holder_name""", {"s": society_id}, fetch_all=True) or []
-    except Exception:
+    except Exception:  # noqa: BLE001
         return html.Div()
     seated = {r["office_code"] for r in rows}
     items = []
@@ -901,7 +920,7 @@ def _office_bearer_status(society_id):
                                   html.Span("incomplete, missing " + ", ".join(r["missing"] or []), style={"color": "#b02a37"})]))
     items += [html.Li([f"{o.replace('_', ' ').title()}: ", html.Span("not yet appointed", style={"color": "#b26a00"})])
               for o in ("president", "secretary", "treasurer") if o not in seated]
-    complete = all((r.get("complete") for r in rows)) and len(seated) == 3
+    complete = all(r.get("complete") for r in rows) and len(seated) == 3
     return html.Div([html.Div("Serving office-bearers", style={"fontWeight": "600", "fontSize": "13px"}),
                      html.Ul(items, style={"fontSize": "12px"}) if items else html.Div("None appointed yet.", style={"fontSize": "12px"}),
                      html.Div([
@@ -995,8 +1014,13 @@ def legal_hierarchy_rows(society_id=None, state=None, answers=None, constitution
     `answers` maps the six Yes/No keys (central_it_tan, central_tds, central_gst, central_rera, has_employees,
     has_security_agency) to booleans; a missing key takes its default. Returns (rows, {}).
     """
-    from app.services.statutory_rules import (regime_selection, instruments_for_regime, instrument_applies, grouped_instruments,
-                                          normalize_state)
+    from app.services.statutory_rules import (
+        grouped_instruments,
+        instrument_applies,
+        instruments_for_regime,
+        normalize_state,
+        regime_selection,
+    )
     st, const = _picked_state_constitution(society_id, state, constitution)
     regime = regime_selection(st, const)["regime"] or "GENERIC"
     instruments = instruments_for_regime(regime)
@@ -1139,7 +1163,7 @@ def render_review(draft, society_id=None):
     bf_n = 0
     try:
         from database.seed import ACCOUNTS
-        drcr = {a[0]: a[5] for a in ACCOUNTS}
+        {a[0]: a[5] for a in ACCOUNTS}
         for r in bf.get("rows") or []:
             a = money(r.get("bf_amount"))
             if a:
@@ -1148,7 +1172,7 @@ def render_review(draft, society_id=None):
                     bf_dr += a
                 else:
                     bf_cr += a
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     if bf_n and bf_dr != bf_cr:
         problems.append(f"Brought Forward does not balance: Dr ₹{bf_dr:,.2f} vs Cr ₹{bf_cr:,.2f}.")
@@ -1179,7 +1203,7 @@ def render_review(draft, society_id=None):
         _fe = funds_error(fp["plan"], funds.get("apt_sinking"), funds.get("apt_repair"), funds.get("apt_cost"))
         if _fe:
             problems.append(_fe)
-    except Exception:
+    except Exception:  # noqa: BLE001
         fund_rows = [("Funds", "-")]
 
     def yn(val):
@@ -1279,7 +1303,7 @@ def render_review(draft, society_id=None):
             for k, pv in rra.list_society_policies(society_id).items():
                 if pv["proposed"]:
                     policy_status.append(f"{k}: {pv['proposed']} (awaiting resolution)")
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
     ratification = []
     if bye_law_status:
@@ -1306,7 +1330,7 @@ def _committee_review_rows(society_id):
     try:
         from app.services.onboarding_service import seated_officers, signature_url
         officers = seated_officers(society_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
         officers = {}
     rows = []
     for office in ("president", "secretary", "treasurer"):
@@ -1377,7 +1401,7 @@ def _reconciliation_review_rows(bf):
         return [("Reconciliation & evidence", "Not yet completed.")]
     items = []
     for key, val in rec.items():
-        if key.endswith("_sha256") or key.endswith("_stored"):
+        if key.endswith(("_sha256", "_stored")):
             continue
         items.append((key.replace("_", " ").title(), str(val)))
     return [("Reconciliation & evidence", items if items else "Not yet completed.")]
@@ -1602,8 +1626,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
             _central_acts_banner(),
             dbc.Alert([
                 html.Strong("Verification: ", className="me-1"),
-                "Master Settings → RWA Compliance verifies every Central Act, Central Rule and Bye-law, and every State Act, State Rule and Model Bye-law, listed in the table below. "
-                "A Treasurer or an Auditor opens the source text and records the notification number, date and opinion reference there; the row then turns ",
+                ("Master Settings → RWA Compliance verifies every Central Act, Central Rule and Bye-law, and every State Act, State Rule and Model Bye-law, listed in the table below. "
+                "A Treasurer or an Auditor opens the source text and records the notification number, date and opinion reference there; the row then turns "),
                 verification_badge(True), " and its name links to the source text. A ", verification_badge(False),
                 " row is shown for information only and never drives enforcement. Confirm the applicable law with your advocate — nothing here is a legal opinion.",
             ], color="info", className="py-2 mt-3", style={"fontSize": "12.5px"}),
@@ -1762,8 +1786,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
             html.Div(id="onb-apt-evidence-status", style={"fontSize":"12.5px","marginTop":"4px", "color": "#667"}),
         ]
     elif category == "Funds":
+        from app.dash_apps.pages.setup_wizard import fund_flags, fund_plan
         from app.services import regime_rules_admin as rra
-        from app.dash_apps.pages.setup_wizard import fund_plan, fund_flags
         from app.services.statutory_rules import fund_rules_for_state
         s_sink, s_repair = None, None          # no default: blank until the society enters the resolved rate
         if society_id:
@@ -1775,12 +1799,12 @@ def render_category_content(category, society_id=None, state=None, constitution=
         fund_rules = fund_rules_for_state(state)
         try:
             pol = rra.list_society_policies(society_id) if society_id else {}
-        except Exception:
+        except Exception:  # noqa: BLE001
             pol = {}
         cards = []
 
         def policy_select(key, lock_regime_label=None):
-            label, clause, choices = rra.POLICY_SPECS[key]
+            label, _clause, choices = rra.POLICY_SPECS[key]
             st = pol.get(key) or {"value": choices[0][0], "active": False, "proposed": None}
             shown = st["proposed"] or st["value"]
             opts = []
@@ -2046,7 +2070,9 @@ def render_category_content(category, society_id=None, state=None, constitution=
 
         _bf_as_on = (_bf_draft.get("as_on_date") if '_bf_draft' in locals() else None) or str(fy_start_date())
         # Funds selected/held for this society (prescribed + opted on the Funds step)
-        from app.services.up_aoa_fund_catalog import FUNDS as _BF_FUNDS, register_rows as _bf_register_rows, status_spec as _bf_status_spec
+        from app.services.up_aoa_fund_catalog import FUNDS as _BF_FUNDS
+        from app.services.up_aoa_fund_catalog import register_rows as _bf_register_rows
+        from app.services.up_aoa_fund_catalog import status_spec as _bf_status_spec
         _bf_acc_names = {a[0]: a[1] for a in ACCOUNTS}
         _bf_values = {"apt_sinking_fund_rate": None, "apt_repair_fund_rate": None}
         _held_rows = _bf_register_rows(_modes, _bf_acc_names, _bf_values)
@@ -2226,9 +2252,9 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 style={"backgroundColor": "#f8f9fa", "padding": "15px", "borderRadius": "5px", "border": "1px solid #ced4da", "marginBottom": "20px"}
             ),
             dbc.Alert([html.Strong("This is the standard template, not the signature. "),
-                       "After you submit, the binding Agreement is issued with three annexes (legal regime, this review, and the opening "
+                       ("After you submit, the binding Agreement is issued with three annexes (legal regime, this review, and the opening "
                        "position). The President, Secretary and Treasurer sign it with their own passwords, then the platform signs and "
-                       "your society goes live. Until then nothing is posted to the ledger."], color="info", className="py-2 mb-3",
+                       "your society goes live. Until then nothing is posted to the ledger.")], color="info", className="py-2 mb-3",
                        style={"fontSize": "12.5px"}),
         ]
     return []
@@ -2271,7 +2297,7 @@ def get_setup_wizard_layout(society_id=None):
                                 [
                                     dbc.NavLink(
                                         [html.I(className=f"{CATEGORY_ICONS.get(cat, 'fas fa-circle')} me-2"), step_label(cat)],
-                                        active=True if i == 0 else False,
+                                        active=i == 0,
                                         id={"type": "sw-nav-item", "index": i},
                                         href="#",
                                         style={"borderRadius": "8px", "marginBottom": "5px"}

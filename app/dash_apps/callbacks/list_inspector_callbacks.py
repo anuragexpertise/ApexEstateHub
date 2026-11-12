@@ -19,28 +19,27 @@ This is a diagnostic / documentation tool — it never mutates data.
 """
 from __future__ import annotations
 
-import time
 import json
-from collections import defaultdict
+import time
 
-from dash import Input, Output, State, html, dcc, no_update
 import dash_bootstrap_components as dbc
+from dash import Input, Output, State, dcc, html, no_update
 
 from app.dash_apps.drilldown.registry import (
     DRILLDOWN_MAP,
     PK_MAP,
-    to_singular,
     to_plural,
+    to_singular,
 )
-from app.security.guards import require_session
-from app.security.authorization import Cap
-from app.security.service_guard import audit_event, require_action
 from app.security.audit_context import (
-    get_current_user_id,
-    get_current_user_role,
     get_current_society_id,
+    get_current_user_role,
 )
+from app.security.authorization import Cap
+from app.security.guards import require_session
+from app.security.service_guard import audit_event, require_action
 from app.utils.ux_toasts import error_toast
+
 
 def _console_denied_alert(_decision=None):
     return dbc.Alert("Platform operator role required.", color="danger",
@@ -105,7 +104,7 @@ def register_list_inspector_callbacks(app):
         for list_id in sorted(LIST_INDEX.keys()):
             entry = LIST_INDEX[list_id]
             title = entry["kpis"][0]["label"] if entry["kpis"] else list_id
-            opts.append({"label": "%s  (%s)" % (title, list_id), "value": list_id})
+            opts.append({"label": f"{title}  ({list_id})", "value": list_id})
         return opts or [{"label": "- no lists found -", "value": ""}]
 
     # ── Populate the KPI selector filtered by the chosen list ───────────────
@@ -204,10 +203,10 @@ def register_list_inspector_callbacks(app):
 
         body_children = [
             html.Div([
-                html.I(className="fas %s me-2" % meta.get("list_icon", "fa-table"),
+                html.I(className="fas {} me-2".format(meta.get("list_icon", "fa-table")),
                        style={"color": color}),
                 html.Strong(selected_list, style={"fontSize": "14px"}),
-                dbc.Badge("rows->%s" % plural, color="secondary", className="ms-2",
+                dbc.Badge(f"rows->{plural}", color="secondary", className="ms-2",
                           style={"fontSize": "9px"}),
             ], style={"display": "flex", "alignItems": "center",
                       "marginBottom": "8px"}),
@@ -263,7 +262,7 @@ def register_list_inspector_callbacks(app):
         return dbc.Card(
             dbc.CardBody(body_children, style={"padding": "12px"}),
             style={"borderRadius": "10px",
-                   "border": "1px solid %s33" % color,
+                   "border": f"1px solid {color}33",
                    "minHeight": "340px", "maxHeight": "640px", "overflowY": "auto"},
         )
 
@@ -302,8 +301,8 @@ def register_list_inspector_callbacks(app):
             sql, params = loaders._build_list_sql(plural, filters, page=1, page_size=25)
             # Inline params for a human-readable, copy-pasteable query
             return _inline_params(sql, params)
-        except Exception as e:
-            return "-- could not build SQL: %s" % e
+        except Exception as e:  # noqa: BLE001
+            return f"-- could not build SQL: {e}"
 
     # ── Load: run the (editable) list SQL and display rows in a list box ──
     @app.callback(
@@ -340,13 +339,13 @@ def register_list_inspector_callbacks(app):
                 [
                     html.Strong("Rows: "),
                     html.Span(str(n), style={"fontWeight": "700", "marginRight": "12px"}),
-                    html.Small("(%0.1f ms)" % elapsed, style={"color": "#888"}),
+                    html.Small(f"({elapsed:0.1f} ms)", style={"color": "#888"}),
                 ],
                 color="success" if n else "warning",
                 className="mt-2 py-2", style={"fontSize": "12px"},
             )
             return result_alert, _render_result_box(rows)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             elapsed = (time.perf_counter() - t0) * 1000
             result_alert = dbc.Alert(
                 [
@@ -356,7 +355,7 @@ def register_list_inspector_callbacks(app):
                         style={"fontSize": "11px", "whiteSpace": "pre-wrap"},
                     ),
                     html.Br(),
-                    html.Small("(%0.1f ms)" % elapsed, style={"color": "#888"}),
+                    html.Small(f"({elapsed:0.1f} ms)", style={"color": "#888"}),
                 ],
                 color="danger", className="mt-2 py-2", style={"fontSize": "12px"},
             )
@@ -375,8 +374,7 @@ def register_list_inspector_callbacks(app):
     def export_list_sql(n_clicks, sql_text, selected_list):
         if not n_clicks or not sql_text:
             return no_update
-        block = ("\n-- ── LIST: %s ─────────────────────────\n%s;\n"
-                 % (selected_list or "unknown", sql_text.strip()))
+        block = ("\n-- ── LIST: {} ─────────────────────────\n{};\n".format(selected_list or "unknown", sql_text.strip()))
         return dcc.send_string(block, filename="list_%s.sql" % (selected_list or "query"))
 
     # ── List Audit ────────────────────────────────────────────────────────
@@ -397,8 +395,8 @@ def register_list_inspector_callbacks(app):
         if not n_clicks:
             raise PreventUpdate
 
-        from database.db_manager import db
         from app.dash_apps.drilldown import loaders
+        from database.db_manager import db
         sid = get_current_society_id()
 
         rows_out = []
@@ -424,7 +422,7 @@ def register_list_inspector_callbacks(app):
                 sql, params = loaders._build_list_sql(plural, filters, page=1, page_size=1)
                 rows = db._execute(sql, params, fetch_all=True)
                 row_count = len(rows) if rows else 0
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 err_msg = str(e)
 
             ms = int((time.perf_counter() - t0) * 1000)
@@ -471,7 +469,7 @@ def register_list_inspector_callbacks(app):
 
 def _kpi_chip_label(k):
     if k["filter"]:
-        return "%s +filter" % k["label"]
+        return "{} +filter".format(k["label"])
     return k["label"]
 
 
@@ -496,7 +494,7 @@ def _inline_params(sql: str, params: tuple) -> str:
         elif isinstance(p, (int, float)):
             lit = str(p)
         else:
-            lit = "'%s'" % str(p).replace("'", "''")
+            lit = "'{}'".format(str(p).replace("'", "''"))
         out = out.replace("%s", lit, 1)
     return out
 
@@ -510,14 +508,14 @@ def _render_result_box(rows: list) -> html.Div:
     for i, row in enumerate(rows[:200]):
         rd = row.to_dict(include_calculated=True) if hasattr(row, "to_dict") else dict(row)
         preview = ", ".join(
-            "%s=%s" % (k, _short(v)) for k, v in list(rd.items())[:12]
+            f"{k}={_short(v)}" for k, v in list(rd.items())[:12]
         )
         items.append(html.Li(
             preview,
             style={"padding": "3px 0", "borderBottom": "1px solid #eef2f7" if i < len(rows) - 1 else "none"},
         ))
     if len(rows) > 200:
-        items.append(html.Li("… %d more rows (truncated)" % (len(rows) - 200),
+        items.append(html.Li("… %d more rows (truncated)" % (len(rows) - 200),  # noqa: UP031
                             style={"padding": "3px 0", "color": "#999"}))
 
     return html.Ul(items, style={"listStyleType": "none", "paddingLeft": "0", "margin": "0"})

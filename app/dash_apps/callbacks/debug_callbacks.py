@@ -19,20 +19,18 @@ Provides two features accessible via the Customize > KPI Inspector tab:
      Output at id="kpi-test-result"
 """
 import time
+
+import dash_bootstrap_components as dbc
 from dash import Input, Output, State, html, no_update
 from dash.exceptions import PreventUpdate
-import dash_bootstrap_components as dbc
 
 from app.dash_apps.callbacks.card_catalogue_callbacks import format_kpi_value
-from app.security.guards import require_session
-from app.security.authorization import Cap
-from app.security.service_guard import audit_event, require_action
 from app.security.audit_context import (
-    get_current_user_id,
-    get_current_user_role,
     get_current_society_id,
 )
-
+from app.security.authorization import Cap
+from app.security.guards import require_session
+from app.security.service_guard import require_action
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
@@ -57,7 +55,7 @@ def _run_kpi_query(query: str, n_params: int, sid) -> tuple:
         ms   = round((time.perf_counter() - t0) * 1000, 1)
         raw  = (row or {}).get("v")
         return raw, ms, None
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         ms = round((time.perf_counter() - t0) * 1000, 1)
         return None, ms, str(exc)
 
@@ -67,7 +65,8 @@ def _detect_duplicate_keys() -> set:
     card_catalogue.py silently overwrites duplicate dict keys in KPI_CARDS.
     We detect them by parsing the source file and counting key occurrences.
     """
-    import ast, inspect, re
+    import inspect
+    import re
     try:
         from app.dash_apps.pages import card_catalogue as cc_mod
         src = inspect.getsource(cc_mod)
@@ -80,7 +79,7 @@ def _detect_duplicate_keys() -> set:
                 dupes.add(k)
             seen.add(k)
         return dupes
-    except Exception:
+    except Exception:  # noqa: BLE001
         return set()
 
 

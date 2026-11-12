@@ -57,7 +57,7 @@ def register_auditor_callbacks(app):
             return []
         try:
             rows = ac.resolutions_for(sid)
-        except Exception:
+        except Exception:  # noqa: BLE001
             return []
         return [{"label": f"#{r['id']} · {r['type']} {r['held_on']} · {r['title'] or ''}", "value": r["id"]}
                 for r in rows]

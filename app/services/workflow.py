@@ -26,8 +26,8 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
 
+from app.utils import now_ist
 from database.db_manager import db
 
 log = logging.getLogger(__name__)
@@ -257,7 +257,7 @@ def _record_transition(source_table, meta, source_id, from_state, to_state,
         "to_state": to_state,
         "actor_id": actor_id,
         "society_id": society_id,
-        "created_at": datetime.utcnow(),
+        "created_at": now_ist(),
     }
 
     # concerns_assigns rows also carry concern_id + entity_role + entity_id.

@@ -4,11 +4,11 @@ Dash application factory.
 Called from app/__init__.py → create_dash_app(flask_app).
 """
 
-import os
 import logging
+import os
 
-from dash import Dash, html
 import dash_bootstrap_components as dbc
+from dash import Dash, html
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ def create_dash_app(flask_app):
         from app.dash_apps.callbacks import register_callbacks
         register_callbacks(dash_app)
         log.info("Dash callbacks registered ✓")
-    except Exception as exc:
+    except Exception:
         log.exception("Callback registration error")
 
     return dash_app

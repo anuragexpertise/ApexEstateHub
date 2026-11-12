@@ -10,9 +10,10 @@ Generates human-readable particulars based on account type and context:
 """
 
 from __future__ import annotations
-from database.money import D
-from datetime import date
+
+from app.utils import today_ist
 from database.db_manager import db
+from database.money import D
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -33,7 +34,7 @@ def generate_particulars(acc_id: int, entity_id: int | None, role: str,
 
     if tab == "SocM":
         # "Maintenance Apr-2026"
-        today = date.today()
+        today = today_ist()
         return f"Maintenance {MONTHS[today.month - 1]}-{today.year}"
 
     if tab == "SellAs":
@@ -83,13 +84,13 @@ def generate_expense_particulars(acc_id: int, entity_id: int | None, role: str,
     acc_name = acc.get("name", "")
 
     if tab == "Salary":
-        today = date.today()
+        today = today_ist()
         entity_name = _get_entity_name(role, entity_id, society_id)
         prefix = f"{entity_name} - " if entity_name else ""
         return f"{prefix}Salary {MONTHS[today.month - 1]}-{today.year}"
 
     if tab in ("Elec", "WTax", "HTax", "Water"):
-        today = date.today()
+        today = today_ist()
         return f"{acc_name} {MONTHS[today.month - 1]}-{today.year}"
 
     if tab in ("RM", "Repairs"):
@@ -115,7 +116,7 @@ def get_pending_balance(entity_id: int | None, role: str, society_id: int) -> fl
             (society_id, entity_id, role), fetch_one=True,
         )
         return D(row.get("balance", 0)) if row else D(0)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️ get_pending_balance: {e}")
         return D(0)
 
@@ -131,7 +132,7 @@ def _get_account(account_id: int, society_id: int) -> dict | None:
             "SELECT id, name, tab_name, header FROM accounts WHERE id=%s AND society_id=%s",
             (account_id, society_id), fetch_one=True,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -141,7 +142,7 @@ def _get_asset(asset_id: int, society_id: int) -> dict | None:
             "SELECT asset_name, asset_SNo FROM assets WHERE id=%s AND society_id=%s",
             (asset_id, society_id), fetch_one=True,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -152,7 +153,7 @@ def _get_event(event_id: int, society_id: int) -> dict | None:
                FROM events WHERE id=%s AND society_id=%s""",
             (event_id, society_id), fetch_one=True,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -183,5 +184,5 @@ def _get_entity_name(role: str, entity_id: int | None, society_id: int) -> str:
             flat = row.get("flat_number") or ""
             return f"{flat} - {val}" if flat else str(val)
         return str(val)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return ""

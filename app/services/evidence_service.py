@@ -18,6 +18,7 @@ import os
 from datetime import datetime
 
 from app.services import onboarding_service as ob
+from app.utils import now_ist
 
 log = logging.getLogger(__name__)
 
@@ -142,11 +143,18 @@ def as_pdf(row: dict, data: bytes) -> bytes:
 
 def register_pdf(society_id: int, society_name: str) -> bytes:
     """One-page-per-screenful register of all evidence with its recorded SHA-256 and a fresh integrity result."""
+    from xml.sax.saxutils import escape
+
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-    from xml.sax.saxutils import escape
+    from reportlab.platypus import (
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
 
     ss = getSampleStyleSheet()
     cell = ParagraphStyle("cell", parent=ss["BodyText"], fontSize=7.5, leading=9)
@@ -164,12 +172,12 @@ def register_pdf(society_id: int, society_name: str) -> bytes:
                      Paragraph(escape(r["filename"] or ""), cell),
                      Paragraph(escape(_fmt_dt(r["uploaded_at"]) + ((" by " + r["uploaded_by_name"]) if r.get("uploaded_by_name") else "")), cell),
                      Paragraph(kb, cell), Paragraph(escape(str(r["sha256"]).lower()), mono),
-                     Paragraph(("<b>%s</b>" % labels[status]) if status != STATUS_OK else labels[status], cell)])
+                     Paragraph((f"<b>{labels[status]}</b>") if status != STATUS_OK else labels[status], cell)])
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=24, rightMargin=24, topMargin=28, bottomMargin=28,
                             title="Evidence register")
     story = [Paragraph("Evidence register", ss["Title"]),
-             Paragraph(escape(society_name or "") + " | generated " + _fmt_dt(datetime.now()) +
+             Paragraph(escape(society_name or "") + " | generated " + _fmt_dt(now_ist()) +
                        f" | {len(rows)} document(s)" + (f" | <b>{bad} FAILED the integrity check</b>" if bad else " | all verified"), ss["BodyText"]),
              Spacer(1, 8)]
     if rows:

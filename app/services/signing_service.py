@@ -25,6 +25,7 @@ import secrets
 from datetime import datetime
 
 from app.services import secret_vault as vault
+from app.utils import now_ist
 
 log = logging.getLogger(__name__)
 
@@ -55,8 +56,9 @@ def label(purpose: str, society_id: int) -> bytes:
 
 
 def _audit(d, society_id, actor_id, action, purpose, version, extra=None):
-    from app.security.pii_masking import redact_for_audit
     import json
+
+    from app.security.pii_masking import redact_for_audit
     # Redact any PII strings in the extra dict before storing in audit_events
     safe_extra = {}
     for k, v in ((extra or {}).items()):
@@ -124,7 +126,7 @@ def sign(society_id: int, purpose: str, message, db=None) -> dict:
     raw = vault.unwrap(row["wrapped_key"])
     return {
         "purpose": purpose, "key_version": row["version"], "key_id": row["key_id"], "algorithm": row["algorithm"],
-        "signature": _mac(raw, purpose, society_id, msg), "signed_at": datetime.now().isoformat(timespec="seconds"),
+        "signature": _mac(raw, purpose, society_id, msg), "signed_at": now_ist().isoformat(timespec="seconds"),
         "text_hash": hashlib.sha256(label(purpose, society_id) + msg).hexdigest(),
     }
 

@@ -29,15 +29,15 @@ from __future__ import annotations
 
 from dash import Input, Output, State, no_update
 from dash.exceptions import PreventUpdate
-from database.db_manager import db
+
 from app.dash_apps.drilldown import loaders
-from app.security.guards import require_session
 from app.security.audit_context import (
-    get_current_user_id,
-    get_current_user_role,
-    get_current_society_id,
     get_current_linked_id,
+    get_current_society_id,
+    get_current_user_role,
 )
+from app.security.guards import require_session
+from database.db_manager import db
 
 # Maps auth-store "role" values to the role codes used in concerns_assigns.
 # Vendor portal only, per the Concerns workflow spec
@@ -162,11 +162,11 @@ def register_concern_bid_callbacks(app):
         except Exception as e:
             import logging
             logging.getLogger(__name__).exception(
-                "notify_concern_bid_saved failed (concern_id=%s): %s", concern_id, e,
+                "notify_concern_bid_saved failed (concern_id=%s): %s", concern_id, e,  # noqa: TRY401
             )
 
         from app.dash_apps.callbacks.drilldown_callbacks import _render_current
-        content, breadcrumb, db_err = _render_current(drill_store or {}, auth or {})
+        content, breadcrumb, _db_err = _render_current(drill_store or {}, auth or {})
         return (
             False, "",
             {"type": "success", "message": msg},

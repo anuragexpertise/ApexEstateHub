@@ -8,13 +8,13 @@ def sweep_all_societies():
     results = {}
     try:
         societies = db._execute("SELECT id FROM societies", fetch_all=True) or []
-    except Exception:
+    except Exception:  # noqa: BLE001
         return results
     for s in societies:
         sid = s["id"]
         try:
             rules = db._execute("SELECT * FROM retention_rules WHERE society_id=%s", (sid,), fetch_all=True) or []
-        except Exception:
+        except Exception:  # noqa: BLE001
             rules = []
         for r in rules:
             key = (sid, r.get("table_name"))

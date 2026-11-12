@@ -104,7 +104,7 @@ def lock_fy(society_id: int, fy: int, user_id: int | None, reason: str, understo
             after={"financial_year": fy, "lock_id": lock_id, "anchor_id": anchor["anchor_id"] if anchor else None,
                    "resolution_id": resolution_id},
             reason=reason, permission_used="finance.period.close", society_id=society_id)
-    except Exception:                                          # noqa: BLE001 - the lock stands; the failure is logged
+    except Exception:
         log.exception("audit row for FY lock %s/%s was not written", society_id, fy)
 
     return True, (f"FY {fy_label(fy)} is locked. No entry can be posted into it or any earlier year, and the lock "

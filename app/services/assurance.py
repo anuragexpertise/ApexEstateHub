@@ -23,6 +23,8 @@ import logging
 import re
 from datetime import date
 
+from app.utils import today_ist
+
 log = logging.getLogger(__name__)
 
 TASKS = ("5.1", "5.2", "5.3")
@@ -89,7 +91,7 @@ def status(db=None) -> dict:
         uncovered = d._execute("SELECT COUNT(*) AS n FROM v_rule_assurance WHERE NOT covered", fetch_one=True)
         label = d._execute("SELECT fn_assurance_label() AS l", fetch_one=True)["l"]
         allowed = bool(d._execute("SELECT fn_audit_grade_claim_allowed() AS ok", fetch_one=True)["ok"])
-    except Exception as exc:  # fail closed: if we cannot read the evidence, nothing is claimed
+    except Exception as exc:  # fail closed: if we cannot read the evidence, nothing is claimed  # noqa: BLE001
         log.warning("assurance status unreadable: %s", refusal_text(exc))
         return {"audit_grade_allowed": False, "label": f"{PROVISIONAL_LABEL_PREFIX}: assurance status unreadable",
                 "tasks": [], "rules_without_opinion": None}
@@ -142,7 +144,7 @@ def advance_engagement(role, actor_id: int | None, engagement_id: int, status: s
         args.append(actor_id)
         if "closed_on" not in fields:
             sets.append("closed_on=%s")
-            args.append(date.today())
+            args.append(today_ist())
     args.append(engagement_id)
     _db(db)._execute(f"UPDATE assurance_engagements SET {', '.join(sets)} WHERE id=%s", tuple(args))  # nosec B608: column names come from ENGAGEMENT_FIELDS only
 
@@ -166,7 +168,7 @@ def close_finding(role, finding_id: int, closure_ref: str, closed_on: date | Non
         _pick("retest_result", retest_result, ("pass", "fail"))
     _db(db)._execute(
         "UPDATE assurance_findings SET status='closed', closure_ref=%s, closed_on=%s, retest_result=%s, retested_on=%s WHERE id=%s",
-        (closure_ref, closed_on or date.today(), retest_result, retested_on, finding_id))
+        (closure_ref, closed_on or today_ist(), retest_result, retested_on, finding_id))
 
 
 def accept_finding(role, finding_id: int, accepted_ref: str, accepted_by: str, accepted_on: date | None = None, db=None) -> None:
@@ -174,7 +176,7 @@ def accept_finding(role, finding_id: int, accepted_ref: str, accepted_by: str, a
     _require_master(role)
     _db(db)._execute(
         "UPDATE assurance_findings SET status='accepted', accepted_ref=%s, accepted_by=%s, accepted_on=%s WHERE id=%s",
-        (accepted_ref, accepted_by, accepted_on or date.today(), finding_id))
+        (accepted_ref, accepted_by, accepted_on or today_ist(), finding_id))
 
 
 # ── 5.2: opinions against rules ───────────────────────────────────────────────────────────────────────────────────
@@ -209,7 +211,7 @@ def record_release_verification(role, actor_id: int | None, release_tag: str, it
     row = _db(db)._execute(
         "INSERT INTO release_verifications (release_tag, item, checked_on, checked_by, source_ref, outcome, rules_touched, "
         "adviser_opinion_ref, note) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-        (release_tag, item, checked_on or date.today(), actor_id, source_ref, outcome, list(rules_touched or []),
+        (release_tag, item, checked_on or today_ist(), actor_id, source_ref, outcome, list(rules_touched or []),
          adviser_opinion_ref or None, note), fetch_one=True)
     return int(row["id"])
 

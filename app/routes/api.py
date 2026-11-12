@@ -1,8 +1,8 @@
 # app/routes/api.py
-from flask import Blueprint, request, jsonify
-from flask_login import login_required, current_user
+from flask import Blueprint, jsonify
+
+from app.auth.jwt_handler import token_required
 from database.db_manager import db  # ← Fix import
-from app.auth.jwt_handler import token_required, role_required
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 

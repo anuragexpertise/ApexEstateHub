@@ -16,7 +16,7 @@ expectation, and involves no data lookup.
 
 from __future__ import annotations
 
-from dash import Input, Output, State, MATCH
+from dash import MATCH, Input, Output, State
 
 
 def register_qty_stepper_callbacks(app):

@@ -24,6 +24,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+from app.utils import today_ist
 from database.db_manager import db
 
 DEFAULT_REGIME = "UP_AOA_2010"
@@ -69,7 +70,7 @@ _PROTECTED_RE = re.compile(
 def is_protected_rule_sql(sql: str) -> str | None:
     """Name of the protected table a write statement targets, else None. A guardrail against
     accidents, not a security boundary (a DO block or function can still reach the tables)."""
-    cleaned = re.sub(r"/\*.*?\*/", " ", sql or "", flags=re.S)
+    cleaned = re.sub(r"/\*.*?\*/", " ", sql or "", flags=re.DOTALL)
     cleaned = re.sub(r"--[^\n]*", " ", cleaned)
     m = _PROTECTED_RE.search(cleaned)
     return m.group(2).lower() if m else None
@@ -149,7 +150,7 @@ def validate_rule_value(rule_key: str, raw) -> tuple[bool, str, float | None, st
         num = float(str(raw).strip())
     except (TypeError, ValueError):
         return False, f"{rule_key} must be a number.", None, None
-    if num != num or num in (float("inf"), float("-inf")):
+    if num != num or num in (float("inf"), float("-inf")):  # noqa: PLR0124
         return False, f"{rule_key} must be a finite number.", None, None
     if spec.kind == "int" and num != int(num):
         return False, f"{rule_key} must be a whole number.", None, None
@@ -165,7 +166,7 @@ def check_cross_rules(rule_key: str, new_value, effective: dict[str, float | str
     ev[rule_key] = new_value
     for m, d, label in (("statement_publish_due_month", "statement_publish_due_day", "Bye-law 49 publish deadline"),
                         ("authority_copy_due_month", "authority_copy_due_day", "Bye-law 49 authority-copy deadline")):
-        if rule_key in (m, d) and (ev.get(m) is not None and ev.get(d) is not None):
+        if rule_key in (m, d) and (ev.get(m) is not None and ev.get(d) is not None):  # noqa: SIM102
             if not _md(ev[m], ev[d]):
                 return f"{label}: month {int(ev[m])} / day {int(ev[d])} is not a real calendar date."
     pub = _md(ev.get("statement_publish_due_month"), ev.get("statement_publish_due_day"))
@@ -178,7 +179,7 @@ def check_cross_rules(rule_key: str, new_value, effective: dict[str, float | str
 # ── reads ─────────────────────────────────────────────────────────────────────
 def effective_rules(regime_code: str, on: date | None = None) -> list[dict]:
     """The row in force for each rule on `on` (default today)."""
-    on = on or date.today()
+    on = on or today_ist()
     return _rows(
         """SELECT DISTINCT ON (rule_key) rule_key, value, value_text, unit, source_reference,
                   effective_from, effective_to
@@ -267,7 +268,7 @@ def save_rule_version(actor_id, actor_role, regime_code: str, rule_key: str, raw
     start = _d(effective_from)
     if not start:
         return False, "Choose the date the new value takes effect."
-    if start < date.today():
+    if start < today_ist():
         return False, "A rule change cannot be back-dated: it would silently re-grade filings and eligibility already reported."
     source = _text(source_reference, MIN_TEXT)
     why = _text(reason, MIN_TEXT)
@@ -342,7 +343,7 @@ def update_instrument(actor_id, actor_role, instrument_id, status, applicability
     verified = _d(last_verified_on)
     if last_verified_on and not verified:
         return False, "Last-verified date is not a valid date."
-    if verified and verified > date.today() + timedelta(days=1):
+    if verified and verified > today_ist() + timedelta(days=1):
         return False, "Last-verified date cannot be in the future."
     try:
         iid = int(instrument_id)
@@ -475,7 +476,7 @@ def society_policy(society_id, policy_key: str) -> str:
         row = _row("SELECT fn_society_policy(%s, %s) AS v", (int(society_id), policy_key))
         if row and row.get("v"):
             return row["v"]
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     return policy_default(policy_key)
 
@@ -487,7 +488,7 @@ def policy_intent(society_id, policy_key: str) -> str:
     try:
         st = list_society_policies(int(society_id))[policy_key]
         return st["proposed"] or st["value"]
-    except Exception:
+    except Exception:  # noqa: BLE001
         return policy_default(policy_key)
 
 
@@ -571,11 +572,11 @@ def governance_snapshot(society_id) -> dict:
                  {"s": int(society_id)}) or {}
         out["pending_choices"] = int(r.get("bl") or 0) + int(r.get("pol") or 0)
         out["last_meeting"] = r.get("last_meeting")
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     try:
         out["pending_enactments"] = len(list_pending_enactments(society_id))
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     return out
 
@@ -588,7 +589,7 @@ def clause_rules(society_id, clause_id: str) -> dict:
     """What an admin may choose for a clause: locked (cannot be 'not adopted') / fixed (cannot be varied)."""
     try:
         locked = clause_is_locked(society_id, clause_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
         locked = clause_id in STATUTE_BACKED_CLAUSES
     return {"title": clause_title(clause_id), "locked": locked, "fixed": clause_id == "BL_55"}
 
@@ -609,7 +610,7 @@ def model_bye_laws_source(regime_code: str = DEFAULT_REGIME) -> dict:
         row = _row("""SELECT source_reference FROM legal_instrument_catalog
                       WHERE regime_code = %(r)s AND instrument_type = 'Bye-laws' ORDER BY display_order, id LIMIT 1""",
                    {"r": regime_code})
-    except Exception:
+    except Exception:  # noqa: BLE001
         row = None
     if row:
         m = _URL_RE.search(row.get("source_reference") or "")
@@ -684,7 +685,7 @@ def save_bye_law_version(actor_id, actor_role, society_id: int, clause_id: str, 
     start = _d(effective_from)
     if not start:
         return False, "Choose the date the new value takes effect."
-    if start < date.today():
+    if start < today_ist():
         return False, "A bye-law change cannot be back-dated."
     why = _text(reason, MIN_TEXT)
     if not why:
@@ -891,7 +892,7 @@ def link_policy_resolution(actor_id, actor_role, society_id: int, policy_key: st
 
 def list_society_bye_laws(society_id: int, on: date | None = None) -> list[dict]:
     """List all bye-law clauses for a society, with effective version on `on` (default today)."""
-    on = on or date.today()
+    on = on or today_ist()
     # Build the VALUES clause for clause titles (avoid % conflicts with psycopg2)
     values_clause = ",".join([f"('{c[0]}', '{c[1].replace(chr(39), chr(39)+chr(39))}')" for c in MODEL_BYE_LAW_CLAUSES])
     return _rows(
@@ -1052,7 +1053,7 @@ def create_meeting(actor_id, actor_role, society_id: int, type: str, held_on, qu
     held = _d(held_on)
     if not held:
         return False, "Meeting date is required."
-    if held > date.today():
+    if held > today_ist():
         return False, "Meeting date cannot be in the future."
     
     row = _row(
@@ -1101,7 +1102,7 @@ def gbm_quorum_floor(society_id: int) -> float:
     try:
         row = _row("SELECT fn_regime_param_num(%s, 'poll_quorum_pct') AS q", (society_id,))
         q = float(row["q"]) if row and row.get("q") is not None else DEFAULT_GBM_QUORUM_PCT
-    except Exception:
+    except Exception:  # noqa: BLE001
         q = DEFAULT_GBM_QUORUM_PCT
     return max(q, DEFAULT_GBM_QUORUM_PCT)
 
@@ -1117,7 +1118,7 @@ def thresholds_ratification(society_id: int) -> dict:
                         JOIN meetings m ON m.id = r.meeting_id
                        WHERE m.society_id = %s AND dt.code = 'RATIFY_VOTING_THRESHOLDS' AND r.passed
                        ORDER BY r.passed_on DESC NULLS LAST, r.id DESC LIMIT 1""", (society_id,))
-    except Exception:
+    except Exception:  # noqa: BLE001
         row = None
     if not row:
         return {"ratified": False, "resolution_id": None, "passed_on": None, "advocate_opinion_ref": None}
@@ -1208,7 +1209,7 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
     # The majority is the one this society's adviser confirmed (society_decision_types), else the platform's; and a decision
     # type whose majority is still provisional blocks here, loudly, until the Secretary and Treasurer have confirmed it.
     from app.services import adviser_decisions as _ad
-    _on = _d(passed_on) or date.today()
+    _on = _d(passed_on) or today_ist()
     blocked = _ad.block_message(society_id, "decision", dt["code"], _on)
     if blocked:
         return False, blocked
@@ -1292,7 +1293,7 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
                 carried = True
             else:
                 msg += " Registers recorded; it stays a draft until it is passed."
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             return False, f"Resolution #{new_id} was saved as a draft, but: {_clean_db_error(exc)}"
     elif gbm and passed:
         return False, f"Resolution #{new_id} was saved as a draft: record the registers to pass it."
@@ -1308,14 +1309,14 @@ def create_resolution(actor_id, actor_role, society_id: int, meeting_id: int, de
                 carried = True
             else:
                 msg += " Committee register recorded; it stays a draft until it is passed."
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             return False, f"Resolution #{new_id} was saved as a draft, but: {_clean_db_error(exc)}"
     elif not gbm and passed:
         return False, f"Resolution #{new_id} was saved as a draft: record the committee register to pass it."
     if carried and clause_id:
         try:
             notes = _auto_activate(actor_id, actor_role, society_id, new_id)
-        except Exception as exc:   # the resolution is saved; activation can be retried by recording again
+        except Exception as exc:   # the resolution is saved; activation can be retried by recording again  # noqa: BLE001
             notes = [f"Resolution saved, but automatic activation failed: {exc}"]
         if notes:
             msg += " " + " ".join(notes)
@@ -1417,6 +1418,6 @@ def execute_enactment(actor_id, actor_role, effect_id: int, actor_society_id=Non
         # Mark as executed
         db._execute("""UPDATE resolution_effects SET status = 'executed', executed_at = NOW() WHERE id = %s""", (effect_id,))
         return True, f"Enactment #{effect_id} executed successfully."
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         db._execute("""UPDATE resolution_effects SET status = 'failed', error_message = %s WHERE id = %s""", (str(e), effect_id))
         return False, f"Execution failed: {e}"

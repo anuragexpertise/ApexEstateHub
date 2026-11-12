@@ -32,7 +32,7 @@ class AdviserRefused(PermissionError):
 def in_force(user_id: int) -> dict | None:
     try:
         row = db._execute("SELECT * FROM fn_adviser_in_force(%s)", (user_id,), fetch_one=True)
-    except Exception:                                                       # noqa: BLE001 - fail closed
+    except Exception:
         log.exception("adviser appointment lookup failed for user %s", user_id)
         return None
     return dict(row) if row and row.get("appointment_id") else None

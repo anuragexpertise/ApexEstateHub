@@ -7,6 +7,7 @@ a classmethod-style function, not at module-import time.  This means
 python-dotenv has already loaded .env before the URL is built.
 """
 import os
+
 from dotenv import load_dotenv
 
 # Load .env as early as possible — before any class body executes
@@ -14,7 +15,6 @@ load_dotenv(override=False)
 
 # Imported after load_dotenv() so .env-provided secrets are visible to it.
 from app.security.secret_policy import resolve_secret
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -144,7 +144,7 @@ class DevelopmentConfig(Config):
     DEBUG   = True
     TESTING = False
     # Lighter pool for local dev
-    SQLALCHEMY_ENGINE_OPTIONS = {
+    SQLALCHEMY_ENGINE_OPTIONS = {  # noqa: RUF012
         **get_engine_options(),
         'pool_size':    2,
         'max_overflow': 5,
@@ -159,7 +159,7 @@ class ProductionConfig(Config):
 class TestingConfig(Config):
     TESTING                    = True
     SQLALCHEMY_DATABASE_URI    = 'sqlite:///:memory:'
-    SQLALCHEMY_ENGINE_OPTIONS  = {}   # No pool needed for in-memory SQLite
+    SQLALCHEMY_ENGINE_OPTIONS  = {}   # No pool needed for in-memory SQLite  # noqa: RUF012
 
 
 config = {

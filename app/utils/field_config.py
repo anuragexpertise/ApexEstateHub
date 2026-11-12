@@ -11,10 +11,10 @@ Defines for every field across all entities:
 Roles: 'master', 'admin', 'apartment', 'vendor', 'security'
 """
 
-from datetime import date, datetime
+from app.utils import now_ist, today_ist
 
-TODAY = date.today().isoformat()
-NOW = datetime.now().strftime("%Y-%m-%dT%H:%M")
+TODAY = today_ist().isoformat()
+NOW = now_ist().strftime("%Y-%m-%dT%H:%M")
 
 # Fallback concerns.concern_type when the field is left blank. This was
 # declared 'general' here and 'other' in the save handler, so the two
@@ -1248,7 +1248,7 @@ def is_editable(entity: str, field: str, role: str) -> bool:
     return role in editable
 
 
-def get_default(entity: str, field: str, ctx: dict = None):
+def get_default(entity: str, field: str, ctx: dict | None = None):
     """Get the default/pre-fill value for a field."""
     entity_config = FIELD_CONFIG.get(entity, {})
     field_config = entity_config.get(field, {})

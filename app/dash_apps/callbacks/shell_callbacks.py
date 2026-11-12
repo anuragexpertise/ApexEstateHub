@@ -25,20 +25,27 @@ Fixes in this version
    interactions only — buttons, logouts, etc.).
 """
 
-import dash
 import time
-from dash import Input, Output, State, html, dcc, no_update, ALL
-from dash.exceptions import PreventUpdate
-import dash_bootstrap_components as dbc
 
-from app.dash_apps.app_shell import ROLE_CONFIG, LOGIN_MODAL_BODY_BASE_STYLE
+import dash
+import dash_bootstrap_components as dbc
+from dash import ALL, Input, Output, State, dcc, html, no_update
+from dash.exceptions import PreventUpdate
+
+from app.dash_apps.app_shell import LOGIN_MODAL_BODY_BASE_STYLE, ROLE_CONFIG
 from app.security.audit_context import (
-    get_current_user_id, get_current_user_role,
-    get_current_society_id, get_current_linked_id,
+    get_current_linked_id,
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
 )
 from app.security.guards import require_session
-from app.utils.ux_toasts import error_toast, normalize_toast, toast_duration_ms, TOAST_TITLES
-
+from app.utils.ux_toasts import (
+    TOAST_TITLES,
+    error_toast,
+    normalize_toast,
+    toast_duration_ms,
+)
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
@@ -52,7 +59,7 @@ def _db_ok() -> bool:
     try:
         _db()._execute("SELECT 1", (), fetch_one=True)
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -153,8 +160,8 @@ def _search_route(portal: str, tab: str) -> str:
 
 
 def _search_index(role: str) -> list[dict]:
-    from app.dash_apps.pages.card_catalogue import KPI_CARDS
     from app.dash_apps.callbacks.customize_kpi_callbacks import _KPI_PORTAL_ENTRIES
+    from app.dash_apps.pages.card_catalogue import KPI_CARDS
 
     routes = _SEARCH_TAB_ROUTES.get(role, {})
     indexed: set = set()
@@ -256,15 +263,15 @@ def _make_nav_items(role, society_id, pathname, user_type=None):
         
         # User Type Permissions Filtering for Apartment Portal
         if role == "apartment":
-            if user_type in ("tenant", "visitor"):
+            if user_type in ("tenant", "visitor"):  # noqa: SIM102
                 # Hide financial tabs
                 if any(x in href for x in ("owner-financials", "owner-receipts", "owner-cashbook", "owner-charges")):
                     continue
-            if user_type == "visitor":
+            if user_type == "visitor":  # noqa: SIM102
                 # Hide concerns
                 if "owner-concerns" in href:
                     continue
-            if user_type != "owner":
+            if user_type != "owner":  # noqa: SIM102
                 # Hide polls
                 if "owner-polls" in href:
                     continue
@@ -499,9 +506,12 @@ def _setup_pending_content(role):
     """
     try:                                                  # plan v5: the Onboarding Hub replaces the dead end
         from app.dash_apps.pages.onboarding_page import render_pending
-        from app.security.audit_context import get_current_society_id, get_current_user_id
+        from app.security.audit_context import (
+            get_current_society_id,
+            get_current_user_id,
+        )
         return render_pending(role, get_current_society_id(), get_current_user_id())
-    except Exception:                                     # noqa: BLE001 - never leave the user with a blank page
+    except Exception:
         import logging
         logging.getLogger(__name__).exception("onboarding hub failed to render")
     if role == "admin":
@@ -526,9 +536,15 @@ def _setup_pending_content(role):
 
 def _portal_content(role, society_id, pathname, auth=None):
     from app.dash_apps.pages.portal_pages import (
-        master_portal_page, admin_portal_page, owner_portal_page,
-        vendor_portal_page, security_portal_page,
-        accountant_portal_page, supervisor_portal_page, staff_portal_page, auditor_portal_page,
+        accountant_portal_page,
+        admin_portal_page,
+        auditor_portal_page,
+        master_portal_page,
+        owner_portal_page,
+        security_portal_page,
+        staff_portal_page,
+        supervisor_portal_page,
+        vendor_portal_page,
     )
     is_master = role == "master"
     p = pathname or ""
@@ -684,9 +700,9 @@ def register_shell_callbacks(app):
                 "SELECT id, name FROM societies ORDER BY name",
                 None, fetch_all=True,
             ) or []
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"❌ societies query error: {exc}")
-            import traceback; traceback.print_exc()
+            import traceback; traceback.print_exc()  # noqa: I001
             return (
                 [], True,
                 html.Div(
@@ -879,7 +895,7 @@ def register_shell_callbacks(app):
                 logo_src = society_logo_url
             if society_bg_url:
                 body_style["--login-bg"] = f"url({society_bg_url})"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"⚠️  stage-2 branding lookup failed: {e}")
 
         from app.dash_apps.pages.login_system import login_layout
@@ -919,7 +935,7 @@ def register_shell_callbacks(app):
         try:
             from flask_login import logout_user
             logout_user()
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
         return None, "/dashboard/", {"type": "success", "message": "Signed out"}, True
 
@@ -1049,7 +1065,7 @@ def register_shell_callbacks(app):
 
         # Item 15: portal lock by onboarding phase. Residents' portals open when the admin completes Enrollment; the
         # admin's home shows the Hub (Stages 5-7) until onboarding is complete; every other admin tab stays usable.
-        from app.security.setup_guard import society_portal_state, admin_in_onboarding
+        from app.security.setup_guard import admin_in_onboarding, society_portal_state
         _pstate = society_portal_state(society_id, role) if role != "master" else "open"
         _hub_home = admin_in_onboarding(society_id, role) and (pathname or "/").rstrip("/") in ("", "/dashboard", "/admin", "/setup-wizard", "/dashboard/admin-portal")
         if _pstate == "enrollment_lock" or _hub_home:
@@ -1092,7 +1108,7 @@ def register_shell_callbacks(app):
             user_name = (u_row or {}).get("name") or email.split("@")[0].title()
             if u_row and u_row.get("user_type"):
                 verified_auth["user_type"] = u_row["user_type"]
-        except Exception:
+        except Exception:  # noqa: BLE001
             user_name = email.split("@")[0].title()
 
         society_name = "EstateHub"
@@ -1111,9 +1127,9 @@ def register_shell_callbacks(app):
                     try:
                         from app.dash_apps.drilldown.renderers import get_image_url
                         society_bg_url = get_image_url(s_row["login_background"], None, "society", society_id)
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S110
                         pass
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
         app_root_style = {}
@@ -1427,7 +1443,7 @@ def register_shell_callbacks(app):
                 }
                 return new_store, toast
             return new_store, no_update
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Notifications load error: {e}")
             return store or {"unread_count": 0, "items": []}, no_update
 
@@ -1518,7 +1534,7 @@ def register_shell_callbacks(app):
             ) or []
             toast_data = {"type": "info", "message": f"Opened: {row['title'] if row else 'notification'}"}
             return ({"display": "none"}, {"unread_count": new_count, "items": items}, toast_data)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Mark read error: {e}")
             raise PreventUpdate
 
@@ -1560,7 +1576,7 @@ def register_shell_callbacks(app):
                 {"uid": uid}
             )
             return {"unread_count": 0, "items": []}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Mark all read error: {e}")
             raise PreventUpdate
 
@@ -1594,14 +1610,14 @@ def register_shell_callbacks(app):
         stack = store.get("stack") or []
         if len(stack) <= 1:
             raise PreventUpdate
-        from app.dash_apps.drilldown.state import navigate_back
         from app.dash_apps.callbacks.drilldown_callbacks import _render_current
+        from app.dash_apps.drilldown.state import navigate_back
         new_store = navigate_back(store, len(stack) - 2)
         hide_kpis = len(new_store.get("stack", [])) > 1
         try:
-            content, bc, db_err = _render_current(new_store, auth)
-        except Exception:
-            content, bc, db_err = html.Div("Error loading page."), [], "Error"
+            content, bc, db_err = _render_current(new_store, auth)  # noqa: RUF059
+        except Exception:  # noqa: BLE001
+            content, bc, _db_err = html.Div("Error loading page."), [], "Error"
         kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
         return new_store, content, bc, kpi_style
 

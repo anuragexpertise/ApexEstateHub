@@ -7,8 +7,9 @@ may act, turns database refusals into messages that are safe to show, and writes
 """
 from __future__ import annotations
 
-from datetime import date
 from decimal import Decimal
+
+from app.utils import today_ist
 
 HEADS = ("cgst", "sgst", "igst")
 KINDS = ("period", "annual")
@@ -63,14 +64,13 @@ def _audit(action, row_id, society_id, user_id, after, reason):
     try:
         from app.security.service_guard import audit_event
         audit_event(action, "itc_reversal_register", row_id, after=after, reason=reason, society_id=society_id)
-    except Exception:                                                     # noqa: BLE001  (an audit outage must not hide the result)
+    except Exception:  # noqa: BLE001, S110
         pass
-
 
 def _d(v) -> Decimal:
     try:
         return Decimal(str(v if v not in (None, "") else 0))
-    except Exception as exc:                                              # noqa: BLE001
+    except Exception as exc:
         raise ItcRefused(f"'{v}' is not a number.") from exc
 
 
@@ -103,8 +103,8 @@ def record_ca_confirmation(society_id, user_id, by, ref, on_date, debit_acc_id, 
         d._execute("""UPDATE society_compliance_settings SET itc_reversal_confirmed_by=%s, itc_reversal_confirmed_ref=%s,
                              itc_reversal_confirmed_on=%s, itc_reversal_debit_acc_id=%s, itc_reversal_credit_acc_id=%s,
                              itc_reversal_nonbusiness_pct=%s, updated_at=NOW() WHERE society_id=%s""",
-                   (by.strip(), ref.strip(), on_date or date.today(), int(debit_acc_id), int(credit_acc_id), pct, society_id))
-    except Exception as exc:                                              # noqa: BLE001
+                   (by.strip(), ref.strip(), on_date or today_ist(), int(debit_acc_id), int(credit_acc_id), pct, society_id))
+    except Exception as exc:
         raise ItcRefused(_clean(exc)) from exc
     _audit("itc.formula.confirm", society_id, society_id, user_id, {"by": by, "ref": ref}, "CA confirmation recorded")
 
@@ -124,7 +124,7 @@ def compute(society_id, user_id, kind, fy, tax_head, t, t1, t2, t3, t4, e, f, ba
                         _d(t), _d(t1), _d(t2), _d(t3), _d(t4), _d(e), _d(f), basis or "", user_id), fetch_one=True)
     except ItcRefused:
         raise
-    except Exception as exc:                                              # noqa: BLE001
+    except Exception as exc:
         raise ItcRefused(_clean(exc)) from exc
     _audit("itc.reversal.compute", r["id"], society_id, user_id, {"kind": kind, "fy": fy, "head": tax_head}, basis)
     return r["id"]
@@ -136,7 +136,7 @@ def post(society_id, user_id, register_id, db=None):
         raise ItcRefused("Only the administrator or a serving office-bearer can post an ITC reversal.")
     try:
         r = d._execute("SELECT fn_post_itc_reversal(%s,%s,%s) AS j", (society_id, register_id, user_id), fetch_one=True)
-    except Exception as exc:                                              # noqa: BLE001
+    except Exception as exc:
         raise ItcRefused(_clean(exc)) from exc
     _audit("itc.reversal.post", register_id, society_id, user_id, {"journal_id": r["j"]}, "posted")
     return r["j"]
@@ -148,7 +148,7 @@ def reverse(society_id, user_id, register_id, reason, db=None):
         raise ItcRefused("Only the administrator or a serving office-bearer can reverse an ITC reversal.")
     try:
         r = d._execute("SELECT fn_reverse_itc_reversal(%s,%s,%s,%s) AS j", (society_id, register_id, user_id, reason or ""), fetch_one=True)
-    except Exception as exc:                                              # noqa: BLE001
+    except Exception as exc:
         raise ItcRefused(_clean(exc)) from exc
     _audit("itc.reversal.reverse", register_id, society_id, user_id, {"reversal_journal_id": r["j"]}, reason)
     return r["j"]
@@ -160,7 +160,7 @@ def discard(society_id, user_id, register_id, db=None) -> None:
         raise ItcRefused("Only the administrator or a serving office-bearer can discard a draft.")
     try:
         d._execute("SELECT fn_discard_itc_draft(%s,%s)", (society_id, register_id), fetch_one=True)
-    except Exception as exc:                                              # noqa: BLE001
+    except Exception as exc:
         raise ItcRefused(_clean(exc)) from exc
 
 

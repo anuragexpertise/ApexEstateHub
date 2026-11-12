@@ -74,7 +74,8 @@ def register_ratification_callbacks(app):
         uid, sid = get_current_user_id(), get_current_society_id()
         if not n or not uid or not sid or not inst_id:
             return no_update
-        from app.services import document_signing as ds, instrument_verification as iv
+        from app.services import document_signing as ds
+        from app.services import instrument_verification as iv
         try:
             iv.verify(sid, uid, inst_id, notif, url, opinion)
             return html.Span("Marked verified.", style={"color": "#17976e"})

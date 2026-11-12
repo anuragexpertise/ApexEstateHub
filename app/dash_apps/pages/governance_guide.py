@@ -18,19 +18,19 @@ EDIT, VIEW, NONE = "edit", "view", "none"
 # (layer, name, what it is, decided by, where it is managed)
 LAYERS = [
     ("0", "Act & Rules",
-     "Figures and rules laid down by the UP Apartment Act 2010, its Rules 2011 and the Model Bye-Laws (marked "
-     "Statute), plus platform settings (marked Policy). They apply to every society.",
+     ("Figures and rules laid down by the UP Apartment Act 2010, its Rules 2011 and the Model Bye-Laws (marked "
+     "Statute), plus platform settings (marked Policy). They apply to every society."),
      "The law. Master records changes.",
      "Master: AOA Rule Editor. Everyone sees it under Rules."),
     ("1", "Model Bye-Law adoption",
-     "Each of the 58 Model Bye-Law 2011 clauses is adopted as-is, adopted with a variation, or - for non-statutory "
+     ("Each of the 58 Model Bye-Law 2011 clauses is adopted as-is, adopted with a variation, or - for non-statutory "
      "clauses only - not adopted. Clauses 7, 39, 49 and 55 are enforced by the engine and cannot be dropped "
-     "unless the society's policy allows it.",
+     "unless the society's policy allows it."),
      "General Body (GBM / EGM) resolution",
      "Admin: Society By-laws (choice), Meetings & Resolutions (resolution)."),
     ("2", "Society policy",
-     "A society tightens an adopted clause, for example which overdue bills bar a vote. It can never loosen the "
-     "Model Bye-Law.",
+     ("A society tightens an adopted clause, for example which overdue bills bar a vote. It can never loosen the "
+     "Model Bye-Law."),
      "General Body (GBM / EGM) resolution",
      "Admin: Society By-laws (choice), Meetings & Resolutions (resolution)."),
     ("3", "Board decision",

@@ -29,27 +29,34 @@ config entry, not a new callback.
 
 from __future__ import annotations
 
-from dash import Input, Output, State, no_update, html, ctx, ALL
-from dash.exceptions import PreventUpdate
-from database.money import D, money, rupee  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
 import dash_bootstrap_components as dbc
+from dash import ALL, Input, Output, State, ctx, html, no_update
+from dash.exceptions import PreventUpdate
 
 from app.dash_apps.drilldown.drillin import (
+    TABLE_ICON_COLOR,
+    drillin_label_for,
     get_drillin_config,
-    role_target_table,
     list_drillin_groups,
     list_drillin_items,
-    drillin_label_for,
-    TABLE_ICON_COLOR,
+    role_target_table,
 )
-from app.dash_apps.drilldown.schema_introspect import ENTITY_TABLE_MAP
 from app.dash_apps.drilldown.registry import to_plural
-from app.security.guards import require_session
+from app.dash_apps.drilldown.schema_introspect import ENTITY_TABLE_MAP
 from app.security.audit_context import (
-    get_current_linked_id, get_current_society_id, get_current_user_role)
+    get_current_linked_id,
+    get_current_society_id,
+    get_current_user_role,
+)
 from app.security.authorization import Cap
+from app.security.guards import require_session
 from app.security.service_guard import blocks, check, scoped_get
 from database.db_manager import db
+from database.money import (  # noqa: F401  (Plan v4 C.9: rupee amounts are Decimal)
+    D,
+    money,
+    rupee,
+)
 
 
 def _physical_table(entity: str) -> str:
@@ -279,7 +286,7 @@ def register_drillin_callbacks(app):
                         (event_ticket_event_id, society_id), fetch_one=True,
                     )
                     open_to = (erow or {}).get("open_to") or "all"
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     print(f"⚠️  event_ticket entity_id open_to lookup: {e}")
                     open_to = "all"
                 if open_to == "members_only":
@@ -359,7 +366,7 @@ def register_drillin_callbacks(app):
         # ── Search ────────────────────────────────────────────────────────
         if triggered == "drillin-search":
             store["search"] = search or ""
-            level, content = _current_view(store, society_id)
+            level, content = _current_view(store, society_id)  # noqa: RUF059
             return no_update, _breadcrumb(store), content, no_update, store
 
         raise PreventUpdate
@@ -412,7 +419,7 @@ def register_drillin_callbacks(app):
                             if not has_pan and row.get(cfg["value_col_no_pan"]) is not None:
                                 val_col = cfg["value_col_no_pan"]
                         actual_val = str(row.get(val_col, entity_id_val))
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     print(f"⚠️  drillin_select_item value_col/fill_fields lookup: {e}")
 
         role_label = None
@@ -507,9 +514,7 @@ def register_drillin_callbacks(app):
         hidden_values = []
         for o in hidden_outputs:
             oid = o["id"]
-            if oid.get("entity") == entity and oid.get("field") == field:
-                hidden_values.append("")
-            elif role_fid and oid.get("entity") == entity and oid.get("field") == role_fid:
+            if oid.get("entity") == entity and oid.get("field") == field or role_fid and oid.get("entity") == entity and oid.get("field") == role_fid:
                 hidden_values.append("")
             else:
                 hidden_values.append(no_update)
@@ -641,7 +646,7 @@ def register_pay_dues_bill_callbacks(app):
                  GROUP BY bill_group_id
                  ORDER BY MIN(period_month) ASC
             """, (society_id, apartment_id), fetch_all=True) or []
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return html.P(f"Error loading bills: {e}", className="text-danger text-center",
                           style={"padding": "30px"})
 
@@ -717,7 +722,7 @@ def register_pay_dues_bill_callbacks(app):
                 """, (society_id, apartment_id, bill_group_id), fetch_one=True)
                 if row:
                     label = f"{row['period_month']} — {row['desc']} (₹{row['amount']:,.2f})"
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
         if bill_group_id and label is None:
