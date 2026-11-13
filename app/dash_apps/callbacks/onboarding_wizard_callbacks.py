@@ -583,6 +583,7 @@ def register_onboarding_wizard_callbacks(app):
     # ── item 11: reconciliation cards (driven by the live Brought Forward amounts) ────────────
     @app.callback(
         Output("onb-bf-reconciliation-cards", "children"),
+        Output("onb-bf-reconciliation-tieout", "children"),
         Input({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
         Input("sw-bf-as-on", "date"),
         State("onb-reconciliation-json", "data"),
@@ -591,12 +592,29 @@ def register_onboarding_wizard_callbacks(app):
     def bf_reconciliation_render(amts, bf_as_on, rec_json):
         s = _session()
         if not s or not s[0]:
-            return no_update
+            return no_update, no_update
         sid, _uid, _role = s
         ids = [it["id"]["acc_id"] for it in (ctx.inputs_list[0] or [])]
         live = {int(i): money(v) for i, v in zip(ids, amts or []) if v not in (None, "")}
         accs = {a["id"]: a for a in ob._rows("SELECT id, name, tab_name, drcr_account FROM accounts WHERE society_id=%s", (sid,))}
         rec_json = rec_json or {}
+        from database.seed import ACCOUNTS
+        meta = {a[0]: a for a in ACCOUNTS}
+        sdr = Decimal(0)
+        bank_total = Decimal(0)
+        for acc_id, v in zip(ids, amts or []):
+            a = meta.get(acc_id)
+            if not a or v in (None, ""):
+                continue
+            amt = Decimal(str(v))
+            if amt <= 0:
+                continue
+            tab = a[2]
+            side = a[5] or "Dr"
+            if side == "Dr" and tab in ob.RECEIVABLE_TABS:
+                sdr += amt
+            if side == "Dr" and tab in ob.BANK_TABS:
+                bank_total += amt
         rows = []
         for acc_id, book in live.items():
             a = accs.get(acc_id)
@@ -627,8 +645,17 @@ def register_onboarding_wizard_callbacks(app):
                 ], style={"whiteSpace": "normal"}),
             ], className="sw-grid-row sw-rec-grid"))
 
+        has_evidence = any(
+            (r or {}).get("statement_balance") not in (None, "") or (r or {}).get("sha256")
+            for r in rec_json.values()
+        )
+        tieout = ""
+        if bank_total and not has_evidence:
+            tieout = html.Div(f"Sundry Debtors ₹{sdr:,.2f} entered above; no bank/cash reconciliation evidence yet.",
+                              className="text-warning")
+
         if not rows:
-            return [html.Div("No bank/cash accounts with a non-zero brought-forward balance.", className="text-muted small")]
+            return [html.Div("No bank/cash accounts with a non-zero brought-forward balance.", className="text-muted small")], tieout
 
         header = html.Div([
             html.Div("Account / Book balance"),
@@ -637,7 +664,7 @@ def register_onboarding_wizard_callbacks(app):
             html.Div("Status / evidence"),
             html.Div("Actions"),
         ], className="sw-grid-row sw-rec-grid sw-grid-head")
-        return [html.Div([header] + rows, className="sw-hscroll")]
+        return [html.Div([header] + rows, className="sw-hscroll")], tieout
 
     @app.callback(
         Output("onb-reconciliation-json", "data"),
