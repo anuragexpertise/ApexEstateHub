@@ -567,19 +567,44 @@ def register_drilldown_callbacks(app):
             return html.Small(f"✗ {error_toast(e, 'Unable to process this image.')['message']}", style={"color": "red"}), no_update
 
     # ── 0c. Registration certificate upload (master society creation) ──────────
-    # Stores the raw upload contents in a memory store so handle_form_submit can
-    # bind it to the new society as registration_certificate evidence after creation.
+    # Validates the upload, computes its SHA-256 on the server and shows feedback
+    # (certificate uploaded + SHA-256). The raw bytes are kept in the memory store
+    # so handle_form_submit can bind the certificate to the new society after creation.
+    _CERT_TYPES = {".pdf": b"%PDF-", ".png": b"\x89PNG", ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff"}
+    _CERT_MAX_BYTES = 5 * 1024 * 1024
+
     @app.callback(
         Output({"type": "reg-cert-store", "entity": MATCH}, "data"),
+        Output({"type": "reg-cert-preview", "entity": MATCH}, "children"),
         Input({"type": "reg-cert-upload", "entity": MATCH}, "contents"),
         State({"type": "reg-cert-upload", "entity": MATCH}, "filename"),
         prevent_initial_call=True,
     )
     @require_session
     def handle_reg_cert_upload(contents, filename):
-        if not contents:
-            return no_update
-        return {"contents": contents, "filename": filename}
+        import hashlib
+        import os
+        if not contents or "," not in contents:
+            return no_update, no_update
+        try:
+            raw = base64.b64decode(contents.split(",", 1)[1])
+        except Exception:  # noqa: BLE001
+            return no_update, html.Small("✗ Could not read the uploaded file.", style={"color": "#c62828", "fontSize": "11px"})
+        name = (filename or "registration_certificate.pdf")
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in _CERT_TYPES:
+            return no_update, html.Small("✗ Attach the registration certificate as a PDF, PNG or JPG file.", style={"color": "#c62828", "fontSize": "11px"})
+        if not raw or len(raw) > _CERT_MAX_BYTES:
+            return no_update, html.Small("✗ The certificate file must be between 1 byte and 5 MB.", style={"color": "#c62828", "fontSize": "11px"})
+        if not raw.startswith(_CERT_TYPES[ext]):
+            return no_update, html.Small(f"✗ The file does not look like a real {ext.lstrip('.').upper()}.", style={"color": "#c62828", "fontSize": "11px"})
+        digest = hashlib.sha256(raw).hexdigest()
+        preview = html.Small(
+            [html.I(className="fas fa-check-circle me-1", style={"color": "#2e7d32"}),
+             f"Registration certificate uploaded: {name}  (SHA-256: {digest})"],
+            style={"color": "#2e7d32", "fontSize": "11px", "marginTop": "4px"},
+        )
+        return {"contents": contents, "filename": name, "sha256": digest}, preview
 
     # ── 0b. Camera capture (device Snap button) ─────────────────────────────────
     # camera_callbacks.py's clientside snapCamCapture() writes the captured
