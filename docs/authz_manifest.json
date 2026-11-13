@@ -97,13 +97,7 @@
     "callback:bank_reconcile_callbacks.py::process_bank_statement_upload": {
       "classification": "unclassified"
     },
-    "callback:bulk_enroll_callbacks.py::bulk_register_print": {
-      "classification": "legacy-gated"
-    },
-    "callback:bulk_enroll_callbacks.py::bulk_register_scan": {
-      "classification": "legacy-gated"
-    },
-    "callback:bulk_enroll_callbacks.py::bulk_register_snapshot": {
+    "callback:bulk_enroll_callbacks.py::bulk_upload_record": {
       "classification": "legacy-gated"
     },
     "callback:bulk_enroll_callbacks.py::close_bulk_enroll_modal": {
@@ -296,6 +290,10 @@
         "poll.vote"
       ],
       "classification": "action"
+    },
+    "callback:drilldown_callbacks.py::handle_reg_cert_upload": {
+      "classification": "exempt",
+      "reason": "Pure UI relay: returns the browser's own upload contents/filename to a client-side store. Reads and writes no server data; nothing is saved until a separate, guarded submit handler runs."
     },
     "callback:drilldown_callbacks.py::lock_financial_year": {
       "actions": [
@@ -623,13 +621,10 @@
     "callback:onboarding_callbacks.py::onb_decl_template": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_callbacks.py::onb_election_evidence": {
-      "classification": "legacy-gated"
-    },
     "callback:onboarding_callbacks.py::onb_election_import": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_callbacks.py::onb_election_print": {
+    "callback:onboarding_callbacks.py::onb_election_scan": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_election_template": {
@@ -639,6 +634,9 @@
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_esign_start": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_ev_verify": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_fix": {
@@ -669,6 +667,9 @@
       "classification": "exempt",
       "reason": "Pure UI trigger: bumps pwd-gate-store so the wizard re-checks. Server re-verifies admin role and 'committee seated' state before anything opens; writes nothing."
     },
+    "callback:onboarding_callbacks.py::onb_opt_doc": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_callbacks.py::onb_phase_next": {
       "classification": "legacy-gated"
     },
@@ -686,11 +687,18 @@
     "callback:onboarding_callbacks.py::onb_print_agreement": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_callbacks.py::onb_reg_cert": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_callbacks.py::onb_seal": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_callbacks.py::onb_seat": {
+    "callback:onboarding_callbacks.py::onb_seat_all": {
       "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_seat_all_files": {
+      "classification": "exempt",
+      "reason": "Pure UI state: echoes the chosen file names back into the form. Reads and writes no server data (the files are only used by onb_seat_all, which checks the admin role)."
     },
     "callback:onboarding_callbacks.py::onb_sig_preview": {
       "classification": "legacy-gated"
@@ -701,19 +709,16 @@
     "callback:onboarding_callbacks.py::onb_signmode": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_callbacks.py::onb_supp_build": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_supp_sign": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_callbacks.py::onb_sync_step_stores": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_wizard_callbacks.py::apt_print": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_wizard_callbacks.py::apt_scan": {
-      "classification": "legacy-gated"
-    },
     "callback:onboarding_wizard_callbacks.py::bf_apply": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_wizard_callbacks.py::bf_print": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::bf_reconciliation_render": {
@@ -731,12 +736,6 @@
     "callback:onboarding_wizard_callbacks.py::bf_recv_sync": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_wizard_callbacks.py::bf_scan": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_wizard_callbacks.py::bf_statement_template": {
-      "classification": "legacy-gated"
-    },
     "callback:onboarding_wizard_callbacks.py::bf_template": {
       "classification": "legacy-gated"
     },
@@ -750,19 +749,7 @@
     "callback:onboarding_wizard_callbacks.py::legal_regime_refresh": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_wizard_callbacks.py::recv_print": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_wizard_callbacks.py::recv_scan": {
-      "classification": "legacy-gated"
-    },
     "callback:onboarding_wizard_callbacks.py::tds_apply": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_wizard_callbacks.py::tds_print": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_wizard_callbacks.py::tds_scan": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::tds_template": {
@@ -793,9 +780,6 @@
       "classification": "legacy-gated"
     },
     "callback:paper_sign_callbacks.py::adopt_import": {
-      "classification": "legacy-gated"
-    },
-    "callback:paper_sign_callbacks.py::adopt_print": {
       "classification": "legacy-gated"
     },
     "callback:paper_sign_callbacks.py::adopt_scan": {
@@ -1139,6 +1123,12 @@
     "route:esign_routes.py::esign_callback": {
       "classification": "exempt",
       "reason": "Vendor webhook: no session by design. Authenticated by HMAC-SHA256 of the raw body (ESIGN_CALLBACK_SECRET; refused when unset); idempotent; refuses a wrong document hash or signer; returns status only."
+    },
+    "route:evidence_routes.py::evidence_file": {
+      "classification": "legacy-gated"
+    },
+    "route:evidence_routes.py::register_pdf": {
+      "classification": "legacy-gated"
     },
     "route:presumed_visitor.py::create_presumed_visitor": {
       "classification": "unclassified"

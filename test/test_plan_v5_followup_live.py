@@ -230,9 +230,13 @@ def test_15_an_adviser_cannot_sign_in_outside_an_appointment(w):
 
 
 # ── V5.12 minimisation ────────────────────────────────────────────────────────────────────────────────────────────
-def test_16_family_logins_need_an_adult_confirmation(w):
+def test_16_family_logins_need_an_adult_confirmation(w, monkeypatch):
     from app.dash_apps.callbacks import bulk_enroll_callbacks as be
+    from app.services import undivided_declaration as ud
     db, sid = w["db"], w["sid"]
+    # Enrollment is gated on a complete Builder's Declaration (checked before any row). That gate is not what this test
+    # is about, so satisfy it and let the adult-confirmation rule be the one that decides.
+    monkeypatch.setattr(ud, "status", lambda _sid: {"balanced": True, "evidence": True})
     base = {"flat_number": "F-1", "password": "Fam@123456", "name": "Kin", "user_type": "family"}
     r = be._bulk_insert_apartment_users([{**base, "email": f"kin1{PID}@v5follow.example"}], sid, MASTER_ID)
     assert r["success"] == 0 and "adults only" in r["failed"][0][1]

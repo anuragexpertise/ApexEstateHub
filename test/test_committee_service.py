@@ -246,8 +246,11 @@ def test_a_flat_of_another_society_is_not_visible(svc):
 def test_the_tab_shows_forms_to_the_admin_and_only_the_committee_to_owners():
     def ids(node, found=None):
         found = set() if found is None else found
-        if getattr(node, "id", None):
-            found.add(node.id)
+        nid = getattr(node, "id", None)
+        if isinstance(nid, dict):                           # pattern-matching id: unhashable, so compare it as "type:entity:field"
+            found.add(f"{nid.get('type')}:{nid.get('entity')}:{nid.get('field')}")
+        elif nid:
+            found.add(nid)
         kids = getattr(node, "children", None)
         for k in (kids if isinstance(kids, (list, tuple)) else [kids]):
             if k is not None and not isinstance(k, (str, int, float)):
@@ -256,8 +259,9 @@ def test_the_tab_shows_forms_to_the_admin_and_only_the_committee_to_owners():
     from app.dash_apps.pages.committee_page import committee_tab
     admin_ids = set().union(*[ids(n) for n in committee_tab("admin", 1)])
     owner_ids = set().union(*[ids(n) for n in committee_tab("apartment", 1)])
-    assert {"mc-appoint-btn", "mc-end-btn", "mc-flat", "mc-body"} <= admin_ids
-    assert "mc-body" in owner_ids and not {"mc-appoint-btn", "mc-end-btn", "mc-flat"} & owner_ids
+    flat = "form-field-hidden:committee:flat"               # the flat picker is now a pattern-matching form field, not "mc-flat"
+    assert {"mc-appoint-btn", "mc-end-btn", flat, "mc-body"} <= admin_ids
+    assert "mc-body" in owner_ids and not {"mc-appoint-btn", "mc-end-btn", flat} & owner_ids
 
 
 # ── the Dash callbacks, driven directly with the session identity patched ─────────────────────────────────────

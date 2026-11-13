@@ -964,7 +964,7 @@ def get_member_ledger(
                        (
                            SELECT string_agg(a2.name || ': ' || t2.amount, ', ')
                            FROM transactions t2
-                           JOIN accounts a2 ON a2.id = t2.acc_id
+                           JOIN accounts a2 ON a2.id = t2.acc_id AND a2.society_id = t2.society_id
                            WHERE t2.journal_id = t.journal_id
                              AND t2.id != t.id
                        ) AS breakdown
@@ -2640,7 +2640,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                 "    WHEN r.role='security' THEN s.name "
                 "    ELSE 'Other' END AS entity_name "
                 "FROM receipts r "
-                "LEFT JOIN accounts a ON a.id=r.acc_id "
+                "LEFT JOIN accounts a ON a.id=r.acc_id AND a.society_id=r.society_id "
                 "LEFT JOIN apartments ap ON ap.id=r.entity_id AND r.role='apartment' "
                 "LEFT JOIN vendors v ON v.id=r.entity_id AND r.role='vendor' "
                 "LEFT JOIN security_staff s ON s.id=r.entity_id AND r.role='security' "
@@ -2660,7 +2660,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                 "      THEN COALESCE(ar.asset_name,'Asset #'||e.entity_id::TEXT) "
                 "    ELSE 'Other' END AS entity_name "
                 "FROM expenses e "
-                "LEFT JOIN accounts a ON a.id=e.acc_id "
+                "LEFT JOIN accounts a ON a.id=e.acc_id AND a.society_id=e.society_id "
                 "LEFT JOIN vendors v ON v.id=e.entity_id AND e.role='vendor' "
                 "LEFT JOIN security_staff s ON s.id=e.entity_id AND e.role='security' "
                 "LEFT JOIN assets ar ON ar.id=e.entity_id AND e.role='assets' "
@@ -2678,7 +2678,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
             if not r:
                 r = db._execute(
                     "SELECT r.*, COALESCE(a.name,'') AS account_name "
-                    "FROM receivables r LEFT JOIN accounts a ON a.id=r.acc_id "
+                    "FROM receivables r LEFT JOIN accounts a ON a.id=r.acc_id AND a.society_id=r.society_id "
                     "WHERE r.id=%s AND r.society_id=%s",
                     (pk, society_id), fetch_one=True,
                 )
@@ -2693,7 +2693,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
             if not r:
                 r = db._execute(
                     "SELECT p.*, COALESCE(a.name,'') AS account_name "
-                    "FROM payables p LEFT JOIN accounts a ON a.id=p.acc_id "
+                    "FROM payables p LEFT JOIN accounts a ON a.id=p.acc_id AND a.society_id=p.society_id "
                     "WHERE p.id=%s AND p.society_id=%s",
                     (pk, society_id), fetch_one=True,
                 )
@@ -2735,7 +2735,7 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
                 "    (1 - COALESCE(ar.depreciation_rate,a.depreciation_percent,100)/100), 0) "
                 "    AS book_value "
                 "FROM assets ar "
-                "LEFT JOIN accounts a ON a.id=ar.acc_id "
+                "LEFT JOIN accounts a ON a.id=ar.acc_id AND a.society_id=ar.society_id "
                 "WHERE ar.id=%s AND ar.society_id=%s",
                 (pk, society_id), fetch_one=True,
             )

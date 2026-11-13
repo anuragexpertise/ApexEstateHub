@@ -282,12 +282,12 @@ KPI_CARDS = {
         "query": """
             WITH cr AS (
                 SELECT COALESCE(SUM(t.amount),0) AS amt
-                FROM transactions t JOIN accounts a ON a.id=t.acc_id
+                FROM transactions t JOIN accounts a ON a.id=t.acc_id AND a.society_id=t.society_id
                 WHERE t.society_id=%s AND t.status='paid' AND a.drcr_account='Cr'
             ),
             dr AS (
                 SELECT COALESCE(SUM(t.amount),0) AS amt
-                FROM transactions t JOIN accounts a ON a.id=t.acc_id
+                FROM transactions t JOIN accounts a ON a.id=t.acc_id AND a.society_id=t.society_id
                 WHERE t.society_id=%s AND t.status='paid' AND a.drcr_account='Dr'
             ),
             bf AS (
@@ -846,7 +846,7 @@ KPI_CARDS = {
     "kpi_receipts_in_hand_total": {
         "query": """
             SELECT COALESCE(SUM(t.amount), 0) AS v
-            FROM transactions t JOIN accounts a ON a.id=t.acc_id
+            FROM transactions t JOIN accounts a ON a.id=t.acc_id AND a.society_id=t.society_id
             WHERE t.society_id=%s AND t.status='paid' AND a.drcr_account='Cr'
         """,
         "params": 1, "format": "currency",
