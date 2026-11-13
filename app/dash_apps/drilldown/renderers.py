@@ -8738,8 +8738,8 @@ def render_form_master_society_new() -> html.Div:
                         },
                         multiple=False, accept=".pdf,.png,.jpg,.jpeg",
                     ),
-                    html.Div(id={"type": "reg-cert-preview", "entity": "master_society"}, style={"fontSize":"11px","marginTop":"4px"}),
-                    dcc.Store(id={"type": "reg-cert-store", "entity": "master_society"}, storage_type="memory"),
+                    html.Div(id={"type": "reg-cert-preview", "entity": "master_society", "field": "registration_certificate"}, style={"fontSize":"11px","marginTop":"4px"}),
+                    dcc.Store(id={"type": "reg-cert-store", "entity": "master_society", "field": "registration_certificate"}, storage_type="memory"),
                 ], width=12, className="mb-3"),
                 # State, Constitution (regime) and the registration certificate are the
                 # society's own onboarding/setup-wizard steps, not the master's.
