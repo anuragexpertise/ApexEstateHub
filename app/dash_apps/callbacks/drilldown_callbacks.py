@@ -574,10 +574,10 @@ def register_drilldown_callbacks(app):
     _CERT_MAX_BYTES = 5 * 1024 * 1024
 
     @app.callback(
-        Output({"type": "reg-cert-store", "entity": MATCH}, "data"),
-        Output({"type": "reg-cert-preview", "entity": MATCH}, "children"),
-        Input({"type": "reg-cert-upload", "entity": MATCH}, "contents"),
-        State({"type": "reg-cert-upload", "entity": MATCH}, "filename"),
+        Output({"type": "reg-cert-store", "entity": MATCH, "field": MATCH}, "data"),
+        Output({"type": "reg-cert-preview", "entity": MATCH, "field": MATCH}, "children"),
+        Input({"type": "reg-cert-upload", "entity": MATCH, "field": MATCH}, "contents"),
+        State({"type": "reg-cert-upload", "entity": MATCH, "field": MATCH}, "filename"),
         prevent_initial_call=True,
     )
     @require_session
@@ -602,7 +602,7 @@ def register_drilldown_callbacks(app):
         preview = html.Small(
             [html.I(className="fas fa-check-circle me-1", style={"color": "#2e7d32"}),
              f"Registration certificate uploaded: {name}  (SHA-256: {digest})"],
-            style={"color": "#2e7d32", "fontSize": "11px", "marginTop": "4px"},
+            style={"color": "#2e7d32", "fontSize": "11px", "marginTop": "4px", "wordBreak": "break-all", "display": "block"},
         )
         return {"contents": contents, "filename": name, "sha256": digest}, preview
 
