@@ -2930,11 +2930,34 @@
     "public": true
   },
   {
+    "id": "callback:master_rules_callbacks.py::build_amendment_prompt",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "build_amendment_prompt",
+    "line": 146,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "mrl-amend-usages",
+      "mrl-amend-prompt"
+    ],
+    "guards": [
+      "require_action",
+      "require_session"
+    ],
+    "actions": [
+      "platform.rules.manage"
+    ],
+    "public": false
+  },
+  {
     "id": "callback:master_rules_callbacks.py::civ_tick_all",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "civ_tick_all",
-    "line": 89,
+    "line": 90,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2951,7 +2974,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "civ_verify",
-    "line": 101,
+    "line": 102,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2966,11 +2989,54 @@
     "public": false
   },
   {
+    "id": "callback:master_rules_callbacks.py::export_amendment_sql",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "export_amendment_sql",
+    "line": 216,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "mrl-amend-result",
+      "mrl-amend-download"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:master_rules_callbacks.py::integrate_amendment_sql",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "integrate_amendment_sql",
+    "line": 232,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "mrl-amend-result",
+      "mrl-amend-tested"
+    ],
+    "guards": [
+      "require_action",
+      "require_session"
+    ],
+    "actions": [
+      "platform.sql.inspect"
+    ],
+    "public": false
+  },
+  {
     "id": "callback:master_rules_callbacks.py::prefill_catalog",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "prefill_catalog",
-    "line": 78,
+    "line": 79,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2994,7 +3060,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "save_catalog",
-    "line": 122,
+    "line": 123,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3014,7 +3080,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "save_rule",
-    "line": 67,
+    "line": 68,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3034,7 +3100,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "show_hint",
-    "line": 50,
+    "line": 51,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3049,6 +3115,48 @@
     "actions": [
       "platform.rules.manage"
     ],
+    "public": false
+  },
+  {
+    "id": "callback:master_rules_callbacks.py::test_amendment_sql",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "test_amendment_sql",
+    "line": 194,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "mrl-amend-result",
+      "mrl-amend-tested"
+    ],
+    "guards": [
+      "require_action",
+      "require_session"
+    ],
+    "actions": [
+      "platform.sql.inspect"
+    ],
+    "public": false
+  },
+  {
+    "id": "callback:master_rules_callbacks.py::toggle_amendment_panel",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "toggle_amendment_panel",
+    "line": 135,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "mrl-amend-panel"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
     "public": false
   },
   {

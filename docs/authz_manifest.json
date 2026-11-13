@@ -551,11 +551,27 @@
       "classification": "exempt",
       "reason": "pre-session UI/login mechanics (check_callback_guards.PUBLIC_CALLBACKS)"
     },
+    "callback:master_rules_callbacks.py::build_amendment_prompt": {
+      "actions": [
+        "platform.rules.manage"
+      ],
+      "classification": "action"
+    },
     "callback:master_rules_callbacks.py::civ_tick_all": {
       "classification": "legacy-gated"
     },
     "callback:master_rules_callbacks.py::civ_verify": {
       "classification": "legacy-gated"
+    },
+    "callback:master_rules_callbacks.py::export_amendment_sql": {
+      "classification": "exempt",
+      "reason": "Session-guarded and master-only. Turns the SQL text already in the browser into a .sql download with its SHA-256; reads and writes no database data."
+    },
+    "callback:master_rules_callbacks.py::integrate_amendment_sql": {
+      "actions": [
+        "platform.sql.inspect"
+      ],
+      "classification": "action"
     },
     "callback:master_rules_callbacks.py::prefill_catalog": {
       "actions": [
@@ -580,6 +596,16 @@
         "platform.rules.manage"
       ],
       "classification": "action"
+    },
+    "callback:master_rules_callbacks.py::test_amendment_sql": {
+      "actions": [
+        "platform.sql.inspect"
+      ],
+      "classification": "action"
+    },
+    "callback:master_rules_callbacks.py::toggle_amendment_panel": {
+      "classification": "exempt",
+      "reason": "Session-guarded. Opens or closes the amendment panel; reads and writes no data."
     },
     "callback:master_tests_callbacks.py::run_all_run_one": {
       "classification": "legacy-gated"
