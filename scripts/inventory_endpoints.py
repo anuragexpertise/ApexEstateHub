@@ -129,11 +129,28 @@ def _authz_actions(fn: ast.AST, caps: dict[str, str],
 INLINE_AUTH_NAMES = {"_bearer_user_id", "authenticate_bearer", "is_authenticated"}
 
 
-def _has_inline_auth(fn: ast.AST) -> bool:
+def _abort_guard_helpers(tree: ast.Module) -> set[str]:
+    """Module-level helpers that refuse the request themselves, i.e. call abort(401) or abort(403)
+    (evidence_routes._scope is one). A route that calls such a helper by name is credited with an inline guard.
+    Only helpers defined in the same module count, so a name cannot be borrowed from elsewhere."""
+    out: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for call in ast.walk(node):
+            if (isinstance(call, ast.Call) and _dec_name(call) == "abort" and call.args
+                    and isinstance(call.args[0], ast.Constant) and call.args[0].value in (401, 403)):
+                out.add(node.name)
+                break
+    return out
+
+
+def _has_inline_auth(fn: ast.AST, guard_helpers: set[str] | None = None) -> bool:
+    names = INLINE_AUTH_NAMES | (guard_helpers or set())
     for node in ast.walk(fn):
-        if isinstance(node, ast.Name) and node.id in INLINE_AUTH_NAMES:
+        if isinstance(node, ast.Name) and node.id in names:
             return True
-        if isinstance(node, ast.Attribute) and node.attr in INLINE_AUTH_NAMES:
+        if isinstance(node, ast.Attribute) and node.attr in names:
             return True
     return False
 
@@ -173,6 +190,7 @@ def collect() -> list[dict]:
     for path in sorted(ROUTES_DIR.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         prefixes = _blueprint_prefixes(tree)
+        guard_helpers = _abort_guard_helpers(tree)
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -180,7 +198,7 @@ def collect() -> list[dict]:
                 info = _route_info(dec, prefixes)
                 if info:
                     guards = sorted({n for d in fn.decorator_list if (n := _dec_name(d)) in LEGACY_GUARDS}
-                                    | ({"inline-auth"} if _has_inline_auth(fn) else set()))
+                                    | ({"inline-auth"} if _has_inline_auth(fn, guard_helpers) else set()))
                     rows.append({
                         "id": f"route:{path.name}::{fn.name}", "kind": "flask-route",
                         "file": f"app/routes/{path.name}", "function": fn.name, "line": fn.lineno,

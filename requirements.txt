@@ -54,6 +54,5 @@ gunicorn==26.2.0
 
 # ── Dev / Test ────────────────────────────────────────────────────────────────
 pytest==9.1.1
-pypdf==5.9.0   # reads back the generated signing PDFs in test/test_paper_sign.py
 sqlparse==0.6.0
 Markdown==3.11
