@@ -11,4 +11,5 @@ CREATE TABLE IF NOT EXISTS society_signing_keys (
     retired_at TIMESTAMPTZ,
     UNIQUE (society_id, purpose, version)
 );
-CREATE INDEX IF NOT EXISTS idx_ssk_society_purpose ON society_signing_keys(society_id, purpose);
+-- No separate (society_id, purpose) index: UNIQUE (society_id, purpose, version) above and uq_signing_key_one_active
+-- already serve every lookup, and database/estatehub.sql (the schema of record) has none.

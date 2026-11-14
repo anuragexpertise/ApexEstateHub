@@ -4456,14 +4456,7 @@ def _save_pay_dues(db, d, sid):
          d. Any overpayment creates an advance-credit receivable row.
       3. Returns (ok, message, {transaction_id, allocated, unallocated}).
 
-    Prerequisites — receivables table MUST have these columns:
-        confirmed_by   INTEGER  (FK → users.id, nullable)
-        confirmed_at   TIMESTAMPTZ nullable
-
-    Migration (run once if missing):
-        ALTER TABLE receivables
-            ADD COLUMN IF NOT EXISTS confirmed_by  INTEGER REFERENCES users(id),
-            ADD COLUMN IF NOT EXISTS confirmed_at  TIMESTAMPTZ;
+    receivables.confirmed_by / confirmed_at are declared inline in database/estatehub.sql; nothing to migrate.
     """
     apt_id = d.get("entity_id")
     if not apt_id:

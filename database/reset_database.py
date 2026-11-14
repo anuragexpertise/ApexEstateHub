@@ -98,9 +98,6 @@ def execute_sql_file(conn, sql_file):
         raise FileNotFoundError(f"Schema file not found: {sql_file}")
 
     print("\nRunning schema file via psql...")
-    with conn.cursor() as cur:
-        cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
-        conn.commit()
 
     import subprocess
     env = os.environ.copy()

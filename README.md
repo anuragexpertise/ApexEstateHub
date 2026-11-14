@@ -54,7 +54,7 @@ uses; it is **not** a reading of the GitHub Actions status.
 |---|---|
 | **Python 3.12** | CI uses 3.12; the pins in `requirements.txt` target a modern 3.11+/3.12 runtime. |
 | **PostgreSQL 16** | The schema relies on PostgreSQL-specific DDL, deferred constraint triggers, statement-level TRUNCATE triggers and `pgcrypto`. SQLite is only a fallback DSN in `app/config.py`; it is **not** a supported application database. |
-| **`pgcrypto` extension** | Created by `database/migrate.py`. Used for receipt/ledger hashing. |
+| **`pgcrypto` extension** | Created by the first statement of `database/estatehub.sql` (needs a role that may create extensions). Used for receipt/ledger hashing. |
 | Optional: Redis | Only for Server-Sent Events fan-out across gunicorn workers (`REDIS_URL`/`KV_URL`). Without it, SSE stays per-process. |
 | Optional: SMTP | Password-reset and notification email. Without it, reset tokens are written to the server log. |
 | Optional: VAPID keys | Browser push notifications (`pywebpush`). FCM additionally needs `firebase_admin`, which is **not** in `requirements.txt`. |
