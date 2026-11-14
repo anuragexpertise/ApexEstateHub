@@ -316,6 +316,12 @@
     "callback:drilldown_callbacks.py::select_pass_type": {
       "classification": "unclassified"
     },
+    "callback:drilldown_callbacks.py::update_finrec_diff": {
+      "classification": "legacy-gated"
+    },
+    "callback:drilldown_callbacks.py::update_finrec_total": {
+      "classification": "legacy-gated"
+    },
     "callback:drilldown_callbacks.py::update_member_ledger_state": {
       "classification": "unclassified"
     },
