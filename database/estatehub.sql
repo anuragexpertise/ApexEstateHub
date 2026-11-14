@@ -498,6 +498,7 @@ CREATE TABLE assets (
     acc_id INT,
     FOREIGN KEY (society_id, acc_id) REFERENCES accounts (society_id, id), -- asset class account (e.g. Furniture 61)
     depreciation_rate NUMERIC(5, 2),
+    accumulated_depreciation NUMERIC(12, 2) NOT NULL DEFAULT 0,
     last_depreciation_date DATE,
     disposed BOOLEAN NOT NULL DEFAULT FALSE,
     disposed_at DATE,
@@ -12378,6 +12379,7 @@ CREATE OR REPLACE FUNCTION fn_asset_list(
 RETURNS TABLE (
     id INT, company_name VARCHAR(100), asset_name VARCHAR(100), asset_sno VARCHAR(50),
     purchase_date DATE, purchase_value NUMERIC(12,2),
+    accumulated_depreciation NUMERIC(12,2),
     parent_account_name VARCHAR(100), depreciation_rate NUMERIC(5,2),
     book_value NUMERIC(15,2), disposed BOOLEAN,
     disposed_at DATE, sale_value NUMERIC(12,2), created_at TIMESTAMP
@@ -12392,10 +12394,11 @@ BEGIN
         ar.asset_sno::VARCHAR(50),
         ar.purchase_date::DATE,
         ar.purchase_value::NUMERIC(12,2),
+        COALESCE(ar.accumulated_depreciation, 0)::NUMERIC(12,2),
         COALESCE(a.name,'—')::VARCHAR(100),
         COALESCE(ar.depreciation_rate, a.depreciation_percent, 100)::NUMERIC(5,2),
         GREATEST(
-            ar.purchase_value * (1 - COALESCE(ar.depreciation_rate, a.depreciation_percent, 100) / 100),
+            ar.purchase_value - COALESCE(ar.accumulated_depreciation, 0),
             0
         )::NUMERIC(15,2),
         ar.disposed::BOOLEAN,

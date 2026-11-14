@@ -1733,6 +1733,117 @@ _CHANNEL_STATUS_BANNER = {
 }
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# FINANCIAL RECONCILIATION — Provisions, Donations, Funds on profiles
+# ════════════════════════════════════════════════════════════════════════════
+# Each line shows: account name | statement balance (from ledger) |
+# cash-count balance (editable input) | difference (check line).
+# The difference updates live via a pattern-matching callback.
+
+
+def _fetch_account_balances(db, society_id: int) -> dict:
+    """Current ledger balances for Provisions, Donations/Gifts and Funds accounts."""
+    try:
+        rows = db._execute(
+            "SELECT name, current_balance "
+            "FROM fn_accounts_hierarchy(%s, NULL) "
+            "WHERE (name ILIKE '%Provisions%' OR name ILIKE '%Gift%' OR name ILIKE '%Donation%' "
+            "   OR name ILIKE '%Sinking Fund%' OR name ILIKE '%Repair Fund%' "
+            "   OR name ILIKE '%Corpus Fund%' OR name ILIKE '%Depreciation Fund%') "
+            "ORDER BY name",
+            (society_id,), fetch_all=True,
+        ) or []
+        return {r["name"]: float(r.get("current_balance") or 0) for r in rows}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _financial_reconciliation_section(society_id: int, record_dict: dict) -> list:
+    """Provisions / Donations / Funds reconciliation lines with check-line difference."""
+    from dash import dcc, html
+    import dash_bootstrap_components as dbc
+
+    balances = _fetch_account_balances(db, society_id)
+    if not balances:
+        return []
+
+    rows = []
+    total_stmt = 0.0
+    total_cash = 0.0
+    for i, (name, stmt) in enumerate(balances.items()):
+        total_stmt += stmt
+        cash = 0.0
+        total_cash += cash
+        diff = stmt - cash
+        rows.append(html.Tr([
+            html.Td(name, style={"fontSize": "12px", "padding": "6px 8px",
+                                 "fontWeight": "600", "color": "#15304f"}),
+            html.Td(f"₹{stmt:,.2f}", style={"fontSize": "12px", "padding": "6px 8px",
+                                            "textAlign": "right", "color": "#7d8ea3"}),
+            html.Td(dbc.Input(
+                id={"type": "finrec-cash", "acct": name, "sid": society_id},
+                value="0.00", type="number", step="0.01", min="0",
+                size="sm",
+                style={"width": "110px", "fontSize": "11px", "textAlign": "right",
+                       "borderRadius": "6px", "padding": "2px 4px"},
+            ), style={"padding": "6px 8px", "textAlign": "right"}),
+            html.Td(html.Span(
+                f"₹{diff:,.2f}",
+                id={"type": "finrec-diff", "acct": name, "sid": society_id},
+                style={"fontSize": "12px", "padding": "6px 8px",
+                       "textAlign": "right", "fontWeight": "700",
+                       "color": "#de5c52" if diff != 0 else "#17976e"},
+            ), style={"padding": "6px 8px", "textAlign": "right"}),
+        ]))
+
+    diff_total = total_stmt - total_cash
+    rows.append(html.Tr([
+        html.Td("Total", style={"fontSize": "12px", "padding": "6px 8px",
+                                "fontWeight": "700", "color": "#15304f",
+                                "borderTop": "1px solid #c2cdda"}),
+        html.Td(f"₹{total_stmt:,.2f}", style={"fontSize": "12px", "padding": "6px 8px",
+                                              "textAlign": "right", "fontWeight": "700",
+                                              "borderTop": "1px solid #c2cdda",
+                                              "color": "#15304f"}),
+        html.Td("", style={"borderTop": "1px solid #c2cdda"}),
+        html.Td(html.Span(
+            f"₹{diff_total:,.2f}",
+            id={"type": "finrec-diff-total", "sid": society_id},
+            style={"fontSize": "12px", "padding": "6px 8px",
+                   "textAlign": "right", "fontWeight": "800",
+                   "borderTop": "1px solid #c2cdda",
+                   "color": "#de5c52" if diff_total != 0 else "#17976e"}),
+        style={"borderTop": "1px solid #c2cdda"}),
+    ]))
+
+    header = html.Div([
+        html.Strong("Provisions · Donations · Funds — Balance Check",
+                    style={"fontSize": "13px", "color": "#15304f"}),
+        html.Span("Statement vs cash-count · difference = statement − cash",
+                  style={"fontSize": "10px", "color": "#7d8ea3", "marginLeft": "8px"}),
+    ], style={"marginBottom": "6px"})
+
+    return [
+        dcc.Store(id={"type": "finrec-balances", "sid": society_id},
+                  data=balances, storage_type="memory"),
+        html.Div(header, style={"paddingLeft": "4px"}),
+        dbc.Table([
+            html.Thead(html.Tr([
+                html.Th("Account", style={"fontSize": "10px", "padding": "6px 8px",
+                                          "textAlign": "left"}),
+                html.Th("Statement", style={"fontSize": "10px", "padding": "6px 8px",
+                                            "textAlign": "right"}),
+                html.Th("Cash Count", style={"fontSize": "10px", "padding": "6px 8px",
+                                             "textAlign": "right"}),
+                html.Th("Difference", style={"fontSize": "10px", "padding": "6px 8px",
+                                             "textAlign": "right"}),
+            ]), style={"background": "#f4f7fb"}),
+            html.Tbody(rows),
+        ], bordered=False, hover=True, size="sm",
+           style={"marginBottom": "10px", "fontSize": "12px"}),
+    ]
+
+
 def render_profile_card(card_id: str, title: str, icon: str,
                         entity: str, record,
                         fields: list[dict], actions: list[dict] | None = None,
@@ -2605,6 +2716,9 @@ def _render_profile_card_inner(card_id: str, title: str, icon: str,
                     "marginBottom": "14px",
                 },
             ) if text_cells else None,
+
+            # ── Financial reconciliation: Provisions, Donations, Funds ─
+            *(_financial_reconciliation_section(society_id, record_dict) if society_id else []),
 
             # ── Channel subscriber list ───────────────────────────────
             *(_render_channel_subscribers(record_dict) if entity == "channel" and pk_val else []),
