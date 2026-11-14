@@ -278,7 +278,7 @@ EXPENSE_PARTICULARS_TEMPLATES = {
         'particulars': lambda r, d=None: (
             f"Salary {_month_year(d)} — {r.get('name','')}"
         ),
-        'account_hint': 'Salary',                       # acc 235
+        'account_hint': 'Sundry Creditors',               # acc 2240 — salary payable to security staff
         'role': 'security',
     },
     'security_bonus': {
@@ -286,7 +286,7 @@ EXPENSE_PARTICULARS_TEMPLATES = {
         'particulars': lambda r, d=None: (
             f"Bonus {_month_year(d)} — {r.get('name','')}"
         ),
-        'account_hint': 'Miscellaneous',                # acc 233
+        'account_hint': 'Sundry Creditors',               # acc 2240
         'role': 'security',
     },
     'vendor_payment': {
@@ -294,7 +294,7 @@ EXPENSE_PARTICULARS_TEMPLATES = {
         'particulars': lambda r, d=None: (
             f"Payment — {r.get('name','')} ({r.get('service_type','')}) — {_dd_mon_yyyy(d)}"
         ),
-        'account_hint': 'Repair and Maintenance',       # acc 2312
+        'account_hint': 'Sundry Creditors',               # acc 2240 — vendor payable
         'role': 'vendor',
     },
     'pass_reversal': {
@@ -302,7 +302,23 @@ EXPENSE_PARTICULARS_TEMPLATES = {
         'particulars': lambda r, d=None: (
             f"Pass Reversal — {r.get('name','')} — {_dd_mon_yyyy(d)}"
         ),
-        'account_hint': 'Miscellaneous',                # acc 233
+        'account_hint': 'Sundry Creditors',               # acc 2240
+        'role': 'vendor',
+    },
+    'amc': {
+        'label': 'AMC / Annual Maintenance Contract',
+        'particulars': lambda r, d=None: (
+            f"AMC {_month_year(d)} — {r.get('name','')}"
+        ),
+        'account_hint': 'Sundry Creditors',               # acc 2240 — vendor/lift/asset AMC payable
+        'role': 'vendor',
+    },
+    'lift_maintenance': {
+        'label': 'Lift Maintenance',
+        'particulars': lambda r, d=None: (
+            f"Lift Maintenance {_month_year(d)} — {r.get('name','')}"
+        ),
+        'account_hint': 'Sundry Creditors',               # acc 2240 — lift vendor payable
         'role': 'vendor',
     },
     'asset_purchase': {
@@ -310,7 +326,7 @@ EXPENSE_PARTICULARS_TEMPLATES = {
         'particulars': lambda r, d=None: (
             f"Asset Purchase — {r.get('asset_name','')} — {_dd_mon_yyyy(d)}"
         ),
-        'account_hint': 'Miscellaneous',                # acc 233; acc_id on asset row matters more
+        'account_hint': 'Sundry Creditors',               # acc 2240 — asset vendor payable
         'role': 'assets',
     },
     'depreciation': {
