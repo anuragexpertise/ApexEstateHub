@@ -1343,7 +1343,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "close_fy_with_reserve",
-    "line": 6563,
+    "line": 6556,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1547,7 +1547,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "lock_financial_year",
-    "line": 6671,
+    "line": 6664,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1649,7 +1649,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "update_finrec_diff",
-    "line": 6749,
+    "line": 6742,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1666,7 +1666,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "update_finrec_total",
-    "line": 6768,
+    "line": 6761,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -1683,7 +1683,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/drilldown_callbacks.py",
     "function": "update_member_ledger_state",
-    "line": 6519,
+    "line": 6512,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2934,7 +2934,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "build_amendment_prompt",
-    "line": 146,
+    "line": 327,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2957,7 +2957,24 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "civ_tick_all",
-    "line": 90,
+    "line": 180,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:master_rules_callbacks.py::civ_tick_all_up",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "civ_tick_all_up",
+    "line": 211,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2974,7 +2991,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "civ_verify",
-    "line": 102,
+    "line": 192,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -2989,11 +3006,144 @@
     "public": false
   },
   {
+    "id": "callback:master_rules_callbacks.py::civ_verify_up",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "civ_verify_up",
+    "line": 223,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "civ-msg-up"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:master_rules_callbacks.py::civ_xlsx_name",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "civ_xlsx_name",
+    "line": 244,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "civ-xlsx-name"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:master_rules_callbacks.py::civ_xlsx_name_up",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "civ_xlsx_name_up",
+    "line": 263,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "civ-xlsx-name-up"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:master_rules_callbacks.py::civ_xlsx_verify",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "civ_xlsx_verify",
+    "line": 254,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "civ-msg"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:master_rules_callbacks.py::civ_xlsx_verify_up",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "civ_xlsx_verify_up",
+    "line": 273,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "civ-msg-up"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:master_rules_callbacks.py::download_civ_template",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "download_civ_template",
+    "line": 281,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "civ-xlsx-template-download"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:master_rules_callbacks.py::download_civ_template_up",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
+    "function": "download_civ_template_up",
+    "line": 291,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "civ-xlsx-template-download-up"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
     "id": "callback:master_rules_callbacks.py::export_amendment_sql",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "export_amendment_sql",
-    "line": 216,
+    "line": 397,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3013,7 +3163,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "integrate_amendment_sql",
-    "line": 232,
+    "line": 413,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3036,7 +3186,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "prefill_catalog",
-    "line": 79,
+    "line": 169,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3060,7 +3210,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "save_catalog",
-    "line": 123,
+    "line": 304,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3080,7 +3230,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "save_rule",
-    "line": 68,
+    "line": 158,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3100,7 +3250,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "show_hint",
-    "line": 51,
+    "line": 141,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3122,7 +3272,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "test_amendment_sql",
-    "line": 194,
+    "line": 375,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -3145,7 +3295,7 @@
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/master_rules_callbacks.py",
     "function": "toggle_amendment_panel",
-    "line": 135,
+    "line": 316,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"

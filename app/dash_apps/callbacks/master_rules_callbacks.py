@@ -7,7 +7,8 @@ server-side Flask-Login session (never the browser's auth-store), the work is do
 app.services.regime_rules_admin, and the body is re-rendered only after a successful save.
 """
 import dash_bootstrap_components as dbc
-from dash import ALL, Input, Output, State, ctx, dcc, html, no_update, PreventUpdate
+from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
+from dash.exceptions import PreventUpdate   # not exported by `dash` itself in the pinned dash==2.14.2
 import io
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -90,6 +91,48 @@ def _run(fn):
     return _alert(msg, "success" if ok else "warning"), (render_rules_sections() if ok else no_update)
 
 
+def _xlsx_result_alert(res: dict, label: str):
+    """One message for an upload: what was verified, and why anything was left alone (never just 'no matches')."""
+    parts = []
+    if res["verified"]:
+        parts.append(f"{res['verified']} {label} instrument(s) verified. Reload the tab to see the new status.")
+    if res.get("skipped_incomplete"):
+        parts.append(f"{len(res['skipped_incomplete'])} row(s) skipped: notification number or URL left blank.")
+    if res.get("skipped_verified"):
+        parts.append(f"{len(res['skipped_verified'])} row(s) were already verified.")
+    if res["unmatched"]:
+        parts.append(f"{len(res['unmatched'])} row(s) had no matching instrument: " + "; ".join(res["unmatched"][:8]))
+    if not res["verified"]:
+        parts.insert(0, "No instruments were verified.")
+        return _alert(" ".join(parts), "info")
+    return _alert(" ".join(parts), "success" if not res["unmatched"] else "warning")
+
+
+def _run_xlsx_verify(regime_code, label, contents, filename, opinion, on):
+    if get_current_user_role() != "master":
+        return _alert("Master role required.", "danger")
+    if not contents or not filename:
+        return _alert("Choose a verified.xlsx file first.", "warning")
+    from app.services import instrument_verification as iv
+    try:
+        res = iv.verify_from_uploaded_xlsx(get_current_user_id(), regime_code, contents, filename, opinion, on)
+    except ds.SigningRefused as exc:
+        return _alert(str(exc), "danger")
+    except Exception as exc:  # noqa: BLE001 - never a silent callback error
+        return _alert(f"Could not verify from the upload: {exc}", "danger")
+    return _xlsx_result_alert(res, label)
+
+
+def _template_download(regime_code, sheet, filename):
+    """verified.xlsx template for the regime: its unverified instruments pre-listed; falls back to one example row."""
+    from app.services import instrument_verification as iv
+    try:
+        rows = iv.template_rows(regime_code)
+    except Exception:  # noqa: BLE001 - table not integrated yet: still hand out a usable, empty template
+        rows = []
+    return dcc.send_bytes(_build_template_bytes(sheet, rows), filename=filename)
+
+
 def register_master_rules_callbacks(app):
 
     @app.callback(Output("mrl-hint", "children"), Input("mrl-key", "value"), prevent_initial_call=True)
@@ -158,6 +201,8 @@ def register_master_rules_callbacks(app):
             done = iv.verify_many_as_master(get_current_user_id(), items, opinion, on)
         except ds.SigningRefused as exc:
             return _alert(str(exc), "danger")
+        except Exception as exc:  # noqa: BLE001 - never a silent callback error
+            return _alert(f"Could not verify: {exc}", "danger")
         return _alert(f"{done} instrument(s) marked verified. Reload the tab to see the new status.", "success")
 
     # ── RWA Compliance (UP): master verifies UP instruments in bulk ───────────────────────────────
@@ -182,47 +227,15 @@ def register_master_rules_callbacks(app):
             return _alert("Master role required.", "danger")
         ids = [it["id"]["id"] for it in (ctx.states_list[2] or [])]
         items = [{"id": i, "notification_no": a, "source_url": b} for i, t, a, b in zip(ids, sel or [], notif or [], url or []) if t]
-        import json, re
-        from database.db_manager import db as _db
-        from app.utils import today_ist
-        from datetime import date
-        opinion = (opinion or "").strip()
-        on_date = (on or today_ist().isoformat())[:10]
+        from app.services import instrument_verification as iv
         try:
-            on_date = date.fromisoformat(on_date)
-        except ValueError:
-            return _alert("The verified date is not a valid date.", "danger")
-        if on_date > today_ist():
-            return _alert("The verified date must not be in the future.", "danger")
-        if not opinion:
-            return _alert("Enter the opinion reference (advocate or CA).", "danger")
-        if not items:
-            return _alert("Select at least one instrument.", "warning")
-        problems = []
-        for i in items:
-            if not (i.get("notification_no") or "").strip():
-                problems.append(f"#{i['id']}: notification number is required.")
-            if not re.match(r"^https?://\S+$", (i.get("source_url") or "").strip(), re.IGNORECASE):
-                problems.append(f"#{i['id']}: a link (https://) to the source text is required.")
-        if problems:
-            return _alert("Nothing was verified. " + " ".join(problems[:12]), "danger")
-        try:
-            verified_count = 0
-            with _db._conn() as conn:
-                cur = conn.cursor()
-                for i in items:
-                    cur.execute("SELECT fn_verify_instrument(%s,%s,%s,%s,%s,%s,%s)",
-                                (int(i["id"]), get_current_user_id(), "master",
-                                 i["notification_no"].strip(), i["source_url"].strip(), opinion, on_date))
-                    verified_count += 1
-                cur.execute("INSERT INTO audit_events (society_id, actor_id, actor_role, action, resource_type, resource_id, after_value, source) "
-                            "VALUES (NULL,%s,'master','INSTRUMENTS_VERIFIED_BULK','legal_instrument_catalog',%s,%s::jsonb,'app')",
-                            (get_current_user_id(), ",".join(str(x["id"]) for x in items),
-                             json.dumps({"opinion_ref": opinion, "verified_on": str(on_date), "count": len(items), "regime": "UP_AOA_2010"})))
-        except Exception as exc:
-            msg = str(exc).split("\n")[0].replace("ERROR:", "").strip()
-            return _alert(f"Nothing was verified. {msg}", "danger")
-        return _alert(f"{verified_count} UP instrument(s) marked verified. Reload the tab to see the new status.", "success")
+            # the same checks as the Central path: is_master(), regime, already-verified, all-or-nothing, one audit row
+            done = iv.verify_many_as_master(get_current_user_id(), items, opinion, on, regime_code="UP_AOA_2010")
+        except ds.SigningRefused as exc:
+            return _alert(str(exc), "danger")
+        except Exception as exc:  # noqa: BLE001 - never a silent callback error
+            return _alert(f"Could not verify: {exc}", "danger")
+        return _alert(f"{done} UP instrument(s) marked verified. Reload the tab to see the new status.", "success")
 
     # ── Upload verified.xlsx → bulk verify Central instruments ────────────────
     @app.callback(Output("civ-xlsx-name", "children"), Input("civ-xlsx-upload", "filename"),
@@ -241,25 +254,7 @@ def register_master_rules_callbacks(app):
     def civ_xlsx_verify(n, contents, filename, opinion, on):
         if not n:
             return no_update
-        if get_current_user_role() != "master":
-            return _alert("Master role required.", "danger")
-        if not contents or not filename:
-            return _alert("Choose a verified.xlsx file first.", "warning")
-        from app.services import instrument_verification as iv
-        try:
-            res = iv.verify_from_uploaded_xlsx(get_current_user_id(), "CENTRAL", contents, filename,
-                                               opinion, on)
-        except ds.SigningRefused as exc:
-            return _alert(str(exc), "danger")
-        parts = []
-        if res["verified"]:
-            parts.append(f"{res['verified']} Central instrument(s) verified.")
-        if res["unmatched"]:
-            parts.append(f"{len(res['unmatched'])} row(s) had no matching instrument: " +
-                         "; ".join(res["unmatched"][:8]))
-        if not parts:
-            return _alert("No new instruments verified (all already verified or no matches).", "info")
-        return _alert(" ".join(parts), "success")
+        return _run_xlsx_verify("CENTRAL", "Central", contents, filename, opinion, on)
 
     # ── Upload verified.xlsx → bulk verify UP instruments ─────────────────────
     @app.callback(Output("civ-xlsx-name-up", "children"), Input("civ-xlsx-upload-up", "filename"),
@@ -278,25 +273,7 @@ def register_master_rules_callbacks(app):
     def civ_xlsx_verify_up(n, contents, filename, opinion, on):
         if not n:
             return no_update
-        if get_current_user_role() != "master":
-            return _alert("Master role required.", "danger")
-        if not contents or not filename:
-            return _alert("Choose a verified.xlsx file first.", "warning")
-        from app.services import instrument_verification as iv
-        try:
-            res = iv.verify_from_uploaded_xlsx(get_current_user_id(), "UP_AOA_2010", contents, filename,
-                                               opinion, on)
-        except ds.SigningRefused as exc:
-            return _alert(str(exc), "danger")
-        parts = []
-        if res["verified"]:
-            parts.append(f"{res['verified']} UP instrument(s) verified.")
-        if res["unmatched"]:
-            parts.append(f"{len(res['unmatched'])} row(s) had no matching instrument: " +
-                         "; ".join(res["unmatched"][:8]))
-        if not parts:
-            return _alert("No new instruments verified (all already verified or no matches).", "info")
-        return _alert(" ".join(parts), "success")
+        return _run_xlsx_verify("UP_AOA_2010", "UP", contents, filename, opinion, on)
 
     @app.callback(Output("civ-xlsx-template-download", "data"),
                   Input("civ-xlsx-download-template", "n_clicks"), prevent_initial_call=True)
@@ -306,15 +283,7 @@ def register_master_rules_callbacks(app):
             raise PreventUpdate
         if get_current_user_role() != "master":
             return no_update
-        example = [
-            [1, "CENTRAL", "Central Act", "Real Estate (Regulation and Development) Act, 2016 (RERA)",
-             2016, "Government of India", "Act 16 of 2016; S.O. 1544(E) dated 26 Apr 2016",
-             "1 May 2016", "central_rera",
-             "https://www.indiacode.nic.in/indiacode/bitstream/123456789/2158/1/A201616.pdf",
-             "Verified against India Code record."],
-        ]
-        data = _build_template_bytes("Central Acts Rules", example)
-        return dcc.send_bytes(data, filename="verified_central_template.xlsx")
+        return _template_download("CENTRAL", "Central Acts Rules", "verified_central_template.xlsx")
 
     @app.callback(Output("civ-xlsx-template-download-up", "data"),
                   Input("civ-xlsx-download-template-up", "n_clicks"), prevent_initial_call=True)
@@ -324,15 +293,7 @@ def register_master_rules_callbacks(app):
             raise PreventUpdate
         if get_current_user_role() != "master":
             return no_update
-        example = [
-            [1, "UP_AOA_2010", "Act", "Uttar Pradesh Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010",
-             2010, "Government of Uttar Pradesh", "UP Act 16 of 2010; Gazette 19 Mar 2010",
-             "21 Jul 2010", "always",
-             "https://upload.indiacode.nic.in/showfile?actid=AC_UP_88_471_00008_00008_1624875459743&filename=the_uttar_pradesh_apartment_act_2010.pdf&type=actfile",
-             "Verified against India Code record."],
-        ]
-        data = _build_template_bytes("UP Acts Rules", example)
-        return dcc.send_bytes(data, filename="verified_up_template.xlsx")
+        return _template_download("UP_AOA_2010", "UP Acts Rules", "verified_up_template.xlsx")
 
     @app.callback(_TOAST, _BODY, Input("mrl-cat-save", "n_clicks"),
                   State("mrl-cat-id", "value"), State("mrl-cat-status", "value"), State("mrl-cat-app", "value"),

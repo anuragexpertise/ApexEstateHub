@@ -39,7 +39,8 @@ def test_master_verifies_all_selected_in_one_go():
     assert iv.verify_many_as_master(9, _items(1, 2), "ADV/2026/14", "2026-11-01", db=db) == 2
     calls = [w for w in db.writes if "fn_verify_instrument" in w[0]]
     assert len(calls) == 2 and calls[0][1][2] == "master" and calls[0][1][5] == "ADV/2026/14"
-    assert any("INSTRUMENTS_VERIFIED_BULK" in w[0] for w in db.writes)
+    audit = [w for w in db.writes if "INSERT INTO audit_events" in w[0]]
+    assert len(audit) == 1 and audit[0][1][1] == "INSTRUMENTS_VERIFIED_BULK" and audit[0][1][2] == "CENTRAL"
 
 
 def test_only_the_master_may_do_it():
