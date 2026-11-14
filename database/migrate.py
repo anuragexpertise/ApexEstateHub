@@ -45,7 +45,6 @@ def main() -> None:
             if cur.fetchone()["n"]:
                 sys.exit("Database is not empty. Installs are always fresh: run "
                          "`python3 database/reset_database.py --yes --after seed`.")
-            cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
             cur.execute(SCHEMA_FILE.read_text(encoding="utf-8"))
         conn.commit()
     except Exception as exc:
