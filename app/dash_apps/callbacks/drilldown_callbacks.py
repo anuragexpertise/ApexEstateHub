@@ -6707,58 +6707,76 @@ def register_fy_close_callbacks(app):
 def _finrec_stmt_balances(sid: int) -> dict:
     """Current ledger balances for Provisions, Donations/Gifts and Funds accounts."""
     try:
+        # The LIKE patterns are literal text inside a parameterised query, so every % is doubled.
         rows = db._execute(
             "SELECT name, current_balance "
             "FROM fn_accounts_hierarchy(%s, NULL) "
-            "WHERE (name ILIKE '%Provisions%' OR name ILIKE '%Gift%' OR name ILIKE '%Donation%' "
-            "   OR name ILIKE '%Sinking Fund%' OR name ILIKE '%Repair Fund%' "
-            "   OR name ILIKE '%Corpus Fund%' OR name ILIKE '%Depreciation Fund%') "
+            "WHERE (name ILIKE '%%Provisions%%' OR name ILIKE '%%Gift%%' OR name ILIKE '%%Donation%%' "
+            "   OR name ILIKE '%%Sinking Fund%%' OR name ILIKE '%%Repair Fund%%' "
+            "   OR name ILIKE '%%Corpus Fund%%' OR name ILIKE '%%Depreciation Fund%%') "
             "ORDER BY name",
             (sid,), fetch_all=True,
         ) or []
         return {r["name"]: float(r.get("current_balance") or 0) for r in rows}
     except Exception:  # noqa: BLE001
+        log.exception("finrec: could not read ledger balances for society %s", sid)
         return {}
 
 
-@app.callback(
-    Output({"type": "finrec-diff", "acct": MATCH, "sid": MATCH}, "children"),
-    Input({"type": "finrec-cash", "acct": MATCH, "sid": MATCH}, "value"),
-    prevent_initial_call=True,
-)
-def update_finrec_diff(cash_value):
-    triggered = ctx.triggered_id
-    acct = triggered["acct"]
-    sid = int(triggered["sid"])
-    balances = _finrec_stmt_balances(sid)
-    stmt = balances.get(acct, 0.0)
-    cash = float(cash_value or 0)
-    diff = stmt - cash
-    return html.Span(
-        f"₹{diff:,.2f}",
-        style={"fontSize": "12px", "fontWeight": "700",
-               "color": "#de5c52" if diff != 0 else "#17976e"}
-    )
+def _finrec_sid(triggered_sid) -> int | None:
+    """The society whose balances may be shown. The id in the component is client-supplied, so it is only
+    honoured for the master; everyone else gets their own society from the session."""
+    from app.security.audit_context import get_current_society_id
+    own = get_current_society_id()
+    try:
+        asked = int(triggered_sid)
+    except (TypeError, ValueError):
+        return None
+    if own is not None and asked == int(own):
+        return asked
+    return asked if get_current_user_role() == "master" else None
 
 
-@app.callback(
-    Output({"type": "finrec-diff-total", "sid": MATCH}, "children"),
-    Input({"type": "finrec-cash", "acct": ALL, "sid": MATCH}, "value"),
-    prevent_initial_call=True,
-)
-def update_finrec_total(cash_values):
-    triggered = ctx.triggered_id
-    sid = int(triggered["sid"])
-    if cash_values is None:
-        cash_values = []
-    if not isinstance(cash_values, list):
-        cash_values = [cash_values]
-    balances = _finrec_stmt_balances(sid)
-    total_stmt = sum(float(v) for v in balances.values())
-    total_cash = sum(float(v or 0) for v in cash_values)
-    diff_total = total_stmt - total_cash
-    return html.Span(
-        f"₹{diff_total:,.2f}",
-        style={"fontSize": "12px", "fontWeight": "800",
-               "color": "#de5c52" if diff_total != 0 else "#17976e"}
+def register_finrec_callbacks(app):
+    """Live 'difference' cells of the Financial Reconciliation grid (Provisions / Donations / Funds)."""
+
+    @app.callback(
+        Output({"type": "finrec-diff", "acct": MATCH, "sid": MATCH}, "children"),
+        Input({"type": "finrec-cash", "acct": MATCH, "sid": MATCH}, "value"),
+        prevent_initial_call=True,
     )
+    @require_session
+    def update_finrec_diff(cash_value):
+        triggered = ctx.triggered_id
+        sid = _finrec_sid(triggered["sid"])
+        if sid is None:
+            return no_update
+        stmt = _finrec_stmt_balances(sid).get(triggered["acct"], 0.0)
+        diff = stmt - float(cash_value or 0)
+        return html.Span(
+            f"₹{diff:,.2f}",
+            style={"fontSize": "12px", "fontWeight": "700",
+                   "color": "#de5c52" if diff != 0 else "#17976e"}
+        )
+
+    @app.callback(
+        Output({"type": "finrec-diff-total", "sid": MATCH}, "children"),
+        Input({"type": "finrec-cash", "acct": ALL, "sid": MATCH}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def update_finrec_total(cash_values):
+        sid = _finrec_sid(ctx.triggered_id["sid"])
+        if sid is None:
+            return no_update
+        if cash_values is None:
+            cash_values = []
+        if not isinstance(cash_values, list):
+            cash_values = [cash_values]
+        total_stmt = sum(_finrec_stmt_balances(sid).values())
+        diff_total = total_stmt - sum(float(v or 0) for v in cash_values)
+        return html.Span(
+            f"₹{diff_total:,.2f}",
+            style={"fontSize": "12px", "fontWeight": "800",
+                   "color": "#de5c52" if diff_total != 0 else "#17976e"}
+        )

@@ -591,8 +591,51 @@ def catalog_edit_form(regime_code: str = REGIME) -> html.Div:
                  "'Read the notified Model Bye-Laws' link every society sees when adopting a clause as-is.",
                  style={"fontSize": "11px", "color": "#666"}, className="mb-2"),
         _label("Reason for the change"), dbc.Input(id="mrl-cat-reason", type="text", size="sm", className="mb-2"),
-        dbc.Button("Save catalog entry", id="mrl-cat-save", color="warning", size="sm"),
+        html.Div([
+            dbc.Button("Save catalog entry", id="mrl-cat-save", color="warning", size="sm"),
+            dbc.Button([html.I(className="fas fa-file-signature me-1"), "Amendment prompt"], id="mrl-amend-toggle",
+                       color="secondary", outline=True, size="sm"),
+        ], style={"display": "flex", "gap": "8px", "flexWrap": "wrap"}),
+        amendment_panel(),
     )
+
+
+def amendment_panel() -> dbc.Collapse:
+    """Under the catalog form: turn the saved entry into a prompt for Claude, then test and integrate the SQL it returns."""
+    mono = {"fontSize": "11px", "fontFamily": "monospace", "backgroundColor": "#f5f7fa", "border": "1px solid #cdd5df",
+            "borderRadius": "8px", "resize": "vertical"}
+    return dbc.Collapse(html.Div([
+        html.Hr(),
+        html.Div("Amend the figures the engine uses", style={"fontWeight": "700", "fontSize": "13px"}),
+        html.Div("1. Save the catalog entry above. 2. Say which figure changes and build the prompt. 3. Give the prompt to "
+                 "Claude. 4. Paste the SQL it returns below, then Test SQL (rolled back), Export .sql, Integrate to DB. "
+                 "Confirm the amendment with an advocate before integrating.",
+                 style={"fontSize": "11px", "color": "#666"}, className="mb-2"),
+        dbc.Row([
+            dbc.Col([_label("Figure now in use (e.g. 7500)"), dbc.Input(id="mrl-amend-old", type="text", size="sm")], md=3),
+            dbc.Col([_label("New figure (e.g. 10000)"), dbc.Input(id="mrl-amend-new", type="text", size="sm")], md=3),
+            dbc.Col([_label("Takes effect on"), dbc.Input(id="mrl-amend-eff", type="date", size="sm")], md=3),
+            dbc.Col(dbc.Button([html.I(className="fas fa-search me-1"), "Find usages & build prompt"], id="mrl-amend-build",
+                               color="primary", size="sm", style={"marginTop": "22px"}), md=3),
+        ], className="mb-2"),
+        dcc.Loading(html.Div(id="mrl-amend-usages", className="mb-2"), type="circle"),
+        _label("Prompt for Claude"),
+        dbc.Textarea(id="mrl-amend-prompt", rows=12, style=mono, placeholder="Press 'Find usages & build prompt'."),
+        html.Div([
+            dcc.Clipboard(target_id="mrl-amend-prompt", title="Copy prompt", style={"fontSize": 18, "cursor": "pointer"}),
+            html.Span("Copy the prompt", style={"fontSize": "11px", "color": "#666", "marginLeft": "6px"}),
+        ], className="mb-3", style={"display": "flex", "alignItems": "center"}),
+        _label("SQL returned by Claude (editable)"),
+        dbc.Textarea(id="mrl-amend-sql", rows=12, style=mono, placeholder="Paste the SQL script here…"),
+        html.Div([
+            dbc.Button([html.I(className="fas fa-play me-1"), "Test SQL"], id="mrl-amend-test", color="success", size="sm"),
+            dbc.Button([html.I(className="fas fa-file-export me-1"), "Export .sql"], id="mrl-amend-export", color="secondary", size="sm"),
+            dbc.Button([html.I(className="fas fa-database me-1"), "Integrate to DB"], id="mrl-amend-integrate", color="warning", size="sm"),
+            dcc.Download(id="mrl-amend-download"),
+        ], style={"display": "flex", "gap": "6px", "marginTop": "8px", "flexWrap": "wrap"}),
+        dcc.Loading(html.Div(id="mrl-amend-result", style={"marginTop": "8px"}), type="circle"),
+        dcc.Store(id="mrl-amend-tested", storage_type="memory"),
+    ], style={"marginTop": "8px"}), id="mrl-amend-panel", is_open=False)
 
 
 def render_master_rules_page() -> html.Div:

@@ -7,13 +7,14 @@ server-side Flask-Login session (never the browser's auth-store), the work is do
 app.services.regime_rules_admin, and the body is re-rendered only after a successful save.
 """
 import dash_bootstrap_components as dbc
-from dash import ALL, Input, Output, State, ctx, no_update
+from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
 from app.dash_apps.pages.master_rules_page import REGIME, render_rules_sections
 from app.security.audit_context import get_current_user_id, get_current_user_role
 from app.security.authorization import Cap
 from app.security.guards import require_session
-from app.security.service_guard import require_action
+from app.security.service_guard import audit_event, require_action
+from app.services import amendment_prompt as amp
 from app.services import regime_rules_admin as rra
 
 _TOAST = Output("mrl-toast", "children", allow_duplicate=True)
@@ -124,3 +125,126 @@ def register_master_rules_callbacks(app):
             return no_update, no_update
         role = get_current_user_role()
         return _run(lambda uid: rra.update_instrument(uid, role, iid, status, app_txt, prov, src, ver, reason))
+
+
+    # ── Amendment prompt: catalog form -> prompt for Claude -> test / export / integrate the SQL it returns ──────────
+
+    @app.callback(Output("mrl-amend-panel", "is_open"), Input("mrl-amend-toggle", "n_clicks"),
+                  State("mrl-amend-panel", "is_open"), prevent_initial_call=True)
+    @require_session
+    def toggle_amendment_panel(n, is_open):
+        return (not is_open) if n else no_update
+
+    @app.callback(Output("mrl-amend-usages", "children"), Output("mrl-amend-prompt", "value"),
+                  Input("mrl-amend-build", "n_clicks"),
+                  State("mrl-cat-id", "value"), State("mrl-cat-status", "value"), State("mrl-cat-app", "value"),
+                  State("mrl-cat-prov", "value"), State("mrl-cat-src", "value"), State("mrl-cat-ver", "value"),
+                  State("mrl-cat-reason", "value"), State("mrl-amend-old", "value"), State("mrl-amend-new", "value"),
+                  State("mrl-amend-eff", "value"), prevent_initial_call=True)
+    @require_session
+    @require_action(Cap.PLATFORM_RULES_MANAGE, "platform_rule", on_deny=lambda _d=None: (_alert("Master role required.", "danger"), no_update))
+    def build_amendment_prompt(n, iid, status, app_txt, prov, src, ver, reason, old, new, eff):
+        if not n:
+            return no_update, no_update
+        if get_current_user_role() != "master":
+            return _alert("Master role required.", "danger"), no_update
+        if not iid:
+            return _alert("Choose the instrument in the form above first.", "warning"), no_update
+        inst = rra.get_instrument(int(iid)) or {}
+        from database.db_manager import db
+        try:
+            usages = amp.find_usages(db, old) if (old or "").strip() else None
+        except Exception as exc:  # noqa: BLE001
+            return _alert(f"Could not search for the figure: {exc}", "danger"), no_update
+        entry = {"id": iid, "title": inst.get("title"), "instrument_type": inst.get("instrument_type"), "regime": REGIME,
+                 "status": status, "last_verified": ver, "applicability": app_txt, "provisions": prov,
+                 "source": src, "reason": reason}
+        prompt = amp.build_prompt(entry, {"old": old, "new": new, "effective": eff}, usages)
+        audit_event("platform.amendment.prompt", "platform_rule", f"catalog:{iid}",
+                    after={"old": old, "new": new, "effective": eff}, permission_used=Cap.PLATFORM_RULES_MANAGE)
+        if usages is None:
+            summary = _alert("Prompt built. Give the figure now in use to have the database and code searched for it.", "info")
+        else:
+            counts = {k: len(usages[k]) for k in ("thresholds", "rules", "functions", "files")}
+            summary = _alert(
+                f"Found {old}: {counts['thresholds']} threshold row(s), {counts['rules']} rule parameter(s), "
+                f"{counts['functions']} SQL function(s), {counts['files']} source line(s). All are listed in the prompt.",
+                "success" if sum(counts.values()) else "warning")
+        return summary, prompt
+
+    def _result(ok, title, detail=None, color=None):
+        body = [html.Strong(title)]
+        if detail:
+            body += [html.Br(), detail]
+        return dbc.Alert(body, color=color or ("success" if ok else "danger"), className="py-2",
+                         style={"fontSize": "12px", "whiteSpace": "pre-wrap"})
+
+    def _rows_preview(res):
+        rows = res.get("rows") or []
+        if not rows:
+            return f"{res.get('rowcount')} row(s) affected." if res.get("rowcount") not in (None, -1) else None
+        return html.Pre("\n".join(" | ".join(f"{k}={v}" for k, v in r.items()) for r in rows),
+                        style={"fontSize": "11px", "margin": "4px 0 0 0"})
+
+    @app.callback(Output("mrl-amend-result", "children"), Output("mrl-amend-tested", "data"),
+                  Input("mrl-amend-test", "n_clicks"), State("mrl-amend-sql", "value"), State("mrl-cat-id", "value"),
+                  prevent_initial_call=True)
+    @require_session
+    @require_action(Cap.PLATFORM_SQL_INSPECT, "platform_console", on_deny=lambda _d=None: (_alert("Master role required.", "danger"), None))
+    def test_amendment_sql(n, sql, iid):
+        if not n:
+            return no_update, no_update
+        if get_current_user_role() != "master":
+            return _alert("Master role required.", "danger"), None
+        why = amp.check_sql(sql)
+        if why:
+            return _result(False, "Not run.", why, "warning"), None
+        audit_event("platform.sql.execute", "platform_console", f"amendment_test:{iid}",
+                    after={"sha256": amp.sql_digest(sql), "sql": sql.strip()[:2000]}, permission_used=Cap.PLATFORM_SQL_INSPECT)
+        from database.db_manager import db
+        try:
+            res = amp.dry_run_sql(db, sql)
+        except Exception as exc:  # noqa: BLE001
+            return _result(False, "The script failed and nothing was changed.", str(exc)[:600]), None
+        return (_result(True, "Test passed: the script ran and was rolled back; nothing was changed. "
+                              "You can now Integrate to DB.", _rows_preview(res)), amp.sql_digest(sql))
+
+    @app.callback(Output("mrl-amend-result", "children", allow_duplicate=True), Output("mrl-amend-download", "data"),
+                  Input("mrl-amend-export", "n_clicks"), State("mrl-amend-sql", "value"), State("mrl-cat-id", "value"),
+                  prevent_initial_call=True)
+    @require_session
+    def export_amendment_sql(n, sql, iid):
+        if not n or not (sql or "").strip():
+            return no_update, no_update
+        if get_current_user_role() != "master":
+            return _alert("Master role required.", "danger"), no_update
+        inst = rra.get_instrument(int(iid)) if iid else None
+        head = f"-- Amendment: {(inst or {}).get('title', 'catalog entry ' + str(iid or '?'))}\n-- sha256: {amp.sql_digest(sql)}\n"
+        return (_result(True, "SQL ready to download."),
+                dcc.send_string(head + sql.strip() + "\n", filename=f"amendment_{iid or 'entry'}.sql"))
+
+    @app.callback(Output("mrl-amend-result", "children", allow_duplicate=True),
+                  Output("mrl-amend-tested", "data", allow_duplicate=True),
+                  Input("mrl-amend-integrate", "n_clicks"), State("mrl-amend-sql", "value"),
+                  State("mrl-amend-tested", "data"), State("mrl-cat-id", "value"), prevent_initial_call=True)
+    @require_session
+    @require_action(Cap.PLATFORM_SQL_INSPECT, "platform_console", on_deny=lambda _d=None: (_alert("Master role required.", "danger"), None))
+    def integrate_amendment_sql(n, sql, tested, iid):
+        if not n:
+            return no_update, no_update
+        if get_current_user_role() != "master":
+            return _alert("Master role required.", "danger"), None
+        why = amp.check_sql(sql)
+        if why:
+            return _result(False, "Not integrated.", why, "warning"), no_update
+        if tested != amp.sql_digest(sql):
+            return _result(False, "Not integrated.", "Run Test SQL on exactly this script first (it has changed or was never tested).",
+                           "warning"), no_update
+        audit_event("platform.sql.integrate", "platform_console", f"amendment:{iid}",
+                    after={"sha256": amp.sql_digest(sql), "sql": sql.strip()[:2000]}, permission_used=Cap.PLATFORM_SQL_INSPECT)
+        from database.db_manager import db
+        try:
+            res = amp.apply_sql(db, sql)
+        except Exception as exc:  # noqa: BLE001
+            return _result(False, "The script failed; nothing was changed.", str(exc)[:600]), None
+        return _result(True, "Integrated. The change is live.", _rows_preview(res)), None

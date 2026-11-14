@@ -1273,6 +1273,36 @@ Every write is one SQL statement that also inserts into `regime_rule_audit` (app
 
 Owner loans in the dues checks are governed by three policy switches in this editor — see Owner Loans & Loanees.
 
+### Amending a Central / State Act figure (Master → RWA Compliance → "Amendment prompt")
+
+When an Act, rule or notification changes a figure the engine uses (for example the GST exemption of
+₹7,500 per member per month becoming ₹10,000), the catalog entry records what the law now says, but the
+figure itself lives elsewhere: dated rows in `state_compliance_thresholds` (or `regime_rule_parameters`),
+fallbacks hard-coded in SQL functions, and text in the code. The **Amendment prompt** button, beside
+*Save catalog entry*, walks the master through finding and changing them:
+
+1. Fill and save the catalog entry ("Edit a catalog entry"), then press **Amendment prompt**.
+2. Enter the figure now in use, the new figure and the date it takes effect, then **Find usages & build prompt**.
+   The panel searches threshold rows, rule parameters, SQL function source and the `app/` and `database/` files for
+   that figure (7500, 7,500 and 7_500 all match; 17500 does not) and builds a prompt from the form and what it found.
+3. Copy the prompt to Claude. It asks for: which variable or function must change, the SQL, a verification query, a
+   rollback script and the non-SQL follow-ups. It tells Claude to close the old row and add a dated new one with
+   `INSERT … ON CONFLICT`, never to overwrite history, never to touch the protected rule tables, and to ask for
+   `pg_get_functiondef(...)` before rewriting a function.
+4. Paste Claude's SQL into the box and use, as in the KPI Inspector, **Test SQL** (runs it and rolls it back, shows the
+   rows it would return), **Export .sql** (download with its SHA-256) and **Integrate to DB**.
+
+**Guard rails.** Integrate runs only on the exact script that last passed Test SQL (changing one character needs a new
+test). Scripts that write to the legal-regime rule tables (`regime_rule_parameters`, `legal_instrument_catalog`, …) are
+refused: those change through the AOA Rule Editor. `COMMIT`/`ROLLBACK`/`SAVEPOINT` lines and `DROP`/`TRUNCATE`/`DELETE FROM`
+are refused. Test and Integrate need the `platform.sql.inspect` capability and are written to the audit log
+(`platform.sql.execute`, `platform.sql.integrate`) with the script's SHA-256. Code lives in
+`app/services/amendment_prompt.py` and `app/dash_apps/callbacks/master_rules_callbacks.py`. Fallbacks such as
+`COALESCE(v_gst_threshold, 7500)` in `fn_auto_generate_receivables`, `database/seed.py` (which re-creates the old
+figure on a fresh install) and the display text in `statutory_rules.py` and `renderers.py` are code or schema, so the
+prompt lists them as follow-ups for a repository change. The tool does not decide what the law says: confirm the
+amendment with an advocate before integrating.
+
 ### Bye-Laws Acceptance & Governance
 
 How a society's own decisions — not just the statute — reach the engine. Tables `society_bye_laws`, `meetings`, `resolutions`, `decision_types`, `resolution_effects`; service `regime_rules_admin.py`; functions `fn_resolve_rule`, `fn_get_standing`.
