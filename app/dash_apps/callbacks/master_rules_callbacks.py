@@ -15,6 +15,7 @@ from app.security.authorization import Cap
 from app.security.guards import require_session
 from app.security.service_guard import audit_event, require_action
 from app.services import amendment_prompt as amp
+from app.services import document_signing as ds
 from app.services import regime_rules_admin as rra
 
 _TOAST = Output("mrl-toast", "children", allow_duplicate=True)
@@ -176,6 +177,80 @@ def register_master_rules_callbacks(app):
             msg = str(exc).split("\n")[0].replace("ERROR:", "").strip()
             return _alert(f"Nothing was verified. {msg}", "danger")
         return _alert(f"{verified_count} UP instrument(s) marked verified. Reload the tab to see the new status.", "success")
+
+    # ── Upload verified.xlsx → bulk verify Central instruments ────────────────
+    @app.callback(Output("civ-xlsx-name", "children"), Input("civ-xlsx-upload", "filename"),
+                  prevent_initial_call=True)
+    @require_session
+    def civ_xlsx_name(filename):
+        if not filename:
+            return ""
+        return f"Selected: {filename}"
+
+    @app.callback(Output("civ-xlsx-msg", "children"), Input("civ-xlsx-verify", "n_clicks"),
+                  State("civ-xlsx-upload", "contents"), State("civ-xlsx-upload", "filename"),
+                  State("civ-xlsx-opinion", "value"), State("civ-xlsx-date", "value"),
+                  prevent_initial_call=True)
+    @require_session
+    def civ_xlsx_verify(n, contents, filename, opinion, on):
+        if not n:
+            return no_update
+        if get_current_user_role() != "master":
+            return _alert("Master role required.", "danger")
+        if not contents or not filename:
+            return _alert("Choose a verified.xlsx file first.", "warning")
+        from app.services import instrument_verification as iv
+        try:
+            res = iv.verify_from_uploaded_xlsx(get_current_user_id(), "CENTRAL", contents, filename,
+                                               opinion, on)
+        except ds.SigningRefused as exc:
+            return _alert(str(exc), "danger")
+        parts = []
+        if res["verified"]:
+            parts.append(f"{res['verified']} Central instrument(s) verified.")
+        if res["unmatched"]:
+            parts.append(f"{len(res['unmatched'])} row(s) had no matching instrument: " +
+                         "; ".join(res["unmatched"][:8]))
+        if not parts:
+            return _alert("No new instruments verified (all already verified or no matches).", "info")
+        return _alert(" ".join(parts), "success")
+
+    # ── Upload verified.xlsx → bulk verify UP instruments ─────────────────────
+    @app.callback(Output("civ-xlsx-name-up", "children"), Input("civ-xlsx-upload-up", "filename"),
+                  prevent_initial_call=True)
+    @require_session
+    def civ_xlsx_name_up(filename):
+        if not filename:
+            return ""
+        return f"Selected: {filename}"
+
+    @app.callback(Output("civ-xlsx-msg-up", "children"), Input("civ-xlsx-verify-up", "n_clicks"),
+                  State("civ-xlsx-upload-up", "contents"), State("civ-xlsx-upload-up", "filename"),
+                  State("civ-xlsx-opinion-up", "value"), State("civ-xlsx-date-up", "value"),
+                  prevent_initial_call=True)
+    @require_session
+    def civ_xlsx_verify_up(n, contents, filename, opinion, on):
+        if not n:
+            return no_update
+        if get_current_user_role() != "master":
+            return _alert("Master role required.", "danger")
+        if not contents or not filename:
+            return _alert("Choose a verified.xlsx file first.", "warning")
+        from app.services import instrument_verification as iv
+        try:
+            res = iv.verify_from_uploaded_xlsx(get_current_user_id(), "UP_AOA_2010", contents, filename,
+                                               opinion, on)
+        except ds.SigningRefused as exc:
+            return _alert(str(exc), "danger")
+        parts = []
+        if res["verified"]:
+            parts.append(f"{res['verified']} UP instrument(s) verified.")
+        if res["unmatched"]:
+            parts.append(f"{len(res['unmatched'])} row(s) had no matching instrument: " +
+                         "; ".join(res["unmatched"][:8]))
+        if not parts:
+            return _alert("No new instruments verified (all already verified or no matches).", "info")
+        return _alert(" ".join(parts), "success")
 
     @app.callback(_TOAST, _BODY, Input("mrl-cat-save", "n_clicks"),
                   State("mrl-cat-id", "value"), State("mrl-cat-status", "value"), State("mrl-cat-app", "value"),
