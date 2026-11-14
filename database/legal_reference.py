@@ -33,7 +33,7 @@ import os
 import re
 import sys
 
-RESEARCHED_ON = "2026-11-05"
+RESEARCHED_ON = "2026-11-14"
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -244,6 +244,74 @@ INSTRUMENTS = [
             'No official copy found; only secondary text (legitquest.com). Made under s.33 '
             'of the Act as amended by UP Act 52 of 1975. Notification number not found.'
         ),
+    },
+    {
+        'regime_code': 'UP_AOA_2010',
+        'instrument_type': 'Rules',
+        'title': 'Uttar Pradesh Real Estate (Regulation and Development) Rules, 2016',
+        'enactment_year': 2016,
+        'issuing_authority': 'Government of Uttar Pradesh',
+        'applicability': (
+            'Real estate projects and agents in Uttar Pradesh under the Central RERA Act, '
+            '2016 (enforced by UP-RERA)'
+        ),
+        'key_provisions': (
+            'Procedural rules under s.84 of the Central RERA Act: registration of projects '
+            'and agents, functions of UP-RERA, fees, complaint procedure under s.31, and the '
+            'formation of the Authority within one year of commencement.'
+        ),
+        'source_reference': 'UP Real Estate (Regulation and Development) Rules, 2016',
+        'display_order': 60,
+        'status': 'active',
+        'applies_when': 'central_rera',
+        'candidate_notification_no': (
+            'Notification No. 1438/Eight-3-16-65Vividh/16 dated 27 Oct 2016 (in force from '
+            'publication)'
+        ),
+        'candidate_source_url': (
+            'https://upload.indiacode.nic.in/showfile?actid=AC_UP_88_471_00007_00007_1627040037997&filename=the_uttar_pradesh_real_estate_(regulation_and_development)_rules%2C_2016.pdf&type=rule'
+        ),
+        'candidate_note': (
+            'Verified against the UP Gazette English translation hosted on India Code '
+            '(research 14 Nov 2026). Made under s.84 of the Central RERA Act, 2016.'
+        ),
+        'candidate_checked_on': '2026-11-14',
+    },
+    {
+        'regime_code': 'UP_AOA_2010',
+        'instrument_type': 'Notification',
+        'title': 'Uttar Pradesh Real Estate Regulatory Authority (General) Regulations, 2019',
+        'enactment_year': 2019,
+        'issuing_authority': 'Uttar Pradesh Real Estate Regulatory Authority',
+        'applicability': (
+            'General functioning of UP-RERA and conduct of its business; all matters within '
+            'the Authority\'s jurisdiction in Uttar Pradesh (consolidated up to the 12th '
+            'amendment)'
+        ),
+        'key_provisions': (
+            'Regulations made under s.85 of the Central RERA Act: promoter disclosures, '
+            'project registration forms (REG-1 to REG-4A), adjudication proceedings, '
+            'extension of registration, transfer of majority rights, and administrative '
+            'charges/standard fees (Reg 47). Consolidated up to the 12th amendment notified '
+            '13 Jul 2026.'
+        ),
+        'source_reference': 'UP-RERA (General) Regulations, 2019',
+        'display_order': 65,
+        'status': 'active',
+        'applies_when': 'central_rera',
+        'candidate_notification_no': (
+            'No. UP RERA - 2019/Gen. Regulations/19 dated 27 Feb 2019; consolidated up to '
+            '12th Amendment notified 13 Jul 2026'
+        ),
+        'candidate_source_url': (
+            'https://www.up-rera.in/ViewDocument?Param=8UttarPradeshRealEstateRegulatoryAuthorityGeneralRegulations201927022019.pdf'
+        ),
+        'candidate_note': (
+            'Verified against UP-RERA official PDF (research 14 Nov 2026). Notified 27 Feb '
+            '2019; consolidated text up to 12th Amendment (13 Jul 2026) at '
+            'https://www.up-rera.in/pdf/58288Amendmentregulationupto12th.pdf.'
+        ),
+        'candidate_checked_on': '2026-11-14',
     },
     {
         'regime_code': 'CENTRAL',
@@ -668,6 +736,87 @@ INSTRUMENTS = [
         'candidate_source_url': 'https://indiacode.nic.in/handle/123456789/20063',
         'candidate_note': 'Verified against India Code record (research 10 Nov 2026).',
         'candidate_checked_on': '2026-11-10',
+    },
+    {
+        'regime_code': 'CENTRAL',
+        'instrument_type': 'Central Act',
+        'title': 'Jan Vishwas (Amendment of Provisions) Act, 2026',
+        'enactment_year': 2026,
+        'issuing_authority': 'Government of India',
+        'applicability': (
+            'Amends Section 68 of RERA and provisions of several Central Acts to ease '
+            'compliance and decriminalise minor offences'
+        ),
+        'key_provisions': (
+            'Amends Section 68 of RERA w.e.f. 7 May 2026: an allottee who ignores an '
+            'Appellate Tribunal order can no longer be jailed. Repeals/amends provisions '
+            'across multiple Central Acts (42 enactments) to reduce imprisonment penalties.'
+        ),
+        'source_reference': 'Jan Vishwas (Amendment of Provisions) Act, 2026 (Central Act 8 of 2026)',
+        'display_order': 165,
+        'status': 'active',
+        'applies_when': 'central_rera',
+        'candidate_notification_no': 'Act 8 of 2026',
+        'candidate_source_url': (
+            'https://indiacode.gov.in/server/api/core/bitstreams/b9a6905c-ede5-48e1-8c87-3d28be9707d7/content'
+        ),
+        'candidate_note': (
+            'Verified against India Code consolidated text as on 15 May 2026 (research 14 Nov 2026). '
+            'Amends RERA s.68 w.e.f. 7 May 2026 per S.O. 2287(E). Confirm the full amendment list.'
+        ),
+        'candidate_checked_on': '2026-11-14',
+    },
+    {
+        'regime_code': 'CENTRAL',
+        'instrument_type': 'Central Act',
+        'title': 'Arbitration and Conciliation Act, 1996',
+        'enactment_year': 1996,
+        'issuing_authority': 'Government of India',
+        'applicability': (
+            'Dispute resolution under the Agreement (clause 5.4): written notice, 30-day '
+            'settlement window, then arbitration between a Society office-bearer and a Licensor director'
+        ),
+        'key_provisions': (
+            'Arbitration procedure, appointment of a sole arbitrator by agreement or under '
+            'institutional rules, seat and venue of arbitration, English language, final and '
+            'binding award, and exclusive jurisdiction of courts at the seat.'
+        ),
+        'source_reference': 'Arbitration and Conciliation Act, 1996 (Central Act 26 of 1996)',
+        'display_order': 170,
+        'status': 'active',
+        'applies_when': 'always',
+        'candidate_notification_no': 'Act 26 of 1996',
+        'candidate_source_url': 'https://indiacode.nic.in/',
+        'candidate_note': (
+            'Verified against India Code record (research 14 Nov 2026). Governing arbitration '
+            'clause of the Agreement (§5.4).'
+        ),
+        'candidate_checked_on': '2026-11-14',
+    },
+    {
+        'regime_code': 'CENTRAL',
+        'instrument_type': 'Central Act',
+        'title': 'Limited Liability Partnership Act, 2008',
+        'enactment_year': 2008,
+        'issuing_authority': 'Government of India',
+        'applicability': (
+            'Operator (EstateHub LLP) incorporation and legal status (Agreement recital (2))'
+        ),
+        'key_provisions': (
+            'Incorporation of LLPs, partners\' limited liability, conversion from firms or '
+            'companies, and winding up of an LLP.'
+        ),
+        'source_reference': 'Limited Liability Partnership Act, 2008 (Central Act 6 of 2009)',
+        'display_order': 175,
+        'status': 'active',
+        'applies_when': 'always',
+        'candidate_notification_no': 'Act 6 of 2009 (in force 31 Mar 2009)',
+        'candidate_source_url': 'https://indiacode.nic.in/',
+        'candidate_note': (
+            'Verified against India Code record (research 14 Nov 2026). The Operator is an '
+            'LLP incorporated under this Act.'
+        ),
+        'candidate_checked_on': '2026-11-14',
     },
 ]
 
