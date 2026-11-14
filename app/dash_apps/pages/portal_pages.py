@@ -449,18 +449,11 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
                 dbc.Col([dbc.Button("Tick all unverified", id="civ-all-up", color="secondary", outline=True, size="sm", n_clicks=0, className="me-2"),
                          dbc.Button("Verify ticked", id="civ-verify-up", color="primary", size="sm", n_clicks=0)], md=4),
             ], className="g-2"),
-            html.Div(id="civ-msg-up", style={"fontSize": "12px", "marginTop": "8px"}),
-        ]), className="mt-3 mb-2", style={"borderRadius": "10px"})
-
-    # ── Upload verified.xlsx → bulk verify UP instruments ─────────────────────
-    upload_panel = html.Div()
-    if role == "master":
-        upload_panel = dbc.Card(dbc.CardBody([
-            html.H6("Bulk-verify from verified.xlsx", style={"fontSize": "14px"}),
-            html.P("Upload the verified.xlsx file (UP Acts Rules sheet). Each row is matched by title to a UP_AOA_2010 "
-                   "instrument and marked verified with that row's notification number and source URL. One opinion reference "
-                   "and date apply to all matched instruments.",
-                   style={"fontSize": "12px", "color": "#777"}),
+            html.Hr(style={"margin": "12px 0", "opacity": "0.2"}),
+            html.P("Or bulk-verify from verified.xlsx (UP Acts Rules sheet). Each row is matched by title to a "
+                   "UP_AOA_2010 instrument and marked verified with that row's notification number and source URL. "
+                   "One opinion reference and date apply to all matched instruments.",
+                   style={"fontSize": "12px", "color": "#777", "marginBottom": "8px"}),
             dbc.Row([
                 dbc.Col([
                     dbc.Button([html.I(className="fas fa-download me-2"), "Download template"],
@@ -486,6 +479,7 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
                 dbc.Col(dbc.Input(id="civ-xlsx-date-up", type="date", size="sm", value=today_ist().isoformat(), max=today_ist().isoformat()), md=3),
                 dbc.Col(dbc.Button("Upload & verify", id="civ-xlsx-verify-up", color="primary", size="sm", n_clicks=0), md=4),
             ], className="g-2 mt-2"),
+            html.Div(id="civ-msg-up", style={"fontSize": "12px", "marginTop": "8px"}),
             html.Div(id="civ-xlsx-msg-up", style={"fontSize": "12px", "marginTop": "8px"}),
         ]), className="mt-3 mb-2", style={"borderRadius": "10px"})
 
@@ -510,7 +504,6 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
                  f"last verified {last_verified}" if last_verified else "verification date not recorded",
                  "fa-scroll"),
         verify_panel,
-        upload_panel,
         html.Div(sections),
         render_governance_guide(),
         html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
@@ -665,18 +658,11 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
                 dbc.Col([dbc.Button("Tick all unverified", id="civ-all", color="secondary", outline=True, size="sm", n_clicks=0, className="me-2"),
                          dbc.Button("Verify ticked", id="civ-verify", color="primary", size="sm", n_clicks=0)], md=4),
             ], className="g-2"),
-            html.Div(id="civ-msg", style={"fontSize": "12px", "marginTop": "8px"}),
-        ]), className="mt-3 mb-2", style={"borderRadius": "10px"})
-
-    # ── Upload verified.xlsx → bulk verify Central instruments ────────────────
-    upload_panel = html.Div()
-    if role == "master":
-        upload_panel = dbc.Card(dbc.CardBody([
-            html.H6("Bulk-verify from verified.xlsx", style={"fontSize": "14px"}),
-            html.P("Upload the verified.xlsx file (Central Acts Rules sheet). Each row is matched by title to a Central "
-                   "instrument and marked verified with that row's notification number and source URL. One opinion reference "
-                   "and date apply to all matched instruments.",
-                   style={"fontSize": "12px", "color": "#777"}),
+            html.Hr(style={"margin": "12px 0", "opacity": "0.2"}),
+            html.P("Or bulk-verify from verified.xlsx (Central Acts Rules sheet). Each row is matched by title to a "
+                   "Central instrument and marked verified with that row's notification number and source URL. "
+                   "One opinion reference and date apply to all matched instruments.",
+                   style={"fontSize": "12px", "color": "#777", "marginBottom": "8px"}),
             dbc.Row([
                 dbc.Col([
                     dbc.Button([html.I(className="fas fa-download me-2"), "Download template"],
@@ -702,6 +688,7 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
                 dbc.Col(dbc.Input(id="civ-xlsx-date", type="date", size="sm", value=today_ist().isoformat(), max=today_ist().isoformat()), md=3),
                 dbc.Col(dbc.Button("Upload & verify", id="civ-xlsx-verify", color="primary", size="sm", n_clicks=0), md=4),
             ], className="g-2 mt-2"),
+            html.Div(id="civ-msg", style={"fontSize": "12px", "marginTop": "8px"}),
             html.Div(id="civ-xlsx-msg", style={"fontSize": "12px", "marginTop": "8px"}),
         ]), className="mt-3 mb-2", style={"borderRadius": "10px"})
 
@@ -729,7 +716,6 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
                  f"last verified {last_verified}" if last_verified else "verification date not recorded",
                  "fa-scroll"),
         verify_panel,
-        upload_panel,
         html.Div(sections),
         render_governance_guide(),
         html.Hr(style={"margin": "20px 0", "opacity": "0.12"}),
