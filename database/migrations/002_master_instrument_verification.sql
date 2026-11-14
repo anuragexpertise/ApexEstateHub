@@ -21,7 +21,7 @@ BEGIN
     IF NULLIF(BTRIM(p_opinion_ref), '') IS NULL THEN RAISE EXCEPTION 'An opinion reference is required to verify.'; END IF;
     IF NULLIF(BTRIM(p_notification_no), '') IS NULL THEN RAISE EXCEPTION 'The notification number is required.'; END IF;
     IF p_source_url IS NULL OR p_source_url !~* '^https?://' THEN RAISE EXCEPTION 'A link to the source text is required.'; END IF;
-    IF p_verified_on IS NULL OR p_verified_on > CURRENT_DATE THEN RAISE EXCEPTION 'The verified date must not be in the future.'; END IF;
+    IF p_verified_on IS NULL OR p_verified_on > (NOW() AT TIME ZONE 'Asia/Kolkata')::date THEN RAISE EXCEPTION 'The verified date must not be in the future.'; END IF;
     UPDATE legal_instrument_catalog SET notification_no = p_notification_no, source_url = p_source_url, opinion_ref = p_opinion_ref,
            last_verified_on = p_verified_on, verified_by = p_user, verifier_role = p_role, verification = 'verified', updated_at = NOW()
      WHERE id = p_instrument_id;

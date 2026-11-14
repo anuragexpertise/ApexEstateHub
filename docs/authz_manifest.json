@@ -560,7 +560,33 @@
     "callback:master_rules_callbacks.py::civ_tick_all": {
       "classification": "legacy-gated"
     },
+    "callback:master_rules_callbacks.py::civ_tick_all_up": {
+      "classification": "legacy-gated"
+    },
     "callback:master_rules_callbacks.py::civ_verify": {
+      "classification": "legacy-gated"
+    },
+    "callback:master_rules_callbacks.py::civ_verify_up": {
+      "classification": "legacy-gated"
+    },
+    "callback:master_rules_callbacks.py::civ_xlsx_name": {
+      "classification": "exempt",
+      "reason": "Session-guarded. Echoes the name of the file the browser itself holds into a label; reads and writes no database data."
+    },
+    "callback:master_rules_callbacks.py::civ_xlsx_name_up": {
+      "classification": "exempt",
+      "reason": "Session-guarded. Echoes the name of the file the browser itself holds into a label; reads and writes no database data."
+    },
+    "callback:master_rules_callbacks.py::civ_xlsx_verify": {
+      "classification": "legacy-gated"
+    },
+    "callback:master_rules_callbacks.py::civ_xlsx_verify_up": {
+      "classification": "legacy-gated"
+    },
+    "callback:master_rules_callbacks.py::download_civ_template": {
+      "classification": "legacy-gated"
+    },
+    "callback:master_rules_callbacks.py::download_civ_template_up": {
       "classification": "legacy-gated"
     },
     "callback:master_rules_callbacks.py::export_amendment_sql": {
