@@ -106,13 +106,76 @@ def register_master_rules_callbacks(app):
             return _alert("Master role required.", "danger")
         ids = [it["id"]["id"] for it in (ctx.states_list[2] or [])]
         items = [{"id": i, "notification_no": a, "source_url": b} for i, t, a, b in zip(ids, sel or [], notif or [], url or []) if t]
-        from app.services import document_signing as ds
         from app.services import instrument_verification as iv
         try:
             done = iv.verify_many_as_master(get_current_user_id(), items, opinion, on)
         except ds.SigningRefused as exc:
             return _alert(str(exc), "danger")
         return _alert(f"{done} instrument(s) marked verified. Reload the tab to see the new status.", "success")
+
+    # ── RWA Compliance (UP): master verifies UP instruments in bulk ───────────────────────────────
+    @app.callback(Output({"type": "civ-sel-up", "id": ALL}, "value"), Input("civ-all-up", "n_clicks"), prevent_initial_call=True)
+    @require_session
+    def civ_tick_all_up(n):
+        if not n or get_current_user_role() != "master":
+            return no_update
+        outs = ctx.outputs_list
+        outs = outs[0] if outs and isinstance(outs[0], list) else outs
+        return [True] * len(outs)
+
+    @app.callback(Output("civ-msg-up", "children"), Input("civ-verify-up", "n_clicks"),
+                  State("civ-opinion-up", "value"), State("civ-date-up", "value"),
+                  State({"type": "civ-sel-up", "id": ALL}, "value"), State({"type": "civ-notif-up", "id": ALL}, "value"),
+                  State({"type": "civ-url-up", "id": ALL}, "value"), prevent_initial_call=True)
+    @require_session
+    def civ_verify_up(n, opinion, on, sel, notif, url):
+        if not n:
+            return no_update
+        if get_current_user_role() != "master":
+            return _alert("Master role required.", "danger")
+        ids = [it["id"]["id"] for it in (ctx.states_list[2] or [])]
+        items = [{"id": i, "notification_no": a, "source_url": b} for i, t, a, b in zip(ids, sel or [], notif or [], url or []) if t]
+        import json, re
+        from database.db_manager import db as _db
+        from app.utils import today_ist
+        from datetime import date
+        opinion = (opinion or "").strip()
+        on_date = (on or today_ist().isoformat())[:10]
+        try:
+            on_date = date.fromisoformat(on_date)
+        except ValueError:
+            return _alert("The verified date is not a valid date.", "danger")
+        if on_date > today_ist():
+            return _alert("The verified date must not be in the future.", "danger")
+        if not opinion:
+            return _alert("Enter the opinion reference (advocate or CA).", "danger")
+        if not items:
+            return _alert("Select at least one instrument.", "warning")
+        problems = []
+        for i in items:
+            if not (i.get("notification_no") or "").strip():
+                problems.append(f"#{i['id']}: notification number is required.")
+            if not re.match(r"^https?://\S+$", (i.get("source_url") or "").strip(), re.IGNORECASE):
+                problems.append(f"#{i['id']}: a link (https://) to the source text is required.")
+        if problems:
+            return _alert("Nothing was verified. " + " ".join(problems[:12]), "danger")
+        try:
+            verified_count = 0
+            with _db._conn() as conn:
+                cur = conn.cursor()
+                for i in items:
+                    cur.execute("SELECT fn_verify_instrument(%s,%s,%s,%s,%s,%s,%s)",
+                                (int(i["id"]), get_current_user_id(), "master",
+                                 i["notification_no"].strip(), i["source_url"].strip(), opinion, on_date))
+                    verified_count += 1
+                cur.execute("INSERT INTO audit_events (society_id, actor_id, actor_role, action, resource_type, resource_id, after_value, source) "
+                            "VALUES (NULL,%s,'master','INSTRUMENTS_VERIFIED_BULK','legal_instrument_catalog',%s,%s::jsonb,'app')",
+                            (get_current_user_id(), ",".join(str(x["id"]) for x in items),
+                             json.dumps({"opinion_ref": opinion, "verified_on": str(on_date), "count": len(items), "regime": "UP_AOA_2010"})))
+        except Exception as exc:
+            msg = str(exc).split("\n")[0].replace("ERROR:", "").strip()
+            return _alert(f"Nothing was verified. {msg}", "danger")
+        return _alert(f"{verified_count} UP instrument(s) marked verified. Reload the tab to see the new status.", "success")
 
     @app.callback(_TOAST, _BODY, Input("mrl-cat-save", "n_clicks"),
                   State("mrl-cat-id", "value"), State("mrl-cat-status", "value"), State("mrl-cat-app", "value"),
