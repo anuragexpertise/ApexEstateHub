@@ -461,17 +461,25 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
                    "instrument and marked verified with that row's notification number and source URL. One opinion reference "
                    "and date apply to all matched instruments.",
                    style={"fontSize": "12px", "color": "#777"}),
-            dcc.Upload(
-                id="civ-xlsx-upload-up",
-                children=html.Div([
-                    html.I(className="fas fa-cloud-upload-alt me-2", style={"fontSize": "14px"}),
-                    "Drag and drop or select verified.xlsx",
-                ]),
-                style={"width": "100%", "height": "42px", "lineHeight": "42px", "borderWidth": "1px",
-                       "borderStyle": "dashed", "borderRadius": "8px", "textAlign": "center",
-                       "color": "#7d8ea3", "fontSize": "12px", "cursor": "pointer"},
-                multiple=False,
-            ),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Button([html.I(className="fas fa-download me-2"), "Download template"],
+                               id="civ-xlsx-download-template-up", color="secondary", outline=True, size="sm",
+                               style={"borderRadius": "8px", "fontWeight": "600"}),
+                    dcc.Download(id="civ-xlsx-template-download-up"),
+                ], md=5),
+                dbc.Col(dcc.Upload(
+                    id="civ-xlsx-upload-up",
+                    children=html.Div([
+                        html.I(className="fas fa-cloud-upload-alt me-2", style={"fontSize": "14px"}),
+                        "Drag and drop or select verified.xlsx",
+                    ]),
+                    style={"width": "100%", "height": "42px", "lineHeight": "42px", "borderWidth": "1px",
+                           "borderStyle": "dashed", "borderRadius": "8px", "textAlign": "center",
+                           "color": "#7d8ea3", "fontSize": "12px", "cursor": "pointer"},
+                    multiple=False,
+                ), md=7),
+            ], className="g-2 mt-2"),
             html.Div(id="civ-xlsx-name-up", style={"fontSize": "11px", "color": "#7d8ea3", "marginTop": "6px"}),
             dbc.Row([
                 dbc.Col(dbc.Input(id="civ-xlsx-opinion-up", placeholder="Opinion reference (advocate or CA)", size="sm"), md=5),
@@ -669,17 +677,25 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
                    "instrument and marked verified with that row's notification number and source URL. One opinion reference "
                    "and date apply to all matched instruments.",
                    style={"fontSize": "12px", "color": "#777"}),
-            dcc.Upload(
-                id="civ-xlsx-upload",
-                children=html.Div([
-                    html.I(className="fas fa-cloud-upload-alt me-2", style={"fontSize": "14px"}),
-                    "Drag and drop or select verified.xlsx",
-                ]),
-                style={"width": "100%", "height": "42px", "lineHeight": "42px", "borderWidth": "1px",
-                       "borderStyle": "dashed", "borderRadius": "8px", "textAlign": "center",
-                       "color": "#7d8ea3", "fontSize": "12px", "cursor": "pointer"},
-                multiple=False,
-            ),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Button([html.I(className="fas fa-download me-2"), "Download template"],
+                               id="civ-xlsx-download-template", color="secondary", outline=True, size="sm",
+                               style={"borderRadius": "8px", "fontWeight": "600"}),
+                    dcc.Download(id="civ-xlsx-template-download"),
+                ], md=5),
+                dbc.Col(dcc.Upload(
+                    id="civ-xlsx-upload",
+                    children=html.Div([
+                        html.I(className="fas fa-cloud-upload-alt me-2", style={"fontSize": "14px"}),
+                        "Drag and drop or select verified.xlsx",
+                    ]),
+                    style={"width": "100%", "height": "42px", "lineHeight": "42px", "borderWidth": "1px",
+                           "borderStyle": "dashed", "borderRadius": "8px", "textAlign": "center",
+                           "color": "#7d8ea3", "fontSize": "12px", "cursor": "pointer"},
+                    multiple=False,
+                ), md=7),
+            ], className="g-2 mt-2"),
             html.Div(id="civ-xlsx-name", style={"fontSize": "11px", "color": "#7d8ea3", "marginTop": "6px"}),
             dbc.Row([
                 dbc.Col(dbc.Input(id="civ-xlsx-opinion", placeholder="Opinion reference (advocate or CA)", size="sm"), md=5),

@@ -7,7 +7,11 @@ server-side Flask-Login session (never the browser's auth-store), the work is do
 app.services.regime_rules_admin, and the body is re-rendered only after a successful save.
 """
 import dash_bootstrap_components as dbc
-from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
+from dash import ALL, Input, Output, State, ctx, dcc, html, no_update, PreventUpdate
+import io
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 from app.dash_apps.pages.master_rules_page import REGIME, render_rules_sections
 from app.security.audit_context import get_current_user_id, get_current_user_role
@@ -20,6 +24,48 @@ from app.services import regime_rules_admin as rra
 
 _TOAST = Output("mrl-toast", "children", allow_duplicate=True)
 _BODY = Output("mrl-body", "children", allow_duplicate=True)
+
+# ── verified.xlsx template (download → fill → upload to bulk-verify) ──────────
+
+TEMPLATE_HEADERS = [
+    "#", "Regime", "Instrument Type", "Title", "Enactment Year", "Issuing Authority",
+    "Notification / Gazette No.", "In Force / Commencement", "Applies When",
+    "Official URL (Complete)", "Verification Notes",
+]
+
+TEMPLATE_FILL = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+TEMPLATE_FONT = Font(bold=True, color="FFFFFF", size=10)
+TEMPLATE_WRAP = Alignment(wrap_text=True, vertical="top")
+TEMPLATE_BORDER = Border(left=Side(style="thin", color="B0B0B0"),
+                         right=Side(style="thin", color="B0B0B0"),
+                         top=Side(style="thin", color="B0B0B0"),
+                         bottom=Side(style="thin", color="B0B0B0"))
+
+
+def _build_template_bytes(sheet_name: str, example_rows: list[list]) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+    ws.append(TEMPLATE_HEADERS)
+    for c in range(1, len(TEMPLATE_HEADERS) + 1):
+        cell = ws.cell(row=1, column=c)
+        cell.fill = TEMPLATE_FILL
+        cell.font = TEMPLATE_FONT
+        cell.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
+        cell.border = TEMPLATE_BORDER
+    for row in example_rows:
+        ws.append(row)
+        for c in range(1, len(TEMPLATE_HEADERS) + 1):
+            cell = ws.cell(row=ws.max_row, column=c)
+            cell.border = TEMPLATE_BORDER
+            cell.alignment = TEMPLATE_WRAP
+    widths = [4, 10, 12, 42, 9, 18, 34, 30, 14, 62, 46]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = "A2"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 def _alert(msg, color):
@@ -251,6 +297,42 @@ def register_master_rules_callbacks(app):
         if not parts:
             return _alert("No new instruments verified (all already verified or no matches).", "info")
         return _alert(" ".join(parts), "success")
+
+    @app.callback(Output("civ-xlsx-template-download", "data"),
+                  Input("civ-xlsx-download-template", "n_clicks"), prevent_initial_call=True)
+    @require_session
+    def download_civ_template(n_clicks):
+        if not n_clicks:
+            raise PreventUpdate
+        if get_current_user_role() != "master":
+            return no_update
+        example = [
+            [1, "CENTRAL", "Central Act", "Real Estate (Regulation and Development) Act, 2016 (RERA)",
+             2016, "Government of India", "Act 16 of 2016; S.O. 1544(E) dated 26 Apr 2016",
+             "1 May 2016", "central_rera",
+             "https://www.indiacode.nic.in/indiacode/bitstream/123456789/2158/1/A201616.pdf",
+             "Verified against India Code record."],
+        ]
+        data = _build_template_bytes("Central Acts Rules", example)
+        return dcc.send_bytes(data, filename="verified_central_template.xlsx")
+
+    @app.callback(Output("civ-xlsx-template-download-up", "data"),
+                  Input("civ-xlsx-download-template-up", "n_clicks"), prevent_initial_call=True)
+    @require_session
+    def download_civ_template_up(n_clicks):
+        if not n_clicks:
+            raise PreventUpdate
+        if get_current_user_role() != "master":
+            return no_update
+        example = [
+            [1, "UP_AOA_2010", "Act", "Uttar Pradesh Apartment (Promotion of Construction, Ownership and Maintenance) Act, 2010",
+             2010, "Government of Uttar Pradesh", "UP Act 16 of 2010; Gazette 19 Mar 2010",
+             "21 Jul 2010", "always",
+             "https://upload.indiacode.nic.in/showfile?actid=AC_UP_88_471_00008_00008_1624875459743&filename=the_uttar_pradesh_apartment_act_2010.pdf&type=actfile",
+             "Verified against India Code record."],
+        ]
+        data = _build_template_bytes("UP Acts Rules", example)
+        return dcc.send_bytes(data, filename="verified_up_template.xlsx")
 
     @app.callback(_TOAST, _BODY, Input("mrl-cat-save", "n_clicks"),
                   State("mrl-cat-id", "value"), State("mrl-cat-status", "value"), State("mrl-cat-app", "value"),
