@@ -141,7 +141,7 @@ def register_master_rules_callbacks(app):
         outs = outs[0] if outs and isinstance(outs[0], list) else outs    # one entry per matched checkbox, however Dash nests it
         return [True] * len(outs)
 
-    @app.callback(Output("civ-msg", "children"), Input("civ-verify", "n_clicks"),
+    @app.callback(Output("civ-msg", "children", allow_duplicate=True), Input("civ-verify", "n_clicks"),
                   State("civ-opinion", "value"), State("civ-date", "value"),
                   State({"type": "civ-sel", "id": ALL}, "value"), State({"type": "civ-notif", "id": ALL}, "value"),
                   State({"type": "civ-url", "id": ALL}, "value"), prevent_initial_call=True)
@@ -170,7 +170,7 @@ def register_master_rules_callbacks(app):
         outs = outs[0] if outs and isinstance(outs[0], list) else outs
         return [True] * len(outs)
 
-    @app.callback(Output("civ-msg-up", "children"), Input("civ-verify-up", "n_clicks"),
+    @app.callback(Output("civ-msg-up", "children", allow_duplicate=True), Input("civ-verify-up", "n_clicks"),
                   State("civ-opinion-up", "value"), State("civ-date-up", "value"),
                   State({"type": "civ-sel-up", "id": ALL}, "value"), State({"type": "civ-notif-up", "id": ALL}, "value"),
                   State({"type": "civ-url-up", "id": ALL}, "value"), prevent_initial_call=True)
@@ -233,9 +233,9 @@ def register_master_rules_callbacks(app):
             return ""
         return f"Selected: {filename}"
 
-    @app.callback(Output("civ-xlsx-msg", "children"), Input("civ-xlsx-verify", "n_clicks"),
+    @app.callback(Output("civ-msg", "children", allow_duplicate=True), Input("civ-xlsx-verify", "n_clicks"),
                   State("civ-xlsx-upload", "contents"), State("civ-xlsx-upload", "filename"),
-                  State("civ-xlsx-opinion", "value"), State("civ-xlsx-date", "value"),
+                  State("civ-opinion", "value"), State("civ-date", "value"),
                   prevent_initial_call=True)
     @require_session
     def civ_xlsx_verify(n, contents, filename, opinion, on):
@@ -270,9 +270,9 @@ def register_master_rules_callbacks(app):
             return ""
         return f"Selected: {filename}"
 
-    @app.callback(Output("civ-xlsx-msg-up", "children"), Input("civ-xlsx-verify-up", "n_clicks"),
+    @app.callback(Output("civ-msg-up", "children", allow_duplicate=True), Input("civ-xlsx-verify-up", "n_clicks"),
                   State("civ-xlsx-upload-up", "contents"), State("civ-xlsx-upload-up", "filename"),
-                  State("civ-xlsx-opinion-up", "value"), State("civ-xlsx-date-up", "value"),
+                  State("civ-opinion-up", "value"), State("civ-date-up", "value"),
                   prevent_initial_call=True)
     @require_session
     def civ_xlsx_verify_up(n, contents, filename, opinion, on):

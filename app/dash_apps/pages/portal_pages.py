@@ -452,7 +452,7 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
             html.Hr(style={"margin": "12px 0", "opacity": "0.2"}),
             html.P("Or bulk-verify from verified.xlsx (UP Acts Rules sheet). Each row is matched by title to a "
                    "UP_AOA_2010 instrument and marked verified with that row's notification number and source URL. "
-                   "One opinion reference and date apply to all matched instruments.",
+                   "The same opinion reference and date above apply to all matched instruments.",
                    style={"fontSize": "12px", "color": "#777", "marginBottom": "8px"}),
             dbc.Row([
                 dbc.Col([
@@ -474,13 +474,8 @@ def _rwa_compliance_up_page(c: str, role: str = "master", embedded: bool = False
                 ), md=7),
             ], className="g-2 mt-2"),
             html.Div(id="civ-xlsx-name-up", style={"fontSize": "11px", "color": "#7d8ea3", "marginTop": "6px"}),
-            dbc.Row([
-                dbc.Col(dbc.Input(id="civ-xlsx-opinion-up", placeholder="Opinion reference (advocate or CA)", size="sm"), md=5),
-                dbc.Col(dbc.Input(id="civ-xlsx-date-up", type="date", size="sm", value=today_ist().isoformat(), max=today_ist().isoformat()), md=3),
-                dbc.Col(dbc.Button("Upload & verify", id="civ-xlsx-verify-up", color="primary", size="sm", n_clicks=0), md=4),
-            ], className="g-2 mt-2"),
+            dbc.Col(dbc.Button("Upload & verify", id="civ-xlsx-verify-up", color="primary", size="sm", n_clicks=0), md="auto", className="mt-2"),
             html.Div(id="civ-msg-up", style={"fontSize": "12px", "marginTop": "8px"}),
-            html.Div(id="civ-xlsx-msg-up", style={"fontSize": "12px", "marginTop": "8px"}),
         ]), className="mt-3 mb-2", style={"borderRadius": "10px"})
 
     if role == "master":
@@ -661,7 +656,7 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
             html.Hr(style={"margin": "12px 0", "opacity": "0.2"}),
             html.P("Or bulk-verify from verified.xlsx (Central Acts Rules sheet). Each row is matched by title to a "
                    "Central instrument and marked verified with that row's notification number and source URL. "
-                   "One opinion reference and date apply to all matched instruments.",
+                   "The same opinion reference and date above apply to all matched instruments.",
                    style={"fontSize": "12px", "color": "#777", "marginBottom": "8px"}),
             dbc.Row([
                 dbc.Col([
@@ -683,13 +678,8 @@ def _rwa_compliance_india_page(c: str, role: str = "master", embedded: bool = Fa
                 ), md=7),
             ], className="g-2 mt-2"),
             html.Div(id="civ-xlsx-name", style={"fontSize": "11px", "color": "#7d8ea3", "marginTop": "6px"}),
-            dbc.Row([
-                dbc.Col(dbc.Input(id="civ-xlsx-opinion", placeholder="Opinion reference (advocate or CA)", size="sm"), md=5),
-                dbc.Col(dbc.Input(id="civ-xlsx-date", type="date", size="sm", value=today_ist().isoformat(), max=today_ist().isoformat()), md=3),
-                dbc.Col(dbc.Button("Upload & verify", id="civ-xlsx-verify", color="primary", size="sm", n_clicks=0), md=4),
-            ], className="g-2 mt-2"),
+            dbc.Col(dbc.Button("Upload & verify", id="civ-xlsx-verify", color="primary", size="sm", n_clicks=0), md="auto", className="mt-2"),
             html.Div(id="civ-msg", style={"fontSize": "12px", "marginTop": "8px"}),
-            html.Div(id="civ-xlsx-msg", style={"fontSize": "12px", "marginTop": "8px"}),
         ]), className="mt-3 mb-2", style={"borderRadius": "10px"})
 
     last_verified = max((r.get("last_verified_on") for r in rows if r.get("last_verified_on")), default=None)
