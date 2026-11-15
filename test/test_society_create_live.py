@@ -91,6 +91,11 @@ def test_bulk_reupload_keeps_enrolled_rows_and_tables_errors(made):
     def row(flat, email, owner, pw="Passw0rd!"):
         return {"flat_number": flat, "email": email, "password": pw, "owner_name": owner}
 
+    # Flats come from the builder's Declaration; bulk enrollment fills them with owners and never creates one.
+    for f in ("A-1", "A-2"):
+        db._execute("INSERT INTO apartments (society_id, flat_number, apartment_size, active) VALUES (%s,%s,1000,TRUE)",
+                    (sid, f))
+
     first = be._bulk_insert_apartments(
         [row("A-1", f"a1_{tag}@x.com", "Asha"), row("A-2", f"A2_{tag}@x.com", "Bela", pw="short")], sid, None)
     assert first["success"] == 1 and len(first["failed"]) == 1
@@ -109,3 +114,26 @@ def test_bulk_reupload_keeps_enrolled_rows_and_tables_errors(made):
     # the on-screen result is a table of the rows to fix
     html = str(be._render_results({"success": 0, "failed": first["failed"], "skipped": []}, "f.xlsx"))
     assert "Table" in html and "What to fix" in html
+
+
+def test_bulk_enrollment_never_creates_a_flat(made):
+    """Owners are enrolled only into flats the builder's Declaration created; a flat that is not there is refused."""
+    from app.services.society_service import create_society_checked
+    from app.dash_apps.callbacks import bulk_enroll_callbacks as be
+    from database.db_manager import db
+    tag = uuid.uuid4().hex[:8]
+    sid = create_society_checked(_data(tag))
+    made.append(sid)
+    db._execute("INSERT INTO apartments (society_id, flat_number, apartment_size, active) VALUES (%s,'B-1',900,TRUE)", (sid,))
+
+    res = be._bulk_insert_apartments(
+        [{"flat_number": "B-1", "email": f"b1_{tag}@x.com", "password": "Passw0rd!", "owner_name": "Declared"},
+         {"flat_number": "Z-9", "email": f"z9_{tag}@x.com", "password": "Passw0rd!", "owner_name": "Stranger"}], sid, None)
+
+    assert res["success"] == 1 and len(res["failed"]) == 1
+    assert res["failed"][0][0] == 3 and "not in the builder's Declaration" in res["failed"][0][1]
+    flats = [r["flat_number"] for r in db._execute("SELECT flat_number FROM apartments WHERE society_id=%s", (sid,), fetch_all=True)]
+    assert flats == ["B-1"]                                   # Z-9 was not created
+    declared = db._execute("SELECT apartment_size, owner_name FROM apartments WHERE society_id=%s AND flat_number='B-1'",
+                           (sid,), fetch_one=True)
+    assert declared["apartment_size"] == 900 and declared["owner_name"] == "Declared"

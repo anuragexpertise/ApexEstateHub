@@ -83,9 +83,11 @@ _BULK_TEMPLATES: dict[str, dict] = {
         "notes": (
             "email and password are required to create the owner's login "
             "account, which is needed for the gate-pass QR code and the "
-            "owner portal. Flats already created from the builder's Declaration "
-            "(Stage 5) are filled in rather than duplicated: the template comes "
-            "pre-filled with them, and the Declaration's area and share are kept."
+            "owner portal. Owners are enrolled only into flats the builder's "
+            "Declaration (Stage 5) created, so flat_number must match one of them: "
+            "the template comes pre-filled with the flats that still have no owner, "
+            "and the Declaration's area and share are kept. A flat that is not in "
+            "the Declaration is refused; correct the Declaration first."
         ),
     },
     "vendors": {
@@ -333,19 +335,22 @@ def _find_flat(sid: int, flat: str) -> dict | None:
 
 def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int | None = None) -> dict:
     """
-    For each Excel row:
-      1. Insert into apartments → get apartments.id
-      2. Insert into users (role='apartment') → get users.id
-      3. Set users.linked_id = apartments.id
+    Enroll owners INTO flats that already exist. For each Excel row:
+      1. Find the flat the builder's Declaration created (apartments.id); a flat that is not there is refused.
+      2. Fill in the owner's details on that flat.
+      3. Insert into users (role='apartment') with linked_id = apartments.id
 
-    This is the ONLY order that gives the owner:
+    This never creates an apartment: the Declaration workbook (Stage 5) is the only thing that does, so every flat
+    has its area and undivided-interest share before anyone is enrolled into it, and the plan's apartment cap is
+    checked once, there.
+
+    The owner gets, through that linkage:
       • A gate-pass QR (encoded as apartments.id → fn_evaluate_gate_pass uses
         apartments.id directly)
       • An owner-portal login
       • Push-notification / receivables linkage
 
-    If step 1 succeeds but steps 2-3 fail, the orphaned apartments row is
-    cleaned up so the flat_number slot is freed for the next attempt.
+    Steps 2 and 3 run in one transaction, so a failed login leaves the flat as it was.
     """
     required = _BULK_TEMPLATES["apartments"]["required"]
     success  = 0
@@ -353,16 +358,10 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int | None = No
     skipped: list[tuple] = []
     warnings: list[str] = []
 
-    # A3: enforce the same plan apartment cap as single-add. Rows beyond the
-    # remaining slots are reported as failed rather than silently inserted.
-    from app.services.plan_limits import remaining_apartment_slots
-    slots_left, _plan, _limit = remaining_apartment_slots(sid)
-
-    # While Enrollment is open and the builder's Declaration has set the shares, the Declaration IS the list of flats:
-    # a flat that is not in it would have no share and break the 100% total, so it is refused here.
-    _soc = db._execute("SELECT undivided_interest_basis AS basis, onboarding_phase AS phase FROM societies WHERE id=%s",
+    # The Declaration's area is authoritative once it has set the shares: a file's different figure never replaces it.
+    _soc = db._execute("SELECT undivided_interest_basis AS basis FROM societies WHERE id=%s",
                        (sid,), fetch_one=True) or {}
-    _declared_only = _soc.get("basis") == "declaration" and _soc.get("phase") == "enrollment"
+    _from_declaration = _soc.get("basis") == "declaration"
 
     for i, row in enumerate(rows, start=2):   # row 1 = header
         err = _check_required(row, required)
@@ -387,12 +386,9 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int | None = No
         if _have and _have["has_login"]:
             failed.append((i, f"Flat {_have['flat_number']} is already enrolled with a different login", _em))
             continue
-        if not _have and _declared_only:
-            failed.append((i, (f"Flat {flat} is not in the builder's Declaration. Upload a corrected Declaration "
-                              "(Stage 5) before enrolling it"), _em))
-            continue
-        if not _have and slots_left <= 0:
-            failed.append((i, f"Society plan '{_plan}' limit reached ({_limit} apartments)"))
+        if not _have:
+            failed.append((i, (f"Flat {flat} is not in the builder's Declaration. Owners are enrolled only into flats "
+                              "the Declaration created. Upload a corrected Declaration (Stage 5) first"), _em))
             continue
 
         _pw_err = validate_password(password)
@@ -403,72 +399,34 @@ def _bulk_insert_apartments(rows: list[dict], sid: int, user_id: int | None = No
         try:
             with db._conn() as conn:
                 cur = conn.cursor()
-                if _have:
-                    # A flat created from the Declaration: fill in the owner's details and give it a login.
-                    # The Declaration's area and share are authoritative; this file never overwrites them.
-                    _file_area = _safe_int(row.get("apartment_size"))
-                    if _declared_only and _file_area and _have["apartment_size"] and _file_area != _have["apartment_size"]:
-                        warnings.append(f"Flat {_have['flat_number']}: file says {_file_area} sq ft, the Declaration says "
-                                        f"{_have['apartment_size']}; the Declaration was kept.")
-                    cur.execute(
-                        "UPDATE apartments SET owner_name = COALESCE(%s, owner_name), mobile = COALESCE(%s, mobile), "
-                        "alt_mobile = COALESCE(%s, alt_mobile), alt_address = COALESCE(%s, alt_address), "
-                        "owner_photo = COALESCE(%s, owner_photo), id_proof = COALESCE(%s, id_proof), "
-                        "apartment_size = CASE WHEN %s AND apartment_size > 0 THEN apartment_size "
-                        "                      WHEN %s > 0 THEN %s ELSE apartment_size END, "
-                        "updated_at = NOW() WHERE id=%s AND society_id=%s",
-                        (row.get("owner_name") or None, row.get("mobile") or None, row.get("alt_mobile") or None,
-                         row.get("alt_address") or None, row.get("owner_photo") or None, row.get("id_proof") or None,
-                         _soc.get("basis") == "declaration", _file_area, _file_area, _have["id"], sid))
-                    apt_id = _have["id"]
-                    cur.execute(
-                        "INSERT INTO users"
-                        "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
-                        "VALUES (%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
-                        (sid, email, generate_password_hash(password), apt_id, user_id),
-                    )
-                else:
-                    # NOTE (2026-09 bugfix, unrelated to the admin-only created_by/
-                    # updated_by removal elsewhere in this file): apartments has
-                    # never had a created_by column — this insert previously
-                    # referenced it anyway, which would throw "column does not
-                    # exist" on every bulk apartment enrollment.
-                    cur.execute(
-                        "INSERT INTO apartments"
-                        "(society_id, flat_number, owner_name, mobile, apartment_size, "
-                        "alt_mobile, alt_address, owner_photo, id_proof, apt_calc_start_date, active) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
-                        (
-                            sid,
-                            flat,
-                            row.get("owner_name") or None,
-                            row.get("mobile")     or None,
-                            _safe_int(row.get("apartment_size")),
-                            row.get("alt_mobile") or None,
-                            row.get("alt_address") or None,
-                            row.get("owner_photo") or None,
-                            row.get("id_proof") or None,
-                            row.get("apt_calc_start_date") or None,
-                        ),
-                    )
-                    apt_r = cur.fetchone()
-                    apt_id = apt_r["id"] if apt_r else None
-                    if not apt_id:
-                        raise Exception("Apartment insert failed")  # noqa: TRY002
-
-                    cur.execute(
-                        "INSERT INTO users"
-                        "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
-                        "VALUES (%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
-                        (sid, email, generate_password_hash(password), apt_id, user_id),
-                    )
+                # Fill in the owner's details on the Declaration's flat and give it a login. The Declaration's area
+                # and share are authoritative; this file never overwrites them.
+                _file_area = _safe_int(row.get("apartment_size"))
+                if _from_declaration and _file_area and _have["apartment_size"] and _file_area != _have["apartment_size"]:
+                    warnings.append(f"Flat {_have['flat_number']}: file says {_file_area} sq ft, the Declaration says "
+                                    f"{_have['apartment_size']}; the Declaration was kept.")
+                cur.execute(
+                    "UPDATE apartments SET owner_name = COALESCE(%s, owner_name), mobile = COALESCE(%s, mobile), "
+                    "alt_mobile = COALESCE(%s, alt_mobile), alt_address = COALESCE(%s, alt_address), "
+                    "owner_photo = COALESCE(%s, owner_photo), id_proof = COALESCE(%s, id_proof), "
+                    "apartment_size = CASE WHEN %s AND apartment_size > 0 THEN apartment_size "
+                    "                      WHEN %s > 0 THEN %s ELSE apartment_size END, "
+                    "updated_at = NOW() WHERE id=%s AND society_id=%s",
+                    (row.get("owner_name") or None, row.get("mobile") or None, row.get("alt_mobile") or None,
+                     row.get("alt_address") or None, row.get("owner_photo") or None, row.get("id_proof") or None,
+                     _from_declaration, _file_area, _file_area, _have["id"], sid))
+                apt_id = _have["id"]
+                cur.execute(
+                    "INSERT INTO users"
+                    "(society_id, email, password_hash, role, login_method, linked_id, created_by) "
+                    "VALUES (%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
+                    (sid, email, generate_password_hash(password), apt_id, user_id),
+                )
         except Exception as e:  # noqa: BLE001
             failed.append((i, _friendly_error(e), _em))
             continue
 
         success += 1
-        if not _have:
-            slots_left -= 1
         # Item 10: link any pending opening receivable for this flat (idempotent).
         try:
             ob.link_opening_receivable(sid, apt_id, flat)
