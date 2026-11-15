@@ -3223,14 +3223,18 @@ def render_form_card(card_id: str, title: str, icon: str,
                 for o in f.get("options", [])
             ]
             
-            # Filter user_type options for apartment_users based on logged in user's role
-            if entity == "apartment_users" and fid == "user_type" and role == "apartment":
+            # Filter user_type options for apartment_users based on the logged-in resident's own type.
+            # NB: `entity` is the SINGULAR name here ("apartment_user"); comparing it to the plural meant this
+            # filter never ran and every resident was offered "Owner" in the dropdown.
+            if entity_plural == "apartment_users" and fid == "user_type" and role == "apartment":
                 caller_type = (auth_data or {}).get("user_type")
-                if caller_type in ("family", "tenant"):
+                if caller_type == "owner":
+                    opts = [o for o in opts if o["value"] in ("family", "tenant", "visitor")]
+                elif caller_type in ("family", "tenant"):
                     opts = [o for o in opts if o["value"] == "visitor"]
-                elif caller_type == "visitor":
+                else:
                     opts = []
-                    
+
             if entity == "polls" and fid == "open_to":
                 ctrl = dbc.RadioItems(
                     id={"type": "form-field", "entity": entity, "field": fid},

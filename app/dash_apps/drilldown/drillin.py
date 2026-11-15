@@ -273,6 +273,13 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
         "table": "apartments",
         "label": "Apartment",
     },
+    # Members form (admin only: residents' flat is pinned server-side and the field is hidden for them).
+    # The form is built from the vw_apartment_users view, so that is the table name introspection reports.
+    ("vw_apartment_users", "apartment_id"): {
+        "mode": "single",
+        "table": "apartments",
+        "label": "Apartment",
+    },
     # Committee bearer flat selection — drill-in picks a flat of this society;
     # the holder's name is then derived from the flat's owner/family login
     # (members of the society, never tenants or visitors).

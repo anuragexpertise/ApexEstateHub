@@ -5314,83 +5314,176 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
     _move_temp_images(role, domain_id, sid, d)
     return True, f"{role.title()} '{email}' created", domain_id
 
+# Which login types each kind of caller may create/edit on the Members screen (README §4.3):
+# the admin any type, an owner family/tenant/visitor, a family member or tenant visitors only, a visitor none.
+_HOUSEHOLD_TYPES = ("family", "tenant", "visitor")
+_ALL_RESIDENT_TYPES = ("owner",) + _HOUSEHOLD_TYPES
+
+
+def _creatable_resident_types(actor_role, actor_type) -> tuple:
+    if actor_role in ("admin", "master"):
+        return _ALL_RESIDENT_TYPES
+    if actor_role == "apartment":
+        if actor_type == "owner":
+            return _HOUSEHOLD_TYPES
+        if actor_type in ("family", "tenant"):
+            return ("visitor",)
+    return ()
+
+
 def _save_apartment_user(db, d, sid, is_edit, pk):
     from werkzeug.security import generate_password_hash
 
-    from app.dash_apps.auth_layer import get_current_linked_id, get_current_user_id
-    
-    # Order: Builder's Declaration must be complete before owner enrollment.
-    from app.services import undivided_declaration as ud
-    decl = ud.status(sid)
-    if not decl["balanced"] or not decl["evidence"]:
-        return False, "Owner enrollment requires the Builder's Declaration to be complete first (shares total 100% and the Declaration PDF on file).", None
+    from app.security.audit_context import get_current_linked_id, get_current_user_id
+    from app.services.committee_service import clean_email
 
-    email = (d.get("email") or "").strip().lower()
-    if not email:
-        return False, "Email is required", None
-        
-    user_type = d.get("user_type", "visitor")
     actor_uid = get_current_user_id()
-    
-    actor_row = db._execute("SELECT role, user_type FROM users WHERE id=%s AND society_id=%s", (actor_uid, sid), fetch_one=True)
+    actor_row = db._execute(
+        "SELECT role, user_type, linked_id FROM users WHERE id=%s AND society_id=%s AND active IS NOT FALSE",
+        (actor_uid, sid), fetch_one=True,
+    ) if actor_uid else None
     if not actor_row:
         return False, "Unauthorised: Could not identify current user", None
-        
+
     actor_role = actor_row["role"]
     actor_type = actor_row["user_type"]
-    
-    if actor_role in ("admin", "master"):
-        apt_id = d.get("apartment_id")
-        if not apt_id:
+    is_admin_actor = actor_role in ("admin", "master")
+    allowed_types = _creatable_resident_types(actor_role, actor_type)
+    if not allowed_types:
+        if actor_role == "apartment" and actor_type == "visitor":
+            return False, "Unauthorised: Visitors cannot create members.", None
+        return False, "Unauthorised: You cannot add or edit members.", None
+
+    # The flat: an admin names it; a resident always acts on their OWN flat, whatever the browser sent.
+    if is_admin_actor:
+        try:
+            apt_id = int(d.get("apartment_id"))
+        except (TypeError, ValueError):
             return False, "Apartment is required", None
     else:
-        apt_id = get_current_linked_id()
-        if actor_type in ("family", "tenant") and user_type != "visitor":
-            return False, f"Unauthorised: {actor_type.title()} can only create 'visitor' members.", None
-        if actor_type == "visitor":
-            return False, "Unauthorised: Visitors cannot create members.", None
-        
+        apt_id = actor_row.get("linked_id") or get_current_linked_id()
+        if not apt_id:
+            return False, "Unauthorised: Your login is not linked to a flat", None
+    if not db._execute("SELECT 1 AS x FROM apartments WHERE id=%s AND society_id=%s", (apt_id, sid), fetch_one=True):
+        return False, "Apartment not found in this society", None
+
+    email = clean_email(d.get("email"))
+    name = (d.get("name") or "").strip()
+    pw = (d.get("password") or "").strip()
+    user_type = (d.get("user_type") or "").strip().lower()
+
     if is_edit:
-        pw = (d.get("password") or "").strip()
-        name = (d.get("name") or "").strip()
-        set_parts, params = [], []
-        if email:
-            set_parts.append("email=%s"); params.append(email)
-        if name:
-            set_parts.append("name=%s"); params.append(name)
+        # Load the row being edited and make sure this caller may touch it at all.
+        target = db._execute(
+            "SELECT id, user_type, linked_id FROM users WHERE id=%s AND society_id=%s AND role='apartment'",
+            (pk, sid), fetch_one=True,
+        ) if pk else None
+        if not target:
+            return False, "Member not found", None
+        if not is_admin_actor:
+            if target["linked_id"] != apt_id:
+                return False, "Unauthorised: That member belongs to another flat.", None
+            if target["id"] == actor_uid:
+                return False, "Use Settings to change your own details.", None
+            if target["user_type"] not in allowed_types:
+                return False, f"Unauthorised: You cannot edit a {str(target['user_type']).title()} login.", None
+        user_type = user_type or target["user_type"]
+        if user_type != "family" and db._execute(
+                "SELECT 1 AS x FROM consent_records WHERE society_id=%s AND person_key=%s AND purpose='guardian_consent' "
+                "AND withdrawn_at IS NULL", (sid, f"minor:{pk}"), fetch_one=True):
+            return False, "This is a child's login (guardian consent on file); it must stay a Family member.", None
+    if user_type not in _ALL_RESIDENT_TYPES:
+        return False, "Please choose the member's type (family, tenant or visitor)", None
+    if user_type not in allowed_types:
+        who = (actor_type or actor_role or "you").title()
+        return False, (f"Unauthorised: {who} can only create 'visitor' members." if allowed_types == ("visitor",)
+                       else f"Unauthorised: you cannot create a '{user_type}' login."), None
+
+    if not email:
+        return False, "Enter a valid email address", None
+    if not name:
+        return False, "Name is required", None
+    clash = db._execute("SELECT id FROM users WHERE lower(email)=%s" + (" AND id<>%s" if is_edit else ""),
+                        (email, pk) if is_edit else (email,), fetch_one=True)
+    if clash:
+        return False, "This email is already used by another login", None
+
+    if is_edit:
+        set_parts, params = ["email=%s", "name=%s", "user_type=%s"], [email, name, user_type]
         if pw:
+            pw_err = validate_password(pw)
+            if pw_err:
+                return False, pw_err, None
             set_parts.append("password_hash=%s"); params.append(generate_password_hash(pw))
-        if user_type:
-            set_parts.append("user_type=%s"); params.append(user_type)
-        if actor_role in ("admin", "master") and apt_id:
+            set_parts.append("must_change_password=TRUE")
+        if is_admin_actor:
             set_parts.append("linked_id=%s"); params.append(apt_id)
-            
         params += [pk, sid]
-        if not set_parts:
-            return True, "No changes to save", pk
-            
-        db._execute(
-            f"UPDATE users SET {', '.join(set_parts)} "
-            "WHERE id=%s AND society_id=%s AND role='apartment'",
-            params,
-        )
-        return True, f"Member '{email}' updated", pk
-    else:
-        pw = d.get("password", "")
-        name = (d.get("name") or "").strip()
-        if not pw:
-            return False, "Password is required for new member", None
-            
         try:
-            r = db._execute(
+            db._execute(f"UPDATE users SET {', '.join(set_parts)} WHERE id=%s AND society_id=%s AND role='apartment'", params)
+        except Exception as e:  # noqa: BLE001
+            return False, _friendly_member_error(e), None
+        return True, f"Member '{email}' updated", pk
+
+    # ── create ──────────────────────────────────────────────────────────────
+    if user_type == "owner":
+        # Order: Builder's Declaration must be complete before OWNER enrollment (it does not gate household logins).
+        from app.services import undivided_declaration as ud
+        decl = ud.status(sid)
+        if not decl["balanced"] or not decl["evidence"]:
+            return False, ("Owner enrollment requires the Builder's Declaration to be complete first "
+                           "(shares total 100% and the Declaration PDF on file)."), None
+    is_child = False
+    if user_type != "owner":
+        age_group = str(d.get("age_group") or "").strip().lower()
+        if age_group not in ("adult", "child"):
+            return False, "Say whether the person is an adult (18 or over) or a child (under 18)", None
+        if age_group == "child":
+            # DPDP Act s.9: a child's data may be processed only with a parent/lawful guardian's verifiable consent.
+            # The consent is the signed-in owner's own act (or the admin attesting to consent on file), and the
+            # login is limited to a Family member so it cannot become a tenant/visitor/owner record.
+            if user_type != "family":
+                return False, "A child's login can only be a Family member.", None
+            if str(d.get("guardian_consent") or "").strip().lower() not in ("yes", "y", "true", "1"):
+                return False, ("A parent or lawful guardian must consent before a child's login is created. "
+                               "Choose 'Yes' under Parent/guardian consent."), None
+            is_child = True
+    if not pw:
+        return False, "Password is required for new member", None
+    pw_err = validate_password(pw)
+    if pw_err:
+        return False, pw_err, None
+
+    try:
+        with db._conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
                 "INSERT INTO users(society_id, email, name, password_hash, role, login_method, linked_id, user_type, created_by) "
                 "VALUES(%s, %s, %s, %s, 'apartment', 'password', %s, %s, %s) RETURNING id",
                 (sid, email, name, generate_password_hash(pw), apt_id, user_type, actor_uid),
-                fetch_one=True,
             )
-            return True, f"Member '{email}' added as {user_type.title()}", r["id"]
-        except Exception as e:  # noqa: BLE001
-            return False, f"Creation failed: {_clean_pg_error(e)}", None
+            new_id = cur.fetchone()["id"]
+            if is_child:
+                # Same transaction as the login: no child login can exist without its consent record.
+                from app.services import dpdp_service as dpdp
+                notice = dpdp.ensure_notice(sid, actor_uid)
+                cur.execute(
+                    "INSERT INTO consent_records (society_id, person_key, person_role, purpose, notice_version, "
+                    "lawful_basis, created_by, user_id) VALUES (%s, %s, 'family', 'guardian_consent', %s, 'consent', %s, %s)",
+                    (sid, f"minor:{new_id}", notice["version"], actor_uid,
+                     actor_uid if actor_role == "apartment" else None),
+                )
+    except Exception as e:  # noqa: BLE001
+        return False, _friendly_member_error(e), None
+    return True, f"Member '{email}' added as {user_type.title()}", new_id
+
+
+def _friendly_member_error(e: Exception) -> str:
+    low = str(e).lower()
+    if "duplicate key" in low or "unique constraint" in low:
+        return "This email is already used by another login"
+    return f"Could not save the member: {_clean_pg_error(e)}"
+
 
 def _save_event(db, d, sid, is_edit, pk):
     from app.security.audit_context import get_current_user_role
