@@ -868,6 +868,22 @@ def build_entity_meta() -> dict:
                 {"label": "Login Email", "field": "email", "icon": "fa-envelope"}
             ] + profile_fields
 
+        # Members form: name and type must be chosen explicitly (the server enforces it too), and a NEW login also
+        # records whether the person is an adult or a child. A child's login needs a parent/guardian's consent
+        # (DPDP Act s.9), so those two fields travel with the form; see _save_apartment_user.
+        if ekey == "apartment_users":
+            for _lst in (new_fields, edit_fields):
+                for _f in _lst:
+                    if _f["id"] in ("name", "user_type"):
+                        _f["required"] = True
+            new_fields = new_fields + [
+                {"id": "age_group", "label": "Age group", "type": "select", "required": True,
+                 "options": [{"label": "Adult (18 or over)", "value": "adult"},
+                             {"label": "Child (under 18) - needs parent/guardian consent", "value": "child"}]},
+                {"id": "guardian_consent", "label": "Parent/guardian consent (only for a child)", "type": "select",
+                 "options": [{"label": "Yes - I am the child's parent or lawful guardian and I consent", "value": "yes"}]},
+            ]
+
         # Append computed/joined fields to profile + list
         if ekey in _COMPUTED_FIELDS:
             # Task 1.11: never add a computed field whose label a real column already shows (receivables and assets
