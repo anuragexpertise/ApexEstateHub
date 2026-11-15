@@ -165,10 +165,10 @@ def test_the_same_instrument_twice_is_refused_not_double_processed():
 
 def test_over_long_notification_number_is_reported_before_any_write():
     db = FakeDB([inst(1, "Code on Wages, 2019", 2019)])
-    c = xlsx("Central Acts Rules", [("Code on Wages, 2019", 2019, "x" * 300, OK_URL)])
+    c = xlsx("Central Acts Rules", [("Code on Wages, 2019", 2019, "x" * 600, OK_URL)])
     with pytest.raises(ds.SigningRefused) as e:
         iv.verify_from_uploaded_xlsx(9, "CENTRAL", c, "v.xlsx", "ADV/1", "2026-11-01", db=db)
-    assert "300 characters" in str(e.value) and db.committed_verifications == []
+    assert "600 characters" in str(e.value) and db.committed_verifications == []
 
 
 def test_master_only_wrong_sheet_future_date_and_missing_opinion():

@@ -3129,7 +3129,7 @@ CREATE TABLE legal_instrument_catalog (
     -- Verification workflow (Plan v3 2.7): a row is 'verified' only with its source text link, notification number, date,
     -- verifier (Treasurer or Auditor) and the opinion that supports it. Anything else is 'unverified' and is labelled so;
     -- unverified rows never drive enforcement. Editing the substance of a verified row returns it to 'unverified'.
-    notification_no VARCHAR(255),
+    notification_no VARCHAR(500),
     verification VARCHAR(12) NOT NULL DEFAULT 'unverified' CHECK (
         verification IN ('unverified', 'verified')
     ),

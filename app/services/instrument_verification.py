@@ -59,7 +59,7 @@ def is_master(user_id: int, db=None) -> bool:
 # regime_code -> label used in messages. Only these two regimes can be verified by the platform master in bulk.
 MASTER_REGIMES = {"CENTRAL": "Central", "UP_AOA_2010": "UP"}
 
-NOTIFICATION_MAX = 255     # legal_instrument_catalog.notification_no (widened from 100 by migration 008)
+NOTIFICATION_MAX = 500     # legal_instrument_catalog.notification_no (VARCHAR(500) in estatehub.sql)
 OPINION_MAX = 255          # legal_instrument_catalog.opinion_ref
 
 _MIGRATION_HINT = " (apply database/migrations/002_master_instrument_verification.sql first)"
