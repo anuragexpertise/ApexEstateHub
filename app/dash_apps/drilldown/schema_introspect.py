@@ -884,6 +884,16 @@ def build_entity_meta() -> dict:
                  "options": [{"label": "Yes - I am the child's parent or lawful guardian and I consent", "value": "yes"}]},
             ]
 
+        # Owner enrolment: flats are created only by the builder's Declaration workbook, so the New Apartment form picks
+        # one of those flats through the Apartment drill-in instead of taking a typed flat number. (The Edit form keeps
+        # its fields; the flat already exists by then.) _save_user_entity enforces the same rule on the server.
+        if ekey == "apartments":
+            from app.dash_apps.drilldown.drillin import get_drillin_config
+            new_fields = [
+                {"id": "apartment_id", "label": "Apartment", "type": "drillin", "required": True,
+                 "drillin": get_drillin_config("apartments", "apartment_id")},
+            ] + [f for f in new_fields if f["id"] != "flat_number"]
+
         # Append computed/joined fields to profile + list
         if ekey in _COMPUTED_FIELDS:
             # Task 1.11: never add a computed field whose label a real column already shows (receivables and assets

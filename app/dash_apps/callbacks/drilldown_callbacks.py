@@ -5139,9 +5139,13 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             )
             return True, "Apartment updated", r["id"] if r else None
 
-        flat = (d.get("flat_number") or "").strip()
-        if not flat:
-            return False, "Flat number is required", None
+        # Owner enrolment never creates a flat. The builder's Declaration workbook (Stage 5) is what creates the society's
+        # flats, so the owner is enrolled INTO one of them, picked with the Apartment drill-in. This check is the
+        # authority; the picker's own filter is only a convenience (its config travels through a browser store).
+        try:
+            apt_id = int(d.get("apartment_id"))
+        except (TypeError, ValueError):
+            return False, "Pick the apartment from the Builder's Declaration", None
         email = (d.get("email") or "").strip().lower()
         if not email:
             return False, "Email is required", None
@@ -5151,27 +5155,39 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
         if validate_password(pw):
             return False, validate_password(pw), None
 
-        # apartments row FIRST, then users — the reverse of vendor/security
-        # below. flat_number is the natural key here (not email), and if
-        # the users insert then fails we roll back the apartments row so
-        # the flat slot is freed for retry. Mirrors _bulk_insert_apartments'
-        # documented reasoning in bulk_enroll_callbacks.py.
+        have = db._execute(
+            "SELECT flat_number FROM apartments WHERE id=%s AND society_id=%s AND active",
+            (apt_id, sid), fetch_one=True)
+        if not have:
+            return False, ("That apartment is not in this society's Builder's Declaration. Upload the Declaration "
+                           "(Stage 5) before enrolling its owner."), None
+        flat = have["flat_number"]
+
+        # Fill the declared flat, then give it a login, in ONE transaction. The flat row is locked first so two
+        # admins enrolling the same flat at once cannot both attach a login to it.
         try:
             with db._conn() as conn:
                 cur = conn.cursor()
+                cur.execute("SELECT id FROM apartments WHERE id=%s AND society_id=%s AND active FOR UPDATE", (apt_id, sid))
+                if not cur.fetchone():
+                    return False, "That apartment is no longer available", None
+                cur.execute("SELECT 1 AS x FROM users WHERE society_id=%s AND role='apartment' AND linked_id=%s",
+                            (sid, apt_id))
+                if cur.fetchone():
+                    return False, f"Flat {flat} already has an owner login", None
+                # The Declaration's area is authoritative; the form's figure is used only if the flat has none.
+                _area = _safe_int(d.get("apartment_size"))
                 cur.execute(
-                    "INSERT INTO apartments(society_id,flat_number,owner_name,mobile,"
-                    "apartment_size,alt_mobile,alt_address,owner_photo,id_proof,active) "
-                    "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id",
-                    (sid, flat, d.get("owner_name"), d.get("mobile"), _safe_int(d.get("apartment_size")),
-                     d.get("alt_mobile"), d.get("alt_address"),
-                     d.get("owner_photo"), d.get("id_proof")),
+                    "UPDATE apartments SET owner_name=COALESCE(NULLIF(%s,''), owner_name), "
+                    "mobile=COALESCE(NULLIF(%s,''), mobile), alt_mobile=COALESCE(NULLIF(%s,''), alt_mobile), "
+                    "alt_address=COALESCE(NULLIF(%s,''), alt_address), owner_photo=COALESCE(NULLIF(%s,''), owner_photo), "
+                    "id_proof=COALESCE(NULLIF(%s,''), id_proof), "
+                    "apartment_size=CASE WHEN apartment_size > 0 THEN apartment_size "
+                    "                    WHEN %s > 0 THEN %s ELSE apartment_size END, "
+                    "updated_at=NOW() WHERE id=%s AND society_id=%s",
+                    (d.get("owner_name"), d.get("mobile"), d.get("alt_mobile"), d.get("alt_address"),
+                     d.get("owner_photo"), d.get("id_proof"), _area, _area, apt_id, sid),
                 )
-                r = cur.fetchone()
-                apt_id = r["id"] if r else None
-                if not apt_id:
-                    raise Exception("Apartment insert failed")  # noqa: TRY002
-
                 cur.execute(
                     "INSERT INTO users(society_id,email,password_hash,role,login_method,linked_id,created_by) "
                     "VALUES(%s,%s,%s,'apartment','password',%s,%s) RETURNING id",
@@ -5192,7 +5208,7 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
             logging.getLogger(__name__).exception("undivided-interest fill after enrolment skipped for society %s", sid)
 
         _move_temp_images("apartment", apt_id, sid, d)
-        return True, f"Apartment '{flat}' created", apt_id
+        return True, f"Owner enrolled in apartment '{flat}'", apt_id
 
     # ── VENDOR / SECURITY ────────────────────────────────────────────────
     # pk is now vendors.id / security_staff.id (matches fn_vendors_list.id /

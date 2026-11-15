@@ -280,6 +280,18 @@ DRILLIN_CONFIG: dict[tuple[str, str], dict] = {
         "table": "apartments",
         "label": "Apartment",
     },
+    # Owner enrolment (the New Apartment form). The builder's Declaration workbook is what creates flats, so an owner is
+    # enrolled INTO one of those flats: the picker lists only active flats that have no owner login yet, and tapping one
+    # fills in its area from the Declaration. The save (_save_user_entity) re-checks all of this on the server, because the
+    # picker's config travels through a browser store and is not an authority.
+    ("apartments", "apartment_id"): {
+        "mode": "single",
+        "table": "apartments",
+        "label": "Apartment (from the Builder's Declaration)",
+        "filter": ("active AND NOT EXISTS (SELECT 1 FROM users u WHERE u.society_id = apartments.society_id "
+                   "AND u.role = 'apartment' AND u.linked_id = apartments.id)"),
+        "fill_fields": {"apartment_size": "apartment_size"},
+    },
     # Committee bearer flat selection — drill-in picks a flat of this society;
     # the holder's name is then derived from the flat's owner/family login
     # (members of the society, never tenants or visitors).
