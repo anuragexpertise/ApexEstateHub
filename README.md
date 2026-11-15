@@ -10,39 +10,26 @@
 
 > 🧭 **New to the repository?** Read [§0 Getting started](#0-getting-started) first (virtualenv, `.env`, schema + seed, run commands, demo logins), then [§3 Architecture](#3-architecture-overview) and [§17 Codebase Map](#17-codebase-map).
 
-> ✅ **What this revision was checked against:** branch `master`, commit `ee55a64`
-> ("demo data", 12 Nov 2026), by running it: a fresh PostgreSQL 16 loaded with
-> `database/migrate.py --seed`, `python run.py` serving the Dash app, every demo
-> login in this README, the full pytest suite (hermetic and live), the CI scripts,
-> `ruff`, `bandit` and `pip-audit`. Module counts, file paths, `fn_*` names,
-> environment variables and credentials were reconciled against the code and the
-> database by script. The long compliance narrative (§1–§14 and the statutory
-> tables) was **not** re-audited line by line in this pass. Defects found by that
-> run are in [§19.1](#191-defects-found-on-12-nov-2026). Historical claims are
-> labelled as historical.
+> ✅ **What this revision was checked against:** branch `master`, commit `b91f71e`
+> (14 Nov 2026) plus the migration fold described in §22, on 15 Nov 2026, by running it: a fresh
+> PostgreSQL 16 loaded with `database/migrate.py --seed`, the hermetic and the full pytest suites
+> (Python 3.13), and the CI scripts. Module counts, file paths, `fn_*` names, environment variables,
+> migrations and CI shape were reconciled against the code by script. **Not re-run in this pass:**
+> `pip-audit`, `bandit`, `ruff`, the demo-login walk-through and the Dash callback count. The long
+> compliance narrative (§1–§14 and the statutory tables) was **not** re-audited line by line.
+> Historical claims are labelled as historical.
 
-### Status snapshot — 12 Nov 2026 (commit `ee55a64`)
+### Status — 15 Nov 2026
 
-"As found" is the commit as pulled; "with patch" is the same commit plus the
-fixes listed in §19.1 (D1–D6). Everything was run locally with the commands CI
-uses; it is **not** a reading of the GitHub Actions status.
-
-| Check | As found | With patch |
-|---|---|---|
-| `python run.py` on a seeded database | boots in ~7 s, `/health` → `{"db":"connected","status":"ok"}`; the `poll-scheduler` thread dies with a `TypeError` | no traceback at boot |
-| Documented install (`database/migrate.py --seed`) | ✅ 158 tables, 9 views, 313 `fn_*`, 89 triggers, 1 society, 57 users, ledger anchored (196 entries) | same |
-| Dash callbacks | 360 (308 server-side, 52 clientside), no duplicate outputs | same |
-| Demo logins listed in §0 (11) | not run on the unpatched app | ✅ 11 of 11 |
-| Account lockout | 6th bad password → HTTP 503 for every later attempt, including the correct password | HTTP 401 while locked; correct password works once the lock expires |
-| Cross-society file access (`/assets/<other society>/…`) | HTTP 200 | HTTP 403 (master still allowed; `default/…` still shared) |
-| Hermetic suite, as CI runs it | ❌ 12 failed · 1,377 passed · 518 skipped | ❌ 1 failed · 1,388 passed · 518 skipped |
-| Full suite on a fresh seeded database | ❌ 21 failed · 52 errors · 2,000 passed · 3 skipped | ❌ 8 failed · 2,065 passed · 3 skipped |
-| `scripts/check_callback_guards.py` | ✅ 55 files | ✅ |
-| `scripts/inventory_endpoints.py --check` | ❌ exit 1: 12 endpoints missing from the manifest, 16 stale entries | ❌ unchanged (see O1) |
-| `bandit -lll -iii` | ✅ exit 0 | ✅ |
-| `pip-audit --strict` with the CI ignore list | ❌ `pypdf 5.9.0`: 103 advisories | ❌ unchanged (see O2) |
-| `ruff check --select F,E9` | 23 findings (11 unused imports, 9 unused variables, 3 f-strings without placeholders) and 4 undefined names hidden by `# noqa: F821` | 23 findings, no undefined names |
-| `scripts/release_check.py status` | exit 1 — Provisional: 5.1, 5.2, 5.3 outstanding; 68 rules/decision types without an opinion | same |
+| Check | Result |
+|---|---|
+| Install: `database/migrate.py --seed` on an empty PostgreSQL 16 | ✅ 158 tables, 9 views, 313 `fn_*`, 89 triggers, 1 society, ledger anchored (196 entries) |
+| Schema after applying every file in `database/migrations/` to a fresh install | ✅ identical `pg_dump -s` output |
+| Hermetic suite, as CI runs it | ✅ 1,423 passed · 528 skipped · 169 deselected |
+| Full suite on a fresh seeded database | ✅ 2,117 passed · 3 skipped |
+| `scripts/check_callback_guards.py` | ✅ 55 files |
+| `scripts/inventory_endpoints.py --check` | ✅ 351 endpoints, 126 unclassified legacy |
+| `scripts/build_scheme_sql.py --check` | ✅ scheme block is up to date |
 
 ---
 
@@ -54,7 +41,7 @@ uses; it is **not** a reading of the GitHub Actions status.
 |---|---|
 | **Python 3.12** | CI uses 3.12; the pins in `requirements.txt` target a modern 3.11+/3.12 runtime. |
 | **PostgreSQL 16** | The schema relies on PostgreSQL-specific DDL, deferred constraint triggers, statement-level TRUNCATE triggers and `pgcrypto`. SQLite is only a fallback DSN in `app/config.py`; it is **not** a supported application database. |
-| **`pgcrypto` extension** | Created by the first statement of `database/estatehub.sql` (needs a role that may create extensions). Used for receipt/ledger hashing. |
+| **`pgcrypto` extension** | Created by the `CREATE EXTENSION IF NOT EXISTS pgcrypto;` statement at the top of `database/estatehub.sql` (needs a role that may create extensions); `migrate.py` and `reset_database.py` no longer create it separately. Used for receipt/ledger hashing. |
 | Optional: Redis | Only for Server-Sent Events fan-out across gunicorn workers (`REDIS_URL`/`KV_URL`). Without it, SSE stays per-process. |
 | Optional: SMTP | Password-reset and notification email. Without it, reset tokens are written to the server log. |
 | Optional: VAPID keys | Browser push notifications (`pywebpush`). FCM additionally needs `firebase_admin`, which is **not** in `requirements.txt`. |
@@ -221,7 +208,7 @@ The complete, itemised list is [*Gaps we are open about*](#gaps-we-are-open-abou
 
 ### Evidence, and its limits
 
-- **A critical review.** [`ER.md`](ER.md) is a first-person, **unsigned** review of this codebase dated 16 Oct 2026. It says itself that it did not examine the user-interface code, the full SQL line by line, or the exact bye-law text. It is a list of places where a CA or advocate would push back, **not an audit opinion**. Its findings and what has been done about each are in [*Review findings and remediation status*](#review-findings-and-remediation-status). A **signed** review by the society's own CA or advocate is the step that would carry weight, and this repository is arranged so that they can run every check above themselves.
+- **A critical review.** `ER.md` is a first-person, **unsigned** review of this codebase dated 16 Oct 2026 (removed from the working tree in commit `b6ca8f3`, 13 Nov 2026; recover it with `git show b6ca8f3^:ER.md`). It says itself that it did not examine the user-interface code, the full SQL line by line, or the exact bye-law text. It is a list of places where a CA or advocate would push back, **not an audit opinion**. Its findings and what has been done about each are in [*Review findings and remediation status*](#review-findings-and-remediation-status). A **signed** review by the society's own CA or advocate is the step that would carry weight, and this repository is arranged so that they can run every check above themselves.
 - **Automated tests.** **1,214 test functions in 111 files** (`test/test_*.py`), 15 of them marked `postgres_integration`. The hermetic subset runs with no database; the live subset needs a seeded PostgreSQL 16 and `ESTATEHUB_LIVE_TESTS=1`. CI runs both, plus `pip-audit`, `bandit`, gitleaks, the callback-guard check and the endpoint-inventory check on every push — see [§24 Testing & CI](#24-testing--ci). A dated snapshot of an actual run is recorded in [§24](#24-testing--ci); the figure this README used to carry was historical and is not presented as current.
 - **Honesty about status.** Every control below is marked ✅ implemented and tested, 🟡 partial, or ⬜ not yet built, and the ⬜ and 🟡 rows state the limit.
 
@@ -236,7 +223,7 @@ The complete, itemised list is [*Gaps we are open about*](#gaps-we-are-open-abou
 >
 > Nothing here is legal, tax or audit advice. The society's own advocate and CA remain the authority on interpretation; the software's job is to make their decisions enforceable, visible and reproducible.
 >
-> **Reviewed, not certified.** [`ER.md`](ER.md) is a critical, unsigned review of this codebase (16 Oct 2026) that lists where a CA, advocate or tax officer would push back; it is a focused first pass, **not an audit opinion**. Its findings, and what has and has not been fixed since, are in [*Review findings and remediation status*](#review-findings-and-remediation-status).
+> **Reviewed, not certified.** `ER.md` (removed from the working tree in commit `b6ca8f3`, 13 Nov 2026; recover it with `git show b6ca8f3^:ER.md`) is a critical, unsigned review of this codebase (16 Oct 2026) that lists where a CA, advocate or tax officer would push back; it is a focused first pass, **not an audit opinion**. Its findings, and what has and has not been fixed since, are in [*Review findings and remediation status*](#review-findings-and-remediation-status).
 
 ### How the rules are followed — in spirit, not just in letter
 
@@ -252,7 +239,7 @@ Most software "complies" by hard-coding a number. EstateHub is designed so that 
 | **The software advises; it does not act unlawfully on its own** | `fn_service_cutoff_check` reports blockers and the earliest lawful date for an essential-services cut-off under **s.22** (more than 6 months' default, 7 days' notice, General Body resolution, certified copy, one-month wait, displayed notice, appeal window) and the screen refuses to record a cut-off the check does not allow. It never cuts a service itself. |
 | **Every change to a rule is itself audited** | `regime_rule_audit` is append-only; a database trigger rejects `UPDATE` and `DELETE`, and the change and its audit row commit in one statement. |
 
-The full, source-cited catalogue of Acts, Rules, Bye-laws and Notifications for UP is held in the `legal_instrument_catalog` table and shown at **Master → RWA Compliance (UP)**; the society sees the same list in the Setup Wizard's *UP AOA Compliance* step. Rows are never deleted. Superseded instruments are retired with `status = 'superseded'` and a `last_verified_on` date.
+The full, source-cited catalogue of Acts, Rules, Bye-laws and Notifications for UP is held in the `legal_instrument_catalog` table and shown at **Master → RWA Compliance (UP)**, with the Central Acts and Rules (regime `CENTRAL`) on **Master → RWA Compliance- INDIA**; the society sees the same list in the Setup Wizard's *UP AOA Compliance* step. Rows are never deleted. Superseded instruments are retired with `status = 'superseded'` and a `last_verified_on` date.
 
 ---
 
@@ -369,7 +356,7 @@ them (`app/services/dpdp_service.py` centralises them).
 | Purpose-bound access trail | 🟡 | `audit_events` records who did what, with a reason, policy version and correlation id; read-access logging of personal data is not comprehensive. |
 | Notice and **consent records** | ✅ | `privacy_notices` is versioned per society (title, body ≥100 characters, effective dates, current flag) and a notice gate holds every user before the dashboard. `consent_records` stores per-purpose consent with the notice version and a withdrawal time; dues and gate safety are recorded as `legitimate_use` **[Verify]**, optional purposes as `consent`. Draft notices carry a "pending legal review" banner. |
 | Data-principal rights (access, correction, **erasure**, nominee, grievance) | ✅ / 🟡 | `rights_requests` records type, due date (`RESPONSE_DAYS = 30`, **[Verify]**) and outcome. Erasure blanks the **profile** only, after a 48-hour notice, and only when `fn_erasure_blockers` reports no blocker (`fn_erase_person_profile`); it never touches ledger rows. Self-service is through Privacy in Settings, not a separate portal. |
-| **Retention and deletion schedule** | 🟡 | `retention_rules` (default 5 years, configurable per society) are read by `retention_engine.sweep_all_societies`, which the in-process retention loop calls once a day. **That function currently only lists each society's rules and returns empty placeholder results; it reports and purges nothing**, so no deletion schedule is enforced yet (see O4 in §19.1). Whether any Act requires a longer period for a class of record is still a question for the CA (`docs/PHASE0_TRACKER.md`, task 0.4). |
+| **Retention and deletion schedule** | 🟡 | `retention_rules` (default 5 years, configurable per society) are read by `retention_engine.sweep_all_societies`, which the in-process retention loop calls once a day. **That function currently only lists each society's rules and returns empty placeholder results; it reports and purges nothing**, so no deletion schedule is enforced yet (see O1 in §19). Whether any Act requires a longer period for a class of record is still a question for the CA (`docs/PHASE0_TRACKER.md`, task 0.4). |
 | Breach notification workflow | 🟡 | `breach_register` records incidents and statuses. **Notification** to the Data Protection Board / affected persons is an operational process, not automated. |
 | Grievance officer / contact | ✅ | `societies.grievance_officer_name/email/phone` are shown on the login page and in every notice; a grievance is one of the request types in the rights register. |
 
@@ -380,7 +367,7 @@ retention policy and restrict ID-proof images to the roles that need them.
 
 ### Review findings and remediation status
 
-[`ER.md`](ER.md) is a critical review of this codebase written to find the places where a CA, advocate, auditor or tax officer would push back. It is reproduced in the repository unedited so you can read the findings in full. The table shows what has been done about each one. Statutory figures in the review are marked *Verified*, *Verify* or *Code-only*; **please treat anything marked *Verify* as unconfirmed until your CA or advocate confirms it.**
+`ER.md` is a critical review of this codebase written to find the places where a CA, advocate, auditor or tax officer would push back. It was kept in the repository unedited until it was removed from the working tree in commit `b6ca8f3`, 13 Nov 2026; recover it with `git show b6ca8f3^:ER.md`; read the findings there in full. The table shows what has been done about each one. Statutory figures in the review are marked *Verified*, *Verify* or *Code-only*; **please treat anything marked *Verify* as unconfirmed until your CA or advocate confirms it.**
 
 | Finding | Status | What changed, and what has not |
 |---|---|---|
@@ -405,11 +392,11 @@ retention policy and restrict ID-proof images to the roles that need them.
 | **Review §8.7** Rule-Application Register; Compliance Certificate | ⬜ | New exports. |
 | **Hygiene** `float` in money paths | ✅ | Rupee amounts that are added, compared, stored or matched use `Decimal` through `database/money.py` (fund withdrawals and balances, bank statement lines and matching, salary and purchase values, I&E totals, TDS on the printed expense). The remaining `float(` calls are percentages, rule parameters, display formatting or JSON/Excel edges, each listed with its reason in [`docs/FLOAT_AUDIT.md`](docs/FLOAT_AUDIT.md) (Plan v4 C.9; `test_money_paths_decimal.py`). |
 
-Owner decisions taken on 24-25 Oct 2026 are in the *Decisions record* at the end of [`ER.md`](ER.md) §9. The questions waiting for an advocate or CA are listed in [`docs/PHASE0_ADVISER_QUESTIONS.md`](docs/PHASE0_ADVISER_QUESTIONS.md), and Phase 0 progress is in [`docs/PHASE0_TRACKER.md`](docs/PHASE0_TRACKER.md).
+Owner decisions taken on 24-25 Oct 2026 are in the *Decisions record* at the end of `ER.md` §9 (see above for where to find it). The questions waiting for an advocate or CA are listed in [`docs/PHASE0_ADVISER_QUESTIONS.md`](docs/PHASE0_ADVISER_QUESTIONS.md), and Phase 0 progress is in [`docs/PHASE0_TRACKER.md`](docs/PHASE0_TRACKER.md).
 
 ### Who signs what
 
-Status marks: ✅ built, 🟡 partly built, ⬜ planned (Gold-Standard Plan v3). A password confirmation records who confirmed; it is **not** a legal e-signature, and whether it satisfies the bye-laws and the IT Act is a question for the society's advocate. Keep signed paper minutes.
+Status marks: ✅ built, 🟡 partly built, ⬜ planned (Gold-Standard Plan v3, no longer in the tree; the current plans are in `.kilo/plans/`). A password confirmation records who confirmed; it is **not** a legal e-signature, and whether it satisfies the bye-laws and the IT Act is a question for the society's advocate. Keep signed paper minutes.
 
 | Record | Today | Planned signers | Sealed with | Status |
 |---|---|---|---|---|
@@ -522,7 +509,7 @@ Relevant suites include `test_accounting_integrity_live`, `test_scenario_b_recei
 16. [PostgreSQL Function Index](#16-postgresql-function-index)
 17. [Codebase Map](#17-codebase-map)
 18. [Critical Dash Rules](#18-critical-dash-rules)
-19. [Known Bugs & Fixes Applied](#19-known-bugs--fixes-applied)
+19. [Open Items](#19-open-items)
 20. [🚩 Open Design Subtleties & Flagged Caveats](#20--open-design-subtleties--flagged-caveats)
 21. [🧹 Legacy Code Cleanup Status](#21--legacy-code-cleanup-status)
 22. [Deployment, environment variables & database operations](#22-deployment-environment-variables--database-operations)
@@ -564,7 +551,7 @@ Each society gets its own fully isolated data silo scoped by `society_id`. A **M
 | **Privacy** | Versioned DPDP notice gate · purpose-bound consents · rights register (access/correction/erasure/grievance/nominee) · breach register · profile-only erasure that never touches ledger rows |
 | **Assurance** | Auditor portal with eight read-only checks · signed per-FY compliance certificate with a public `/verify/...` page · assurance engagements/findings · rule-opinion references · release gates |
 | **Signing** | Four per-society HMAC-SHA256 purposes (`SIGNING_QR`, `SIGNING_NOC`, `SIGNING_AGREEMENT`, `SIGNING_LEDGER`) wrapped under `SECRET_VAULT_KEY`; eSign adapter (Leegality contract, not live) |
-| **Database** | PostgreSQL 16 · 160 tables · 353 `fn_*` functions · 87 triggers · hash-chained ledger and receipt chains · `pgcrypto` |
+| **Database** | PostgreSQL 16 · 158 tables · 313 `fn_*` functions · 89 triggers · hash-chained ledger and receipt chains · `pgcrypto` |
 | **Bulk enrollment** | XLSX template download, preview/validation and commit for residents, vendors and staff |
 | **Society admin** | Pending receipt creation at the gate → admin verification; pending expenses above the approval threshold go to the approval ladder |
 
@@ -594,7 +581,7 @@ Flask app (app/__init__.py::create_app)
         ├── drilldown/          KPI → list → profile → form engine
         └── assets/             CSS/JS served by Dash
   │
-  ├── services/ (52)    business logic: auth, QR, onboarding, finance approvals,
+  ├── services/ (53)    business logic: auth, QR, onboarding, finance approvals,
   │                     DPDP, signing, assurance, jobs, mail, push, SSE
   ├── security/ (15)    roles, RBAC policy, capability engine, guards, vault,
   │                     ledger anchors, PII masking, password policy
@@ -1272,6 +1259,32 @@ Every write is one SQL statement that also inserts into `regime_rule_audit` (app
 **State → regime sync.** `societies.state` is written as a code (`UP`) by the wizard, but every `fn_regime_param_*` / compliance function reads `society_legal_regime`, which only `seed.py` ever filled (matching the full name `Uttar Pradesh`). `fn_sync_society_regime` + trigger `societies_sync_regime` now assign the active regime for a state on insert/update (code or full name; a draft regime such as MH is never assigned; a state with no active regime leaves any existing row untouched).
 
 Owner loans in the dues checks are governed by three policy switches in this editor — see Owner Loans & Loanees.
+
+### Verifying catalogue instruments in bulk (Master → RWA Compliance- INDIA / RWA Compliance (UP))
+
+The master portal has two catalogue tabs: **RWA Compliance- INDIA** (regime `CENTRAL`, Central Acts and Central
+Rules) and **RWA Compliance (UP)** (regime `UP_AOA_2010`). On each, the platform master can mark unverified
+instruments *verified* without opening them one at a time, in either of two ways. Both use **one opinion reference
+(advocate or CA) and one date for the whole batch**; the date may not be in the future (IST), and a blank date means today.
+
+* **Tick and verify.** Tick the instruments you have checked (or **Tick all unverified**), type each one's notification
+  number and the `https://` link to its text, then **Verify ticked**.
+* **Download template, fill, upload.** **Download template** gives a `verified.xlsx` with the regime's *unverified*
+  instruments already listed (sheet *Central Acts Rules* or *UP Acts Rules*: title, year, authority, "applies when").
+  Fill in only **Notification / Gazette No.** and **Official URL (Complete)**, then upload it and press **Upload & verify**.
+  Rows are matched to catalogue rows by title (and enactment year when given); a title shorter than 15 characters
+  matches exactly only. A `verified.xlsx` with both sheets is tracked at the repository root as the reference copy; the
+  generated `*_template.xlsx` downloads are git-ignored.
+
+**Rules (both paths).** Only the platform master may use them. All or nothing: every row is checked first, and any badly
+filled row (notification number over 255 characters, a link that is not `http(s)://`, a title matching more than one
+instrument, an instrument listed twice) stops the whole batch and is reported. On upload, a row left blank in notification
+number or link is skipped, an already-verified instrument is skipped (re-verifying would send it back to unverified through
+`trg_instrument_unverify`), and titles that match nothing are listed. The writes and one `audit_events` row
+(`INSTRUMENTS_VERIFIED_BULK` for tick-and-verify, `INSTRUMENTS_VERIFIED_XLSX` for upload) share one transaction. The
+Treasurer's or Auditor's one-row path (`instrument_verification.verify`) is unchanged. Code:
+`app/services/instrument_verification.py` (`verify_many_as_master`, `template_rows`, `verify_from_uploaded_xlsx`),
+`app/dash_apps/callbacks/master_rules_callbacks.py`, `app/dash_apps/pages/portal_pages.py`.
 
 ### Amending a Central / State Act figure (Master → RWA Compliance → "Amendment prompt")
 
@@ -1972,7 +1985,7 @@ Versions are the pins in `requirements.txt`.
 
 ## 16. PostgreSQL Function Index
 
-`database/estatehub.sql` defines **353 `fn_*` functions** and 87 triggers. This
+`database/estatehub.sql` defines **313 `fn_*` functions** and 89 triggers. This
 section indexes the ones a reader is most likely to need; it is not exhaustive —
 search the SQL file for the full list. Every function name below was checked
 against `CREATE OR REPLACE FUNCTION` in that file.
@@ -2057,33 +2070,32 @@ ApexEstateHub/
 │   ├── static/                  Logo/background, JS (push, mobile, error monitor, QR scanner,
 │   │                            service worker), templates (base/index/login/test_push)
 │   ├── templates/               Flask/Jinja pages
-│   ├── routes/                  10 modules → blueprints: auth, api, web, scan, push,
-│   │                            sse, presumed_visitor, verify, esign, __init__
-│   ├── services/                49 modules + __init__ (below)
+│   ├── routes/                  10 modules + __init__ → blueprints: auth, api, web, scan, push,
+│   │                            sse, presumed_visitor, verify, esign, evidence
+│   ├── services/                53 modules + __init__ (below)
 │   ├── security/                15 modules (below)
 │   └── dash_apps/
 │       ├── __init__.py          Dash factory: assets, external scripts/styles, callbacks
 │       ├── app_shell.py         ROLE_CONFIG (10 portals), header, sidebar, stores, modals
 │       ├── layout.py            Shared layout components
 │       ├── print_render.py      Component → HTML for print views
-│       ├── callbacks/           53 registered modules + print_letterhead.py (helper)
+│       ├── callbacks/           54 registered modules + print_letterhead.py (helper)
 │       ├── drilldown/           loaders, renderers, registry, curated, drillin, state,
 │       │                        profile_actions, schema_introspect, image_utils, __init__
-│       └── pages/               21 modules: portal_pages, card_catalogue, login_system,
+│       └── pages/               22 modules: portal_pages, card_catalogue, login_system,
 │                                setup_wizard, onboarding_page, wizard_registry,
 │                                governance_settings, governance_guide, committee_page,
 │                                adviser_page, adviser_portal, auditor_page, privacy_page,
 │                                poll_page, team_page, tax_rates_page, gst_accounts_page,
 │                                master_rules_page, customize_layout, adoption_panel,
-│                                up_compliance_card
+│                                up_compliance_card, attendance_panel
 │
 ├── database/
-│   ├── estatehub.sql            THE schema: 160 tables, 353 functions, 87 triggers
+│   ├── estatehub.sql            THE schema: 158 tables, 9 views, 313 fn_* (355 functions), 89 triggers
 │   ├── migrate.py               Fresh install onto an empty DB (+ --seed)
 │   ├── reset_database.py        Destructive: drop schema, reinstall, optional seed
 │   ├── apply_migration.py       Applies database/migrations/*.sql to an existing DB
-│   ├── migrations/              001_society_signing_keys.sql,
-│   │                            002_master_instrument_verification.sql
+│   ├── migrations/              001–009, all idempotent
 │   ├── seed.py                  Idempotent demo society (Sunrise Residency)
 │   ├── legal_reference.py       Acts/Rules/Bye-laws catalogue + regime profiles
 │   ├── db_config.py             CLI target resolution (PG* first, DATABASE_URL fallback)
@@ -2105,7 +2117,7 @@ ApexEstateHub/
 │                                inventory_endpoints, manage_apartment_users,
 │                                patrol_cron, release_check, rotate_vault_key,
 │                                run_job, simulate_workflows
-├── test/                        111 test files, fake_db.py, conftest.py, fixtures,
+├── test/                        122 test files, fake_db.py, conftest.py, fixtures,
 │                                live_db_gate.py
 ├── docs/                        ADMIN_QUICKSTART, admin onboarding + re-audit,
 │                                FLOAT_AUDIT, PHASE0_*, PHASE5_ASSURANCE, SCHEDULER,
@@ -2117,16 +2129,18 @@ ApexEstateHub/
 ├── Procfile                     gunicorn command
 ├── requirements.txt             Pinned dependencies
 ├── db_query.py, seed_legal_instrument_sources.py   Operator utilities
-└── ER.md, EstateHub Gold-Standard Plan v2–v5, RWA architecture, legal PDFs/DOCX
+└── legal reference PDFs/DOCX, sample workbooks (`EstateAcc.xlsx`, `conversation.xlsx`, `verified.xlsx`,
+    `tds_rates_template.xlsx`), brochure PDF, `study 10 chatGPT code.txt`; `demo_data/` (RRA, Sunrise)
+    (`ER.md` and the Gold-Standard Plan v2–v5 files were removed on 13 Nov 2026)
 ```
 
-### `app/services/` (52 modules + package `__init__`)
+### `app/services/` (53 modules + package `__init__`)
 
 | Area | Modules |
 |---|---|
 | Auth, people, access | `auth_service`, `society_service`, `team_service`, `committee_service`, `employee_attendance`, `adviser_decisions`, `adviser_export`, `plan_limits` |
 | Money and funds | `expense_approval`, `fund_withdrawal_approval`, `fy_lock_service`, `pending_receivables`, `receivable_dispute_service`, `ratification_service` |
-| Tax and compliance | `gst_classification`, `itc_reversal_service`, `tax_rate_service`, `instrument_verification`, `statutory_rules`, `regime_rules_admin`, `rule_params`, `up_aoa_actions`, `up_aoa_compliance_service` (live: registers via `up_aoa_actions.load_card_data`), `up_aoa_fund_catalog`, `compliance_certificate` |
+| Tax and compliance | `gst_classification`, `itc_reversal_service`, `tax_rate_service`, `instrument_verification`, `amendment_prompt`, `statutory_rules`, `regime_rules_admin`, `rule_params`, `up_aoa_actions`, `up_aoa_compliance_service` (live: registers via `up_aoa_actions.load_card_data`), `up_aoa_fund_catalog`, `compliance_certificate` |
 | Onboarding and e-sign | `onboarding_service`, `onboarding_jobs`, `xlsx_templates`, `document_signing`, `esign_adapter`, `signing_service`, `secret_vault`, `paper_evidence`, `evidence_service`, `undivided_declaration` |
 | Privacy and audit | `dpdp_service`, `retention_engine`, `auditor_checks`, `audit_runs`, `assurance` |
 | Operations | `qr_service`, `alert_service`, `event_service`, `maintenance_service`, `workflow`, `workflow_service`, `kpi_rule_links_service` |
@@ -2144,7 +2158,7 @@ ApexEstateHub/
 whose name starts with `register_`. Each import is wrapped in `try/except`, so one
 broken module logs a warning and the rest still boot. A startup check warns when
 a `*_callbacks.py` file defines `register_*` but is missing from the list. The
-current list (53 entries; `print_letterhead.py` is a helper, not a module):
+current list (54 entries; `print_letterhead.py` is a helper, not a module):
 
 ```python
 "shell_callbacks"              # 1. routing MUST be first
@@ -2190,6 +2204,7 @@ current list (53 entries; `print_letterhead.py` is a helper, not a module):
 "gst_class_callbacks"             # 13j5. GST account classes
 "auditor_callbacks"               # 13k. auditor portal
 "bulk_enroll_callbacks"        # 14. XLSX enrolment
+"paper_sign_callbacks"         # 14-ps. paper signing of the bye-laws adoption
 "bank_reconcile_callbacks"     # 14a2. bank reconciliation
 "assign_to_callbacks"          # 14b. assign concern
 "concern_bid_callbacks"        # 14c. vendor bid
@@ -2206,8 +2221,8 @@ current list (53 entries; `print_letterhead.py` is a helper, not a module):
 Every uncommented entry exists on disk. `setup_wizard_callbacks` is commented out
 and its file is no longer in the tree (its functionality moved into
 `onboarding_wizard_callbacks` and the Onboarding Hub). `paper_sign_callbacks` is
-registered (step 14-ps) but is not shown in the list above, and
-`print_letterhead.py` sits in the folder without being in the registration list.
+registered at step 14-ps, between `bulk_enroll_callbacks` and `bank_reconcile_callbacks`,
+and `print_letterhead.py` sits in the folder without being in the registration list.
 
 ---
 
@@ -2260,84 +2275,11 @@ Rule 12: dbc.Label/Button take ONE positional arg (children). dbc.Label("x", htm
 
 ---
 
-## 19. Known Bugs & Fixes Applied
+## 19. Open Items
 
-| Bug | Symptom | Fix Applied |
-|---|---|---|
-| `fn_auto_generate_receivables` NULL acc_id | `fn_verify_receivable` returns "No income account set" | Fallback now looks up accounts by name; one-time UPDATE patches existing rows |
-| `fn_save_receipt` arg order wrong | Silent data corruption — role written to acc_id column | Fixed arg order in `_save_receipt_v3` to match SQL signature |
-| `fn_save_expense` arg order wrong | Same as above | Fixed arg order in `_save_expense_v3` |
-| `kpi_receivables_total` → wrong target | Clicked KPI opened receipts list instead of receivables | Fixed `DRILLDOWN_MAP` entry: `"list_receipts"` → `"list_receivables"` |
-| Default profile not showing | `_render_card("dashboard_admin")` fell through to `_empty_state` | Added `dashboard_*` handler + `_render_default_profile()` + `portal-content-store` Input |
-| KPI `prevent_initial_call=True` blocked page-load refresh | KPI values stayed `"—"` until user clicked | Changed to `"initial_duplicate"` |
-| `portal-content-store` guard blocked KPI refresh | KPI callback gated on store having `rendered=True` then crashed | Removed blocking guard |
-| Camera `mode` captured before `stopCamera()` clears `S.mode` | Wrong mode (`null`) sent to validate callback | Saved `currentMode` before `stopCamera()` call |
-| Leftover `render_default_profile` in `shell_callbacks.py` | Pylance undefined-variable errors on `loaders`, `renderers`, `nav_state` | Delete that callback block — functionality moved to `drilldown_callbacks.py` |
-| `fn_account_ledger_fy` referenced `t.role` | `Error: column t.role does not exist` on Ledger Index card → IncExp drilldown | Added `transactions.role` column (mirrors `receipts`/`expenses`/`payables`.role); every `INSERT INTO transactions` now writes it; `fn_account_ledger_fy` / `fn_cashbook_paired_v3` / `fn_cashbook_month_page` join `apartments`/`vendors`/`security_staff` on `entity_id` **and** `role`, since `entity_id` alone can collide across those tables |
-| Patrol Locations map blank | `L.map()` initialization skipped on page load | Fixed `prevent_initial_call=False` in `patrol_map_callbacks.py` so map mounts immediately |
-| Patrol Location not saving | Form submitted `"patrol_location_new"` but handler only checked `"patrol_location"` | Fixed string-matching condition in `_save_patrol_location` inside `drilldown_callbacks.py` |
-| Patrol Locations list empty | List generation SQL was completely missing from `loaders.py` | Added `patrol_locations` branch to `load_list` in `loaders.py` using direct SQL query |
-| Duplicate list columns | `active` and `scan_interval` appeared twice in Patrol Locations list | Removed `patrol_locations` from `_COMPUTED_FIELDS` in `schema_introspect.py` since schema introspector already natively discovers them |
-| No NFC programming UI | "Program NFC" button opened generic QR modal with no way to write NFC | Added "Write to NFC Tag" button to `_qr_modal` (`app_shell.py`) and wired Web NFC API `NDEFReader().write()` callback (`qr_callbacks.py`) |
-| Security portal Gate Alert buttons non-functional | `security_callbacks.py` was fully implemented and its render function imported by `portal_pages.py`, but `register_security_callbacks(app)` itself was never called in `callbacks/__init__.py` — every School Bus/Taxi/Visitor gate-alert button rendered with no listener | Added the missing `register_security_callbacks(app)` call (step 6b) in `callbacks/__init__.py` |
-| `def buildLetterheadPdfDoc` in the shared JS helper | A Python keyword inside the `LETTERHEAD_JS` string literal is a hard JS **`SyntaxError`**. Because that helper is prepended into *every* Print/PDF clientside callback, Save-as-PDF was broken everywhere it was used — Agreement, NOC, Receipts, Event Tickets, Vendor Pass, Expense, 6 Statements. The `buildLetterheadPdfDoc({… password: …})` option it referenced (`pdf-lib`) does not exist — pdf-lib has no encryption API | Rewrote it as a real `function` that renders via `html2pdf.js` (already on the allow-listed cdnjs CDN), waits for images, wraps the body in `#pdf-root`, and drops the fictional password option |
-| Agreement Email button silently failed/truncated | The button was a bare `mailto:` with the **entire** agreement text URL-encoded into the body — well past most mail clients' ~2 000-char limit, so the compose window came up empty or truncated | Short body plus a full-text copy to the clipboard whenever the encoded length would exceed the safe limit; recipient now prefilled from the society's `secretary_email` |
-| "6 Statements" PDF asked for a password that was then thrown away | `fin-stmt-password` was collected and passed to the (broken) `buildLetterheadPdfDoc`, which ignored it. pdf-lib has no encryption API and the surrounding JS did not parse | Removed the field, the `State`, and the `password` argument rather than collect a secret the app cannot honour. Real encryption needs a server-side pikepdf/qpdf step on a streaming route — a browser-side html2pdf pipeline cannot provide it |
-| `fn_appropriate_income_to_fund` always reported "Available: ₹0" | The balance check summed only the named account. The account an admin picks is the rollup `4110 Interest Income`, which has no transactions of its own — its children `4111/4112/4113` carry the postings — so the feature was dead on arrival for any society that had actually earned interest | Balance is now summed over the account's **whole subtree** via a recursive CTE, matching how the trial balance already rolls a parent up on top of its children. Same fix in `loaders.get_income_accounts_for_appropriation` so the dropdown shows the same figure the function enforces |
-| `pending` appropriations were permanently inert | The non-admin branch inserted a `pending` row and told the user "submitted for approval", but **nothing could ever action it** — no confirm function existed, so no journal was ever posted and the row sat there forever | Added `fn_confirm_fund_appropriation` / `fn_cancel_fund_appropriation`, plus Confirm/Cancel buttons on the log table. Both re-check the accrued balance and both accounts' Dr/Cr nature at action time |
-| Both new fund functions authorised on `users.id` alone | `SELECT (role='admin' OR is_master_admin) FROM users WHERE id = p_created_by` — the *accounts* were society-validated but the *permission* was not, so an admin of society A could re-route or appropriate society B's funds | Acting user is now resolved **inside** `p_society_id`; cross-society callers get the same refusal as a non-admin. Master admins and unassigned seeded admins (NULL `society_id`) stay permitted |
-| `IF drcr_account != 'Cr'` let null-natured accounts through | `accounts.drcr_account` is **nullable** (the rollup "Balance Sheet Root" has no Dr/Cr nature), and `NULL != 'Cr'` evaluates to NULL, not TRUE — so `IF` treated it as false and the guard passed silently | `IS DISTINCT FROM 'Cr'` in every new guard |
-| Fund→bank routing was inconsistent between collection paths | `fn_verify_receipt`/`fn_verify_receivable`/`fn_save_receipt` passed `p_credit_acc_id` to `fn_resolve_bank_leg`, but both FIFO and selective "Pay Dues" did not. Verifying dues one flat at a time banked into the mapped account; paying the same dues through the ordinary FIFO path did not | Both engines now resolve a bank account per settled row and emit one Dr leg per distinct account. Invariant `Σ legs = p_amount` verified across cash / mixed / overpayment / no-mapping branches; with no mapping the output is byte-identical to the old single leg |
-| Bank reconciliation matched the wrong account's statement | `bank_statement_lines` had no bank-account column, so uploading a second account's statement auto-reconciled against the primary account's receipts of the same amount | Added `bank_statement_lines.bank_acc_id` (NULL = primary, so all existing history stays valid) + a Bank Account selector on the upload modal. Candidates are narrowed only when a row's landing account is **provably** different — unknown is never excluded, so a single-account society behaves exactly as before |
-| Fund Management card showed two different tables | `renderers.py` hand-rolled its own balances table and utilization log alongside the ones in `fund_management_callbacks.py`. The card's *first* render showed a gross "Available Balance" with **no statutory-lock column**, and switched to the drawable/locked presentation on the first Reload click | Both tables and both `FUND_TYPE_PATTERNS` copies deleted; the card now imports the same builders the callbacks use, so first render and post-submit render cannot disagree |
-| `psycopg2` "invalid dsn: extra key/value separator" | `db_manager._build_dsn` appended `&options=-c timezone=...` without percent-encoding the `=`, killing the connection pool — **only** for deployments using discrete `PGHOST`/`PGUSER`/`PGPASSWORD` env vars instead of a single `DATABASE_URL` | `quote("=", safe="")` (and `/` and `+`) applied to the option key and value. A no-op for the single-connection-string path |
-| `MUTUALITY_NATURE_MAP` / `TDS_SECTION_MAP` side-dicts in `seed.py` | The values they carried were already inline columns on `accounts` (`mutuality_nature`, `tds_section`); the two dicts were a second, drifting copy of the same 12 + 6 facts | Deleted; `seed_accounts` reads the two inline fields directly from the `ACCOUNTS` tuple. All 83 rows verified to carry 10 fields with the same tags the dicts produced |
-| Fund log tables crashed on `'datetime.datetime' object is not subscriptable` | `fund_appropriations.created_at` is a `TIMESTAMP`, so psycopg2 returns a `datetime`, but both log builders sliced it as a string (`value[:10]`). Clicking **Appropriate to Fund** raised it on every click once a log row existed | `_log_date()` formats by type (`strftime` for datetimes, slice for strings) and is shared by `build_log_table` and `build_appropriation_log_table`, so first render and post-submit render can't disagree |
-| A committed fund journal reported itself as `Error: ...` | The write and the card rebuild shared one `try`, so a *render* bug surfaced as a *failed transaction*. The admin resubmits and the same appropriation posts twice — nothing in the DB can catch it, the income account simply had the balance | Every write callback split into a write phase (failure → `Not saved: …`, form preserved) and a refresh phase (failure → `_committed_with_refresh_failure`, which keeps the outcome line and warns "do not submit again"). Applied to utilize, appropriate, confirm/cancel and routing |
-| `submit_appropriation` returned 10 values for 11 Outputs | The Particulars field is an Output but was never returned as `None`, so **every successful** appropriation would fail with "Incorrect number of output values" and leave the form filled — masked until the datetime crash above stopped firing first | Sixth `None` added; the form now clears completely. Note `render_up_compliance_body()` has the same class of coupling (positional `card.children[2].children`) |
-| UP AOA had SQL but no UI | Neither `fn_appropriate_income_to_fund`-class function had a Python caller; the fund functions existed, the card did not | Fund Management card: 4 sections, 6 shared builders, and the reload path wired to all of them |
-| `up_aoa_compliance_service.py` never imported | Added with the SQL engine, then superseded — the card calls `up_aoa_actions` directly, so the module has zero callers | Documented in [§17](#17-codebase-map) as dead code rather than left silently drifting |
-| Security's "Resolved" button was gated on the wrong row | `renderers.py` and the handler both checked only whether *any* admin row on the concern was `accepted`, never security's own row. A guard who was never assigned — or who had already resolved — was offered the button and then got "No active (assigned) assignment found for you on this concern" | Both now require the caller's **own** `SEC` row at `assigned` *in addition to* the admin-accepted condition, via `loaders.get_concern_assignment_status()` |
-| Security was inviteable but could never do anything with it | The Invite modal wrote `SEC` rows at `invited`, but `Bid` and `Decline` are vendor-only and there is no other path off `invited` except a direct Assign — so security sat stuck at a stage the UI offered no button for | Security are no longer invited. `loaders.invite_concern_assignee()` rejects `SEC` with a pointer to Assign; the Invite modal's `SEC` branch writes straight at `assigned` |
-| Re-invite / re-assign silently demoted working rows | Both guards excluded only `resolved` / `closed`. Re-inviting reset an `assigned` (or `accepted`) row back to `invited` and wiped its `bid_amount`; re-assigning dropped an admin's `accepted` back to `assigned` | Stage-specific exclusion lists (`RE_INVITE_BLOCKED_STAGES`, `REASSIGN_BLOCKED_STAGES`) plus a `SELECT … FOR UPDATE` pre-check, so a refusal names the stage that blocked it. The Assign modal's uncheck handler now protects `accepted` rows too |
-| `close_concern` had no precondition | It reported "Concern closed" and fired a close push on a concern with **zero** assignment rows — the UPDATE matched nothing, the trigger left `concerns.status` at `open`, and the success toast was a lie. It also stamped `invited` / `bid_submitted` / `declined` rows `closed` on an untouched concern. The Close button rendered at every stage, including `open` | Refuses when there are no assignment rows or anyone is still `assigned` / `accepted`; `concern_is_closable()` is the same predicate and gates the button |
-| A vendor could not revise a bid, but a ₹0 bid was accepted | `Bid` was hidden the moment the row reached `bid_submitted`, and `submit_concern_bid` only matched `status='invited'`, so a vendor who fat-fingered their figure was stuck with it. The guard was `bid < 0` while the error read "must be positive", so a ₹0 bid went through | Bid is offered across the whole candidate window (`invited` **or** `bid_submitted`) and the write accepts both; guard corrected to `bid <= 0` |
-| `preferred_time` defaulted to `"anytime"` on a `TIME` column | An untouched optional time input came back as `""`, and the save handler substituted the string `"anytime"`, which Postgres rejects — `invalid input syntax for type time` — so a new concern submitted without a preferred time failed to insert at all. On edit the same default applied, so *clearing* the field raised the same error instead of nulling it | `_concern_time_value()` normalises `""` / `None` / whitespace to `NULL` on both the insert and the update |
-| `concern_type` had two different defaults | `field_config.py` declared `"general"`, the save handler wrote `"other"`. Not cosmetic: candidate queries match `v.service_type ILIKE concern_type`, so the default decided which vendors a blank concern could ever be assigned to — and `"other"` matched nothing | Single source of truth `field_config.DEFAULT_CONCERN_TYPE = "general"`, imported by the save handler and both modals |
-| "Your involvement" never showed a bid amount, and had no `declined` state | The banner read `assign_bid_amount`, but `_assignments` comes from `fn_concern_assignments()`, which returns the column as `bid_amount` — so the key was always absent. `declined` was missing from `_CONCERN_STAGE_LABEL` entirely, so a caller who had declined fell through to a generic `.title()` pill with no actions explained | Reads `bid_amount`; `'declined'` added to the label map |
-| The `open` banner was one fixed, wrong string | It always read "awaiting invitation/assignment" — including while three vendors had already bid, and after every candidate had declined (which puts the aggregate straight back to `open`, indistinguishable from a concern nobody has looked at). `resolved` said "pending close" to vendors and security, who have no Close button. The owner portal, which has no assignment row of its own, saw no assignee names and no bid count at all | `_concern_status_banner_text()` derives the wording from the actual rows; `resolved` is role-aware; `_concern_team_banner_text()` gives every portal the assignee list and bid count |
-| The new-concern form promised a bidding round that hadn't started | "please wait for bids from vendors/security" — but nobody has been invited yet, and security never bid. The actual next step is inviting | Reworded to point at Invite → Assign, and to say explicitly that security are assigned directly and don't bid |
-| A concern's content was editable at any stage | An owner could rewrite the description, type or preferred time after bids, after assignment, or after closure — invalidating the `service_type` match that decides who gets invited. The save path also had no `created_by` check (the 6b row-ownership block only covers apartment / vendor / security *profiles*), and since `apartment_id` is force-stamped to the caller's own flat, a forged `id` could re-point someone else's concern onto their own flat | Edit refused once any row reaches `bid_submitted` or beyond, and non-admin callers must own the concern (`created_by = caller`) |
-| Vendor portal could raise concerns it had no flat for | `("vendor", "concerns")` carried `"new"`, which renders a `New` button on the concerns list routing to `form_concern_new` — where `apartment_id` is `ADMIN_ONLY`-editable, so it renders read-only and **empty** for a vendor. The result was a concern with `apartment_id = NULL`: no owner could ever see, invite for, or close it, yet `notify_concern_created` still fired at the missing flat. `field_config`'s `"required"` rule did not help — `get_validation()` has no callers | Perm is now **view-only** for vendor and security. `_save_concern` additionally refuses any non-admin write with no `apartment_id`, covering a directly posted callback. Admin stays exempt so a society-level concern with no flat remains legal (the column is nullable by design) |
-| `ca.pem`, `service.cert`, `service.key`, `setup_aiven_db.sh` were committed | `.gitignore` covered `.env` and `*.json` but nothing matched `*.pem` / `*.crt` / `*.key`, so a fresh clone handed everyone Aiven's CA cert **and the server's own private key** (which is what Postgres uses to authenticate the app). `.gitignore` listing them had no effect — the files were tracked | Removed from the index (files left on disk so the local connection and `setup_aiven_db.sh` keep working) and ignore rules added. **The credentials themselves must be rotated on the Aiven project — that is an ops action, not a repo change, and is still outstanding** |
-
-### 19.1 Defects found on 12 Nov 2026
-
-Found by running commit `ee55a64` (see the status snapshot at the top). **D1–D6
-are fixed in the accompanying patch** and re-tested; **O1–O5 are open**.
-
-| # | Defect | Evidence | Status |
-|---|---|---|---|
-| D1 | `today_ist` was called on the `datetime` *module* (`app/services/society_service.py`, `app/dash_apps/drilldown/renderers.py`, `app/dash_apps/callbacks/drilldown_callbacks.py`), raising `AttributeError`. `create_society_checked` therefore failed for every new society, and two drill-down helpers that compute the month start failed too | 61 of the 73 failing/erroring tests in the live suite | Fixed: import `today_ist` from `app.utils` |
-| D2 | Account lockout was broken. `users.locked_until` is `timestamp without time zone` (IST wall-clock; the pool sets the session timezone to `Asia/Kolkata`), so psycopg2 returns a naive value, and `locked_until > now_ist()` (aware) raised `TypeError`. After the 5th bad password every later attempt returned HTTP 503, including the correct password; the lock-expiry test failed with the same error | Reproduced against the running app; `test_lockout_expires_allows_login` | Fixed: new `app.utils.as_ist()` treats naive DB timestamps as IST; used at all four comparisons in `auth_service.py` |
-| D3 | The same naive/aware comparison in the RBAC denial-reason builder (`app/security/policy.py`, `effective_to`) | `test_expired_assignment_is_denied` | Fixed with `as_ist()` |
-| D4 | The same comparison killed the `poll-scheduler` thread at start-up (`app/services/scheduler.py`, `next_run - now`), so poll expiry and the "poll ending soon" reminders never ran | `Exception in thread poll-scheduler` in the boot log | Fixed with `as_ist()` |
-| D5 | `retention_sweep_loop` logged through an undefined name `log` (hidden by `# noqa: F821`), so any sweep result raised `NameError`, caught and logged as "retention sweep job failed" | Code reading; `ruff` | Fixed: uses `logger` |
-| D6 | Cross-society file access. The `/assets/<path>` guard looked at `parts[1]` of the **absolute filesystem path** (never numeric), so the society check never ran; had it run, `abort` and `current_user` were not imported (`# noqa: F821`) and it would have returned 500. A society-1 user could download society-2 files | Reproduced: society-1 session got HTTP 200 for `/assets/2/…` | Fixed: the society is read from the first segment of the requested path; other society → 403, master allowed, `default/…` shared |
-
-**Open (not changed by the patch):**
-
-* **O1 — Endpoint manifest drift (breaks CI).** `scripts/inventory_endpoints.py --check` exits 1: 12 new endpoints are not in `docs/authz_manifest.json` and 16 entries are stale (callbacks removed from `onboarding_wizard_callbacks.py` and `paper_sign_callbacks.py`). This is why `test_resident_surface_authz.py::test_inventory_check_passes` fails. Classify the new endpoints by hand, then run `inventory_endpoints.py --write`; a regenerated manifest covers 336 endpoints (33 `action`, 67 `exempt`, 98 `legacy-gated`, 138 `unclassified`).
-* **O2 — Dependency audit (breaks CI).** `pypdf==5.9.0` has 103 advisories outside the workflow's ignore list, and nothing in the repository imports it. Upgrade or remove it. Other pins that no file imports directly: `Flask-Migrate`, `Flask-WTF`, `WTForms`, `Flask-Session`, `plotly`, `alembic`, `passlib`, `bcrypt`, `APScheduler`, `requests`, `email-validator` (`plotly` and `requests` are Dash dependencies, so check before removing any).
-* **O3 — Eight live-suite failures remain.** Cause is stated only where it was established:
-  * `test_committee_service::test_the_tab_shows_forms_to_the_admin_and_only_the_committee_to_owners`: the test helper `ids()` puts Dash pattern-matching ids (dicts) into a `set` (`TypeError: unhashable type: 'dict'`). Test-side.
-  * `test_er_remediation_live::test_only_the_unavoidable_forward_reference_is_an_alter_table`: finds an `ALTER TABLE` forward reference to `legal_instrument_catalog` as well as `societies` in `estatehub.sql`. The schema or the test expectation is stale.
-  * `test_job_runner_live::test_anchor_job_passes_on_an_intact_ledger`: the `anchors` job fails for societies created by earlier live tests, which commit their rows, because they have no active `SIGNING_LEDGER` key. `create_society_checked` does not provision signing keys; confirm that onboarding does, otherwise the scheduled `anchors` job will fail for new societies.
-  * `test_phase1_followup_live::test_salary_and_payables_cards_open_a_list_that_matches_their_total` (3 cases): the list returns 18 rows where 3 are expected. Cause not determined.
-  * `test_plan_v5_followup_live::test_16_family_logins_need_an_adult_confirmation`: `_bulk_insert_apartment_users` returns no failure entry for a family login. Cause not determined.
-  * `test_resident_surface_authz::test_inventory_check_passes`: O1.
-* **O4 — Retention is not enforced.** `app/services/retention_engine.sweep_all_societies` returns placeholder results without reading or deleting any data, although `retention_rules` exist and §6/§25 describe a sweep.
-* **O5 — Test isolation.** Live tests commit societies and other rows to the seeded database, so a second run against the same database fails (for example payables lists show 18 rows instead of 3). Use a fresh database for each live run.
+* **O1 — Retention is not enforced.** `app/services/retention_engine.sweep_all_societies` returns placeholder results without reading or deleting any data, although `retention_rules` exist and §6/§25 describe a sweep.
+* **O2 — Test isolation.** Live tests commit societies and other rows to the seeded database, so a second run against the same database can fail (for example payables lists show 18 rows instead of 3). Use a fresh database for each live run.
+* **O3 — Credential rotation (operations).** `ca.pem`, `service.cert`, `service.key` and `setup_aiven_db.sh` were once tracked in git, so the database CA certificate and the server's private key sit in the repository history. They were removed from the index and are now ignored, but the credentials themselves must be rotated on the database host. That is an ops action, not a repository change, and it is not recorded as done.
 
 ---
 
@@ -2345,8 +2287,7 @@ are fixed in the accompanying patch** and re-tested; **O1–O5 are open**.
 
 Behaviors the code deliberately implements a specific (non-obvious) way, or
 explicitly defers — not bugs, but easy to break by accident if a future
-change doesn't know the reasoning below. Distinct from [§19](#19-known-bugs--fixes-applied),
-which is already-fixed bugs, and [§18](#18-critical-dash-rules), which is
+change doesn't know the reasoning below. Distinct from [§18](#18-critical-dash-rules), which is
 Dash-framework footguns.
 
 ### Concurrency / "First Writer Wins" Patterns
@@ -2359,7 +2300,7 @@ Dash-framework footguns.
   Any new concurrent-write code must follow the same `RETURNING`-based
   pattern; a naive `UPDATE` + assume-success will not be race-safe here.
 - **`entity_id` alone collides across `apartments`/`vendors`/`security_staff`.**
-  Already caused one shipped bug (`fn_account_ledger_fy`, see §19) — every
+  Every
   join against those three tables on `entity_id` must also filter on
   `role`, since the ids are independent per-table sequences, not a shared
   namespace.
@@ -2694,9 +2635,14 @@ python3 database/reset_database.py --yes --after seed
   and refuses a database that already has tables. The SQL has no `IF NOT EXISTS`
   guards on tables; the supported reinstall is `reset_database.py`.
 * `database/migrations/` holds incremental, idempotent scripts that
-  `apply_migration.py` runs on an existing database. `estatehub.sql` includes
-  the same objects, so a fresh install does not need them:
-  `001_society_signing_keys.sql` and `002_master_instrument_verification.sql`.
+  `apply_migration.py` runs on an existing database, in name order. `estatehub.sql` is
+  meant to include the same objects, so a fresh install does not need them
+  (`test_migrations_are_folded_live.py` checks that each file changes nothing on a fresh install; it does not compare column lengths, so also diff `pg_dump -s` of a fresh install against one with every file applied).
+  The files are `001_society_signing_keys`, `002_master_instrument_verification`,
+  `003_paper_evidence_purposes`, `004_paper_sign_binding`,
+  `005_billing_waits_for_declaration`, `006_scope_account_joins_by_society`,
+  `007_asset_accumulated_depreciation`, `008_instrument_verification_fixes` and
+  `009_widen_notification_no`. All of them are folded into `estatehub.sql`.
 * Either database must be reachable with `pgcrypto`:
   `CREATE EXTENSION IF NOT EXISTS pgcrypto;`. Everything lives in `public`; no
   `search_path` overrides are required.
@@ -2863,7 +2809,7 @@ The Secretary holds `roles.manage` and `enrollment.commit`, but the committee an
 | **Confirm TDS and GST rates** ✅ | Governance → TDS & GST Rates → edit → confirm | Any edit returns the figures to "pending" until confirmed again |
 | **Classify GST accounts** ✅ | Governance → GST Accounts (with the CA) | Advice reference required for all but taxable |
 | **Approve adviser decisions** ✅ | As for the Secretary | Two different approvers |
-| **Verify a statute catalogue row** ✅ | Statute catalogue → mark verified with source link, notification number, date and opinion reference | Only the Treasurer or an Auditor; editing a verified row sends it back to unverified |
+| **Verify a statute catalogue row** ✅ | Statute catalogue → mark verified with source link, notification number, date and opinion reference | Only the Treasurer or an Auditor; editing a verified row sends it back to unverified. The platform master can verify a batch (§9, *Verifying catalogue instruments in bulk*) |
 | **Ratify irregular items** ✅ | Ratification register → spend before approval, emergency spend, arrears write-off, interest waiver | Stand for 90 days; if rejected or expired the postings are reversed (`ratification_service.py`). The Admin or any serving office-bearer may act |
 | **Reverse and reconcile** 🟡 | Capabilities `finance.reverse` and `finance.reconcile` are granted, not on one's own items | The reversal and reconcile screens documented today are the Admin's (§23.3) |
 
@@ -3077,7 +3023,7 @@ The following tables map every user-reachable workflow in the application, organ
 
 ### Layout
 
-* `test/test_*.py` — **117 files, 1,569 `def test_` functions** (parametrised cases expand the count at run time).
+* `test/test_*.py` — **122 files, 1,599 `def test_` functions** (parametrised cases expand the count at run time).
 * `test/conftest.py` — puts the repo root on `sys.path`, resets the in-memory
   `FakeDB` around every test, and provides fixtures such as `patched_db`,
   `grant_society_admin` and `revoke_role` that mirror `database/seed.py`'s RBAC
@@ -3095,17 +3041,15 @@ Two kinds of test:
 
 There is no `pytest.ini`/`pyproject.toml`; run pytest from the repository root.
 
-**Status observed on 12 Nov 2026** (commit `ee55a64`, Python 3.13 virtualenv, PostgreSQL 16):
+**Status observed on 15 Nov 2026** (Python 3.13 virtualenv, PostgreSQL 16):
 
 ```
-hermetic, as found:       12 failed, 1377 passed, 518 skipped, 169 deselected
-hermetic, with patch:      1 failed, 1388 passed, 518 skipped, 169 deselected
-full + live, as found:    21 failed, 52 errors, 2000 passed, 3 skipped
-full + live, with patch:   8 failed, 2065 passed, 3 skipped
+hermetic:       1423 passed, 528 skipped, 169 deselected
+full + live:    2117 passed, 3 skipped
 ```
 
-The failures are itemised in §19.1. Live runs used a fresh database seeded with
-`database/migrate.py --seed` and `ESTATEHUB_LIVE_TESTS=1`; run them against a fresh database each time (O5).
+Live runs used a fresh database seeded with `database/migrate.py --seed` and
+`ESTATEHUB_LIVE_TESTS=1`; run them against a fresh database each time (O2 in §19).
 Re-run the commands below before quoting a number; this is a snapshot, not a guarantee.
 
 ```bash
@@ -3148,11 +3092,10 @@ says to record it in `docs/`.
 | `check_save_handlers.py` | Save handlers' keys against the schema/entity metadata | no |
 | `release_check.py gate/status/worklist` | Phase-5 assurance gates and what may be claimed | operator/CI gate |
 
-On 12 Nov 2026 `check_callback_guards.py` exits 0 (55 files) but
-`inventory_endpoints.py --check` **exits 1**: 12 endpoints are missing from
-`docs/authz_manifest.json` and 16 manifest entries are stale (§19.1, O1). CI's
-`hermetic` job runs that command, so it fails until the manifest is brought up to date.
-The `security-scans` job also fails on `pypdf` (O2); `bandit -lll -iii` passes.
+On 15 Nov 2026 `check_callback_guards.py` exits 0 (55 files),
+`inventory_endpoints.py --check` exits 0 (351 endpoints, 126 unclassified legacy) and
+`build_scheme_sql.py --check` reports the scheme block up to date. `bandit` and
+`pip-audit` were not re-run on that date.
 
 `docs/endpoint_inventory.md` is generated by `inventory_endpoints.py --write`;
 do not hand-edit it. The reviewed classifications live in
@@ -3188,7 +3131,7 @@ The signing key must not sit on the database host.
 Besides the `run_job.py` jobs, `app/services/scheduler.py::init_scheduler()` starts three
 daemon threads when the web app boots (skipped when `TESTING` is set and in the Werkzeug
 reloader's parent process): `poll-scheduler` (expires polls and sends "ending soon"
-reminders), `retention-sweep` (daily, see O4) and `poll-redis-listener`. With several
+reminders), `retention-sweep` (daily, see O1) and `poll-redis-listener`. With several
 gunicorn workers each worker starts its own copy.
 
 ### Database roles
@@ -3251,7 +3194,7 @@ passes. Marking an opinion `disputes` does not cover a rule.
 
 `app/services/retention_engine.py` is called once a day by the in-process retention loop
 and is meant to sweep each society's `retention_rules` (default 5 years, configurable), but
-the function is currently a placeholder that purges and reports nothing (§19.1, O4).
+the function is currently a placeholder that purges and reports nothing (§19, O1).
 `app/services/dpdp_service.py` enforces the 48-hour erasure notice and refuses
 erasure while `fn_erasure_blockers` reports a blocker; erasure blanks the
 person's profile and never touches ledger rows. Breach and rights requests stay

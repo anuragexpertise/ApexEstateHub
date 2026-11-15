@@ -54,7 +54,8 @@ class TestV4RepoStandStatus:
                                    "005_billing_waits_for_declaration.sql",
                                    "006_scope_account_joins_by_society.sql",
                                    "007_asset_accumulated_depreciation.sql",
-                                   "008_instrument_verification_fixes.sql"}
+                                   "008_instrument_verification_fixes.sql",
+                                   "009_widen_notification_no.sql"}
 
     def test_float_count_reduced_from_v3(self):
         total = 0
