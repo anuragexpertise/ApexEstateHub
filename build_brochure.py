@@ -1,3 +1,15 @@
+"""Build the EstateHub marketing brochure PDF.
+
+Usage:
+    pip install reportlab
+    python build_brochure.py
+
+Writes EstateHub_Marketing_Brochure_Print_Ready.pdf next to this script.
+
+The database counts on the cover (tables, SQL functions, triggers) are read from the
+"Schema source of truth" line near the top of README.md, so they follow the README.
+All other brochure text lives in this file and is edited by hand.
+"""
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
@@ -7,9 +19,38 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from pathlib import Path
-import textwrap, re
+import textwrap, re, sys
 
-out = Path(__file__).resolve().parent / "EstateHub_Marketing_Brochure_Print_Ready.pdf"
+ROOT = Path(__file__).resolve().parent
+out = ROOT / "EstateHub_Marketing_Brochure_Print_Ready.pdf"
+README = ROOT / "README.md"
+
+# Used only if README.md is missing or its "Schema source of truth" line cannot be parsed.
+FALLBACK_STATS = {"tables": 158, "views": 9, "functions": 313, "triggers": 89}
+
+
+def load_stats():
+    """Read table / view / fn_* function / trigger counts from README.md."""
+    stats = dict(FALLBACK_STATS)
+    try:
+        text = README.read_text(encoding="utf-8")
+    except OSError:
+        print(f"WARNING: {README.name} not found; using fallback counts {stats}", file=sys.stderr)
+        return stats
+    m = re.search(r"Schema source of truth[^\n]*?(\d+)\s+tables(?:\s*\(\+\s*(\d+)\s+views\))?"
+                  r",\s*(\d+)\s+`?fn_\*`?\s+functions,\s*(\d+)\s+triggers", text)
+    if not m:
+        print(f"WARNING: could not parse the schema counts in {README.name}; "
+              f"using fallback counts {stats}", file=sys.stderr)
+        return stats
+    stats["tables"] = int(m.group(1))
+    stats["views"] = int(m.group(2)) if m.group(2) else stats["views"]
+    stats["functions"] = int(m.group(3))
+    stats["triggers"] = int(m.group(4))
+    return stats
+
+
+STATS = load_stats()
 W, H = A4
 NAVY  = HexColor("#0F2B46")
 BLUE  = HexColor("#1D70F7")
@@ -150,8 +191,9 @@ class Hero(Flowable):
         c.setFont("Helvetica", 7.2); c.setFillColor(HexColor("#9FB3C8"))
         c.drawString(10 * mm, self.height - 8.2 * mm, "Python 3.12  •  Dash 2.14 + Flask 2.2  •  PostgreSQL 16  •  gunicorn")
         # stat chips
-        chips = [("10", "Role-Scoped Portals", TEAL), ("160", "Database Tables", BLUE),
-                 ("353", "SQL Functions", GREEN), ("87", "Database Triggers", GOLD)]
+        chips = [("10", "Role-Scoped Portals", TEAL), (str(STATS["tables"]), "Database Tables", BLUE),
+                 (str(STATS["functions"]), "SQL Functions", GREEN),
+                 (str(STATS["triggers"]), "Database Triggers", GOLD)]
         x = 10 * mm; y = self.height - 22 * mm
         for num, lab, col in chips:
             c.setFillColor(LIGHT); c.roundRect(x, y, 40 * mm, 14 * mm, 3 * mm, fill=1, stroke=0)
@@ -538,5 +580,7 @@ S += [Spacer(1, 3 * mm),
         "commercial publication.", "S")]
 
 doc.build(S, onFirstPage=footer, onLaterPages=footer)
+print(f"Counts used (from {README.name}): {STATS['tables']} tables, "
+      f"{STATS['functions']} functions, {STATS['triggers']} triggers")
 print(f"Created: {out}")
 print(f"File size: {out.stat().st_size/1024:.1f} KB")
