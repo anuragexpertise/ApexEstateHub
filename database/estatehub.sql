@@ -7765,6 +7765,7 @@ CREATE OR REPLACE FUNCTION fn_save_expense(
 RETURNS TABLE(expense_id INT, transaction_id INT, journal_id INT, status VARCHAR(20), cash_warning TEXT)
 LANGUAGE plpgsql AS $$
 DECLARE
+    v_dup_count INT;
     v_expense_id INT;
     v_trx_id     INT;
     v_journal_id INT;
