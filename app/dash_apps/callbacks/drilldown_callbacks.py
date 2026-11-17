@@ -4197,10 +4197,16 @@ def _save_receipt_v3(db, d, sid):
         amt = D(amt)
         if amt <= 0:
             return False, "Amount must be > 0", None
-        if amt > 1000000:
-            return False, "Amount exceeds maximum limit (₹1,000,000)", None
     except (ValueError, TypeError):
         return False, "Invalid amount", None
+
+    # ── R1: Server-set created_by; reject client-supplied user_id ──────────
+    server_user_id = get_current_user_id()
+    if server_user_id is None:
+        return False, "Authentication required", None
+    client_user_id = d.get("user_id")
+    if client_user_id is not None and str(client_user_id) != str(server_user_id):
+        return False, "user_id does not match authenticated user", None
 
     acc_id = d.get("acc_id")
     if not acc_id:
@@ -4222,12 +4228,63 @@ def _save_receipt_v3(db, d, sid):
 
     receipt_date = d.get("receipt_date") or dt_date.today().isoformat()  # noqa: DTZ011
     try:
-        soc_info = db._execute("SELECT calc_start_date FROM societies WHERE id = %s", (sid,), fetch_one=True)
+        soc_info = db._execute("SELECT calc_start_date, max_receipt_amount FROM societies WHERE id = %s", (sid,), fetch_one=True)
         if soc_info and soc_info.get("calc_start_date"):  # noqa: SIM102
             if receipt_date < str(soc_info["calc_start_date"]):
                 return False, f"Receipt date cannot be earlier than {soc_info['calc_start_date']}", None
     except Exception:  # noqa: BLE001, S110
         pass
+
+    # ── R5: Date upper bound — no future dates ─────────────────────────────
+    today_iso = dt_date.today().isoformat()  # noqa: DTZ011
+    if receipt_date > today_iso:
+        return False, "Receipt date cannot be in the future", None
+
+    # ── R6: Society-configurable amount ceiling ────────────────────────────
+    max_amt = 1000000
+    try:
+        if soc_info and soc_info.get("max_receipt_amount") is not None:
+            max_amt = D(soc_info["max_receipt_amount"])
+    except Exception:  # noqa: BLE001, S110
+        pass
+    if amt > max_amt:
+        return False, f"Amount exceeds maximum limit (₹{max_amt:,.2f})", None
+
+    # ── R2: Server-validate role against actor's server-resolved role ──────
+    server_role = get_current_user_role()
+    client_role = d.get("role", "other")
+    _ROLE_MAP = {
+        "apartment": ("apartment",),
+        "vendor": ("vendor",),
+        "security": ("security",),
+        "admin": ("apartment", "vendor", "security", "assets", "other"),
+        "master": ("apartment", "vendor", "security", "assets", "other"),
+    }
+    allowed_roles = _ROLE_MAP.get(server_role or "other", ("other",))
+    if client_role not in allowed_roles:
+        return False, f"Role '{client_role}' not permitted for this user", None
+
+    # ── R3: Server-validate mode against allowlist ─────────────────────────
+    client_mode = d.get("mode", "cash")
+    _VALID_MODES = ("cash", "cheque", "upi", "card", "bank", "crypto")
+    if client_mode not in _VALID_MODES:
+        return False, f"Invalid payment mode '{client_mode}'", None
+
+    # ── R7: Duplicate receipt detection within 24 hours ────────────────────
+    if entity_id is not None:
+        try:
+            dup = db._execute(
+                """SELECT COUNT(*) AS n FROM receipts
+                   WHERE society_id = %s AND entity_id = %s AND role = %s
+                     AND receipt_date = %s AND amount = %s AND particulars = %s
+                     AND status <> 'cancelled'
+                     AND created_at >= NOW() - INTERVAL '24 hours'""",
+                (sid, entity_id, client_role, receipt_date, amt, particulars), fetch_one=True,
+            )
+            if dup and dup.get("n", 0) > 0:
+                return False, "Duplicate receipt detected: same entity, amount, date, and particulars within 24 hours", None
+        except Exception:  # noqa: BLE001, S110
+            pass
 
     try:
         r = db._execute(
@@ -4238,14 +4295,13 @@ def _save_receipt_v3(db, d, sid):
                 particulars,    # p_particulars
                 amt,            # p_amount
                 entity_id,      # p_entity_id
-                d.get("role", "other"),
-                d.get("mode", "cash"),
+                client_role,    # p_role (server-validated)
+                client_mode,    # p_mode (server-validated)
                 receipt_date,
-                d.get("user_id"),
+                server_user_id, # p_created_by (server-set)
                 d.get("cheque_no"),
                 d.get("transaction_id"),
                 d.get("source_reference"),
-
             ),
             fetch_one=True,
         )
@@ -4253,6 +4309,29 @@ def _save_receipt_v3(db, d, sid):
         receipt_status = (r or {}).get("status", "unknown")
         cash_warning = (r or {}).get("cash_warning")
         _notify_receipt_saved(db, sid, d, amt, particulars, use_pending=(receipt_status == 'pending'))
+
+        # ── R8: Audit events write ─────────────────────────────────────────
+        try:
+            from app.security.service_guard import audit_event as _audit_event
+            _audit_event(
+                db, sid, server_user_id, server_role or "unknown",
+                action="receipt_create",
+                resource_type="receipts",
+                resource_id=str(receipt_id) if receipt_id else None,
+                after_value={
+                    "amount": str(amt),
+                    "particulars": particulars,
+                    "entity_id": entity_id,
+                    "role": client_role,
+                    "mode": client_mode,
+                    "receipt_date": receipt_date,
+                    "status": receipt_status,
+                },
+                source="app",
+            )
+        except Exception:  # noqa: BLE001, S110
+            pass
+
         if receipt_status == 'confirmed':
             msg = f"Receipt of ₹{amt:,.2f} saved and confirmed [[receipt:{receipt_id}]]"
         else:

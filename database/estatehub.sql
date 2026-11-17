@@ -99,6 +99,9 @@ CREATE TABLE societies (
     cash_limit_mode VARCHAR(5) CHECK (
         cash_limit_mode IN ('warn', 'block')
     ),
+    -- Per-society per-receipt amount ceiling (INR). Defaults to 1,000,000.
+    -- Enforced in _save_receipt_v3 before calling fn_save_receipt.
+    max_receipt_amount NUMERIC DEFAULT 1000000 CHECK (max_receipt_amount > 0),
     -- V5 onboarding state machine. Registered societies start at 'registered'.
     -- The Setup Wizard drafts move it to 'setup draft'; the activation function
     -- (V5.7) moves it to 'active' only when all four Agreement signatures are
@@ -7611,6 +7614,7 @@ DECLARE
     v_is_admin   BOOLEAN;
     v_status     VARCHAR(20);
     v_cash_warning TEXT;
+    v_dup_count  INT;
 BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'Amount must be > 0'; END IF;
     IF p_acc_id IS NULL THEN RAISE EXCEPTION 'acc_id is required'; END IF;
@@ -7651,10 +7655,31 @@ BEGIN
     SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin
       FROM users WHERE id = p_created_by;
 
-    IF v_is_admin THEN
-        v_status := 'confirmed';
-    ELSE
-        v_status := 'pending';
+    -- R4: Pending-by-default for ALL creators (admin and non-admin alike).
+    -- Separation of duties: a single admin cannot create AND confirm a receipt.
+    -- Confirmation requires a separate verifier via fn_verify_receipt.
+    v_status := 'pending';
+
+    -- R5: Reject future-dated receipts.
+    IF p_receipt_date > CURRENT_DATE THEN
+        RAISE EXCEPTION 'Receipt date cannot be in the future' USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- R7: Duplicate receipt detection within 24 hours.
+    IF p_entity_id IS NOT NULL THEN
+        SELECT COUNT(*) INTO v_dup_count
+          FROM receipts r
+         WHERE r.society_id      = p_society_id
+           AND r.entity_id       = p_entity_id
+           AND r.role            = p_role
+           AND r.receipt_date    = p_receipt_date
+           AND r.amount          = p_amount
+           AND r.particulars     = p_particulars
+           AND r.created_at >= NOW() - INTERVAL '24 hours'
+           AND r.status <> 'cancelled';
+        IF v_dup_count > 0 THEN
+            RAISE EXCEPTION 'Duplicate receipt detected: same entity, amount, date, and particulars within 24 hours' USING ERRCODE = 'check_violation';
+        END IF;
     END IF;
 
     INSERT INTO receipts(
@@ -7783,11 +7808,32 @@ BEGIN
  
     SELECT (role = 'admin' OR is_master_admin) INTO v_is_admin
       FROM users WHERE id = p_created_by;
- 
-    IF v_is_admin THEN
-        v_status := 'confirmed';
-    ELSE
-        v_status := 'pending';
+
+    -- R4: Pending-by-default for ALL creators (admin and non-admin alike).
+    -- Separation of duties: a single admin cannot create AND confirm a receipt.
+    -- Confirmation requires a separate verifier via fn_verify_receipt.
+    v_status := 'pending';
+
+    -- R5: Reject future-dated receipts.
+    IF p_receipt_date > CURRENT_DATE THEN
+        RAISE EXCEPTION 'Receipt date cannot be in the future' USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- R7: Duplicate receipt detection within 24 hours.
+    IF p_entity_id IS NOT NULL THEN
+        SELECT COUNT(*) INTO v_dup_count
+          FROM receipts r
+         WHERE r.society_id      = p_society_id
+           AND r.entity_id       = p_entity_id
+           AND r.role            = p_role
+           AND r.receipt_date    = p_receipt_date
+           AND r.amount          = p_amount
+           AND r.particulars     = p_particulars
+           AND r.created_at >= NOW() - INTERVAL '24 hours'
+           AND r.status <> 'cancelled';
+        IF v_dup_count > 0 THEN
+            RAISE EXCEPTION 'Duplicate receipt detected: same entity, amount, date, and particulars within 24 hours' USING ERRCODE = 'check_violation';
+        END IF;
     END IF;
  
     INSERT INTO expenses(

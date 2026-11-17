@@ -601,14 +601,14 @@ FIELD_CONFIG = {
         },
         "role": {
             "visible": ADMIN_MASTER,
-            "editable": ADMIN_ONLY,
+            "editable": (),
             "default": "other",
             "validation": {},
             "tooltip": "Role of the paying entity (apartment, vendor, security, other)",
         },
         "mode": {
             "visible": ALL_ROLES,
-            "editable": ADMIN_MASTER,
+            "editable": (),
             "default": "cash",
             "validation": {
                 "required": "Payment mode is required.",
