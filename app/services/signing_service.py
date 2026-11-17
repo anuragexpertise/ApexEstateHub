@@ -8,7 +8,7 @@ tag code takes its key as a string.
 
 Rules enforced here:
 * Purpose separation: every signed message starts with a label such as
-  "ApexEstateHub/v1/SIGNING_NOC/society:123|", so a QR tag can never pass as a NOC signature.
+  "Esatehub/v1/SIGNING_NOC/society:123|", so a QR tag can never pass as a NOC signature.
 * Every signature says how it was made: purpose, key version, key id, algorithm, time, hash of the signed text.
 * Rotation retires the old version but keeps it, so old records still verify.
 * A revoked key makes every signature at or after its compromise date "untrusted".
@@ -52,7 +52,7 @@ def _check_purpose(purpose: str) -> None:
 
 def label(purpose: str, society_id: int) -> bytes:
     _check_purpose(purpose)
-    return f"ApexEstateHub/{LABEL_VERSION}/{purpose}/society:{int(society_id)}|".encode()
+    return f"Esatehub/{LABEL_VERSION}/{purpose}/society:{int(society_id)}|".encode()
 
 
 def _audit(d, society_id, actor_id, action, purpose, version, extra=None):

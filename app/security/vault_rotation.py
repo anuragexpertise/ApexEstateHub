@@ -19,8 +19,8 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from app.services import secret_vault as vault
 
-_LABEL = b"ApexEstateHub/v1/MASTER-VERIFIER"
-_SEAL_LABEL = b"ApexEstateHub/v1/VAULT-SEAL"
+_LABEL = b"Esatehub/v1/MASTER-VERIFIER"
+_SEAL_LABEL = b"Esatehub/v1/VAULT-SEAL"
 
 
 class MasterKeyError(RuntimeError):

@@ -49,8 +49,8 @@
 ### Install
 
 ```bash
-git clone https://github.com/anuragexpertise/ApexEstateHub.git
-cd ApexEstateHub
+git clone https://github.com/anuragexpertise/Esatehub.git
+cd Esatehub
 python3 -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -1126,7 +1126,7 @@ Each society gets four independent HMAC-SHA256 keys — `SIGNING_QR`,
 `SIGNING_NOC`, `SIGNING_AGREEMENT`, `SIGNING_LEDGER` — created from
 `os.urandom`, stored wrapped in `society_signing_keys`, and unwrapped only inside
 `app/services/signing_service.py`. Every signed message carries a purpose label
-(`ApexEstateHub/v1/<PURPOSE>/society:<id>|`) so a QR tag cannot pass as a NOC
+(`Esatehub/v1/<PURPOSE>/society:<id>|`) so a QR tag cannot pass as a NOC
 signature. Rotation retires a key version without deleting it, so old records
 still verify; revoking a compromised key makes later signatures "untrusted".
 Creation, rotation and revocation are audited.
@@ -2056,7 +2056,7 @@ against `CREATE OR REPLACE FUNCTION` in that file.
 ## 17. Codebase Map
 
 ```
-ApexEstateHub/
+Esatehub/
 ├── app/
 │   ├── __init__.py              Flask factory: config, error handlers, blueprints,
 │   │                            /assets, /print_doc, /print_wizard, vault fail-fast, scheduler

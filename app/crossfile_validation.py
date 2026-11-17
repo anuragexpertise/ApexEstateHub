@@ -1,10 +1,10 @@
 import re
 
 files = {
-    "shell_callbacks.py":        "/home/at/Documents/ApexEstateHub/app/dash_apps/callbacks/shell_callbacks.py",
-    "login_callbacks.py":        "/home/at/Documents/ApexEstateHub/app/dash_apps/callbacks/login_callbacks.py",
-    "card_catalogue_callbacks.py": "/home/at/Documents/ApexEstateHub/app/dash_apps/callbacks/card_catalogue_callbacks.py",
-    "app_shell.py":              "/home/at/Documents/ApexEstateHub/app/dash_apps/app_shell.py",
+    "shell_callbacks.py":        "/home/at/Documents/Esatehub/app/dash_apps/callbacks/shell_callbacks.py",
+    "login_callbacks.py":        "/home/at/Documents/Esatehub/app/dash_apps/callbacks/login_callbacks.py",
+    "card_catalogue_callbacks.py": "/home/at/Documents/Esatehub/app/dash_apps/callbacks/card_catalogue_callbacks.py",
+    "app_shell.py":              "/home/at/Documents/Esatehub/app/dash_apps/app_shell.py",
 }
 
 all_ok = True
