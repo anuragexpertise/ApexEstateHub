@@ -120,6 +120,48 @@ _BEARER_EDIT_FIELDS = [
      "required": False},
 ]
 
+# ── 1c. Authorized Dependent Time-based Pass (child / child's tutor or visitor) ─────────────────────────────────
+# Table dependent_passes. NO scan, last-seen or gate columns exist and none are listed here: a scan leaves no trace
+# (DPDP Act s.9(3)); see app/services/dependent_pass_service.py.
+_DEP_KIND_OPTIONS = [{"label": "Child", "value": "child"},
+                     {"label": "Tutor / child's visitor", "value": "tutor"}]
+_DEP_DAY_OPTIONS = [{"label": "Every day", "value": "all"}, {"label": "Mon-Fri", "value": "mon_fri"},
+                    {"label": "Mon-Sat", "value": "mon_sat"}, {"label": "Sat-Sun", "value": "sat_sun"}]
+_DEP_LIST_COLUMNS = [
+    _col("Flat No", "flat_number"),
+    _col("For", "kind_label"),
+    _col("Name / nickname", "label"),
+    _col("Valid From", "valid_from", "date"),
+    _col("Valid Until", "valid_until", "date"),
+    _col("Daily Window", "window_text"),
+    _col("Days", "weekdays_label"),
+    _col("Status", "state_label"),
+]
+_DEP_PROFILE_FIELDS = [
+    _pf("Flat No", "flat_number", "fa-home"),
+    _pf("Pass For", "kind_label", "fa-user-clock"),
+    _pf("Name / nickname", "label", "fa-id-badge"),
+    _pf("Valid From", "valid_from", "fa-calendar"),
+    _pf("Valid Until", "valid_until", "fa-calendar-check"),
+    _pf("Daily Window (IST)", "window_text", "fa-clock"),
+    _pf("Days", "weekdays_label", "fa-calendar-week"),
+    _pf("Status", "state_label", "fa-toggle-on"),
+    _pf("Issued", "created_at", "fa-calendar-plus"),
+]
+_DEP_NEW_FIELDS = [
+    {"id": "apartment_id", "label": "Flat", "type": "select", "options_from": "apartments", "required": True},
+    {"id": "pass_kind", "label": "Pass for", "type": "select", "options": _DEP_KIND_OPTIONS, "required": True},
+    {"id": "label", "label": "First name or nickname (the guard matches it; no full name or ID)", "type": "text",
+     "required": True},
+    {"id": "valid_from", "label": "Valid from", "type": "date", "required": True},
+    {"id": "valid_until", "label": "Valid until (max 366 days)", "type": "date", "required": True},
+    {"id": "window_from", "label": "Daily window: from", "type": "time", "required": True},
+    {"id": "window_to", "label": "Daily window: to (same day)", "type": "time", "required": True},
+    {"id": "weekdays", "label": "Days", "type": "select", "options": _DEP_DAY_OPTIONS, "required": True},
+    {"id": "guardian_consent", "label": "Parent/guardian consent (required for a child's pass)", "type": "select",
+     "options": [{"label": "Yes - I am the child's parent or lawful guardian and I consent", "value": "yes"}]},
+]
+
 # ── 2. read-only registers ───────────────────────────────────────────────────────────────────────────────────────
 # plural -> definition. `joins` brings in the flat; `search` are ILIKE columns; `order` is the default sort.
 _APT_JOIN = "LEFT JOIN apartments a ON a.id = t.apartment_id"
@@ -323,6 +365,15 @@ def curated_meta() -> dict:
         "form_fields": {"new": [dict(f) for f in _BEARER_NEW_FIELDS],
                         "edit": [dict(f) for f in _BEARER_EDIT_FIELDS]},
     }
+    meta["dependent_passes"] = {
+        "list_title": "Dependent Passes", "list_icon": "fa-child",
+        "list_columns": [dict(c) for c in _DEP_LIST_COLUMNS],
+        "profile_title": "Dependent Pass", "profile_icon": "fa-child", "profile_color": "#0891b2",
+        "profile_fields": [dict(f) for f in _DEP_PROFILE_FIELDS],
+        "profile_actions": [{"label": "Show Pass QR", "action_id": "show_qr", "target_card": "modal_qr",
+                             "icon": "fa-qrcode", "color": "primary"}],
+        "form_fields": {"new": [dict(f) for f in _DEP_NEW_FIELDS], "edit": []},
+    }
     for plural, d in REGISTERS.items():
         meta[plural] = {
             "list_title": d["title"], "list_icon": d["icon"],
@@ -407,6 +458,57 @@ def get_bearer(pk, sid):
     except (TypeError, ValueError):
         return None
     return db._execute(_BEARER_SELECT + " AND co.id = %s", (sid, oid), fetch_one=True)
+
+
+_DEP_SELECT = (
+    "SELECT d.id, d.society_id, d.apartment_id, a.flat_number, d.pass_kind, "
+    "       CASE d.pass_kind WHEN 'child' THEN 'Child' ELSE 'Tutor / child''s visitor' END AS kind_label, "
+    "       d.label, d.valid_from, d.valid_until, d.window_from, d.window_to, d.weekdays, d.status, d.created_at, "
+    "       to_char(d.window_from, 'HH24:MI') || ' - ' || to_char(d.window_to, 'HH24:MI') AS window_text, "
+    "       CASE d.weekdays WHEN 'all' THEN 'Every day' WHEN 'mon_fri' THEN 'Mon-Fri' WHEN 'mon_sat' THEN 'Mon-Sat' "
+    "            ELSE 'Sat-Sun' END AS weekdays_label, "
+    "       CASE WHEN d.status = 'revoked' THEN 'Revoked' WHEN d.valid_until < CURRENT_DATE THEN 'Expired' "
+    "            WHEN d.valid_from > CURRENT_DATE THEN 'Not started' ELSE 'Active' END AS state_label "
+    "  FROM dependent_passes d JOIN apartments a ON a.id = d.apartment_id WHERE d.society_id = %s"
+)
+
+
+def _dep_flat_scope():
+    """A resident sees only their own flat's passes, whatever filter the browser sent; admin/master see the society."""
+    from app.security.audit_context import get_current_linked_id, get_current_user_role
+    if get_current_user_role() == "apartment":
+        return get_current_linked_id() or -1
+    return None
+
+
+def list_dependent_passes(sid, apt_id, search, page_size, offset):
+    scope = _dep_flat_scope()
+    apt_id = scope if scope is not None else apt_id
+    cond, params = "", [sid]
+    if apt_id:
+        cond += " AND d.apartment_id = %s"
+        params.append(apt_id)
+    if search:
+        cond += " AND (d.label ILIKE %s OR a.flat_number ILIKE %s)"
+        params += [_like(search)] * 2
+    rows = db._execute(_DEP_SELECT + cond + " ORDER BY (d.status = 'active') DESC, d.valid_until DESC, d.id DESC "
+                       "LIMIT %s OFFSET %s", params + [page_size, offset], fetch_all=True) or []
+    cnt = db._execute("SELECT COUNT(*) AS n FROM dependent_passes d JOIN apartments a ON a.id = d.apartment_id "
+                      "WHERE d.society_id = %s" + cond, params, fetch_one=True)
+    return rows, int((cnt or {}).get("n", len(rows)))
+
+
+def get_dependent_pass(pk, sid):
+    try:
+        pid = int(pk)
+    except (TypeError, ValueError):
+        return None
+    scope = _dep_flat_scope()
+    sql, params = _DEP_SELECT + " AND d.id = %s", [sid, pid]
+    if scope is not None:
+        sql += " AND d.apartment_id = %s"
+        params.append(scope)
+    return db._execute(sql, params, fetch_one=True)
 
 
 def list_register(plural: str, sid, search, page_size, offset):

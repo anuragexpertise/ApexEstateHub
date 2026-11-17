@@ -48,6 +48,8 @@ _KPI_PORTAL_ENTRIES: list[tuple[str, str, str, str]] = [
     ("kpi_supervisor_total", "admin", "enrolled", "Entities"),
     ("kpi_staff_total", "admin", "enrolled", "Entities"),
     ("kpi_committee_bearers", "admin", "enrolled", "Entities"),
+    ("kpi_dependent_passes_admin", "admin", "enrolled", "Entities"),
+    ("kpi_dependent_passes", "apartment", "members", "Members"),
     # ADMIN - Registers tab (read-only statutory registers; see drilldown/curated.py)
     ("kpi_tenants_count", "admin", "registers", "Registers"),
     ("kpi_owner_loans_count", "admin", "registers", "Registers"),

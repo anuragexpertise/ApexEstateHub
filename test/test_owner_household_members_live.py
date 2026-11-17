@@ -96,7 +96,6 @@ def test_validation_messages(w):
     assert "valid email" in s("owner", {"user_type": "visitor", "email": "nope"})[1]
     assert "Name is required" in s("owner", {"user_type": "visitor", "name": " "})[1]
     assert "at least" in s("owner", {"user_type": "visitor", "password": "short"})[1]
-    assert "adult" in s("owner", {"user_type": "visitor", "age_group": ""})[1]
 
 
 def test_duplicate_email_is_a_plain_message(w):
@@ -106,29 +105,11 @@ def test_duplicate_email_is_a_plain_message(w):
     assert not ok and msg == "This email is already used by another login"
 
 
-# ── children (DPDP s.9) ──────────────────────────────────────────────────────────────────────────────────────────
-def test_child_login_needs_guardian_consent_and_records_it(w):
-    ok, msg, _ = w["save"]("owner", {"user_type": "family", "age_group": "child"})
-    assert not ok and "parent or lawful guardian" in msg
-    ok, msg, kid = w["save"]("owner", {"user_type": "family", "age_group": "child", "guardian_consent": "yes"})
-    assert ok, msg
-    c = w["db"]._execute("SELECT * FROM consent_records WHERE society_id=%s AND person_key=%s", (w["sid"], f"minor:{kid}"), fetch_one=True)
-    assert c and c["purpose"] == "guardian_consent" and c["user_id"] == w["u"]["owner"] and c["created_by"] == w["u"]["owner"]
-    assert c["withdrawn_at"] is None
-    # the login stays a Family login
-    ok, msg, _ = w["save"]("owner", {"user_type": "tenant"}, edit_pk=kid)
-    assert not ok and "child's login" in msg
-
-
-@pytest.mark.parametrize("utype", ["tenant", "visitor"])
-def test_a_child_cannot_be_a_tenant_or_visitor(w, utype):
-    ok, msg, _ = w["save"]("owner", {"user_type": utype, "age_group": "child", "guardian_consent": "yes"})
-    assert not ok and "Family" in msg
-
-
-def test_family_and_tenant_cannot_create_a_child_login(w):
-    for actor in ("family", "tenant"):
-        assert not w["save"](actor, {"user_type": "family", "age_group": "child", "guardian_consent": "yes"})[0]
+# ── children (DPDP s.9(3)): no login at all; see test_dependent_pass_live.py ─────────────────────────────────────
+@pytest.mark.parametrize("actor", ["owner", "family", "tenant"])
+def test_a_child_gets_no_login_only_a_dependent_pass(w, actor):
+    ok, msg, _ = w["save"](actor, {"user_type": "family", "age_group": "child", "guardian_consent": "yes"})
+    assert not ok and (actor != "owner" or "Dependent Time-based Pass" in msg)
 
 
 # ── edit ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -181,8 +162,8 @@ def test_admin_form_offers_every_type_and_a_flat_picker_residents_do_not_get():
     assert "apartment_id" not in _type_options("apartment", "owner")[1]
 
 
-def test_new_form_has_age_group_and_consent_and_a_drillin_flat():
+def test_new_form_has_no_child_fields_and_a_drillin_flat():
     from app.dash_apps.drilldown.schema_introspect import get_entity_meta
     ids = {f["id"]: f for f in get_entity_meta()["apartment_users"]["form_fields"]["new"]}
-    assert ids["age_group"]["required"] and "guardian_consent" in ids
+    assert "age_group" not in ids and "guardian_consent" not in ids
     assert ids["apartment_id"]["type"] == "drillin" and ids["name"]["required"] and ids["user_type"]["required"]

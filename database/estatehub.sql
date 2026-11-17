@@ -22758,6 +22758,36 @@ CREATE INDEX idx_consent_records_withdrawn ON consent_records (withdrawn_at)
 WHERE
     withdrawn_at IS NOT NULL;
 
+-- Authorized Dependent Time-based Pass (DPDP Act s.9(3)): a child, or a tutor / visitor who comes for a child, gets a
+-- gate pass for a FLAT instead of a login. The pass is valid only between valid_from..valid_until, on the allowed
+-- weekdays, inside the daily window. A gate scan answers PASS/FAIL, alerts the parent in real time, and writes NOTHING:
+-- no gate_access row, no scan list and no timestamp on this table, so no history of a child's movements can be built.
+-- Do not add last_scanned_at / scan_count / any per-pass scan column here; test_dependent_time_pass_live.py asserts
+-- that the table has none.
+CREATE TABLE dependent_passes (
+    id SERIAL PRIMARY KEY,
+    society_id INT NOT NULL REFERENCES societies (id) ON DELETE CASCADE,
+    apartment_id INT NOT NULL REFERENCES apartments (id) ON DELETE CASCADE,
+    pass_kind VARCHAR(10) NOT NULL CHECK (pass_kind IN ('child', 'tutor')),
+    label VARCHAR(100) NOT NULL, -- what the guard sees: a first name or nickname, never a persistent id
+    valid_from DATE NOT NULL,
+    valid_until DATE NOT NULL,
+    window_from TIME NOT NULL, -- daily window, IST; same-day only (window_to is later than window_from)
+    window_to TIME NOT NULL,
+    weekdays VARCHAR(10) NOT NULL DEFAULT 'all' CHECK (
+        weekdays IN ('all', 'mon_fri', 'mon_sat', 'sat_sun')
+    ),
+    status VARCHAR(10) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
+    qr_version INT NOT NULL DEFAULT (1000 + FLOOR(RANDOM() * 9000))::INT,
+    created_by INT REFERENCES users (id) ON DELETE SET NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMP,
+    CONSTRAINT chk_dependent_pass_dates CHECK (valid_until >= valid_from),
+    CONSTRAINT chk_dependent_pass_window CHECK (window_to > window_from)
+);
+
+CREATE INDEX idx_dependent_passes_flat ON dependent_passes (society_id, apartment_id, status);
+
 -- Rights register: access, correction, erasure, grievance, nominee requests.
 CREATE TABLE rights_requests (
     id BIGSERIAL PRIMARY KEY,

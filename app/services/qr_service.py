@@ -89,6 +89,8 @@ _QR_VERSIONED_ROLES = {
     "NOC": "nocs",
     "EVT": "event_ticket_items",
     "POL": "polls",
+    # Authorized Dependent Time-based Pass (child / child's tutor or visitor), keyed on dependent_passes.id.
+    "DEP": "dependent_passes",
 }
 
 # ADM is signable too, but its qr_version isn't a single flat lookup — see
@@ -343,6 +345,7 @@ ROLE_CODE_MAP = {
     "AST": "asset",
     "ATD": "attendance_entry",
     "NOC": "noc",
+    "DEP": "dependent_pass",
     # Legacy short codes for mapping compatibility
     "A": "admin",
     "O": "apartment",
@@ -370,6 +373,7 @@ ROLE_CODE_MAP_REV = {
     "asset": "AST",
     "attendance_entry": "ATD",
     "noc": "NOC",
+    "dependent_pass": "DEP",
 }
 
 
@@ -586,6 +590,32 @@ def _visitor_user(vis, society_id: int) -> dict:
         "owner_name": vis.get("owner_name") or "",
         "owner_phone": vis.get("owner_phone") or "",
     }
+
+
+def validate_dependent_pass_qr(pass_id: int, society_id: int, mode: str = "entry") -> dict:
+    """Authorized Dependent Time-based Pass: PASS only inside the pass's dates, weekdays and daily window (IST).
+
+    Writes NOTHING (no gate_access row, no per-pass timestamp). The guard sees the flat and the pass kind; the parent
+    is alerted in real time, and that alert is not stored. See dependent_pass_service for why (DPDP s.9(3))."""
+    from app.services import dependent_pass_service as dps
+    from app.utils import now_ist
+    try:
+        p = db._execute(
+            "SELECT d.*, a.flat_number FROM dependent_passes d JOIN apartments a ON a.id = d.apartment_id "
+            "WHERE d.id=%s AND d.society_id=%s", (pass_id, society_id), fetch_one=True)
+        if not p:
+            return {"status": "FAIL", "reason": "Pass not found or no longer valid", "gate_action": "deny"}
+        ok, reason = dps.check_window(p, now_ist())
+        dps.alert_guardians(p, mode, ok, reason)
+        user = {"id": None, "name": f"{dps.PASS_KINDS[p['pass_kind']]} pass (Flat {p['flat_number']})",
+                "role": "dependent_pass", "flat_number": p["flat_number"], "society_id": society_id,
+                "validity": f"{dps.window_label(p)}, {dps.WEEKDAY_LABELS.get(p['weekdays'], '')}"}
+        if not ok:
+            return {"status": "FAIL", "reason": reason, "gate_action": "deny", "user": user, "no_log": True}
+        return {"status": "PASS", "reason": reason, "gate_action": "allow", "user": user, "no_log": True}
+    except Exception as e:  # noqa: BLE001
+        logger.error("dependent pass validation failed: %s", e) if "logger" in globals() else None
+        return {"status": "FAIL", "reason": "Could not check this pass", "gate_action": "deny"}
 
 
 def validate_visitor_qr(visitor_id: int, society_id: int, security_user_id: int | None = None) -> dict:
@@ -1205,6 +1235,11 @@ def validate_qr_code(qr_data: str, society_id: int | None = None, security_user_
 
         role_code = parsed["role_code"]
         secret = _get_signing_secret(qr_society_id) if role_code in _QR_SIGNABLE_ROLES else None
+        if role_code == "DEP" and (not secret or parsed.get("sig") is None):
+            # A dependent pass is new, so there is no unsigned transition window: a typed "<society>-DEP-<n>" must
+            # never get a child through the gate.
+            return {"status": "FAIL", "reason": "This pass is not signed — ask the parent to issue a new one",
+                    "gate_action": "deny"}
         if secret:
             qr_version = parsed.get("qr_version")
             sig = parsed.get("sig")
@@ -1239,6 +1274,8 @@ def validate_qr_code(qr_data: str, society_id: int | None = None, security_user_
             return validate_event_ticket_qr(entity_id, qr_society_id, security_user_id)
         elif role == "visitor":
             return validate_visitor_qr(entity_id, qr_society_id, security_user_id)
+        elif role == "dependent_pass":
+            return validate_dependent_pass_qr(entity_id, qr_society_id, mode=mode)
         elif role == "patrol_location":
             return validate_patrol_qr(entity_id, qr_society_id, security_user_id, lat=lat, lon=lon, mode=mode)
         elif role == "attendance_entry":

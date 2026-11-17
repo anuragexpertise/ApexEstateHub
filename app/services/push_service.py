@@ -114,14 +114,15 @@ def _create_notification(user_id, title, body, society_id=None, url=None):
         logger.error(f"create_notification error: {e}")
 
 
-def send_push_notification(user_id, title, body, icon=None, url=None, society_id=None):
+def send_push_notification(user_id, title, body, icon=None, url=None, society_id=None, persist=True):
     """Send push notification to user across all their active subscriptions.
 
     The in-app notification (which drives the dashboard toast/inbox via
     polling or SSE) is always persisted first, independent of whether the
     actual browser push succeeds.
     """
-    _create_notification(user_id, title, body, society_id=society_id, url=url)
+    if persist:   # persist=False: deliver only, keep nothing (e.g. dependent-pass alerts, DPDP s.9(3))
+        _create_notification(user_id, title, body, society_id=society_id, url=url)
 
     if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
         logger.warning("Push notifications disabled: VAPID keys not configured. In-app notification still recorded.")

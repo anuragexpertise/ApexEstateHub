@@ -742,6 +742,23 @@ def register_qr_callbacks(app):
             # these checks would let anyone request a signed credential
             # for an arbitrary identity in an arbitrary society, the same
             # bug as the hdr-avatar path just via a different trigger.
+            if profile_action.get('role') == 'dependent_pass':
+                # A flat's own dependent passes: the owner of THAT flat, or an admin/master of this society. The
+                # pass is looked up server-side; the client's society/entity claims are not trusted.
+                from database.db_manager import db as _db
+                _p = _db._execute("SELECT apartment_id, status FROM dependent_passes WHERE id=%s AND society_id=%s",
+                                  (profile_action.get('entity_id'), server_society_id), fetch_one=True)
+                _own = server_role == 'apartment' and _p and _p['apartment_id'] == server_linked_id
+                if not _p or not (_own or server_role in ('admin', 'master')):
+                    return True, "", "Error: Not authorized to show this pass.", no_update, True
+                if _p['status'] != 'active':
+                    return True, "", "This pass has been revoked.", no_update, True
+                src, payload = generate_static_qr_code(profile_action['entity_id'], 'dependent_pass', server_society_id)
+                if not src:
+                    return True, "", f"Error: {payload}", no_update, True
+                return True, src, payload, {'entity_id': profile_action['entity_id'], 'role': 'dependent_pass',
+                                            'society_id': server_society_id,
+                                            'name': profile_action.get('name', 'Dependent pass')}, True
             if server_role not in ('admin', 'master'):
                 return True, "", "Error: Not authorized to generate a gate pass for another entity.", no_update, True
 
@@ -897,6 +914,30 @@ def register_qr_callbacks(app):
                  "border": "3px solid #27ae60", "borderRadius": "14px", "marginTop": "12px"},
                 log[:20],
                 {"type": "success", "message": f"Found — {user.get('name', '?')}"},
+            )
+
+        # ════════════════════════════════════════════════════════
+        # AUTHORIZED DEPENDENT TIME-BASED PASS (child / child's tutor or visitor): answer PASS or FAIL and leave
+        # nothing behind. No gate_access row, no entry in the on-screen scan list, no profile opened (DPDP s.9(3):
+        # no tracking of children). The parent was alerted by the validator, without storing the alert.
+        # ════════════════════════════════════════════════════════
+        if result.get("no_log") or (result.get("user") or {}).get("role") == "dependent_pass":
+            user = result.get("user") or {}
+            ok = result.get("status") == "PASS"
+            who = user.get("name", "Dependent pass")
+            detail = f"{who} · {user.get('validity', '')}" if ok else result.get("reason", "Denied")
+            banner = _scan_banner("Access Granted" if ok else "Access Denied", detail,
+                                  "fa-check-circle" if ok else "fa-times-circle",
+                                  "#27ae60" if ok else "#e74c3c", now_s)
+            return (
+                banner,
+                {"background": "linear-gradient(135deg, #d4edda, #c3e6cb)" if ok
+                 else "linear-gradient(135deg, #f8d7da, #f5c6cb)",
+                 "border": f"3px solid {'#27ae60' if ok else '#e74c3c'}",
+                 "borderRadius": "14px", "marginTop": "12px"},
+                list(scan_log or [])[:20],        # unchanged: this scan is not recorded
+                {"type": "success" if ok else "error",
+                 "message": ("Dependent pass OK" if ok else f"Pass refused — {result.get('reason', '')}")},
             )
 
         # ════════════════════════════════════════════════════════

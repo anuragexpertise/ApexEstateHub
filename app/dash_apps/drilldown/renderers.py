@@ -125,6 +125,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     ("admin", "staff"):        {"view", "new", "edit"},
     ("admin", "auditors"):     {"view", "new", "edit"},   # like the other team logins: never delete (falls to ("admin","*") otherwise)
     ("admin", "committee_bearers"): {"view", "new", "edit"},
+    ("admin", "dependent_passes"): {"view", "new", "delete"},
     # Registers written by their own workflows: the admin looks, nothing here edits.
     ("admin", "tenants"):                    {"view"},
     ("admin", "owner_loans"):                {"view"},
@@ -168,6 +169,7 @@ _PORTAL_PERMS: dict[tuple[str, str], set[str]] = {
     # are profile actions with server-side guards.
     ("apartment", "channels"):    {"view", "new"},
     ("apartment", "apartment_users"): {"view", "new", "edit", "delete"},
+    ("apartment", "dependent_passes"): {"view", "new", "delete"},
     ("apartment", "*"):           set(),
 
     # ── VENDOR: view own data + can see events/concerns ───────────────────
@@ -3070,7 +3072,7 @@ def render_form_card(card_id: str, title: str, icon: str,
     # do anything would just be confusing, so it's hidden here and replaced
     # with a short locked-flat note instead.
     _owner_locked_apartment_field = (
-        entity_plural in ("concerns", "apartment_users") and (role or "admin") == "apartment"
+        entity_plural in ("concerns", "apartment_users", "dependent_passes") and (role or "admin") == "apartment"
     )
     if _owner_locked_apartment_field:
         fields = [f for f in fields if f.get("id") != "apartment_id"]

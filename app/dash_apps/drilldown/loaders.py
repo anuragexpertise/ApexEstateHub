@@ -2322,6 +2322,8 @@ def load_list(
             return _cur.list_team(_cur.TEAM_ENTITIES[entity][0], sid, s, page_size, offset)
         if entity == "committee_bearers":
             return _cur.list_bearers(sid, s, page_size, offset)
+        if entity == "dependent_passes":
+            return _cur.list_dependent_passes(sid, apt_id, s, page_size, offset)
         if entity in _cur.REGISTERS:
             return _cur.list_register(entity, sid, s, page_size, offset)
 
@@ -2908,6 +2910,9 @@ def load_profile(entity_singular: str, pk, society_id=None, user_id=None) -> dic
         if entity_singular == "committee_bearer":
             r = _cur.get_bearer(pk, society_id)
             return dict(r) if r else None
+        if entity_singular == "dependent_pass":
+            r = _cur.get_dependent_pass(pk, society_id)
+            return dict(r) if r else None
         if entity_singular in _cur.REGISTER_SINGULAR:
             r = _cur.get_register_row(_cur.REGISTER_SINGULAR[entity_singular], pk, society_id)
             return dict(r) if r else None
@@ -2977,6 +2982,14 @@ def delete_entity(entity_plural: str, pk, society_id=None) -> tuple[bool, str]:
                            "(Edit, give a reason) - neither is deleted, so the history stays.")
         if entity_plural in _cur.REGISTERS:
             return False, "This is a read-only register; it is maintained by its own workflow."
+        if entity_plural == "dependent_passes":
+            # "Delete" = revoke at once (the QR stops working); the row is purged after a short grace period.
+            from app.security.audit_context import get_current_linked_id, get_current_user_role
+            from app.services import dependent_pass_service as dps
+            own_flat = get_current_linked_id() if get_current_user_role() == "apartment" else None
+            if get_current_user_role() == "apartment" and not own_flat:
+                return False, "Your login is not linked to a flat"
+            return dps.revoke_pass(int(pk), society_id, own_flat)
         if entity_plural == "apartments":
             # Trigger will block if outstanding dues > 0
             db._execute(

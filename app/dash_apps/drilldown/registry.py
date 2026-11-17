@@ -54,6 +54,7 @@ PK_MAP: dict = {
     "staff": "id",
     "auditors": "id",
     "committee_bearers": "id",
+    "dependent_passes": "id",
     "tenants": "id",
     "owner_loans": "id",
     "apartment_transfers": "id",
@@ -109,6 +110,7 @@ ENTITY_MAP: dict = {
     "staff": "staff",
     "auditors": "auditor",
     "committee_bearers": "committee_bearer",
+    "dependent_passes": "dependent_pass",
     "tenants": "tenant",
     "owner_loans": "owner_loan",
     "apartment_transfers": "apartment_transfer",
@@ -453,6 +455,8 @@ DRILLDOWN_MAP: dict = {
     "kpi_staff_total": {"target": "list_staff", "label": "Staff"},
     "kpi_auditor_total": {"target": "list_auditors", "label": "Auditors"},
     "kpi_committee_bearers": {"target": "list_committee_bearers", "label": "Committee Bearers"},
+    "kpi_dependent_passes_admin": {"target": "list_dependent_passes", "label": "Dependent Passes"},
+    "kpi_dependent_passes": {"target": "list_dependent_passes", "label": "Dependent Passes"},
     "kpi_tenants_count": {"target": "list_tenants", "label": "Tenants"},
     "kpi_owner_loans_count": {"target": "list_owner_loans", "label": "Owner Loans"},
     "kpi_apartment_transfers_count": {"target": "list_apartment_transfers", "label": "Flat Transfers"},
@@ -527,6 +531,7 @@ DRILLDOWN_MAP: dict = {
     "list_staff": {"target": "profile_staff", "label": "Staff Profile"},
     "list_auditors": {"target": "profile_auditor", "label": "Auditor Profile"},
     "list_committee_bearers": {"target": "profile_committee_bearer", "label": "Committee Bearer Profile"},
+    "list_dependent_passes": {"target": "profile_dependent_pass", "label": "Dependent Pass"},
     # Read-only registers (see curated.py): KPI -> list -> profile, no forms.
     "list_tenants": {"target": "profile_tenant", "label": "Tenant Details"},
     "list_owner_loans": {"target": "profile_owner_loan", "label": "Owner Loan Details"},
@@ -674,6 +679,7 @@ DRILLDOWN_MAP: dict = {
     "profile_supervisor": {"actions": {"edit": {"target": "form_supervisor_edit", "prefill": {"*": "*"}}}},
     "profile_staff": {"actions": {"edit": {"target": "form_staff_edit", "prefill": {"*": "*"}}}},
     "profile_auditor": {"actions": {"edit": {"target": "form_auditor_edit", "prefill": {"*": "*"}}}},
+    "profile_dependent_pass": {"actions": {}},
     "profile_committee_bearer": {
         "actions": {"edit": {"target": "form_committee_bearer_edit", "prefill": {"*": "*"}}}},
     "profile_compliance_setting": {
@@ -731,7 +737,7 @@ def build_breadcrumb(nav_stack: list) -> list:
 #   - concern: highly-customized profile layout in renderers.py that embeds
 #     its own workflow action buttons (Assign, Bid, Resolve), skipping the
 #     generic footer entirely.
-_NO_AUTO_ACTIONS = {"concern", "visitor", "event_ticket", "ledger", "channel", "noc",
+_NO_AUTO_ACTIONS = {"dependent_pass", "concern", "visitor", "event_ticket", "ledger", "channel", "noc",
                     # read-only registers (curated.py): written by their own workflows, never by a generic form
                     "tenant", "owner_loan", "apartment_transfer", "owner_admission", "borrowing_approval",
                     "compliance_flag", "aoa_statutory_filing", "service_cutoff_proceeding"}

@@ -805,6 +805,25 @@ KPI_CARDS = {
         "title": "Maintenance Rules", "group": "Financials",
     },
 
+    # Authorized Dependent Time-based Pass: a child's, or a tutor / child's visitor's, restricted time-window pass for
+    # a flat. Owner card counts their own flat's active passes; the admin card (kpi_dependent_passes_admin) the society's.
+    "kpi_dependent_passes": {
+        "query": """
+            SELECT COUNT(*) AS v FROM dependent_passes
+            WHERE society_id=%s AND apartment_id=%s AND status='active' AND valid_until >= CURRENT_DATE
+        """,
+        "params": 2, "format": "number",
+        "icon": "fa-child", "color": "#0891b2",
+        "title": "Dependent Passes", "group": "Members",
+    },
+
+    "kpi_dependent_passes_admin": {
+        "query": "SELECT COUNT(*) AS v FROM dependent_passes WHERE society_id=%s AND status='active' AND valid_until >= CURRENT_DATE",
+        "params": 1, "format": "number",
+        "icon": "fa-child", "color": "#0891b2",
+        "title": "Dependent Passes", "group": "Entities",
+    },
+
     "kpi_apartment_members": {
         "query": """
             SELECT COUNT(*) AS v
@@ -1179,6 +1198,7 @@ DEFAULT_LAYOUTS = {
             "kpi_staff_total",
             "kpi_auditor_total",
             "kpi_committee_bearers",
+            "kpi_dependent_passes_admin",
         ],
         # Read-only statutory / governance registers (drilldown/curated.py REGISTERS).
         "registers": [
@@ -1278,6 +1298,7 @@ DEFAULT_LAYOUTS = {
             "kpi_polls_active"],
         "members": [
             "kpi_apartment_members",
+            "kpi_dependent_passes",
         ],
         "settings": ["kpi_owner_member_since"],
     },

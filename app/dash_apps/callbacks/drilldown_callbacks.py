@@ -988,7 +988,7 @@ def register_drilldown_callbacks(app):
             if action == "show_qr":
                 entity_singular = to_singular(entity)
                 record = loaders.load_profile(entity_singular, pk, sid) or {}
-                entity_name = record.get("owner_name") or record.get("name") or record.get("location_name") or entity
+                entity_name = record.get("owner_name") or record.get("name") or record.get("label") or record.get("location_name") or entity
 
                 qr_entity_id = pk
                 if entity_singular in ("apartment", "vendor", "security", "patrol_location"):  # noqa: SIM102
@@ -4092,6 +4092,7 @@ def _save_entity(entity, card_id, data):
         if entity in ("accountant", "supervisor", "staff"):
             return _save_team_login(entity, data, is_edit, pk)
         if entity == "committee_bearer": return _save_committee_bearer(db, data, sid, is_edit, pk)
+        if entity == "dependent_pass":  return _save_dependent_pass(db, data, sid, is_edit, pk)
         if entity == "tds_rate":        return _save_tds_rate(db, data, sid, is_edit, pk)
         if entity == "sec_charge":
             return False, "Security charge rules have been removed. Use manual expenses for security payables.", None
@@ -5529,20 +5530,12 @@ def _save_apartment_user(db, d, sid, is_edit, pk):
             return False, ("Owner enrollment requires the Builder's Declaration to be complete first "
                            "(shares total 100% and the Declaration PDF on file)."), None
     is_child = False
-    if user_type != "owner":
-        age_group = str(d.get("age_group") or "").strip().lower()
-        if age_group not in ("adult", "child"):
-            return False, "Say whether the person is an adult (18 or over) or a child (under 18)", None
-        if age_group == "child":
-            # DPDP Act s.9: a child's data may be processed only with a parent/lawful guardian's verifiable consent.
-            # The consent is the signed-in owner's own act (or the admin attesting to consent on file), and the
-            # login is limited to a Family member so it cannot become a tenant/visitor/owner record.
-            if user_type != "family":
-                return False, "A child's login can only be a Family member.", None
-            if str(d.get("guardian_consent") or "").strip().lower() not in ("yes", "y", "true", "1"):
-                return False, ("A parent or lawful guardian must consent before a child's login is created. "
-                               "Choose 'Yes' under Parent/guardian consent."), None
-            is_child = True
+    if str(d.get("age_group") or "").strip().lower() == "child":
+        # DPDP Act s.9(3): no tracking or behavioural monitoring of a child. A login is a standing identity that
+        # gate scans attach to, so a child gets none. Their entry is an Authorized Dependent Time-based Pass for the
+        # flat (restricted time window, nothing logged at the gate) - see dependent_pass_service.
+        return False, ("A child does not get a login. Create an Authorized Dependent Time-based Pass for the flat "
+                       "instead (Members, Dependent Passes, New)."), None
     if not pw:
         return False, "Password is required for new member", None
     pw_err = validate_password(pw)
@@ -6540,6 +6533,38 @@ def _save_team_login(role, d, is_edit, pk):
         return True, msg, (row or {}).get("id")
     except PermissionError as exc:
         return False, str(exc), None
+
+
+def _save_dependent_pass(db, d, sid, is_edit, pk):
+    """New Authorized Dependent Time-based Pass. Passes are issued or revoked, never edited. The owner of a flat issues
+    for their OWN flat only (the flat is taken from the session, not the form); an admin names the flat."""
+    from app.security.audit_context import get_current_linked_id, get_current_society_id, get_current_user_id
+    from app.security.audit_context import get_current_user_role
+    from app.services import dependent_pass_service as dps
+    if is_edit:
+        return False, "A pass cannot be edited. Revoke it and issue a new one.", None
+    role, uid = get_current_user_role(), get_current_user_id()
+    sid = get_current_society_id() or sid
+    if role == "apartment":
+        row = db._execute("SELECT user_type, linked_id FROM users WHERE id=%s AND society_id=%s AND active IS NOT FALSE",
+                          (uid, sid), fetch_one=True) or {}
+        if row.get("user_type") != "owner":
+            return False, "Unauthorised: only the flat's owner can issue a dependent pass.", None
+        apt_id = row.get("linked_id") or get_current_linked_id()
+        if not apt_id:
+            return False, "Unauthorised: Your login is not linked to a flat", None
+    elif role in ("admin", "master"):
+        try:
+            apt_id = int(d.get("apartment_id"))
+        except (TypeError, ValueError):
+            return False, "Pick the flat", None
+    else:
+        return False, "Unauthorised: You cannot issue a dependent pass.", None
+    consent = str(d.get("guardian_consent") or "").strip().lower() in ("yes", "y", "true", "1")
+    ok, msg, pid = dps.create_pass(
+        int(sid), int(apt_id), d.get("pass_kind"), d.get("label"), d.get("valid_from"), d.get("valid_until"),
+        d.get("window_from"), d.get("window_to"), d.get("weekdays"), uid, guardian_consent=consent)
+    return ok, msg, pid
 
 
 def _save_committee_bearer(db, d, sid, is_edit, pk):
