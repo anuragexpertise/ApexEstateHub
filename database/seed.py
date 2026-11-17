@@ -2435,7 +2435,7 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
              apt1_id, "apartment", "cash", "2026-07-10", admin_uid, None, "NEFT0710HALL", None),
         )
         conn.commit()
-        print("  ✓ Receipt (admin, CONFIRMED): Community Hall Booking Fee ₹2000")
+        print("  ✓ Receipt (admin-created): Community Hall Booking Fee ₹2000")
 
     if not _one(cur, """SELECT 1 FROM receipts WHERE society_id=%s AND particulars=%s""",
                 (society_id, "Visitor Parking Fee (gate collection)")):
@@ -2460,7 +2460,27 @@ def seed_receipts_and_salary(cur, conn, society_id: int, admin_uid: int,
              entity_id, role, mode, date_, admin_uid, cheque_no, trx_id, None),
         )
         conn.commit()
-        print(f"  ✓ Receipt (admin, CONFIRMED, mode={mode}): {particulars} ₹{amount:g}")
+        print(f"  ✓ Receipt (admin-created, mode={mode}): {particulars} ₹{amount:g}")
+
+    # Every receipt now starts 'pending' (separation of duties: the creator can never confirm their own receipt), so
+    # the admin-created receipts above are confirmed here by a DIFFERENT person - the society's accountant. The
+    # security-created Visitor Parking Fee deliberately stays pending (it is the "awaiting verification" example).
+    verifier = _one(cur, "SELECT id FROM users WHERE society_id=%s AND role='accountant' AND id<>%s "
+                         "ORDER BY id LIMIT 1", (society_id, admin_uid))
+    if verifier:
+        cur.execute("SELECT id FROM receipts WHERE society_id=%s AND status='pending' AND created_by=%s "
+                    "ORDER BY id", (society_id, admin_uid))
+        for row in cur.fetchall():
+            cur.execute("SELECT * FROM fn_verify_receipt(%s,%s,NULL)", (row["id"], verifier["id"]))
+            res = cur.fetchone() or {}
+            if str(res.get("msg", "")).lower().startswith("error"):
+                raise RuntimeError(f"seed: could not confirm receipt {row['id']}: {res.get('msg')}")
+            # One transaction per receipt: the hash chain orders by confirmed_at (= NOW(), fixed within a
+            # transaction), so receipts confirmed together would tie and chain to the wrong predecessor.
+            conn.commit()
+        print("  ✓ Admin-created receipts confirmed by the accountant (creator never confirms own receipt)")
+    else:
+        print("  ! No accountant login seeded; admin-created receipts stay pending")
 
     cur.execute("SELECT fn_auto_generate_payables(%s)", (society_id,))
     conn.commit()
