@@ -1451,9 +1451,8 @@ class FakeDB:
         mode = p.get("p6") or p.get("mode", "cash")
         receipt_date = p.get("p7") or p.get("receipt_date") or date.today().isoformat()
         user_id = p.get("p8") or p.get("user_id")
-        # Determine status: admin-created = confirmed, else pending
-        user = next((u for u in self.tables.get("users", []) if u.get("id") == user_id), None)
-        status = "confirmed" if (user and user.get("role") == "admin") else "pending"
+        # R4 (separation of duties): EVERY receipt starts pending, whoever creates it; a different person confirms.
+        status = "pending"
         new_id = self._next_id("receipts")
         row = {
             "id": new_id, "society_id": sid, "acc_id": acc_id, "particulars": particulars,

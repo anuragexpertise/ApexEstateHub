@@ -3,8 +3,8 @@ Scenario B — Dues → Receipt → Ledger loop.
 
 Tests the financial flow:
   1. Admin creates a receipt against an owner.
-  2. Non-admin receipt defaults to 'pending'; admin-created is 'confirmed'.
-  3. Admin verifies a pending receipt → status flips to confirmed, transaction posted.
+  2. Every receipt starts 'pending' (separation of duties), whoever creates it.
+  3. A DIFFERENT user verifies it → status flips to confirmed, transaction posted.
   4. Receipt appears in financials list.
   5. FY closing report can be generated.
   6. Ledger entries show correct Dr/Cr sides.
@@ -21,6 +21,22 @@ from app.dash_apps.drilldown.loaders import verify_receipt
 from app.dash_apps.pages import card_catalogue
 
 
+_ACTOR = {"id": None}
+
+
+@pytest.fixture(autouse=True)
+def _signed_in_actor(monkeypatch):
+    """_save_receipt_v3 takes the creator from the SESSION, never from the form, so the tests sign in as `user_id`."""
+    from app.dash_apps.callbacks import drilldown_callbacks as dc
+    monkeypatch.setattr(dc, "get_current_user_id", lambda: _ACTOR["id"])
+    monkeypatch.setattr(dc, "get_current_user_role", lambda: {1: "admin", 3: "security", 4: "accountant"}.get(_ACTOR["id"]))
+
+
+def _save(patched_db, data, sid):
+    _ACTOR["id"] = data.get("user_id")
+    return _save_receipt_v3(patched_db, data, sid)
+
+
 def _seed_society_and_users(patched_db):
     """Minimal seed for a society + admin + owner."""
     patched_db.tables.setdefault("societies", []).append({
@@ -34,6 +50,10 @@ def _seed_society_and_users(patched_db):
     patched_db.tables.setdefault("users", []).append({
         "id": 2, "email": "owner@sun.com", "role": "apartment", "society_id": 1,
         "linked_id": 101, "password_hash": None, "failed_login_attempts": 0, "locked_until": None,
+    })
+    patched_db.tables.setdefault("users", []).append({
+        "id": 4, "email": "acct@sun.com", "role": "accountant", "society_id": 1,
+        "password_hash": None, "failed_login_attempts": 0, "locked_until": None,
     })
     patched_db.tables.setdefault("apartments", []).append({
         "id": 101, "society_id": 1, "flat_number": "A-101", "owner_name": "Rajesh",
@@ -52,9 +72,9 @@ def _seed_society_and_users(patched_db):
 class TestScenarioB_ReceiptLedgerLoop:
     """End-to-end financial flow."""
 
-    def test_admin_created_receipt_is_confirmed(self, patched_db):
+    def test_admin_created_receipt_is_pending_until_someone_else_confirms(self, patched_db):
         _seed_society_and_users(patched_db)
-        ok, msg, rid = _save_receipt_v3(
+        ok, msg, rid = _save(
             patched_db,
             {
                 "amount": 5000,
@@ -69,6 +89,9 @@ class TestScenarioB_ReceiptLedgerLoop:
         assert ok, msg
         assert rid is not None
         receipt = next(r for r in patched_db.tables["receipts"] if r["id"] == rid)
+        assert receipt["status"] == "pending"          # an admin cannot create AND confirm
+        v_ok, v_msg = verify_receipt(rid, confirmed_by=4)    # the accountant
+        assert v_ok, v_msg
         assert receipt["status"] == "confirmed"
 
     def test_security_created_receipt_is_pending(self, patched_db):
@@ -78,14 +101,14 @@ class TestScenarioB_ReceiptLedgerLoop:
             "id": 3, "email": "guard@sun.com", "role": "security", "society_id": 1,
             "linked_id": 201, "failed_login_attempts": 0, "locked_until": None,
         })
-        ok, msg, rid = _save_receipt_v3(
+        ok, msg, rid = _save(
             patched_db,
             {
                 "amount": 200,
                 "acc_id": 633,
                 "particulars": "Gate cash",
                 "entity_id": None,
-                "role": "other",
+                "role": "security",     # a guard may only record security-role receipts
                 "user_id": 3,  # security
             },
             1,
@@ -96,20 +119,24 @@ class TestScenarioB_ReceiptLedgerLoop:
 
     def test_verify_pending_receipt_posts_transaction(self, patched_db):
         _seed_society_and_users(patched_db)
-        ok, msg, rid = _save_receipt_v3(
+        patched_db.tables["users"].append({
+            "id": 3, "email": "guard@sun.com", "role": "security", "society_id": 1,
+            "linked_id": 201, "failed_login_attempts": 0, "locked_until": None,
+        })
+        ok, msg, rid = _save(
             patched_db,
             {
                 "amount": 200,
                 "acc_id": 633,
                 "particulars": "Gate cash",
                 "entity_id": None,
-                "role": "other",
+                "role": "security",     # a guard may only record security-role receipts
                 "user_id": 3,  # security → pending
             },
             1,
         )
         assert ok
-        v_ok, v_msg = verify_receipt(rid, confirmed_by=1)
+        v_ok, v_msg = verify_receipt(rid, confirmed_by=4)
         assert v_ok, v_msg
         receipt = next(r for r in patched_db.tables["receipts"] if r["id"] == rid)
         assert receipt["status"] == "confirmed"
@@ -119,12 +146,13 @@ class TestScenarioB_ReceiptLedgerLoop:
 
     def test_kpi_receipts_total_reflects_confirmed(self, patched_db):
         _seed_society_and_users(patched_db)
-        _save_receipt_v3(
+        ok, _, rid = _save(
             patched_db,
             {"amount": 1000, "acc_id": 2311, "particulars": "Maint", "entity_id": 101,
              "role": "apartment", "user_id": 1},
             1,
         )
+        assert ok and verify_receipt(rid, confirmed_by=4)[0]
         rows = patched_db._fn_receipts_list(
             {"p0": 1, "p1": None, "p2": None, "p3": None}, fetch_one=False, fetch_all=True
         ) or []
@@ -138,14 +166,14 @@ class TestScenarioB_ReceiptLedgerLoop:
             "id": 3, "email": "guard@sun.com", "role": "security", "society_id": 1,
             "linked_id": 201, "failed_login_attempts": 0, "locked_until": None,
         })
-        ok, msg, rid = _save_receipt_v3(
+        ok, msg, rid = _save(
             patched_db,
-            {"amount": 5000, "acc_id": 2311, "particulars": "Maint", "entity_id": 101,
-             "role": "apartment", "user_id": 3},  # security → pending
+            {"amount": 5000, "acc_id": 2311, "particulars": "Maint", "entity_id": None,
+             "role": "security", "user_id": 3},  # security → pending
             1,
         )
         assert ok
-        v_ok, _ = verify_receipt(rid, confirmed_by=1)
+        v_ok, _ = verify_receipt(rid, confirmed_by=4)
         assert v_ok
         ledger = patched_db._fn_account_ledger_fy(
             {"p0": 1, "p1": 2311, "p2": 2026}, fetch_one=False, fetch_all=True
@@ -162,13 +190,13 @@ class TestScenarioB_ReceiptLedgerLoop:
 
     def test_receipt_list_filtered_by_date(self, patched_db):
         _seed_society_and_users(patched_db)
-        _save_receipt_v3(
+        _save(
             patched_db,
             {"amount": 100, "acc_id": 2311, "particulars": "Jan", "entity_id": 101,
              "role": "apartment", "user_id": 1, "receipt_date": "2026-05-15"},
             1,
         )
-        _save_receipt_v3(
+        _save(
             patched_db,
             {"amount": 200, "acc_id": 2311, "particulars": "Feb", "entity_id": 101,
              "role": "apartment", "user_id": 1, "receipt_date": "2026-06-15"},
