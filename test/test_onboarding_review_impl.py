@@ -69,3 +69,40 @@ def test_missing_migration_column_does_not_crash_the_hub(monkeypatch):
     monkeypatch.setattr(ob, "_row", lambda sql, params=None, **k: boom(sql, params))
     assert ob.society_phase(1) == "complete"          # un-migrated DB: nothing is phase-locked
     assert ob.signing_mode(1) == "password"
+
+
+def test_fy_int_rejects_non_integers():
+    from app.services import onboarding_service as ob
+    assert ob._fy_int(2026) == 2026 and ob._fy_int("2026") == 2026 and ob._fy_int(2026.0) == 2026
+    for bad in (None, "", "abc", "2026.5", 2026.5, True, 12, 99999, "1e3"):
+        assert ob._fy_int(bad) is None
+
+
+def test_needs_review_surfaces_in_rail(monkeypatch):
+    from app.services import onboarding_service as ob
+    monkeypatch.setattr(ob, "declaration", lambda sid: {"steps": {
+        "funds": {"status": "done", "needs_review": True},
+        "gst": {"status": "done", "needs_review": False},
+        "tds": {"status": "skipped", "needs_review": True}}})
+    st = ob.step_statuses(1)
+    assert st["funds"]["status"] == "needs_review"
+    assert st["gst"]["status"] == "done" and st["tds"]["status"] == "skipped"
+    assert wr.status_of(st, "Funds") == "needs_review"
+
+
+def _admin_save(monkeypatch, values):
+    from app.services import onboarding_service as ob
+    saved = {}
+    monkeypatch.setattr(ob, "declaration", lambda sid: {})
+    monkeypatch.setattr(ob, "_save_declaration", lambda sid, d, aid: saved.update(d))
+    monkeypatch.setattr(ob, "_committee_complete", lambda sid: True)
+    return ob.save_step(1, 1, "administrator", values), saved
+
+
+def test_blank_or_missing_confirmation_is_rejected(monkeypatch):
+    for vals in ({"stepup_secret": "Str0ng!Passw0rd#1"},
+                 {"stepup_secret": "Str0ng!Passw0rd#1", "stepup_confirm": ""},
+                 {"stepup_secret": "Str0ng!Passw0rd#1", "stepup_confirm": "Str0ng!Passw0rd#2"}):
+        res, saved = _admin_save(monkeypatch, vals)
+        assert not res["ok"] and any("confirm" in e.lower() for e in res["errors"])
+        assert not (saved.get("draft", {}).get("administrator") or {}).get("stepup_hash")
