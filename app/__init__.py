@@ -112,6 +112,12 @@ def _register_error_handlers(app: Flask) -> None:
                 is_db_error = True
         except ImportError:
             pass
+        # A torn-down / unavailable connection pool raises RuntimeError, not a
+        # psycopg2 error — treat it the same way so users get the 503 DB message.
+        if not is_db_error and isinstance(exc, RuntimeError):
+            msg = str(exc).lower()
+            if "pool unavailable" in msg or "connection pool" in msg:
+                is_db_error = True
             
         if is_db_error:
             if _wants_json():
@@ -161,7 +167,8 @@ def create_app(config_name: str | None = None) -> Flask:
     CORS(app)
     _register_error_handlers(app)
 
-    # Fail closed: production must not start without a valid SECRET_VAULT_KEY that matches this database.
+    # Fail closed: production must not start without a valid SECRET_VAULT_KEY that matches this database
+    # and without a reachable database. Do not start in a degraded state.
     if not app.config.get('TESTING'):
         from app.services.secret_vault import assert_vault_ready
         try:
@@ -169,9 +176,9 @@ def create_app(config_name: str | None = None) -> Flask:
             assert_vault_ready(_vault_db)
         except RuntimeError:
             raise
-        except Exception as e:                      # database unreachable at import: still check the key itself  # noqa: BLE001
-            log.warning("vault database check skipped: %s", e)
-            assert_vault_ready(None)
+        except Exception as e:                      # database unreachable at import: fail closed
+            log.error("Database unreachable at startup: %s", e)
+            raise RuntimeError(f"Database unavailable at startup: {e}") from e
 
     # Initialize background jobs
     if not app.config.get('TESTING') and os.environ.get('WERKZEUG_RUN_MAIN') != 'true':

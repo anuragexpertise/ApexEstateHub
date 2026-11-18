@@ -3,6 +3,24 @@ let swRegistration = null;
 let isSubscribed = false;
 let applicationServerPublicKey = null;
 
+function showPushError(message) {
+    // Non-blocking, user-visible notice: push is optional, but failures must not be silent.
+    const existing = document.getElementById('pushError');
+    if (existing) {
+        existing.textContent = message;
+        existing.classList.remove('hidden');
+        return;
+    }
+    const el = document.createElement('div');
+    el.id = 'pushError';
+    el.className = 'conn-banner';
+    el.style.background = '#b58900';
+    el.style.fontSize = '13px';
+    el.innerHTML = `<span>${message}</span>
+        <button class="dismiss" onclick="this.parentElement.classList.add('hidden')">Dismiss</button>`;
+    document.body.appendChild(el);
+}
+
 async function loadVapidPublicKey() {
     try {
         const response = await fetch('/api/push/vapid-public-key');
@@ -17,7 +35,7 @@ async function loadVapidPublicKey() {
         console.log('VAPID public key loaded');
         return true;
     } catch (error) {
-        console.error('Failed to load VAPID public key:', error);
+        showPushError('Push notifications unavailable: could not load server key.');
         return false;
     }
 }
@@ -60,7 +78,7 @@ async function initializePushNotifications() {
             console.log('Already subscribed to push notifications');
         }
     } catch (error) {
-        console.error('Push notification error:', error);
+        showPushError('Push notifications unavailable: ' + error.message);
     }
 }
 
@@ -105,7 +123,7 @@ async function subscribeUser() {
             console.warn('Push subscribe failed:', data);
         }
     } catch (error) {
-        console.error('Failed to subscribe user:', error);
+        showPushError('Failed to subscribe to push notifications: ' + error.message);
     }
 }
 

@@ -7,18 +7,35 @@
     <title>EstateHub - Society Management System</title>
     
     <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" onerror="showConnError()">
     
     <!-- Font Awesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" onerror="showConnError()">
     
     <!-- Your Custom CSS -->
     <link rel="stylesheet" href="/static/css/style.css">
+    
+    <style>
+    .conn-banner{
+        position:fixed;top:0;left:0;right:0;background:#b3261e;color:#fff;
+        padding:10px 16px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
+        font-size:14px;z-index:9999;box-sizing:border-box;
+        display:flex;align-items:center;justify-content:space-between;
+    }
+    .conn-banner.hidden{display:none;}
+    .conn-banner .dismiss{background:transparent;border:none;color:#fff;font-weight:700;
+        cursor:pointer;margin-left:12px;padding:4px 8px;}
+    .conn-banner a{color:#fff;text-decoration:underline;}
+    </style>
     
     <!-- If static files aren't working, try this alternative -->
     <!-- <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"> -->
 </head>
 <body>
+    <div id="connError" class="conn-banner hidden">
+        <span id="connErrorMsg">EstateHub cannot reach the server. Check your internet connection or try again in a moment.</span>
+        <button class="dismiss" onclick="document.getElementById('connError').classList.add('hidden')">Dismiss</button>
+    </div>
     <div id="app-root">
         <!-- Sidebar -->
         <aside class="app-sidebar">
@@ -159,6 +176,15 @@
             });
         }
         
+        function showConnError() {
+            const banner = document.getElementById('connError');
+            const msg = document.getElementById('connErrorMsg');
+            if (banner && msg) {
+                msg.textContent = 'EstateHub cannot load required resources. Check your internet connection and refresh the page.';
+                banner.classList.remove('hidden');
+            }
+        }
+
         // Check authentication
         async function checkAuth() {
             try {
@@ -174,7 +200,12 @@
                     if (userAvatar) userAvatar.textContent = (data.user.name || 'U')[0].toUpperCase();
                 }
             } catch (error) {
-                console.log('Auth check failed:', error);
+                const banner = document.getElementById('connError');
+                const msg = document.getElementById('connErrorMsg');
+                if (banner && msg) {
+                    msg.textContent = 'EstateHub cannot reach the server. Check your internet connection or try again in a moment.';
+                    banner.classList.remove('hidden');
+                }
             }
         }
         checkAuth();
