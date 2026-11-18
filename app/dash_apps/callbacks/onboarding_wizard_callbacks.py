@@ -34,9 +34,7 @@ from app.security.audit_context import (
 from app.security.guards import require_session
 from app.services import onboarding_service as ob
 from app.services import regime_rules_admin as rra
-from app.services.onboarding_service import money
 from app.services.xlsx_templates import (
-    build_bf_template,
     build_tds_template,
     parse_upload,
 )
@@ -144,17 +142,37 @@ def _tds_rows(form):
 
 
 def _bf_rows(form):
+    from app.services import onboarding_service as _ob
     from database.seed import ACCOUNTS
     meta = {a[0]: a for a in ACCOUNTS}
     amts, rems = form.get("sw-bf-amt") or {}, form.get("sw-bf-remarks") or {}
+    # Preserve previously stored evidence + ledger rows per account so a re-save never wipes them.
+    saved = {}
+    try:
+        s = _session()
+        if s and s[0]:
+            bf = (_ob.load_draft(s[0]).get("brought_forward")) or {}
+            saved = {int(r["acc_id"]): r for r in (bf.get("rows") or []) if r.get("acc_id") is not None}
+    except Exception:                                                      # noqa: BLE001
+        saved = {}
     rows = []
     for aid, amt in amts.items():
         a = meta.get(aid)
         if not a:
             continue
-        if amt in (None, "", 0, 0.0) and not rems.get(aid):
+        prev = saved.get(int(aid)) or {}
+        has_saved = bool(prev.get("evidence_id") or prev.get("ledger_rows") or prev.get("bf_amount") or prev.get("remarks"))
+        if amt in (None, "", 0, 0.0) and not rems.get(aid) and not has_saved:
             continue
-        rows.append({"acc_id": aid, "tab": a[2], "side": a[5], "bf_amount": str(amt or 0), "remarks": rems.get(aid) or ""})
+        rows.append({
+            "acc_id": aid, "tab": a[2], "side": a[5],
+            "bf_amount": str(amt or prev.get("bf_amount") or 0),
+            "remarks": rems.get(aid) or prev.get("remarks") or "",
+            "evidence_id": prev.get("evidence_id"),
+            "sha256": prev.get("sha256"),
+            "filename": prev.get("filename"),
+            "ledger_rows": prev.get("ledger_rows"),
+        })
     return rows
 
 
@@ -222,9 +240,7 @@ def _raw_step_values(step_key, form):
              "pay_qr": _uploaded(form, "pay_qr")}
     elif step_key == "brought_forward":
         v = {"fy": form.get("sw-bf-fy"), "as_on_date": _iso(form.get("sw-bf-as-on")),
-             "rows": _bf_rows(form),
-             "receivables": form.get("onb-receivables-json"),
-             "reconciliation": form.get("onb-reconciliation-json")}
+             "rows": _bf_rows(form)}
     return v
 
 
@@ -326,7 +342,6 @@ def register_onboarding_wizard_callbacks(app):
         State("sw-calc-start-date", "date"), State("sw-bf-fy", "value"), State("sw-bf-as-on", "date"),
         State("sw-qr-secret-confirm", "value"),
         State("sw-central-employees", "value"), State("sw-central-security-agency", "value"),
-        State("onb-receivables-json", "data"), State("onb-reconciliation-json", "data"),
         State({"type": "tds-section", "index": ALL}, "value"), State({"type": "tds-discriminator", "index": ALL}, "value"),
         State({"type": "tds-nature", "index": ALL}, "value"), State({"type": "tds-rate", "index": ALL}, "value"),
         State({"type": "tds-rate-no-pan", "index": ALL}, "value"), State({"type": "tds-single-bill", "index": ALL}, "value"),
@@ -467,273 +482,9 @@ def register_onboarding_wizard_callbacks(app):
             body, mk = op.hub_body(role, sid, uid), op.marker(sid)
             return _alert(msg), body, mk, False, ""
 
-    # ── item 10: pending receivables by apartment — manual grid + bulk upload ────────────────────
-    # An editable DataTable owns the rows while the admin works, so typing, pasting from Excel and deleting
-    # rows never re-render (and never steal focus from) the table. onb-receivables-json is only a derived
-    # copy that wizard_nav reads on Next; all rules live in app.services.pending_receivables and are shared
-    # with the step validator and Annex C, so the grid, the upload and the saved data cannot disagree.
-    @app.callback(
-        Output("onb-recv-grid", "data"),
-        Output("onb-bf-recv-feedback", "children"),
-        Input("onb-bf-add-rec", "n_clicks"),
-        Input("onb-bf-recv-upload", "contents"),
-        Input("onb-recv-clear", "submit_n_clicks"),
-        State("onb-bf-recv-upload", "filename"),
-        State("onb-recv-mode", "value"),
-        State("onb-recv-grid", "data"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def bf_recv_grid_update(add_clicks, contents, clear_clicks, filename, mode, rows):
-        import base64
+    # ── item 10/11 removed: receivables & reconciliation merged into per-account ledger rows in §4 ────
 
-        from app.services import pending_receivables as pr
-        trig = ctx.triggered_id
-        rows = rows or []
-        if trig == "onb-bf-add-rec":
-            return rows + [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}], no_update
-        if trig == "onb-recv-clear":
-            return [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}], \
-                   _alert("All rows cleared. Nothing is saved until you click Next.", ok=True)
-        if trig != "onb-bf-recv-upload" or not contents:
-            return no_update, no_update
-        s = _session()
-        known = ob.known_flat_numbers(s[0]) if s and s[0] else []
-        try:
-            data = base64.b64decode(contents.split(",", 1)[1])
-        except Exception:                                                  # noqa: BLE001
-            return no_update, _alert("Could not read the uploaded file.", ok=False)
-        try:
-            incoming, errors, _info = pr.parse_upload(data, filename or "", known)
-        except pr.UploadError as exc:
-            return no_update, _alert(str(exc), ok=False)
-        if errors:
-            # All-or-nothing: importing only the valid rows would silently drop arrears and break the tie-out.
-            shown = errors[:10]
-            more = len(errors) - len(shown)
-            return no_update, dbc.Alert([html.Strong(f"Nothing was imported — {len(errors)} problem(s) in {filename}:"),
-                                         html.Ul([html.Li(e) for e in shown], className="mb-1"),
-                                         html.Div(f"…and {more} more." if more > 0 else ""),
-                                         html.Div("Fix the file and upload it again.", className="small")],
-                                        color="danger", className="py-2 mt-2", style={"fontSize": "12.5px"}, dismissable=True)
-        if not incoming:
-            return no_update, _alert("The file has a header but no receivable rows.", ok=False)
-        merged, added, updated = pr.merge(rows, incoming, "replace" if mode == "replace" else "add")
-        msg = (f"Imported {len(incoming)} row(s) from {filename}: " +
-               ("replaced the existing list." if mode == "replace" else f"{added} added, {updated} updated.") +
-               f" Total ₹{pr.total(merged):,.2f}. Nothing is saved until you click Next.")
-        return merged, _alert(msg, ok=True)
-
-    @app.callback(
-        Output("onb-receivables-json", "data"),
-        Output("onb-bf-tieout", "children"),
-        Input("onb-recv-grid", "data"),
-        Input({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
-    )
-    @require_session
-    def bf_recv_sync(rows, amts):
-        from app.services import pending_receivables as pr
-        s = _session()
-        sid = s[0] if s else None
-        known = ob.known_flat_numbers(sid) if sid else []
-        clean, errors = pr.clean_rows(rows or [], known)
-        # Sundry Debtors total from the Brought Forward amounts currently ON SCREEN (not the saved draft).
-        sdr = Decimal(0)
-        try:
-            # The society's own accounts rows do not exist until Finalize, so read the same seed chart the form lists.
-            from database.seed import ACCOUNTS
-            meta = {a[0]: a for a in ACCOUNTS}                          # id, name, tab (a[2]), ..., side (a[5])
-            ids = [it["id"]["acc_id"] for it in (ctx.inputs_list[1] or [])]
-            for acc_id, v in zip(ids, amts or []):
-                a = meta.get(acc_id)
-                if a and (a[5] or "Dr") == "Dr" and a[2] in ob.RECEIVABLE_TABS and v not in (None, ""):
-                    sdr += Decimal(str(v))
-        except Exception:  # noqa: BLE001, S110
-            pass        # What Next saves: the cleaned rows when everything is valid; otherwise every non-blank typed row, so the
-        # step validator reports the same problems the admin sees here (a duplicate must not vanish silently).
-        typed = [r for r in (rows or []) if r and any(r.get(k) not in (None, "") for k in pr.FIELDS)]
-        stored = typed if errors else clean
-        rt, _sdr, diff = pr.tie_out(clean, sdr)
-        lines = []
-        if clean or errors:
-            lines.append(html.Div(f"{len(clean)} apartment(s) · receivables ₹{rt:,.2f} · Sundry Debtors ₹{sdr:,.2f}"))
-            if errors:
-                lines.append(html.Div([html.Div(e) for e in errors[:8]] +
-                                      ([html.Div(f"…and {len(errors) - 8} more.")] if len(errors) > 8 else []),
-                                      className="text-danger fw-normal"))
-            elif diff == 0:
-                lines.append(html.Div("✓ Ties to Sundry Debtors.", className="text-success"))
-            else:
-                lines.append(html.Div(f"✗ Difference ₹{abs(diff):,.2f} — receivables are "
-                                      f"{'more' if diff > 0 else 'less'} than Sundry Debtors.", className="text-danger"))
-        elif sdr:
-            lines.append(html.Div(f"Sundry Debtors ₹{sdr:,.2f} entered above; no apartment-wise receivables yet.",
-                                  className="text-warning"))
-        return stored, lines
-
-    @app.callback(
-        Output("onb-bf-recv-download", "data"),
-        Input("onb-bf-recv-template", "n_clicks"),
-        State("onb-recv-grid", "data"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def bf_recv_download(n, rows):
-        if not n:
-            return no_update
-        from app.services import pending_receivables as pr
-        s = _session()
-        known = ob.known_flat_numbers(s[0]) if s and s[0] else []
-        clean, _ = pr.clean_rows(rows or [], known)
-        return dcc.send_bytes(pr.build_template(clean, known), "pending_receivables_template.xlsx")
-
-    # ── item 11: reconciliation cards (driven by the live Brought Forward amounts) ────────────
-    @app.callback(
-        Output("onb-bf-reconciliation-cards", "children"),
-        Output("onb-bf-reconciliation-tieout", "children"),
-        Input({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
-        Input("sw-bf-as-on", "date"),
-        State("onb-reconciliation-json", "data"),
-    )
-    @require_session
-    def bf_reconciliation_render(amts, bf_as_on, rec_json):
-        s = _session()
-        if not s or not s[0]:
-            return no_update, no_update
-        sid, _uid, _role = s
-        ids = [it["id"]["acc_id"] for it in (ctx.inputs_list[0] or [])]
-        live = {int(i): money(v) for i, v in zip(ids, amts or []) if v not in (None, "")}
-        accs = {a["id"]: a for a in ob._rows("SELECT id, name, tab_name, drcr_account FROM accounts WHERE society_id=%s", (sid,))}
-        rec_json = rec_json or {}
-        from database.seed import ACCOUNTS
-        meta = {a[0]: a for a in ACCOUNTS}
-        sdr = Decimal(0)
-        bank_total = Decimal(0)
-        for acc_id, v in zip(ids, amts or []):
-            a = meta.get(acc_id)
-            if not a or v in (None, ""):
-                continue
-            amt = Decimal(str(v))
-            if amt <= 0:
-                continue
-            tab = a[2]
-            side = a[5] or "Dr"
-            if side == "Dr" and tab in ob.RECEIVABLE_TABS:
-                sdr += amt
-            if side == "Dr" and tab in ob.BANK_TABS:
-                bank_total += amt
-        rows = []
-        for acc_id, book in live.items():
-            a = accs.get(acc_id)
-            if not a or a["tab_name"] not in ob.BANK_TABS or a["drcr_account"] == "Cr" or book <= 0:
-                continue
-            r = rec_json.get(f"bank_{acc_id}") or {}
-            stmt = r.get("statement_balance", "")
-            st = ob.reconciliation_state(book, r)
-            stale = ob.stale_statement_errors(bf_as_on, {f"bank_{acc_id}": r})
-            status_kids = _rec_status(st, r)
-            if stale:
-                status_kids = [dbc.Alert(stale[0], color="danger", className="py-0 px-1 mb-1", style={"fontSize": "11px"})] + list(status_kids)
-            rows.append(            html.Div([
-                dcc.Store(id={"type": "onb-bf-rec-book", "acc_id": acc_id}, data=str(book)),
-                html.Div([
-                    html.Div(f"{a['tab_name']} · {a['name']}", className="fw-semibold"),
-                    html.Small(f"Book balance: ₹{book}", className="text-muted"),
-                ]),
-                dbc.Input(id={"type": "onb-bf-rec-stmt", "acc_id": acc_id}, type="number", debounce=True, step=0.01, min=0, size="sm",
-                          value=float(money(stmt)) if stmt not in (None, "") else None, placeholder="Statement / cash-count balance"),
-                dbc.Input(id={"type": "onb-bf-rec-diff", "acc_id": acc_id}, type="number", size="sm", disabled=True,
-                          value=float(st["diff"]) if st["diff"] is not None else None, placeholder="Difference"),
-                html.Div(status_kids, id={"type": "onb-bf-rec-status", "acc_id": acc_id}, style={"fontSize": "11.5px", "lineHeight": "1.35"}),
-                html.Div([
-                    dcc.Upload(id={"type": "onb-bf-evidence", "acc_id": acc_id},
-                               children=dbc.Button("Attach scan", size="sm", outline=True, color="secondary", n_clicks=0, className="mb-1"),
-                               multiple=False, accept=".pdf,.png,.jpg,.jpeg", className="d-inline-block ms-1"),
-                ], style={"whiteSpace": "normal"}),
-            ], className="sw-grid-row sw-rec-grid"))
-
-        has_evidence = any(
-            (r or {}).get("statement_balance") not in (None, "") or (r or {}).get("sha256")
-            for r in rec_json.values()
-        )
-        tieout = ""
-        if bank_total and not has_evidence:
-            tieout = html.Div(f"Sundry Debtors ₹{sdr:,.2f} entered above; no bank/cash reconciliation evidence yet.",
-                              className="text-warning")
-
-        if not rows:
-            return [html.Div("No bank/cash accounts with a non-zero brought-forward balance.", className="text-muted small")], tieout
-
-        header = html.Div([
-            html.Div("Account / Book balance"),
-            html.Div("Statement balance"),
-            html.Div("Difference"),
-            html.Div("Status / evidence"),
-            html.Div("Actions"),
-        ], className="sw-grid-row sw-rec-grid sw-grid-head")
-        return [html.Div([header] + rows, className="sw-hscroll")], tieout
-
-    @app.callback(
-        Output("onb-reconciliation-json", "data"),
-        Output({"type": "onb-bf-rec-diff", "acc_id": ALL}, "value"),
-        Output({"type": "onb-bf-rec-status", "acc_id": ALL}, "children"),
-        Input({"type": "onb-bf-rec-stmt", "acc_id": ALL}, "value"),
-        Input({"type": "onb-bf-evidence", "acc_id": ALL}, "contents"),
-        State({"type": "onb-bf-evidence", "acc_id": ALL}, "filename"),
-        State({"type": "onb-bf-rec-book", "acc_id": ALL}, "data"),
-        State("onb-reconciliation-json", "data"),
-        State("sw-bf-as-on", "date"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def bf_reconciliation_update(stmts, contents, filenames, books, rec_json, bf_as_on):
-        s = _session()
-        trig = ctx.triggered_id
-        if not s or not s[0] or not isinstance(trig, dict):
-            return no_update, no_update, no_update
-        sid, uid, _role = s
-        acc_ids = [it["id"]["acc_id"] for it in (ctx.states_list[1] or [])]
-        book_of = dict(zip(acc_ids, books or []))
-        rec = dict(rec_json or {})
-        key = f"bank_{trig['acc_id']}"
-        item = dict(rec.get(key) or {})
-        errors = {}
-        if trig["type"] == "onb-bf-rec-stmt":
-            val = stmts[acc_ids.index(trig["acc_id"])] if trig["acc_id"] in acc_ids else None
-            item["statement_balance"] = "" if val in (None, "") else str(money(val))
-        else:
-            n = acc_ids.index(trig["acc_id"]) if trig["acc_id"] in acc_ids else -1
-            raw = None
-            try:
-                import base64
-                c = contents[n] if n >= 0 else None
-                raw = base64.b64decode(c.split(",", 1)[1]) if c and "," in c else None
-                if not raw:
-                    raise ob.OnboardingError("Attach the scan as a PDF, PNG or JPG.")
-                try:
-                    on = ob._iso_day(bf_as_on)
-                except ValueError:
-                    on = None
-                ev = ob.store_evidence_file(sid, "account_statement", int(trig["acc_id"]), filenames[n] or "", raw, uid,
-                                            {"kind": "account_statement", "acc_id": int(trig["acc_id"]), "as_on_date": on})
-                item.update({"evidence_id": ev["id"], "sha256": ev["sha256"], "filename": ev["filename"], "purpose": "account_statement"})
-                if on:
-                    item["as_on_date"] = on
-            except ob.OnboardingError as exc:
-                errors[trig["acc_id"]] = str(exc)
-            except Exception:                                            # noqa: BLE001
-                errors[trig["acc_id"]] = "That file could not be read; attach a PDF, PNG or JPG."
-        rec[key] = item
-        diffs, statuses = [], []
-        for a in acc_ids:
-            r = rec.get(f"bank_{a}") or {}
-            st = ob.reconciliation_state(money(book_of.get(a) or 0), r)
-            diffs.append(float(st["diff"]) if st["diff"] is not None else None)
-            if a in errors and str(errors[a]).startswith("Rejected"):
-                statuses.append(dbc.Alert(errors[a], color="danger", className="py-1 mb-0", style={"fontSize": "11.5px"}))
-            else:
-                statuses.append(html.Span(errors[a], className="text-danger") if a in errors else _rec_status(st, r))
-        return rec, diffs, statuses
+    # ── Legal Regime Selection: "Your Legal Regime" card + Legal Hierarchy table (item 7) ──────────────────
 
     # ── Legal Regime Selection: "Your Legal Regime" card + Legal Hierarchy table (item 7) ──────────────────
     # Re-rendered when a Yes/No answer changes AND when State / Constitution change on Society Details (they are only
@@ -1050,119 +801,6 @@ def _register_xlsx_callbacks(app):
                    if it.get("effective_start_date")}
         return (outs["nature"], outs["rate"], outs["rate_no_pan"], outs["single"], outs["agg"],
                 pending.get("tan"), pending.get("effective_date"), False, row_eff)
-    # BF template download: exactly the accounts listed on screen ----------------------
-    def _acc_meta():
-        from database.seed import ACCOUNTS
-        return {a[0]: a for a in ACCOUNTS}
-
-    @app.callback(
-        Output("onb-bf-download", "data"),
-        Input("onb-bf-template", "n_clicks"),
-        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
-        State({"type": "sw-bf-remarks", "acc_id": ALL}, "value"),
-        State("sw-bf-fy", "value"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def bf_template(n, amts, remarks, fy):
-        if not n:
-            return no_update
-        meta = _acc_meta()
-        ids = [d["id"]["acc_id"] for d in (ctx.states_list[0] or [])]
-        rows = []
-        for i, aid in enumerate(ids):
-            a = meta.get(aid)
-            if not a:
-                continue
-            amt = amts[i] if i < len(amts or []) else None
-            rows.append({"account_id": aid, "tab": a[2], "account_name": a[3] or a[1], "side": a[5],
-                         "bf_amount": amt if amt else None,
-                         "remarks": (remarks[i] if i < len(remarks or []) else None) or None})
-        return dcc.send_bytes(build_bf_template(rows, fy), "brought_forward_template.xlsx")
-
-    # BF upload -> preview with live Dr / Cr totals -----------------------------------
-    @app.callback(
-        Output("onb-bf-preview", "children"),
-        Output("onb-bf-pending", "data"),
-        Output("onb-bf-apply", "disabled"),
-        Input("onb-bf-upload", "contents"),
-        State("onb-bf-upload", "filename"),
-        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def bf_upload(contents, filename, amts):
-        if not contents:
-            return no_update, no_update, no_update
-        ids = {d["id"]["acc_id"] for d in _states_pattern_list()}
-        meta = _acc_meta()
-        res = parse_upload(contents, filename, "Brought Forward", ["account_id"])
-        errors = list(res.errors)
-        if errors and not res.rows:
-            return _msg("; ".join(errors), "danger"), None, True
-        seen, rows, dr, cr = set(), {}, _D(0), _D(0)
-        for n, rec in enumerate(res.rows, start=2):
-            try:
-                aid = int(str(rec.get("account_id")).strip().split(".")[0])
-            except ValueError:
-                errors.append(f"Row {n}: account_id is not a number.")
-                continue
-            if aid in seen:
-                errors.append(f"Row {n}: duplicate account_id {aid}.")
-                continue
-            seen.add(aid)
-            if aid not in ids:
-                errors.append(f"Row {n}: account_id {aid} is unknown or not postable for this society.")
-                continue
-            try:
-                amt = _dec(rec.get("bf_amount"), _D(0)) or _D(0)
-            except ValueError as exc:
-                errors.append(f"Row {n}: bf_amount {exc}.")
-                continue
-            rows[aid] = {"amount": str(amt), "remarks": (str(rec.get("remarks") or "").strip() or None)}
-            if meta[aid][5] == "Dr":
-                dr += amt
-            else:
-                cr += amt
-        fy = None
-        head = parse_upload(contents, filename, "Header", [])
-        if head.rows and head.rows[0].get("financial_year") not in (None, ""):
-            try:
-                fy = int(float(str(head.rows[0]["financial_year"])))
-            except ValueError:
-                errors.append("Header: financial_year must be a year.")
-        if errors:
-            return _msg("Nothing was applied. " + " ".join(errors[:25]), "danger"), None, True
-        diff = dr - cr
-        colour = "success" if diff == 0 else "warning"
-        return (_msg(f"{len(rows)} account(s) read. Total Dr ₹{dr:,.2f} · Total Cr ₹{cr:,.2f} · Difference ₹{diff:,.2f}"
-                     + ("" if diff == 0 else " (it must be 0.00 before the Review step passes)."), colour),
-                {"rows": {str(k): v for k, v in rows.items()}, "fy": fy}, False)
-
-    # BF apply ---------------------------------------------------------------------
-    @app.callback(
-        Output({"type": "sw-bf-amt", "acc_id": ALL}, "value", allow_duplicate=True),
-        Output({"type": "sw-bf-remarks", "acc_id": ALL}, "value", allow_duplicate=True),
-        Output("sw-bf-fy", "value", allow_duplicate=True),
-        Output("onb-bf-apply", "disabled", allow_duplicate=True),
-        Input("onb-bf-apply", "n_clicks"),
-        State("onb-bf-pending", "data"),
-        State({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def bf_apply(n, pending, amts):
-        if not n or not pending:
-            return no_update, no_update, no_update, no_update
-        ids = [d["id"]["acc_id"] for d in _states_pattern_list()]
-        rows = pending.get("rows") or {}
-        a_out, r_out = [], []
-        for aid in ids:
-            item = rows.get(str(aid))
-            a_out.append(float(item["amount"]) if item else no_update)
-            r_out.append(item["remarks"] if item and item.get("remarks") else no_update)
-        return a_out, r_out, (pending.get("fy") if pending.get("fy") else no_update), True
-
     # BF ledger rows modal per account -----------------------------------------
     @app.callback(
         Output({"type": "sw-bf-ledger-modal", "acc_id": MATCH}, "is_open"),
@@ -1194,13 +832,33 @@ def _register_xlsx_callbacks(app):
     @require_session
     def bf_ledger_grid(add_n, contents, clear_n, filename, mode, rows):
         from app.services import pending_receivables as pr
+        s = _session()
         trig = ctx.triggered_id
         rows = rows or [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}]
+        acc_id = int(trig["acc_id"]) if isinstance(trig, dict) else None
+
+        def _persist(merged):
+            if s and s[0] and acc_id is not None:
+                try:
+                    d = ob.declaration(s[0]) or {}
+                    draft = d.setdefault("draft", {})
+                    bf = draft.setdefault("brought_forward", {})
+                    br = next((r for r in (bf.get("rows") or []) if int(r.get("acc_id") or -1) == acc_id), None)
+                    if br is None:
+                        br = {"acc_id": acc_id}
+                        bf.setdefault("rows", []).append(br)
+                    br["ledger_rows"] = merged
+                    ob._save_declaration(s[0], d, s[1])
+                except Exception:                                              # noqa: BLE001, S110
+                    pass
+            return merged
+
         if trig and trig["type"] == "sw-bf-ledger-add":
-            return rows + [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}], no_update
+            merged = rows + [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}]
+            return _persist(merged), no_update
         if trig and trig["type"] == "sw-bf-ledger-clear":
-            return [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}], \
-                   _alert("All ledger rows cleared.", ok=True)
+            merged = [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}]
+            return _persist(merged), _alert("All ledger rows cleared.", ok=True)
         if trig and trig["type"] == "sw-bf-ledger-upload" and contents:
             data = _decode(contents)
             if data is None:
@@ -1222,7 +880,7 @@ def _register_xlsx_callbacks(app):
             merged, _added, _updated = pr.merge(rows, incoming, "replace" if mode == "replace" else "add")
             total = sum((Decimal(str(i.get("amount") or 0)) for i in merged), Decimal(0))
             msg = f"Imported {len(incoming)} row(s) from {filename}. Total ₹{total:,.2f}."
-            return merged, _alert(msg, ok=True)
+            return _persist(merged), _alert(msg, ok=True)
         return no_update, no_update
 
     @app.callback(
@@ -1260,3 +918,50 @@ def _register_xlsx_callbacks(app):
         from app.services import pending_receivables as pr
         clean, _ = pr.clean_rows(rows or [], [])
         return dcc.send_bytes(pr.build_template(clean, []), "ledger_template.xlsx")
+
+    # BF per-account attachment upload -> evidence register (server SHA-256) -----------------
+    @app.callback(
+        Output({"type": "sw-bf-attach-feedback", "acc_id": MATCH}, "children"),
+        Input({"type": "sw-bf-attach", "acc_id": MATCH}, "contents"),
+        State({"type": "sw-bf-attach", "acc_id": MATCH}, "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def bf_attach_upload(contents, filename):
+        s = _session()
+        if not s or not s[0]:
+            return no_update
+        sid, uid, _role = s
+        trig = ctx.triggered_id
+        if not isinstance(trig, dict):
+            return no_update
+        acc_id = int(trig["acc_id"])
+        raw = None
+        try:
+            import base64
+            c = contents
+            raw = base64.b64decode(c.split(",", 1)[1]) if c and "," in c else None
+            if not raw:
+                raise ob.OnboardingError("Attach the scan as a PDF, PNG or JPG.")
+            ev = ob.store_evidence_file(sid, "brought_forward", acc_id, filename or "", raw, uid,
+                                        {"kind": "brought_forward", "acc_id": acc_id})
+            # Record the evidence against this account's BF row so it persists in the draft.
+            try:
+                d = ob.declaration(sid) or {}
+                draft = d.setdefault("draft", {})
+                bf = draft.setdefault("brought_forward", {})
+                br = next((r for r in (bf.get("rows") or []) if int(r.get("acc_id") or -1) == acc_id), None)
+                if br is None:
+                    br = {"acc_id": acc_id}
+                    bf.setdefault("rows", []).append(br)
+                br.update({"evidence_id": ev["id"], "sha256": ev["sha256"],
+                           "filename": ev["filename"], "purpose": "brought_forward"})
+                ob._save_declaration(sid, d, uid)
+            except Exception:                                              # noqa: BLE001, S110
+                pass
+            return html.Div(f"✓ Attached {ev['filename']} (SHA-256 {str(ev['sha256'])[:16]}…)",
+                            className="text-success")
+        except ob.OnboardingError as exc:
+            return html.Div(str(exc), className="text-danger")
+        except Exception:                                                  # noqa: BLE001
+            return html.Div("That file could not be read; attach a PDF, PNG or JPG.", className="text-danger")

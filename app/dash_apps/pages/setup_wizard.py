@@ -2161,8 +2161,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
                                                                    size="sm", outline=True, n_clicks=0),
                                                multiple=False, accept=".pdf,.png,.jpg,.jpeg,.webp"), md=2),
                         ], className="g-1 align-items-center mb-2"),
-                        html.Div(id={"type": "sw-bf-ledger-rows", "acc_id": acc_id}, className="ms-3 mt-1",
-                                 style={"display": "none"}),
+                        html.Div(id={"type": "sw-bf-attach-feedback", "acc_id": acc_id},
+                                 style={"fontSize": "12.5px", "marginTop": "4px"}),
                         html.Small("Admin: attachment verified to match the entered value for this account/label.",
                                    className="text-muted d-block mt-1 mb-3", style={"fontSize": "11px"}),
                         ledger_modal,
@@ -2183,16 +2183,6 @@ def render_category_content(category, society_id=None, state=None, constitution=
                            className="text-muted d-block mt-1") if _not_opted else None,
             ], className="py-2"), className="mb-3", style={"border": "1px solid #d7deea", "background": "#f8faff"}),
             html.H6("Brought Forward Accounts", className="mt-4 mb-2 text-primary"),
-            dbc.Row([
-                dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Download template (xlsx)"],
-                                   id="onb-bf-template", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
-                dbc.Col(dcc.Upload(id="onb-bf-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload filled xlsx"],
-                                   color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".xlsx"), md="auto"),
-                dbc.Col(dcc.Download(id="onb-bf-download"), md="auto"),
-            ], className="g-2 mb-2"),
-            dcc.Store(id="onb-bf-pending", data=None),
-            html.Div(id="onb-bf-preview", className="mb-2"),
-            dbc.Button("Apply to form", id="onb-bf-apply", color="primary", size="sm", disabled=True, n_clicks=0, className="mb-3"),
             html.Div([
                 html.P("Enter one row per account that carries a brought-forward (opening) balance. For each account enter the "
                        "label, value and remarks, add ledger sub-rows if needed, and attach the supporting statement. Admin "
