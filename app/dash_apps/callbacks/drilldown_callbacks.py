@@ -2016,10 +2016,11 @@ def register_drilldown_callbacks(app):
         State({"type": "reg-cert-store", "entity": ALL, "field": ALL}, "data"),
         State("drilldown-store", "data"),
         State("auth-store", "data"),
+        State("op-token-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def handle_form_submit(n_clicks_list, _fv, _hv, _dv, _rcs, store, auth):
+    def handle_form_submit(n_clicks_list, _fv, _hv, _dv, _rcs, store, auth, op_token=None):
         # ── Guard: nothing triggered or all zero-clicks ──────────────────────
         if not ctx.triggered or not ctx.triggered[0]["value"]:
             return no_update, no_update, no_update, no_update, no_update
@@ -2262,12 +2263,17 @@ def register_drilldown_callbacks(app):
                 create_society_checked,
                 payload_from_master_form,
             )
+            from app.services import op_progress
+            _trk = op_progress.begin(op_token, "society_register", "Registering the society", steps_total=4, society_id=None)
             try:
+                _trk.step(1, "Creating the society, its chart of accounts and defaults")
                 nsid = create_society_checked(payload_from_master_form(merged, get_current_user_id()))
                 if not nsid:
+                    _trk.fail("Failed")
                     return (store, no_update, no_update, 
                             {"type": "error", "message": "Failed to create society."}, 
                             no_update)
+                _trk.step(2, "Society created. Filing the registration certificate")
 
                 # Store the registration certificate as evidence for Annex E (registration_certificate purpose).
                 # The master uploads it at registration; it is later read by the onboarding hub's Annex E control.
@@ -2300,22 +2306,31 @@ def register_drilldown_callbacks(app):
                     # Non-fatal: society is created; the certificate can still be uploaded in the onboarding hub.
 
                 # Success: redirect to the master societies list ("total societies")
+                _trk.step(3, "Opening the societies list")
                 store = nav_state.navigate_to(store, "list_master_societies", "All Societies")
                 hide_kpis = len(store.get("stack", [])) > 1
                 content, bc, db_err = _render_current(store, auth)
                 kpi_style = {"display": "none"} if hide_kpis else {"display": "grid"}
+                _trk.done("Society registered")
+                from app.utils.ux_toasts import celebration
                 return (
                     store,
                     content,
                     bc,
-                    {"type": "success", "message": f"Society '{name}' created successfully!"},
+                    {"type": "success", "message": f"Society '{name}' created successfully!",
+                     "celebrate": celebration(
+                         "registered", f"{name} is registered",
+                         "The society is on the platform. The administrator can now sign in and begin onboarding.",
+                         key=f"eh-registered-{nsid}")},
                     kpi_style,
                 )
             except SocietyCreateError as e:
+                _trk.fail("Failed")
                 return (store, no_update, no_update,
                         {"type": "error", "message": str(e)},
                         no_update)
             except Exception as e:  # noqa: BLE001
+                _trk.fail("Failed")
                 return (store, no_update, no_update,
                         error_toast(e, "Unable to create the society. Please try again."),
                         no_update)
@@ -2707,12 +2722,20 @@ def register_drilldown_callbacks(app):
         Input({"type": "btn-fy-export", "entity": MATCH}, "n_clicks"),
         State("drilldown-store", "data"),
         State("auth-store", "data"),
+        State("op-token-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def download_fy_export(n_clicks, store, auth):
+    def download_fy_export(n_clicks, store, auth, op_token=None):
         if not n_clicks:
             return no_update
+        from app.services import op_progress
+        with op_progress.begin(op_token, "fy_export", "Preparing your report", steps_total=3,
+                               society_id=get_current_society_id()) as _trk:
+            _trk.step(1, "Collecting the figures from the ledger")
+            return _download_fy_export_impl(store, auth, _trk)
+
+    def _download_fy_export_impl(store, auth, _trk):
         entity = ctx.triggered_id.get("entity")
         store = store or {}
         sid = get_current_society_id()
@@ -2848,6 +2871,7 @@ def register_drilldown_callbacks(app):
         else:
             return no_update
 
+        _trk.step(2, "Writing the workbook")
         _log_export(entity, sid, fy, {"entity": entity, "fy": fy, "filters": dict(filters or {})})
         return dcc.send_bytes(lambda buf: buf.write(data), filename=filename)
 
@@ -2857,12 +2881,20 @@ def register_drilldown_callbacks(app):
         Input({"type": "btn-xls-download", "entity": MATCH}, "n_clicks"),
         State("drilldown-store", "data"),
         State("auth-store", "data"),
+        State("op-token-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def download_xls(n_clicks, store, auth):
+    def download_xls(n_clicks, store, auth, op_token=None):
         if not n_clicks:
             return no_update
+        from app.services import op_progress
+        with op_progress.begin(op_token, "xls_export", "Preparing your download", steps_total=3,
+                               society_id=get_current_society_id()) as _trk:
+            _trk.step(1, "Reading the rows")
+            return _download_xls_impl(store, auth, _trk)
+
+    def _download_xls_impl(store, auth, _trk):
         entity = ctx.triggered_id.get("entity", "data")
         sid = get_current_society_id()
         filters = nav_state.get_filters(store or {})
@@ -2871,6 +2903,7 @@ def register_drilldown_callbacks(app):
         rows, _ = loaders.load_list(entity, filters, page=1, page_size=10_000)
         if not rows:
             return no_update
+        _trk.step(2, "Writing the workbook")
         df = pd.DataFrame(rows)
         try:
             get_current_user_id()

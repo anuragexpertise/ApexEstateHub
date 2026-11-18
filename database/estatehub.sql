@@ -24002,6 +24002,21 @@ CREATE TABLE onboarding_jobs (
     finished_at TIMESTAMPTZ
 );
 
+-- progress of database-intensive operations (bar shown by the shell-level modal; created lazily by app/services/op_progress.py too)
+CREATE TABLE IF NOT EXISTS op_progress (
+    token UUID PRIMARY KEY,
+    user_id INT,
+    society_id INT,
+    kind TEXT NOT NULL,
+    title TEXT,
+    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'done', 'failed')),
+    step INT NOT NULL DEFAULT 0,
+    steps_total INT NOT NULL DEFAULT 1,
+    message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- onboarding events (agreement_signed etc.)
 CREATE TABLE onboarding_events (
     id SERIAL PRIMARY KEY,

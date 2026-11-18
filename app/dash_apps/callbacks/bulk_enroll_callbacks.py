@@ -827,10 +827,11 @@ def register_bulk_enroll_callbacks(app):
         State("bulk-enroll-entity-store",   "data"),
         State("auth-store",                 "data"),
         State("drilldown-store",            "data"),
+        State("op-token-store",             "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def process_bulk_enroll_upload(contents, filename, entity, auth, store):
+    def process_bulk_enroll_upload(contents, filename, entity, auth, store, op_token=None):
         if not contents or entity not in _BULK_TEMPLATES:
             raise PreventUpdate
 
@@ -896,22 +897,26 @@ def register_bulk_enroll_callbacks(app):
                 no_update, no_update, no_update, no_update,
             )
 
-        if entity == "apartments":
-            results = _bulk_insert_apartments(rows, sid, actor_id)
-        elif entity == "vendors":
-            results = _bulk_insert_vendors(rows, sid, actor_id)
-        elif entity == "apartment_users":
-            results = _bulk_insert_apartment_users(rows, sid, actor_id)
-        elif entity in ("supervisor","staff"):
-            results = _bulk_insert_team_role(rows, sid, actor_id, role_name=entity)
-        elif entity == "assets":
-            results = _bulk_insert_assets(rows, sid, actor_id)
-        elif entity == "security":
-            results = _bulk_insert_security(rows, sid, actor_id)
-        elif entity in ("supervisor","staff"):
-            results = _bulk_insert_team_role(rows, sid, actor_id, role_name=entity)
-        else:
-            results = {"success":0,"failed":[(0,f"Unsupported bulk entity: {entity}")]}
+        # Progress: the insert helpers loop over `rows`, so a tracked list moves the bar one row at a time
+        # (each row costs a password hash and several inserts, which is what makes a big file slow).
+        from app.services import op_progress
+        with op_progress.begin(op_token, "bulk_enroll", f"Enrolling {len(rows)} rows", steps_total=100, society_id=sid) as trk:
+            rows = op_progress.tracked_rows(rows, trk, "Row")
+            if entity == "apartments":
+                results = _bulk_insert_apartments(rows, sid, actor_id)
+            elif entity == "vendors":
+                results = _bulk_insert_vendors(rows, sid, actor_id)
+            elif entity == "apartment_users":
+                results = _bulk_insert_apartment_users(rows, sid, actor_id)
+            elif entity in ("supervisor","staff"):
+                results = _bulk_insert_team_role(rows, sid, actor_id, role_name=entity)
+            elif entity == "assets":
+                results = _bulk_insert_assets(rows, sid, actor_id)
+            elif entity == "security":
+                results = _bulk_insert_security(rows, sid, actor_id)
+            else:
+                results = {"success":0,"failed":[(0,f"Unsupported bulk entity: {entity}")]}
+            trk.step(99, "Refreshing the list")
 
         # Secret-free audit: counts and the entity kind only - never row
         # contents, which carry names, phones and (initial) credentials.
