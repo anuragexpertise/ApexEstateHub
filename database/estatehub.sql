@@ -13,6 +13,20 @@
 -- Aiven/Render allow it for the database owner; a CI database needs it explicitly.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- Timezone: the app is IST. today_ist() writes dates in IST, so CURRENT_DATE must also be IST, otherwise between
+-- 00:00 and 05:30 IST a UTC session still sees yesterday and e.g. a just-seated office-bearer (term_start = today IST)
+-- is invisible to fn_mark_committee_seated(). Set on the database AND the connected role so it applies through
+-- connection poolers that reject the "options=-c timezone" startup parameter. Applies to NEW sessions; the DO block
+-- also sets it for the session running this script.
+SET timezone = 'Asia/Kolkata';
+DO $$
+BEGIN
+    EXECUTE format('ALTER DATABASE %I SET timezone = %L', current_database(), 'Asia/Kolkata');
+    EXECUTE format('ALTER ROLE %I IN DATABASE %I SET timezone = %L', current_user, current_database(), 'Asia/Kolkata');
+EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'Could not ALTER DATABASE/ROLE timezone (insufficient privilege); ask the DB owner to run: ALTER DATABASE % SET timezone = ''Asia/Kolkata''', current_database();
+END $$;
+
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 1: TABLES
 -- ════════════════════════════════════════════════════════════════
@@ -22941,14 +22955,14 @@ END $$;
 -- with a login, an evidence file and its hash (V5.3). Idempotent; never moves a society backwards.
 CREATE OR REPLACE FUNCTION fn_mark_committee_seated(p_society_id INT)
 RETURNS BOOLEAN LANGUAGE plpgsql AS $$
-DECLARE v_ok BOOLEAN;
+DECLARE v_ok BOOLEAN; v_today DATE := (NOW() AT TIME ZONE 'Asia/Kolkata')::date;
 BEGIN
     SELECT COUNT(DISTINCT co.office_code) = 3 INTO v_ok
       FROM committee_offices co
      WHERE co.society_id = p_society_id AND co.status = 'active'
        AND co.office_code IN ('president', 'secretary', 'treasurer')
        AND co.user_id IS NOT NULL AND co.evidence_hash IS NOT NULL
-       AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE);
+       AND co.term_start <= v_today AND (co.term_end IS NULL OR co.term_end >= v_today);
     IF v_ok THEN
         UPDATE societies SET onboarding_state = 'committee seated'
          WHERE id = p_society_id AND onboarding_state = 'registered';
