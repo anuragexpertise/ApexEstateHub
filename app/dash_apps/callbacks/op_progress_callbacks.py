@@ -10,12 +10,12 @@ Progress flow
 """
 from __future__ import annotations
 
-from dash import ALL, Input, Output, State, no_update
+from dash import Input, Output, State, no_update
 
 from app.security.guards import require_session
 from app.services import op_progress
 
-MAX_MISSES = 12     # polls (~0.7s each) with no row yet before the modal gives up: the action was refused before it began
+MAX_MISSES = 8      # polls (~0.7s each) with no row yet before the modal gives up: the action was refused before it began
 
 
 def register_op_progress_callbacks(app):
@@ -52,30 +52,16 @@ def register_op_progress_callbacks(app):
     )
 
     # ── progress: open the modal the instant a heavy action is triggered ───────────────────────────────────────
+    # app/assets/op_progress_trigger.js recognises the action, stores its title in window.__ehOpTitle and clicks
+    # #op-open-btn. (One callback listing every button as an Input would never fire: Dash only runs a callback when
+    # all its Inputs are in the layout, and these buttons live on different pages.)
     app.clientside_callback(
         """
-        function() {
-            var NU = window.dash_clientside.no_update, SKIP = [NU, NU, NU, NU, NU, NU, NU];
-            var ctx = window.dash_clientside.callback_context;
-            if (!ctx || !ctx.triggered || !ctx.triggered.length) { return SKIP; }
-            var trig = ctx.triggered[0];
-            if (!trig.value) { return SKIP; }   // a freshly rendered button, not a click
-            var raw = trig.prop_id.split('.')[0], id = raw, titles = {
-                'btn-fy-export': 'Preparing your report',
-                'btn-xls-download': 'Preparing your download',
-                'bulk-enroll-upload': 'Enrolling from your file',
-                'bank-reconcile-upload': 'Reconciling the bank statement',
-                'onb-seal': 'Sealing the annexes and issuing the Agreement',
-                'upc-dep-run': 'Posting the depreciation fund'
-            }, title = null;
-            try { id = JSON.parse(raw); } catch (e) {}
-            if (typeof id === 'object') {
-                if (id.type === 'form-submit') {
-                    if (id.card_id !== 'form_master_society_new') { return SKIP; }
-                    title = 'Registering the society';
-                } else { title = titles[id.type] || null; }
-            } else { title = titles[id] || null; }
-            if (!title) { return SKIP; }
+        function(n) {
+            var NU = window.dash_clientside.no_update;
+            var title = window.__ehOpTitle;
+            if (!n || !title) { return [NU, NU, NU, NU, NU, NU, NU]; }
+            window.__ehOpTitle = null;
             return [true, false, title, 5, 'Starting', '', {miss: 0}];
         }
         """,
@@ -86,13 +72,7 @@ def register_op_progress_callbacks(app):
         Output("op-bar", "label"),
         Output("op-msg", "children"),
         Output("op-state", "data"),
-        Input({"type": "btn-fy-export", "entity": ALL}, "n_clicks"),
-        Input({"type": "btn-xls-download", "entity": ALL}, "n_clicks"),
-        Input("bulk-enroll-upload", "contents"),
-        Input("bank-reconcile-upload", "contents"),
-        Input({"type": "form-submit", "entity": ALL, "card_id": ALL}, "n_clicks"),
-        Input("onb-seal", "n_clicks"),
-        Input("upc-dep-run", "n_clicks"),
+        Input("op-open-btn", "n_clicks"),
         prevent_initial_call=True,
     )
 

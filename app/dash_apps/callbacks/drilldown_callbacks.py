@@ -6771,10 +6771,11 @@ def register_fy_close_callbacks(app):
         Input("fy-close-reserve-submit", "n_clicks"),
         State("drilldown-store", "data"),
         State("auth-store", "data"),
+        State("op-token-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def close_fy_with_reserve(n_clicks, store, auth):
+    def close_fy_with_reserve(n_clicks, store, auth, op_token=None):
         if not ctx.triggered or not n_clicks:
             return no_update, no_update, no_update, no_update
 
@@ -6806,8 +6807,12 @@ def register_fy_close_callbacks(app):
         # The share is the Model Bye-Laws constant, not a user input: the
         # input box on the panel is display-only, so a tampered client value
         # cannot change what gets appropriated.
-        result, err = loaders.close_fy_with_reserve_appropriation(
-            society_id, fy, created_by=get_current_user_id())
+        from app.services import op_progress
+        with op_progress.begin(op_token, "fy_close", "Closing the financial year", steps_total=2,
+                               society_id=society_id) as _trk:
+            _trk.step(1, "Posting the reserve appropriation and closing the year")
+            result, err = loaders.close_fy_with_reserve_appropriation(
+                society_id, fy, created_by=get_current_user_id())
 
         if err or not result:
             message = err or "The financial year could not be closed."
@@ -6878,11 +6883,12 @@ def register_fy_close_callbacks(app):
         State("fy-lock-understood", "value"),
         State("drilldown-store", "data"),
         State("auth-store", "data"),
+        State("op-token-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
     @require_action(Cap.FINANCE_PERIOD_CLOSE, "fy_lock", resolve=_lock_resolve, on_deny=_lock_denied)
-    def lock_financial_year(n_clicks, reason, resolution, understood, store, auth):
+    def lock_financial_year(n_clicks, reason, resolution, understood, store, auth, op_token=None):
         if not ctx.triggered or not n_clicks:
             return no_update, no_update, no_update, no_update
         store = store or {}
@@ -6901,9 +6907,12 @@ def register_fy_close_callbacks(app):
         except (TypeError, ValueError):
             return no_update, no_update, no_update, {"_toast": {"type": "error",
                                                                 "message": "The resolution number must be a whole number."}}
-        from app.services import fy_lock_service
-        ok, message, _details = fy_lock_service.lock_fy(
-            society_id, fy, get_current_user_id(), reason, bool(understood), res_id)
+        from app.services import fy_lock_service, op_progress
+        with op_progress.begin(op_token, "fy_lock", "Locking the financial year", steps_total=2,
+                               society_id=society_id) as _trk:
+            _trk.step(1, "Checking the year and sealing it")
+            ok, message, _details = fy_lock_service.lock_fy(
+                society_id, fy, get_current_user_id(), reason, bool(understood), res_id)
         if not ok:
             return no_update, no_update, no_update, {"_toast": {"type": "error", "message": message}}
         store["trigger"] = store.get("trigger", 0) + 1
