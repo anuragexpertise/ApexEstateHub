@@ -1756,8 +1756,8 @@ def _annex_a(society_id: int, soc: dict) -> tuple[dict, dict]:
                        "in Stage 6 (Adoption) and is between the Society and its members; the Operator is not a party to it."}
     controls = {"regime_assigned": _ctl(bool(regime_code), "A legal regime is assigned." if regime_code else
                                         "No legal regime is assigned. Choose the State and constitution (UP AOA gets UP_AOA_2010)."),
-                "unverified_instruments": _ctl(False, f"{len(unverified)} instrument(s) are unverified; the advocate should confirm before sealing.",
-                                               len(unverified) == 0)}
+                "unverified_instruments": _ctl(len(unverified) == 0, f"{len(unverified)} instrument(s) are unverified; the advocate should confirm before sealing.",
+                                               len(unverified) > 0)}
     return content, controls
 
 
