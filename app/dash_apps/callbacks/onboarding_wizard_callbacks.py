@@ -256,15 +256,8 @@ def _rail_item_classes(statuses, current):
 
 
 def _rail_item_styles(statuses, current):
-    styles = []
-    for i, cat in enumerate(CATEGORIES):
-        st = _status_of(statuses, cat)
-        is_skipped = st == "skipped"
-        _STATUS_DOT_COLOR.get(st, "#b8c2cf")
-        styles.append({"display": "flex", "alignItems": "center", "gap": "8px", "padding": "8px 10px",
-                       "borderRadius": "8px", "border": "1px solid transparent", "fontSize": "12px",
-                       "cursor": "default" if is_skipped else "pointer"})
-    return styles
+    """Inline style per rail box. Layout and colour come from onboarding.css (chevron strip); only the cursor varies."""
+    return [{"cursor": "default" if _status_of(statuses, cat) == "skipped" else "pointer"} for cat in CATEGORIES]
 
 
 def _step_styles(current):

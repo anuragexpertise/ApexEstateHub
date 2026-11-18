@@ -40,25 +40,18 @@ def _field(label, comp, width="100%"):
                     style={"marginBottom": "8px", "width": width})
 
 
+_DOT = {"done": "✔", "current": "●", "todo": "○"}
+
+
 def tracker(society_id: int):
+    """Stage tracker: one line of arrow boxes (chevrons), one per stage. The full stage text is the tooltip."""
     items = []
-    groups = [(1, 3, "Set up"), (4, 4, "Sign"), (5, 7, "Go-live checklist")]
-    gi = 0
     for s in ob.stage_report(society_id):
-        if gi < len(groups) and s["n"] == groups[gi][0]:
-            items.append(html.Div(groups[gi][2], style={"fontSize": "9px", "fontWeight": "700",
-                                                       "color": "#556", "marginTop": "4px", "marginBottom": "1px",
-                                                       "textTransform": "uppercase", "letterSpacing": "0.4px",
-                                                       "borderBottom": "1px solid #e1e7ef", "paddingBottom": "1px",
-                                                       "flexBasis": "100%", "textAlign": "left"}))
-            gi += 1
-        icon, color = _ICON[s["status"]]
         items.append(html.Div([
-            html.I(className=f"fas {icon}", style={"color": color, "fontSize": "15px"}),
-            html.Div(f"{s['n']}. {s['label']}", style={"fontSize": "11px", "fontWeight": "700" if s["status"] == "current" else "500",
-                                                       "color": "#223" if s["status"] != "todo" else "#8895a5", "marginTop": "3px"}),
-        ], title=s["text"], style={"textAlign": "center", "flex": "1 1 72px", "minWidth": "66px", "padding": "3px 1px"}))
-    return html.Div(items, style={"display": "flex", "flexWrap": "wrap", "gap": "2px", "borderBottom": "1px solid #e1e7ef", "paddingBottom": "6px"})
+            html.Span(_DOT[s["status"]], className="onb-rail-dot"),
+            html.Span(f"{s['n']}. {s['label']}", className="onb-rail-label"),
+        ], title=f"{s['label']} - {s['text']}", className=f"onb-chev-item {s['status']}"))
+    return html.Div(items, className="onb-chev")
 
 
 def marker(society_id: int) -> str:
@@ -359,35 +352,23 @@ def setup_stage(society_id: int, current_step: int | None = None) -> list:
            html.Div("Declare the legal regime, rates, charges, accounts and opening balances. The wizard draft is saved as you move "
                     "between steps; nothing is posted until the Agreement is signed and the society is activated.", style=_MUTED)]
 
-    # ── left rail (item 2) ──────────────────────────────────────────────────────
+    # ── step tracker: one line of arrow boxes above the step (ids/classes unchanged for wizard_nav) ───────────
     rail_items = []
     last = len(CATEGORIES) - 1
+    from app.dash_apps.pages.wizard_registry import status_of as _status_of
+    _dots = {"todo": "○", "current": "●", "done": "✔", "error": "✖", "needs_review": "◐", "skipped": "—"}
     for i, cat in enumerate(CATEGORIES):
-        from app.dash_apps.pages.wizard_registry import status_of as _status_of
         st = _status_of(statuses, cat)
-        is_skipped = st == "skipped"
-        base = {"type": "onb-rail", "key": cat}
         classes = ["onb-rail-item", st]
         if i == current_step:
             classes.append("current")
-        if is_skipped:
-            classes.append("skipped")
-        dot = {"todo": "○", "current": "●", "done": "✔", "error": "✖", "needs_review": "◐", "skipped": "—"}.get(st, "○")
-        dot_color = {"todo": "#b8c2cf", "current": "#1d74d8", "done": "#17976e", "error": "#c0392b",
-                     "needs_review": "#e59620", "skipped": "#9aa3ad"}.get(st, "#b8c2cf")
         rail_items.append(html.Div([
-            html.Span(dot, className="onb-rail-dot", style={"color": dot_color}),
-            html.Span(step_label(cat), className="onb-rail-label", title=cat),
-        ], id=base, n_clicks=0, className=" ".join(classes),
-           style={"display": "flex", "alignItems": "center", "gap": "8px", "padding": "8px 10px",
-                  "borderRadius": "8px", "border": "1px solid transparent", "fontSize": "12px",
-                  "cursor": "default" if is_skipped else "pointer"}))
-    rail = html.Div([
-        html.Div("Setup steps", className="onb-rail-head", style={"fontWeight": "700", "fontSize": "13px", "color": "#223"}),
-        html.Div(rail_items, className="onb-rail-body", style={"display": "flex", "flexDirection": "column", "gap": "4px", "padding": "6px 0"}),
-        html.Div("Green = done · blue = current · amber = needs review · struck = skipped",
-                 className="onb-rail-foot"),
-    ], className="onb-rail")
+            html.Span(_dots.get(st, "○"), className="onb-rail-dot"),
+            html.Span(step_label(cat), className="onb-rail-label"),
+        ], id={"type": "onb-rail", "key": cat}, n_clicks=0, className=" ".join(classes),
+           title=f"{cat} ({st.replace('_', ' ')})",
+           style={"cursor": "default" if st == "skipped" else "pointer"}))
+    rail = html.Div(rail_items, className="onb-rail onb-chev")
 
     # ── main content ────────────────────────────────────────────────────────────
     containers = []
