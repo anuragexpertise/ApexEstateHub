@@ -27,6 +27,7 @@ from app.security.audit_context import (
 from app.security.guards import require_session
 from app.services import document_signing as ds
 from app.services import onboarding_service as ob
+from app.utils.ux_toasts import celebration
 
 log = logging.getLogger(__name__)
 
@@ -387,29 +388,44 @@ def register_onboarding_callbacks(app):
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
+        Output("celebrate-store", "data", allow_duplicate=True),
         Input(f"{P}-seal", "n_clicks"),
         State(f"{P}-agree", "value"), State(f"{P}-seal-pw", "value"),
+        State("op-token-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_seal(n, agree, password):
+    def onb_seal(n, agree, password, op_token=None):
         s = _session()
         if not n or not s:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
         sid, uid, role = s
         if role != "admin" or not sid:
-            return no_update, _alert("Only the society's administrator can seal the annexes.", False), no_update
+            return no_update, _alert("Only the society's administrator can seal the annexes.", False), no_update, no_update
+        from app.services import op_progress
+        trk = op_progress.begin(op_token, "annex_seal", "Sealing the annexes", steps_total=4, society_id=sid)
         try:
+            trk.step(1, "Checking your confirmation and password")
             ob.seal_with_confirmation(sid, uid, agree, password)
+            trk.step(3, "Annexes sealed. Preparing the Agreement for signing")
         except ob.OnboardingError as exc:
-            return no_update, _alert(str(exc), False), no_update
+            trk.fail("Not sealed")
+            return no_update, _alert(str(exc), False), no_update, no_update
+        except Exception:
+            trk.fail("Failed")
+            raise
         body, mk = _body(sid, uid, role)
-        return body, _alert("Annexes sealed and the Agreement issued for signing."), mk
+        trk.done("Agreement issued for signing")
+        return (body, _alert("Annexes sealed and the Agreement issued for signing."), mk,
+                celebration("sealed", "Agreement sealed",
+                            "The annexes are sealed and the Agreement is issued for signing.",
+                            ["Annexes sealed with their content hashes", "Agreement issued to the President, Secretary and Treasurer"]))
 
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
+        Output("celebrate-store", "data", allow_duplicate=True),
         Input(f"{P}-sign", "n_clicks"),
         State(f"{P}-pw", "value"), State(f"{P}-method", "value"),
         State(f"{P}-paper", "contents"), State(f"{P}-paper", "filename"),
@@ -419,11 +435,11 @@ def register_onboarding_callbacks(app):
     def onb_sign(n, password, method, paper, paper_name):
         s = _session()
         if not n or not s:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
         sid, uid, role = s
         ag = ob.db._execute("SELECT id FROM society_agreements WHERE society_id=%s", (sid,), fetch_one=True) if sid else None
         if not ag:
-            return no_update, _alert("There is no Agreement to sign yet.", False), no_update
+            return no_update, _alert("There is no Agreement to sign yet.", False), no_update, no_update
         try:
             from app.services import esign_adapter as es
             mode = ob.signing_mode(sid)
@@ -435,9 +451,11 @@ def register_onboarding_callbacks(app):
             else:
                 st = ds.sign("agreement", ag["id"], uid, password or "")
         except ds.SigningRefused as exc:
-            return no_update, _alert(str(exc), False), no_update
+            return no_update, _alert(str(exc), False), no_update, no_update
         body, mk = _body(sid, uid, role)
-        return body, _alert("Signed." + (" The Agreement is sealed." if st.get("sealed") else "")), mk
+        cel = (celebration("sealed", "Agreement sealed", "Every required signature is in. The Agreement is sealed.",
+                           key=f"eh-agreement-sealed-{ag['id']}") if st.get("sealed") else no_update)
+        return body, _alert("Signed." + (" The Agreement is sealed." if st.get("sealed") else "")), mk, cel
 
     @app.callback(
         Output(f"{P}-print-dl", "data"),
@@ -1171,6 +1189,7 @@ def register_onboarding_callbacks(app):
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
+        Output("celebrate-store", "data", allow_duplicate=True),
         Input({"type": f"{P}-supp-sign", "code": ALL}, "n_clicks"),
         State({"type": f"{P}-supp-pw", "code": ALL}, "value"),
         State({"type": f"{P}-supp-pw", "code": ALL}, "id"),
@@ -1181,15 +1200,17 @@ def register_onboarding_callbacks(app):
         s = _session()
         trig = ctx.triggered_id
         if not s or not s[0] or not trig or not any(clicks or []):
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
         sid, uid, role = s
         code = trig["code"]
         password = next((v for v, i in zip(pws or [], pw_ids or []) if i.get("code") == code), "")
         try:
             st = ob.sign_supplementary_annex(sid, code, uid, password or "")
         except ob.OnboardingError as exc:
-            return no_update, _alert(str(exc), False), no_update
+            return no_update, _alert(str(exc), False), no_update, no_update
         body, mk = _body(sid, uid, role)
-        return body, _alert("Signed." + (f" Annexure {code} is sealed." if st.get("sealed") else "")), mk
+        cel = (celebration("sealed", f"Annexure {code} sealed", "All three office-bearers have signed. It is now part of the Agreement.",
+                           key=f"eh-annex-sealed-{sid}-{code}-{st.get('content_hash', '')}") if st.get("sealed") else no_update)
+        return body, _alert("Signed." + (f" Annexure {code} is sealed." if st.get("sealed") else "")), mk, cel
 
     print("  ✓ Onboarding callbacks registered")

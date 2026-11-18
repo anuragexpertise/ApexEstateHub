@@ -80,6 +80,7 @@ def register_callbacks(app):
         "mode_conditional_callbacks", # 18. Mode-conditional
         "qty_stepper_callbacks",      # 19. Quantity stepper
         "qr_reissue_callbacks",       # 21. Re-issue QR
+        "op_progress_callbacks",      # 22. Celebration modal + progress bar for database-intensive operations
     ]
 
     for mod_name in CALLBACK_MODULES:
