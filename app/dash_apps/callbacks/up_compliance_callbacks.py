@@ -114,19 +114,24 @@ def register_up_compliance_callbacks(app):
         return _run(lambda sid, uid: act.issue_statement(sid, uid, transfer))
 
     @app.callback(Output("upc-dep-result", "children"), _BODY, Input("upc-dep-run", "n_clicks"),
-                  prevent_initial_call=True)
+                  State("op-token-store", "data"), prevent_initial_call=True)
     @require_session
-    def run_depreciation_fund(n):
+    def run_depreciation_fund(n, op_token=None):
         if not n:
             raise PreventUpdate
         ctx, err = _ctx()
         if err:
             return err, no_update
+        from app.services import op_progress
         try:
-            ok, msg = act.post_depreciation_fund(ctx[0])
+            with op_progress.begin(op_token, "depreciation_fund", "Posting the depreciation fund", steps_total=3,
+                                   society_id=ctx[0]) as trk:
+                trk.step(1, "Computing depreciation and posting the entries")
+                ok, msg = act.post_depreciation_fund(ctx[0])
+                trk.step(2, "Refreshing the card")
+                body = render_up_compliance_body(act.load_card_data(ctx[0])) if ok else no_update
         except Exception as exc:  # noqa: BLE001
             return _alert(f"Could not post: {exc}", "danger"), no_update
-        body = render_up_compliance_body(act.load_card_data(ctx[0])) if ok else no_update
         return _alert(msg, "success" if ok else "danger"), body
 
     @app.callback(Output("upc-b7-result", "children"), Input("upc-b7-run", "n_clicks"),

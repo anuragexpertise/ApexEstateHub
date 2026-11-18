@@ -76,6 +76,7 @@ _SETUP_EXEMPT_MODULES = frozenset({
     "onboarding_wizard_callbacks",   # wizard nav/step-save/review must work while setup is incomplete
     "paper_sign_callbacks",     # bye-laws adoption paper signing lives in the Onboarding Hub; each callback checks admin itself
     "privacy_callbacks",
+    "op_progress_callbacks",    # progress poll for the signed-in user's own operation (row is user-scoped); also used by Master
 })
 _SETUP_EXEMPT_FUNCTIONS = frozenset({
     ("drilldown_callbacks", "handle_image_upload"),

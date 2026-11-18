@@ -231,7 +231,7 @@ def _parse_statement(contents: str, filename: str) -> pd.DataFrame:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _match_and_insert(df: pd.DataFrame, entity: str, sid: int, uploaded_by: int,
-                      bank_acc_id: int | None = None) -> dict:
+                      bank_acc_id: int | None = None, tracker=None) -> dict:
     """
     entity: 'receipts' or 'expenses'. Inserts one bank_statement_lines row
     per statement row, auto-confirming exact matches. bank_acc_id is the
@@ -245,7 +245,11 @@ def _match_and_insert(df: pd.DataFrame, entity: str, sid: int, uploaded_by: int,
     batch_id = str(uuid.uuid4())
     exact = fuzzy = unmatched = 0
 
-    for _, row in df.iterrows():
+    total = len(df)
+    every = max(total // 50, 1)     # about 50 progress writes however long the statement is
+    for pos, (_, row) in enumerate(df.iterrows()):
+        if tracker is not None and pos % every == 0:
+            tracker.step(int(pos / total * 100), f"Matching line {pos + 1} of {total}")
         amount = row.get(amount_col)
         if pd.isna(amount):
             continue  # this row belongs to the other side of the statement
@@ -639,10 +643,11 @@ def register_bank_reconcile_callbacks(app):
         State("bank-reconcile-bank-select", "value"),
         State("auth-store", "data"),
         State("drilldown-store", "data"),
+        State("op-token-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def process_bank_statement_upload(contents, filename, entity, bank_acc_id, auth, store):
+    def process_bank_statement_upload(contents, filename, entity, bank_acc_id, auth, store, op_token=None):
         if not contents or entity not in _ENTITY_LABELS:
             raise PreventUpdate
 
@@ -698,8 +703,11 @@ def register_bank_reconcile_callbacks(app):
                 no_update, no_update, no_update, no_update,
             )
 
+        from app.services import op_progress
         try:
-            results = _match_and_insert(df, entity, sid, actor_id, bank_acc_id)
+            with op_progress.begin(op_token, "bank_reconcile", "Reconciling the bank statement",
+                                   steps_total=100, society_id=sid) as trk:
+                results = _match_and_insert(df, entity, sid, actor_id, bank_acc_id, tracker=trk)
         except Exception as e:  # noqa: BLE001
             return (
                 html.Div(error_toast(e, "Unable to reconcile this bank statement. Please try again.")["message"], style={"color": "#de5c52"}),

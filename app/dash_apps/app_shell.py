@@ -1325,6 +1325,24 @@ def shell_layout() -> html.Div:
             dcc.Store(id="evaluate-pass-sound-store", storage_type="memory", data=None),
             html.Div(id="evaluate-pass-sound-dummy", style={"display": "none"}),
 
+            # ── Celebration (confetti + modal): fed by celebrate-store or a toast carrying a `celebrate` key ──
+            dcc.Store(id="celebrate-store", storage_type="memory", data=None),
+            html.Div(id="celebrate-sink", style={"display": "none"}),
+
+            # ── Progress for database-intensive operations (see op_progress_callbacks.py) ──
+            html.Div(id="op-init", style={"display": "none"}),
+            dcc.Store(id="op-token-store", storage_type="memory", data=None),
+            dcc.Store(id="op-state", storage_type="memory", data={"miss": 0}),
+            dcc.Interval(id="op-poll", interval=700, n_intervals=0, disabled=True),
+            dbc.Modal([
+                dbc.ModalBody([
+                    html.Div(id="op-title", style={"fontWeight": "700", "fontSize": "16px", "marginBottom": "10px"}),
+                    dbc.Progress(id="op-bar", value=5, striped=True, animated=True, label="Starting",
+                                 style={"height": "22px"}),
+                    html.Div(id="op-msg", style={"fontSize": "12.5px", "color": "#6b7280", "marginTop": "8px"}),
+                ]),
+            ], id="op-modal", is_open=False, centered=True, size="md"),
+
             # ── Notifications dropdown ─────────────────────────────────────────
             html.Div(
                 id="notifications-dropdown",

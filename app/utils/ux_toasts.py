@@ -164,6 +164,16 @@ def normalize_toast(data) -> dict | None:
     return out
 
 
+def celebration(kind: str, title: str, message: str = "", details: list[str] | None = None, key: str | None = None) -> dict:
+    """Payload for the confetti + modal celebration (app/assets/onboarding_celebrate.js).
+    kind is 'live', 'registered' or 'sealed'. Send it as ``celebrate-store`` data, or add it to a toast under ``celebrate``.
+    A ``key`` makes it fire once per browser; leave it off for events that are genuinely new each time."""
+    out = {"kind": kind, "title": title, "message": message, "details": list(details or [])}
+    if key:
+        out["key"] = key
+    return out
+
+
 def toast_duration_ms(message: str, type_: str) -> int:
     """Long messages and errors stay on screen longer so they can be read."""
     base = 6000 if type_ in ("error", "warning") else 4000
