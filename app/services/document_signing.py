@@ -408,7 +408,20 @@ def _seal(d, society_id, kind, subject_id, item_hash, st) -> dict:
         names = ", ".join(f"{x['name']} ({x['office_code'].replace('_', ' ').title()})" for x in st["signed"])[:255]
         d._execute("UPDATE meetings SET minutes_signed_by=%s WHERE id=%s", (names, subject_id))
     _audit(d, society_id, None, "DOCUMENT_SEALED", kind, subject_id, {"purpose": purpose, "key_version": rec["key_version"], "item_hash": item_hash})
-    return d._execute("SELECT * FROM signed_records WHERE subject_kind=%s AND subject_id=%s AND status='valid'", (kind, subject_id), fetch_one=True)
+    sealed = d._execute("SELECT * FROM signed_records WHERE subject_kind=%s AND subject_id=%s AND status='valid'", (kind, subject_id), fetch_one=True)
+    if kind in ("agreement", "noc"):                                       # file the sealed copy: app/assets/<society_id>/agreements | NOCs
+        try:
+            from app.services import document_archive as da
+            if kind == "agreement":
+                da.archive_agreement(society_id, subject_id, st={**st, "seal": sealed, "item_hash": item_hash, "sealed": True},
+                                     event="sealed", db=d)
+            else:
+                soc = d._execute("SELECT name, address FROM societies WHERE id=%s", (society_id,), fetch_one=True) or {}
+                da.archive_noc(society_id, subject_id, None, event="sealed", db=d,
+                               society_name=soc.get("name") or "", society_address=soc.get("address") or "")
+        except Exception as exc:                                           # noqa: BLE001 - a filing problem must never undo a valid seal
+            log.error("sealed %s %s was not filed as a PDF: %s", kind, subject_id, exc)
+    return sealed
 
 
 # ── C.4: a document names the resolution that authorises it ────────────────────────────────────────────────────

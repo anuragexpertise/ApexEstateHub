@@ -65,6 +65,7 @@ def register_callbacks(app):
         "tax_rate_callbacks",            # 13j3. TDS & GST Rates tab (CA / Treasurer / Secretary, own society)
         "adviser_callbacks",             # 13j4. Adviser Decisions tab (fill in: admin / Secretary / Treasurer; approve: Secretary + Treasurer)
         "gst_class_callbacks",           # 13j5. GST Accounts tab (CA / Treasurer / Secretary, own society)
+        "documents_callbacks",           # 13j6. Documents tab: issued Agreements and NOCs as PDF, Verify / Verify all (admin, own society)
         "auditor_callbacks",             # 13k. Auditor portal (read-only verification)
         "bulk_enroll_callbacks",      # 14. Bulk Enroll
         "paper_sign_callbacks",       # 14-ps. Paper signing of the bye-laws adoption (Society_bye_laws.xlsx)

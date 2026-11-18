@@ -450,6 +450,19 @@ def register_onboarding_callbacks(app):
         s = _session()
         if not n or not s or not s[0]:
             return no_update, no_update
+        # Direct PDF: the Agreement and annexes A to E drawn by reportlab, filed under app/assets/<society_id>/agreements/ with its
+        # SHA-256 in issued_documents, and sent from that verified file. The browser-print HTML below stays as the fallback.
+        try:
+            from app.services import document_archive as da
+            ag = ob.db._execute("SELECT id FROM society_agreements WHERE society_id=%s", (s[0],), fetch_one=True)
+            if ag:
+                row = da.archive_agreement(s[0], ag["id"], event="printed", created_by=s[1])
+                _row, data = da.read_verified(s[0], row["id"])
+                return dcc.send_bytes(data, row["filename"]), no_update
+        except ob.OnboardingError as exc:
+            return no_update, _alert(str(exc), False)
+        except Exception:                                              # noqa: BLE001
+            log.exception("Agreement PDF failed for society %s; sending the printable HTML instead", s[0])
         try:
             name, page = ob.agreement_print_html(s[0])
         except ob.OnboardingError as exc:

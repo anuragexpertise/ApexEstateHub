@@ -241,10 +241,14 @@ def render_governance_tabs(role: str, sid, color: str = "#1859b8"):
     adviser = adviser_tab(role, society_id)
     gst_accounts = gst_accounts_tab(role, society_id)
 
-    return _wrap(role, compliance, rules, bye, mtg, committee, tax, adviser, gst_accounts)
+    # -- Documents: the admin's register of issued Agreements and NOCs kept as PDF, with Verify (SHA-256) and download.
+    from app.dash_apps.pages.documents_page import documents_tab
+    documents = documents_tab(role, society_id)
+
+    return _wrap(role, compliance, rules, bye, mtg, committee, tax, adviser, gst_accounts, documents)
 
 
-def _wrap(role, compliance, rules, bye, mtg, committee, tax=None, adviser=None, gst_accounts=None):
+def _wrap(role, compliance, rules, bye, mtg, committee, tax=None, adviser=None, gst_accounts=None, documents=None):
     head = [html.H5("Society governance", id="society-governance", style={"fontWeight": "700", "marginTop": "8px"})]
     if role != "admin":
         head.append(html.Small("Read-only view for your society.", className="text-muted"))
@@ -260,5 +264,6 @@ def _wrap(role, compliance, rules, bye, mtg, committee, tax=None, adviser=None, 
             *([dcc.Tab(label="TDS & GST Rates", value="tab-tax-rates", children=html.Div(tax))] if tax is not None else []),
             *([dcc.Tab(label="Adviser Decisions", value="tab-adviser", children=html.Div(adviser))] if adviser is not None else []),
             *([dcc.Tab(label="GST Accounts", value="tab-gst-accounts", children=html.Div(gst_accounts))] if gst_accounts is not None else []),
+            *([dcc.Tab(label="Documents", value="tab-documents", children=html.Div(documents))] if documents is not None else []),
         ]),
     ])

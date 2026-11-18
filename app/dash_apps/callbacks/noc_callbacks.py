@@ -62,10 +62,14 @@ Add this Store alongside the other dcc.Store components in the shell:
 That single line is the only layout change needed.
 """
 
-from dash import Input, Output, State, clientside_callback, no_update
+from dash import Input, Output, State, clientside_callback, ctx, no_update
 
 from app.dash_apps.callbacks.print_letterhead import LETTERHEAD_JS, clientside_iife
-from app.security.audit_context import get_current_society_id
+from app.security.audit_context import (
+    get_current_society_id,
+    get_current_user_id,
+    get_current_user_role,
+)
 from app.security.guards import require_session
 from app.security.stamp_scope import stamp_document
 
@@ -253,6 +257,36 @@ def register_noc_callbacks(app):
             stamp_document("nocs", noc_id, "last_emailed_at")
         except Exception as e:  # noqa: BLE001
             print(f"noc last_emailed_at stamp error: {e}")
+        return no_update
+
+    # ── Keep a PDF of every NOC that leaves the building ───────────────────
+    # app/assets/<society_id>/NOCs/<certificate_no>_<sha12>.pdf plus a row in issued_documents holding the SHA-256.
+    # The text comes from the editor (dbc.Textarea exposes `value`); a sealed NOC keeps its sealed wording.
+    @app.callback(
+        Output('noc-action-store-print', 'data', allow_duplicate=True),
+        Input('noc-btn-print', 'n_clicks'),
+        Input('noc-btn-pdf', 'n_clicks'),
+        Input('noc-btn-email', 'n_clicks'),
+        State('noc-textarea', 'value'),
+        State('noc-letterhead-data', 'data'),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def _archive_noc_pdf(n_print, n_pdf, n_email, text, lh_data):
+        noc_id = (lh_data or {}).get("id")
+        sid = get_current_society_id()   # tenant scope from the server session, never the browser
+        if not noc_id or not sid or get_current_user_role() != "admin":
+            return no_update
+        event = {"noc-btn-print": "printed", "noc-btn-pdf": "issued", "noc-btn-email": "emailed"}.get(ctx.triggered_id)
+        if not event:
+            return no_update
+        try:
+            from app.services import document_archive
+            document_archive.archive_noc(
+                sid, int(noc_id), text, event=event, created_by=get_current_user_id(),
+                society_name=(lh_data or {}).get("society_name", ""), society_address=(lh_data or {}).get("society_address", ""))
+        except Exception as e:  # noqa: BLE001 - never block printing; the failure is logged
+            print(f"noc pdf archive error: {e}")
         return no_update
 
     print("  ✓ NOC callbacks registered (Print / PDF / Email)")
