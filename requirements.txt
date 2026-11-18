@@ -48,6 +48,7 @@ requests==2.34.2
 email-validator==2.3.0
 numpy==2.4.6   # required by opencv
 reportlab==5.0.1   # server-side PDF for the paper-signing workflow (paper_evidence.make_document)
+uharfbuzz==0.57.0   # shapes Hindi/Devanagari in server-side PDFs (app/services/pdf_text.py); without it conjuncts and matras print wrongly
 
 # ── Production ────────────────────────────────────────────────────────────────
 gunicorn==26.2.0

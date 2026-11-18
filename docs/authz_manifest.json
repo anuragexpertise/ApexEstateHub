@@ -254,6 +254,12 @@
     "callback:dispute_callbacks.py::_raise": {
       "classification": "legacy-gated"
     },
+    "callback:documents_callbacks.py::idoc_filter": {
+      "classification": "legacy-gated"
+    },
+    "callback:documents_callbacks.py::idoc_verify": {
+      "classification": "legacy-gated"
+    },
     "callback:drilldown_callbacks.py::close_fy_with_reserve": {
       "classification": "unclassified"
     },
@@ -643,6 +649,9 @@
       "classification": "legacy-gated"
     },
     "callback:master_tests_callbacks.py::start_run_all": {
+      "classification": "legacy-gated"
+    },
+    "callback:noc_callbacks.py::_archive_noc_pdf": {
       "classification": "legacy-gated"
     },
     "callback:noc_callbacks.py::_stamp_noc_emailed": {
@@ -1177,6 +1186,9 @@
     },
     "route:auth.py::unsubscribe_push": {
       "classification": "unclassified"
+    },
+    "route:document_routes.py::document_file": {
+      "classification": "legacy-gated"
     },
     "route:esign_routes.py::esign_callback": {
       "classification": "exempt",

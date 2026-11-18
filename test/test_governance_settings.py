@@ -420,8 +420,8 @@ def _labels(node, acc=None):
 
 BASE_TABS = ["RWA Compliance (UP)", "Rules", "Society By-laws", "Meetings & Resolutions", "Managing Committee"]
 TABS = [*BASE_TABS, "Adviser Decisions"]     # everyone in the society reads the adviser decisions (Plan v4, C.6)
-# the admin also gets the read-only TDS & GST Rates and GST Accounts tabs
-ADMIN_TABS = [*BASE_TABS, "TDS & GST Rates", "Adviser Decisions", "GST Accounts"]
+# the admin also gets the read-only TDS & GST Rates and GST Accounts tabs, and the Documents register (issued Agreements / NOCs as PDF)
+ADMIN_TABS = [*BASE_TABS, "TDS & GST Rates", "Adviser Decisions", "GST Accounts", "Documents"]
 
 
 def test_admin_has_the_five_tabs_and_the_governance_forms(stub):
