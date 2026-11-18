@@ -134,8 +134,8 @@ def seated_officers(society_id: int) -> dict:
                              co.user_id, a.flat_number
                         FROM committee_offices co JOIN apartments a ON a.id = co.apartment_id
                        WHERE co.society_id=%s AND co.status='active' AND co.office_code = ANY(%s)
-                         AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE)""",
-                   (society_id, list(CORE_OFFICES))):
+                         AND co.term_start <= %s AND (co.term_end IS NULL OR co.term_end >= %s)""",
+                   (society_id, list(CORE_OFFICES), today_ist(), today_ist())):
         out[r["office_code"]] = dict(r)
         out[r["office_code"]]["complete"] = _officer_complete(out[r["office_code"]])
     return out
@@ -391,8 +391,8 @@ def update_seated_officer(actor_id: int, society_id: int, office_code: str, phon
             raise OnboardingError("The Agreement is already being signed; office-bearer details are locked.")
     row = _row("""SELECT co.id, co.apartment_id FROM committee_offices co
                    WHERE co.society_id=%s AND co.office_code=%s AND co.status='active'
-                     AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE)""",
-               (society_id, office_code))
+                     AND co.term_start <= %s AND (co.term_end IS NULL OR co.term_end >= %s)""",
+               (society_id, office_code, today_ist(), today_ist()))
     if not row:
         raise OnboardingError(f"{OFFICE_LABEL[office_code]} is not currently seated.")
     updates = []
@@ -1769,7 +1769,7 @@ def _annex_a(society_id: int, soc: dict) -> tuple[dict, dict]:
     """Annex A: legal regime and hierarchy snapshot, sealed as part of the Agreement."""
     from app.services.statutory_rules import instrument_applies, instruments_for_regime
     regime_row = _row("SELECT regime_code FROM society_legal_regime WHERE society_id=%s "
-                      "AND effective_from <= CURRENT_DATE AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)", (society_id,))
+                      "AND effective_from <= %s AND (effective_to IS NULL OR effective_to >= %s)", (society_id, today_ist(), today_ist()))
     regime_code = (regime_row or {}).get("regime_code")
     # Read the six Yes/No answers from the draft.
     decl = declaration(society_id) or {}
