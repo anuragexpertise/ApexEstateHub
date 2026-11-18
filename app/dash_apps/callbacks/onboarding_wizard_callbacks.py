@@ -440,25 +440,32 @@ def register_onboarding_wizard_callbacks(app):
         Output("onb-finalize-error", "children", allow_duplicate=True),
         Input("onb-finalize-confirm", "n_clicks"),
         State("onb-finalize-password", "value"),
+        State("op-token-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def wizard_finalize(n_clicks, password):
+    def wizard_finalize(n_clicks, password, op_token=None):
         s = _session()
         if not n_clicks or not s or s[2] != "admin" or not s[0]:
             return no_update, no_update, no_update, no_update, no_update
         sid, uid, role = s
-        try:
-            msg = ob.finalize_draft(sid, uid, password or "")
-        except ob.OnboardingError as exc:
-            # Keep the modal open and say why inline, so a mistyped password is a retry, not a restart.
-            return _alert(str(exc), False), no_update, no_update, no_update, str(exc)
-        try:                                   # regenerate Annexes A-D from the draft just saved, so Annex C is never a stale snapshot
-            ob.build_annexes(sid, uid)
-        except ob.OnboardingError:
-            pass
-        body, mk = op.hub_body(role, sid, uid), op.marker(sid)
-        return _alert(msg), body, mk, False, ""
+        from app.services import op_progress
+        with op_progress.begin(op_token, "setup_finalize", "Saving the Setup Wizard", steps_total=4, society_id=sid) as trk:
+            try:
+                trk.step(1, "Checking your password and saving every step")
+                msg = ob.finalize_draft(sid, uid, password or "")
+            except ob.OnboardingError as exc:
+                # Keep the modal open and say why inline, so a mistyped password is a retry, not a restart.
+                trk.fail("Not saved")
+                return _alert(str(exc), False), no_update, no_update, no_update, str(exc)
+            trk.step(2, "Preparing Annexes A to D from what you entered")
+            try:                                   # regenerate Annexes A-D from the draft just saved, so Annex C is never a stale snapshot
+                ob.build_annexes(sid, uid)
+            except ob.OnboardingError:
+                pass
+            trk.step(3, "Opening the onboarding hub")
+            body, mk = op.hub_body(role, sid, uid), op.marker(sid)
+            return _alert(msg), body, mk, False, ""
 
     # ── item 10: pending receivables by apartment — manual grid + bulk upload ────────────────────
     # An editable DataTable owns the rows while the admin works, so typing, pasting from Excel and deleting

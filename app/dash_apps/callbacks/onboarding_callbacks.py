@@ -345,21 +345,27 @@ def register_onboarding_callbacks(app):
         Output(f"{P}-marker", "data", allow_duplicate=True),
         Output("onb-view", "data", allow_duplicate=True),
         Input(f"{P}-prepare", "n_clicks"),
+        State("op-token-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_prepare(n):
+    def onb_prepare(n, op_token=None):
         s = _session()
         if not n or not s:
             return no_update, no_update, no_update, no_update
         sid, uid, role = s
         if role != "admin" or not sid:
             return no_update, _alert("Only the society's administrator can check the annexes.", False), no_update, no_update
-        try:
-            ob.build_annexes(sid, uid)
-        except ob.OnboardingError as exc:
-            return no_update, _alert(str(exc), False), no_update, no_update
-        body, mk = _body(sid, uid, role, view="current")
+        from app.services import op_progress
+        with op_progress.begin(op_token, "annex_build", "Checking the annexes", steps_total=3, society_id=sid) as trk:
+            try:
+                trk.step(1, "Building Annexes A to D and testing each control")
+                ob.build_annexes(sid, uid)
+            except ob.OnboardingError as exc:
+                trk.fail("Not ready")
+                return no_update, _alert(str(exc), False), no_update, no_update
+            trk.step(2, "Refreshing the checklist")
+            body, mk = _body(sid, uid, role, view="current")
         return body, _alert("Annexes checked. Fix anything marked red using its link, then seal."), mk, "current"
 
     # ── "Fix in <step>" links on a failing annex control ─────────────────────
@@ -826,10 +832,11 @@ def register_onboarding_callbacks(app):
         Input(f"{P}-decl-apply", "n_clicks"),
         State(f"{P}-decl-xlsx", "contents"), State(f"{P}-decl-xlsx", "filename"),
         State(f"{P}-decl-pdf", "contents"), State(f"{P}-decl-pdf", "filename"),
+        State("op-token-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_decl_apply(n, xlsx_c, xlsx_n, pdf_c, pdf_n):
+    def onb_decl_apply(n, xlsx_c, xlsx_n, pdf_c, pdf_n, op_token=None):
         s = _session()
         if not n or not s or s[2] != "admin" or not s[0]:
             return no_update, no_update, no_update
@@ -842,9 +849,13 @@ def register_onboarding_callbacks(app):
         xlsx, pdf = _decode(xlsx_c), _decode(pdf_c)
         if not xlsx or not pdf:
             return no_update, _alert("Choose both the filled workbook (.xlsx) and the builder's signed Declaration (.pdf).", False), no_update
+        from app.services import op_progress
         from app.services import undivided_declaration as ud
         try:
-            msg = ud.apply(sid, uid, xlsx_n or "", xlsx, pdf_n or "", pdf)
+            with op_progress.begin(op_token, "declaration_apply", "Applying the Declaration", steps_total=3, society_id=sid) as trk:
+                trk.step(1, "Checking every flat's share and filing the signed PDF")
+                msg = ud.apply(sid, uid, xlsx_n or "", xlsx, pdf_n or "", pdf)
+                trk.step(2, "Refreshing the page")
         except ob.OnboardingError as exc:
             return no_update, _alert(str(exc), False), no_update
         except Exception:
@@ -860,19 +871,25 @@ def register_onboarding_callbacks(app):
         Input(f"{P}-enrol-done", "n_clicks"),
         State(f"{P}-enrol-later", "value"), State(f"{P}-enrol-later-reason", "value"),
         State(f"{P}-decl-waive", "value"), State(f"{P}-decl-waive-reason", "value"),
+        State("op-token-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_enrol_done(n, later, reason, waive, waive_reason):
+    def onb_enrol_done(n, later, reason, waive, waive_reason, op_token=None):
         s = _session()
         if not n or not s or s[2] != "admin" or not s[0]:
             return no_update, no_update, no_update
         sid, uid, role = s
-        try:
-            msg = ob.mark_enrollment_complete(sid, uid, reason if later else None, waive_reason if waive else None)
-        except ob.OnboardingError as exc:
-            return no_update, _alert(str(exc), False), no_update
-        body, mk = _body(sid, uid, role)
+        from app.services import op_progress
+        with op_progress.begin(op_token, "enrollment_complete", "Completing enrollment", steps_total=3, society_id=sid) as trk:
+            try:
+                trk.step(1, "Opening the portals and catching up billing")
+                msg = ob.mark_enrollment_complete(sid, uid, reason if later else None, waive_reason if waive else None)
+            except ob.OnboardingError as exc:
+                trk.fail("Not completed")
+                return no_update, _alert(str(exc), False), no_update
+            trk.step(2, "Refreshing the page")
+            body, mk = _body(sid, uid, role)
         return body, _alert(msg), mk
 
     @app.callback(
@@ -1169,20 +1186,27 @@ def register_onboarding_callbacks(app):
         Output(f"{P}-toast", "children", allow_duplicate=True),
         Output(f"{P}-marker", "data", allow_duplicate=True),
         Input({"type": f"{P}-supp-build", "code": ALL}, "n_clicks"),
+        State("op-token-store", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_supp_build(clicks):
+    def onb_supp_build(clicks, op_token=None):
         s = _session()
         trig = ctx.triggered_id
         if not s or not s[0] or s[2] != "admin" or not trig or not any(clicks or []):
             return no_update, no_update, no_update
         sid, uid, role = s
-        try:
-            ob.build_supplementary_annex(sid, trig["code"], uid)
-        except ob.OnboardingError as exc:
-            return no_update, _alert(str(exc), False), no_update
-        body, mk = _body(sid, uid, role)
+        from app.services import op_progress
+        with op_progress.begin(op_token, "supp_annex_build", f"Preparing Annexure {trig['code']}",
+                               steps_total=3, society_id=sid) as trk:
+            try:
+                trk.step(1, f"Collecting the data for Annexure {trig['code']}")
+                ob.build_supplementary_annex(sid, trig["code"], uid)
+            except ob.OnboardingError as exc:
+                trk.fail("Not ready")
+                return no_update, _alert(str(exc), False), no_update
+            trk.step(2, "Refreshing the page")
+            body, mk = _body(sid, uid, role)
         return body, _alert(f"Annexure {trig['code']} is ready for signing."), mk
 
     @app.callback(

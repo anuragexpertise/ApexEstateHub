@@ -1331,6 +1331,7 @@ def shell_layout() -> html.Div:
 
             # ── Progress for database-intensive operations (see op_progress_callbacks.py) ──
             html.Div(id="op-init", style={"display": "none"}),
+            html.Button(id="op-open-btn", n_clicks=0, style={"display": "none"}, tabIndex=-1),
             dcc.Store(id="op-token-store", storage_type="memory", data=None),
             dcc.Store(id="op-state", storage_type="memory", data={"miss": 0}),
             dcc.Interval(id="op-poll", interval=700, n_intervals=0, disabled=True),
