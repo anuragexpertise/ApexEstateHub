@@ -57,6 +57,41 @@ OPERATOR_ADDRESS_DEFAULT = "Agra, UP, India"
 OPERATOR_PLACEHOLDER = "[OPERATOR LEGAL ENTITY - TO BE CONFIRMED BY ADVOCATE BEFORE SIGNING]"
 EVIDENCE_MAX_BYTES = 5 * 1024 * 1024
 EVIDENCE_TYPES = {".pdf": b"%PDF-", ".png": b"\x89PNG", ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff"}
+# Column widths an office-bearer's details are written into (apartments.flat_number / owner_name / mobile). A longer value
+# is refused by Postgres mid-seating, which used to surface only as "an unexpected error"; check it up front instead.
+FLAT_MAX_CHARS = 20
+NAME_MAX_CHARS = 100
+MOBILE_MAX_CHARS = 15
+
+
+def _length_problems(label: str, flat: str | None, name: str | None, phone: str | None) -> list[str]:
+    """Plain-language reasons an office-bearer's flat, name or mobile will not fit their columns. Pure: writes nothing."""
+    out: list[str] = []
+    if flat is not None and len(flat) > FLAT_MAX_CHARS:
+        out.append(f"{label}: flat number is {len(flat)} characters; use at most {FLAT_MAX_CHARS} (for example 'B-1203').")
+    if name is not None and len(name) > NAME_MAX_CHARS:
+        out.append(f"{label}: name is {len(name)} characters; use at most {NAME_MAX_CHARS}.")
+    if phone and len(phone) > MOBILE_MAX_CHARS:
+        out.append(f"{label}: mobile number is {len(phone)} characters; use at most {MOBILE_MAX_CHARS} (digits, with an optional leading +).")
+    return out
+
+
+def _describe_unexpected(exc: BaseException) -> str:
+    """A short, safe sentence for an exception that is not an OnboardingError, so the admin sees what to fix instead of
+    "see the server log". Never echoes the database's own text, which can carry other people's data."""
+    code = getattr(exc, "pgcode", None)
+    name = type(exc).__name__
+    if code == "22001" or name == "StringDataRightTruncation":
+        return "a value is too long for its field (flat number up to 20 characters, name up to 100, mobile up to 15)."
+    if code == "23505" or name == "UniqueViolation":
+        return "that flat, email or office is already recorded; refresh the page and check the committee list."
+    if code in ("23502", "23514") or name in ("NotNullViolation", "CheckViolation"):
+        return "a required value is missing or out of range; check the row for this office in the workbook."
+    if code == "23503" or name == "ForeignKeyViolation":
+        return "a record it depends on is missing; refresh the page and try again."
+    if name in ("UnidentifiedImageError", "DecompressionBombError") or (isinstance(exc, (OSError, SyntaxError)) and "image" in str(exc).lower()):
+        return "the signature image could not be read; upload a fresh PNG, JPG or WEBP file."
+    return f"an unexpected error stopped it ({name}; see the server log)."
 
 
 class OnboardingError(ValueError):
@@ -186,10 +221,21 @@ def _check_signature_file(filename: str, data: bytes) -> None:
     if not data or len(data) > 1024 * 1024:
         raise OnboardingError("The signature image must be between 1 byte and 1 MB.")
     magic = data[:12]
-    ok_magic = (magic.startswith(b"\x89PNG") or magic[:4] == b"\xff\xd8\xff" or
-                magic[:4] == b"RIFF" and magic[8:12] == b"WEBP")
+    # The JPEG signature is three bytes; comparing it with a four-byte slice rejected every JPEG.
+    ok_magic = (magic.startswith(b"\x89PNG") or magic[:3] == b"\xff\xd8\xff" or
+                (magic[:4] == b"RIFF" and magic[8:12] == b"WEBP"))
     if not ok_magic:
         raise OnboardingError("The signature file does not look like a real image.")
+    # Right header bytes are not enough: a cut-off or corrupt file used to pass here and crash the seating later.
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+        with Image.open(BytesIO(data)) as im:
+            im.load()
+    except Exception as exc:                                    # noqa: BLE001 - Pillow raises many types for a bad file
+        log.info("signature image rejected: %s", type(exc).__name__)
+        raise OnboardingError("The signature image is damaged or incomplete. Save it again as a PNG or JPG and upload it again.") from exc
 
 
 def _store_evidence(society_id: int, filename: str, data: bytes) -> tuple[str, str]:
@@ -211,7 +257,11 @@ def _store_signature(society_id: int, filename: str, data: bytes) -> str:
     convert to WebP < 50 KB via image_utils.compress_to_webp. Returns the stored relative path."""
     from app.dash_apps.drilldown.image_utils import compress_to_webp as _c2w
     _check_signature_file(filename, data)
-    webp = _c2w(data)
+    try:
+        webp = _c2w(data)
+    except Exception as exc:                                    # noqa: BLE001 - defence in depth behind _check_signature_file
+        log.exception("could not convert a signature image for society %s", society_id)
+        raise OnboardingError("The signature image could not be processed. Upload a fresh PNG or JPG file.") from exc
     if webp is None:
         raise OnboardingError("The signature image could not be compressed below 50 KB.")
     digest = _sha(webp)
@@ -249,6 +299,9 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
         raise OnboardingError("Enter a valid email address.")
     if phone_c is False:
         raise OnboardingError("Enter a valid phone number.")
+    too_long = _length_problems(OFFICE_LABEL[office_code], flat, name, phone_c)
+    if too_long:
+        raise OnboardingError(" ".join(too_long))
     # One person, one office: the Agreement needs the President, Secretary and Treasurer to be three different people
     # (one person signs once), so a flat or login already seated in another core office is refused here, not at signing.
     clash = _row("""SELECT co.office_code FROM committee_offices co
@@ -424,6 +477,7 @@ def validate_election_rows(rows: list[dict]) -> tuple[dict, list[str]]:
                 errors.append(f"{label}: give the resolution reference (at least 3 characters).")
             if area and not re.fullmatch(r"\d+(\.\d+)?", area):
                 errors.append(f"{label}: flat area must be a number.")
+            errors.extend(_length_problems(label, flat, name, phone if isinstance(phone, str) else None))
             rec.update({"flat": flat, "size": area, "ref": ref})
         out[office] = rec
     for office in CORE_OFFICES + ("grievance_officer",):
@@ -514,7 +568,7 @@ def seat_founding_committee(actor_id: int, society_id: int, rows: list[dict], mi
                                   passwords.get(office) or "", rec["ref"], minutes_name, minutes_bytes,
                                   signature_name=sig_name, signature_bytes=sig_bytes, apartment_size=_area_int(rec.get("size")))
         except Exception as exc:
-            reason = str(exc) if isinstance(exc, OnboardingError) else "an unexpected error stopped it (see the server log)."
+            reason = str(exc) if isinstance(exc, OnboardingError) else _describe_unexpected(exc)
             if not isinstance(exc, OnboardingError):
                 log.exception("seating %s for society %s from Election Results.xlsx failed", office, society_id)
             if not done:
