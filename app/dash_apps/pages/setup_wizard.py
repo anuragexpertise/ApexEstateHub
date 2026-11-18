@@ -2120,55 +2120,65 @@ def render_category_content(category, society_id=None, state=None, constitution=
 
             # ── item 10: pending receivables by apartment ─────────────────────────
             html.Hr(),
-            html.H6("Pending receivables by apartment", className="mt-4 mb-2 text-primary"),
-            html.P("Opening dues carried forward, one row per flat. Type or paste rows into the grid below, or upload an "
-                   "Excel/CSV file. The total must tie to the Sundry Debtors accounts entered above (SDr / SDrCash / SDrDig).",
-                   className="text-muted small mb-2"),
-            dcc.Store(id="onb-receivables-json", data=_saved_receivables(society_id)),
-            dash_table.DataTable(
-                id="onb-recv-grid",
-                columns=[{"id": "flat_number", "name": "Flat no.", "type": "text"},
-                         {"id": "amount", "name": "Value receivable (₹)", "type": "numeric"},
-                         {"id": "overdue_days", "name": "Days overdue", "type": "numeric"},
-                         {"id": "remarks", "name": "Remarks", "type": "text"}],
-                data=_saved_receivables(society_id) or [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}],
-                editable=True, row_deletable=True, page_size=25, sort_action="native",
-                style_table={"overflowX": "auto"},
-                style_cell={"fontSize": "12.5px", "padding": "4px 8px", "textAlign": "left", "minWidth": "90px"},
-                style_header={"fontWeight": "700"},
-                style_cell_conditional=[{"if": {"column_id": "remarks"}, "minWidth": "220px"}],
-            ),
-            dbc.Row([
-                dbc.Col(dbc.Button("+ Add row", id="onb-bf-add-rec", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
-                dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Template (xlsx)"],
-                                   id="onb-bf-recv-template", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
-                dbc.Col(dcc.Upload(id="onb-bf-recv-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload xlsx / csv"],
-                                               color="secondary", size="sm", outline=True, n_clicks=0),
-                                   multiple=False, accept=".xlsx,.csv"), md="auto"),
-                dbc.Col(dcc.RadioItems(id="onb-recv-mode", value="add", inline=True,
-                                       options=[{"label": " Add to / update existing rows", "value": "add"},
-                                                {"label": " Replace all rows", "value": "replace"}],
-                                       inputStyle={"marginLeft": "10px"}, labelStyle={"fontSize": "12px", "marginRight": "6px"}), md="auto"),
-                dbc.Col(dcc.ConfirmDialogProvider(children=dbc.Button("Clear all", color="danger", size="sm", outline=True, n_clicks=0),
-                                                  id="onb-recv-clear", message="Remove every receivable row from the grid?"), md="auto"),
-                dbc.Col(dcc.Download(id="onb-bf-recv-download"), md="auto"),
-            ], className="g-2 mt-1 align-items-center"),
-            html.Div(id="onb-bf-recv-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
-            html.Div(id="onb-bf-tieout", className="mb-3", style={"fontSize": "12px", "fontWeight": "700"}),
+            html.Details(open=True, children=[
+                html.Summary(
+                    html.H6("Pending receivables by apartment", className="mt-4 mb-2 text-primary"),
+                    style={"cursor": "pointer", "padding": "4px 0"}
+                ),
+                html.P("Opening dues carried forward, one row per flat. Type or paste rows into the grid below, or upload an "
+                       "Excel/CSV file. The total must tie to the Sundry Debtors accounts entered above (SDr / SDrCash / SDrDig).",
+                       className="text-muted small mb-2"),
+                dcc.Store(id="onb-receivables-json", data=_saved_receivables(society_id)),
+                dash_table.DataTable(
+                    id="onb-recv-grid",
+                    columns=[{"id": "flat_number", "name": "Flat no.", "type": "text"},
+                             {"id": "amount", "name": "Value receivable (₹)", "type": "numeric"},
+                             {"id": "overdue_days", "name": "Days overdue", "type": "numeric"},
+                             {"id": "remarks", "name": "Remarks", "type": "text"}],
+                    data=_saved_receivables(society_id) or [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}],
+                    editable=True, row_deletable=True, page_size=25, sort_action="native",
+                    style_table={"overflowX": "auto"},
+                    style_cell={"fontSize": "12.5px", "padding": "4px 8px", "textAlign": "left", "minWidth": "90px"},
+                    style_header={"fontWeight": "700"},
+                    style_cell_conditional=[{"if": {"column_id": "remarks"}, "minWidth": "220px"}],
+                ),
+                dbc.Row([
+                    dbc.Col(dbc.Button("+ Add row", id="onb-bf-add-rec", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                    dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Template (xlsx)"],
+                                       id="onb-bf-recv-template", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                    dbc.Col(dcc.Upload(id="onb-bf-recv-upload", children=dbc.Button([html.I(className="fas fa-upload me-2"), "Upload xlsx / csv"],
+                                                                           color="secondary", size="sm", outline=True, n_clicks=0),
+                                       multiple=False, accept=".xlsx,.csv"), md="auto"),
+                    dbc.Col(dcc.RadioItems(id="onb-recv-mode", value="add", inline=True,
+                                           options=[{"label": " Add to / update existing rows", "value": "add"},
+                                                    {"label": " Replace all rows", "value": "replace"}],
+                                           inputStyle={"marginLeft": "10px"}, labelStyle={"fontSize": "12px", "marginRight": "6px"}), md="auto"),
+                    dbc.Col(dcc.ConfirmDialogProvider(children=dbc.Button("Clear all", color="danger", size="sm", outline=True, n_clicks=0),
+                                                      id="onb-recv-clear", message="Remove every receivable row from the grid?"), md="auto"),
+                    dbc.Col(dcc.Download(id="onb-bf-recv-download"), md="auto"),
+                ], className="g-2 mt-1 align-items-center"),
+                html.Div(id="onb-bf-recv-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
+                html.Div(id="onb-bf-tieout", className="mb-3", style={"fontSize": "12px", "fontWeight": "700"}),
+            ]),
             # ── item 11: reconciliation & evidence ────────────────────────────────
-            dbc.Card(dbc.CardBody([
-                html.H6("Reconciliation & evidence", className="mb-2 text-primary", style={"fontSize": "13px"}),
-                html.P("Reconcile every bank/cash account that carries a brought-forward balance, and attach the supporting scans "
-                       "(the server computes each file's SHA-256; nobody types a hash).", className="text-muted small mb-2"),
-                dcc.Store(id="onb-reconciliation-json", data=_saved_reconciliation(society_id)),
-                html.Div(id="onb-bf-reconciliation-cards", className="mb-3"),
-                html.Div(id="onb-bf-reconciliation-tieout", className="mb-3", style={"fontSize": "12px", "fontWeight": "700"}),
-                html.Small("Statement balances are taken from the Brought Forward XLSX uploaded above — one row per account. "
-                           "Each account only needs its 'Attach scan' evidence below (PDF/PNG/JPG; server computes SHA-256).",
-                           className="text-muted d-block mb-2"),
-                html.Div(id="onb-bf-evidence-status", style={"fontSize":"12.5px","marginTop":"4px", "color": "#667"}),
-                html.Div(id="onb-bf-evidence-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
-            ]), className="mb-3", style={"border": "1px solid #d7deea", "background": "#f8faff"}),
+            html.Details(open=True, children=[
+                html.Summary(
+                    html.H6("Reconciliation & evidence", className="mb-2 text-primary", style={"fontSize": "13px"}),
+                    style={"cursor": "pointer", "padding": "4px 0"}
+                ),
+                dbc.Card(dbc.CardBody([
+                    html.P("Reconcile every bank/cash account that carries a brought-forward balance, and attach the supporting scans "
+                           "(the server computes each file's SHA-256; nobody types a hash).", className="text-muted small mb-2"),
+                    dcc.Store(id="onb-reconciliation-json", data=_saved_reconciliation(society_id)),
+                    html.Div(id="onb-bf-reconciliation-cards", className="mb-3"),
+                    html.Div(id="onb-bf-reconciliation-tieout", className="mb-3", style={"fontSize": "12px", "fontWeight": "700"}),
+                    html.Small("Statement balances are taken from the Brought Forward XLSX uploaded above — one row per account. "
+                               "Each account only needs its 'Attach scan' evidence below (PDF/PNG/JPG; server computes SHA-256).",
+                               className="text-muted d-block mb-2"),
+                    html.Div(id="onb-bf-evidence-status", style={"fontSize":"12.5px","marginTop":"4px", "color": "#667"}),
+                    html.Div(id="onb-bf-evidence-feedback", style={"fontSize": "12.5px", "marginTop": "4px"}),
+                ]), className="mb-3", style={"border": "1px solid #d7deea", "background": "#f8faff"}),
+            ]),
         ]
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Administrator":
