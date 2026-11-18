@@ -650,7 +650,11 @@ def save_step(society_id: int, actor_id: int, step_key: str, values: dict, clear
             from werkzeug.security import generate_password_hash as _gph
 
             from app.security.password_policy import validate_signing_secret as _vss
-            if confirm is not None and plain != confirm:
+            # An untouched Dash input arrives as None (dropped upstream), so a missing confirmation must fail
+            # exactly like a typo: only an exact match is accepted.
+            if confirm in (None, ""):
+                pre_errors.append("Re-enter the step-up password in the confirmation box.")
+            elif plain != confirm:
                 pre_errors.append("The step-up password and its confirmation do not match.")
             elif _vss(str(plain)):
                 pre_errors.append(_vss(str(plain)))
@@ -706,6 +710,44 @@ def save_step(society_id: int, actor_id: int, step_key: str, values: dict, clear
 
     _save_declaration(society_id, d, actor_id)
     return {"ok": not errors, "errors": errors, "status": steps[step_key]["status"]}
+
+
+def _fy_int(v) -> int | None:
+    """Financial year start as an int in a sane range, else None (never raises)."""
+    if isinstance(v, bool) or v in (None, ""):
+        return None
+    try:
+        d = Decimal(str(v).strip())
+    except (InvalidOperation, ValueError):
+        return None
+    if d != d.to_integral_value():
+        return None
+    y = int(d)
+    return y if 1900 <= y <= 2200 else None
+
+
+def charge_errors(draft: dict, society_id: int) -> list[str]:
+    """Billing-basis and fund-rate rules shared by the Apartment Charges step and Finalize, so a step can
+    never read "done" while Finalize still rejects it. Mirrors the checks in _submit_from_draft."""
+    from app.dash_apps.pages.setup_wizard import apt_charges_error as _apt_charges_error
+    from app.dash_apps.pages.setup_wizard import fund_plan as _fund_plan
+    from app.dash_apps.pages.setup_wizard import funds_error as _funds_error
+
+    funds = (draft or {}).get("funds") or {}
+    soc = _row("SELECT state, constitution FROM societies WHERE id=%s", (society_id,)) or {}
+    s_state = soc.get("state") or "UP"
+    s_constitution = soc.get("constitution") or "AOA"
+    try:
+        flags = _fund_flags_fn(society_id, s_state, constitution=s_constitution)
+        sinking = (funds.get("apt_sinking") or 0) if flags["sinking"] else 0
+        repair = (funds.get("apt_repair") or 0) if flags["repair"] else 0
+        err = (_apt_charges_error(funds.get("apt_billing_basis"), funds.get("apt_budget"),
+                                  funds.get("apt_rate"), funds.get("apt_amt"))
+               or _funds_error(_fund_plan(society_id, s_state, constitution=s_constitution)["plan"],
+                               sinking, repair, funds.get("apt_cost")))
+    except Exception as exc:  # noqa: BLE001
+        return [f"Charges could not be checked: {exc}"]
+    return [err] if err else []
 
 
 def validate_step(step_key: str, draft: dict, society_id: int) -> list[str]:
@@ -795,6 +837,10 @@ def validate_step(step_key: str, draft: dict, society_id: int) -> list[str]:
                 except (InvalidOperation, ValueError):
                     errors.append(f"{fld.upper()} must be a number >= 0.")
 
+    elif step_key == "apartment":
+        # Same rules Finalize enforces (billing basis + fund rates), reported here at the step that owns them.
+        errors.extend(charge_errors(draft, society_id))
+
     elif step_key == "vendor":
         for fld in ("vendor_1day", "vendor_7day", "vendor_1mth"):
             v = step.get(fld)
@@ -811,8 +857,8 @@ def validate_step(step_key: str, draft: dict, society_id: int) -> list[str]:
             errors.append("Accounting/calculation start date is required.")
 
     elif step_key == "brought_forward":
-        if not step.get("fy"):
-            errors.append("Financial year is required.")
+        if _fy_int(step.get("fy")) is None:
+            errors.append("Financial year must be a whole year, for example 2026.")
         rows = step.get("rows") or []
         dr = sum((money(r.get("bf_amount")) for r in rows if r.get("side") == "Dr"), Decimal(0))
         cr = sum((money(r.get("bf_amount")) for r in rows if r.get("side") == "Cr"), Decimal(0))
@@ -841,6 +887,9 @@ def step_statuses(society_id: int) -> dict[str, dict]:
     for key in STEP_REGISTRY_KEYS:
         s = dict(steps.get(key) or {"status": "todo", "saved_at": None})
         s.setdefault("status", "todo")
+        # A completed step whose upstream values changed shows the amber state until it is re-saved.
+        if s.get("needs_review") and s["status"] == "done":
+            s["status"] = "needs_review"
         out[key] = s
     return out
 
@@ -908,9 +957,6 @@ def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
     from app.dash_apps.callbacks.drilldown_callbacks import (
         _move_temp_images,
     )
-    from app.dash_apps.pages.setup_wizard import apt_charges_error as _apt_charges_error
-    from app.dash_apps.pages.setup_wizard import fund_plan as _fund_plan
-    from app.dash_apps.pages.setup_wizard import funds_error as _funds_error
     from app.services import regime_rules_admin as _rra
     from app.services.auth_service import (
         verify_password_with_lockout,  # noqa: F401  (throttle+lockout shared)
@@ -947,12 +993,9 @@ def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
     apt_sinking = (funds.get("apt_sinking") or 0) if _flags["sinking"] else 0
     apt_repair = (funds.get("apt_repair") or 0) if _flags["repair"] else 0
 
-    _apt_err = (_apt_charges_error(funds.get("apt_billing_basis"), funds.get("apt_budget"),
-                                   funds.get("apt_rate"), funds.get("apt_amt"))
-                or _funds_error(_fund_plan(society_id, s_state, constitution=s_constitution)["plan"],
-                                apt_sinking, apt_repair, funds.get("apt_cost")))
-    if _apt_err:
-        raise OnboardingError(_apt_err)
+    _charge_errs = charge_errors(draft, society_id)
+    if _charge_errs:
+        raise OnboardingError(_charge_errs[0])
 
     # throttle (5 s, shared via DB)
     _slot = db._execute(
@@ -1049,7 +1092,7 @@ def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
         "apt_billing_basis": funds.get("apt_billing_basis"), "apt_due": funds.get("apt_due_day"),
         "apt_sink": apt_sinking, "apt_repair": apt_repair,
         "ven_1": vend.get("vendor_1day"), "ven_7": vend.get("vendor_7day"), "ven_30": vend.get("vendor_1mth"),
-        "bf_fy": bf.get("fy"), "bf_json": _json.dumps(bf_json), "created_by": actor_id,
+        "bf_fy": _fy_int(bf.get("fy")), "bf_json": _json.dumps(bf_json), "created_by": actor_id,
         "s_email": sd.get("email"), "reg_num": reg_num,
         "apt_interest": max(float(funds.get("apt_interest") or 0), 0.0),
         "apt_cost": funds.get("apt_cost"), "apt_budget": funds.get("apt_budget"),
