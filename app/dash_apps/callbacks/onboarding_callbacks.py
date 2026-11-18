@@ -274,8 +274,14 @@ def register_onboarding_callbacks(app):
         if not n or not s or s[2] != "admin" or not s[0]:
             return no_update, no_update, no_update
         sid, uid, role = s
-        if ob.state_of(sid) != "committee seated":
-            return no_update, no_update, no_update
+        st = ob.state_of(sid)
+        if st == "setup draft":                  # already past the committee stage: just reopen the wizard
+            return op.hub_body(role, sid, uid, view="setup"), no_update, "setup"
+        if st != "committee seated":
+            log.warning("continue-setup refused for society %s: onboarding_state=%r (expected 'committee seated')", sid, st)
+            return no_update, _alert("The committee is not marked as seated yet. All three office-bearers (President, Secretary, "
+                                     "Treasurer) need a login and signed election evidence. If they are all seated, refresh the "
+                                     "page; if this persists, ask the platform operator to check the database timezone.", False), no_update
         if not op.grievance_named(sid):
             return no_update, _alert("Name the grievance officer first.", False), no_update
         return op.hub_body(role, sid, uid, view="setup"), no_update, "setup"
