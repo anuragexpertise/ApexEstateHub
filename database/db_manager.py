@@ -84,7 +84,22 @@ class DatabaseManager:
     def _dsn(self) -> str:
         raw = os.getenv("DATABASE_URL", "").strip()
         if raw:
-            return raw.replace("postgres://", "postgresql://", 1)
+            dsn = raw.replace("postgres://", "postgresql://", 1)
+            # A single DATABASE_URL used to skip the timezone option below, so the session ran in the server default
+            # (usually UTC). CURRENT_DATE then lagged today_ist() between 00:00 and 05:30 IST, and freshly seated
+            # office-bearers (term_start = today_ist()) were invisible until the date rolled over in UTC.
+            # Not applied when the URL already sets options, when PG_SKIP_STARTUP_OPTIONS=1, or for a host with
+            # "-pooler" in its name. Connection poolers (PgBouncer on Aiven, Neon's pooler) can reject startup
+            # options: behind one, set PG_SKIP_STARTUP_OPTIONS=1 and run
+            #   ALTER DATABASE <db> SET timezone = 'Asia/Kolkata';
+            # once instead, which applies whatever the connection path.
+            host = (urlsplit(dsn).hostname or "").lower()
+            skip = os.getenv("PG_SKIP_STARTUP_OPTIONS", "").strip().lower() in ("1", "true", "yes")
+            if not skip and "options=" not in dsn and "-pooler" not in host:
+                tz = os.getenv("TZ", "Asia/Kolkata")
+                tz = {"Asia/Calcutta": "Asia/Kolkata"}.get(tz, tz)
+                dsn += ("&" if "?" in dsn else "?") + f"options={quote(f'-c timezone={tz}')}"
+            return dsn
 
         host   = os.getenv("PGHOST",     "").strip()
         port   = os.getenv("PGPORT",     "5432").strip() or "5432"
