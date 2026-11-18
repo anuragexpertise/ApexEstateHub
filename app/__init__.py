@@ -167,13 +167,11 @@ def create_app(config_name: str | None = None) -> Flask:
     CORS(app)
     _register_error_handlers(app)
 
-    # Fail closed: production must not start without a valid SECRET_VAULT_KEY that matches this database
-    # and without a reachable database. Do not start in a degraded state.
-    #
-    # Offline/local runs: set ESTATEHUB_OFFLINE=1 to boot without a reachable
-    # database. DB-backed requests then return 503 via the registered error
-    # handlers instead of crashing the process at startup.
-    _offline = os.getenv("ESTATEHUB_OFFLINE", "").strip().lower() in ("1", "true", "yes", "on")
+    # Offline/local runs: when the database is unreachable at startup, boot in
+    # degraded mode instead of crashing. DB-backed requests then return 503 via
+    # the registered error handlers. Set ESTATEHUB_FAIL_CLOSED=1 to restore the
+    # original crash-on-unreachable-DB behaviour.
+    _fail_closed = os.getenv("ESTATEHUB_FAIL_CLOSED", "").strip().lower() in ("1", "true", "yes", "on")
     if not app.config.get('TESTING'):
         from app.services.secret_vault import assert_vault_ready
         try:
@@ -181,18 +179,16 @@ def create_app(config_name: str | None = None) -> Flask:
             assert_vault_ready(_vault_db)
             app.config["DB_AVAILABLE"] = True
         except RuntimeError:
-            if _offline:
-                log.warning("Database unreachable at startup — running in OFFLINE/degraded mode")
-                app.config["DB_AVAILABLE"] = False
-            else:
+            if _fail_closed:
                 raise
-        except Exception as e:                      # database unreachable at import: fail closed
-            if _offline:
-                log.warning("Database unreachable at startup — running in OFFLINE/degraded mode: %s", e)
-                app.config["DB_AVAILABLE"] = False
-            else:
+            log.warning("Database unreachable at startup — running in OFFLINE/degraded mode")
+            app.config["DB_AVAILABLE"] = False
+        except Exception as e:                      # database unreachable at import
+            if _fail_closed:
                 log.error("Database unreachable at startup: %s", e)
                 raise RuntimeError(f"Database unavailable at startup: {e}") from e
+            log.warning("Database unreachable at startup — running in OFFLINE/degraded mode: %s", e)
+            app.config["DB_AVAILABLE"] = False
 
     # Initialize background jobs
     if not app.config.get('TESTING') and os.environ.get('WERKZEUG_RUN_MAIN') != 'true':

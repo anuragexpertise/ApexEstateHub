@@ -702,7 +702,6 @@ def register_shell_callbacks(app):
             ) or []
         except Exception as exc:  # noqa: BLE001
             print(f"❌ societies query error: {exc}")
-            import traceback; traceback.print_exc()  # noqa: I001
             return (
                 [], True,
                 html.Div(
