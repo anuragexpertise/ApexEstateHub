@@ -46,19 +46,19 @@ def tracker(society_id: int):
     gi = 0
     for s in ob.stage_report(society_id):
         if gi < len(groups) and s["n"] == groups[gi][0]:
-            items.append(html.Div(groups[gi][2], style={"fontSize": "10px", "fontWeight": "700",
-                                                        "color": "#556", "marginTop": "6px", "marginBottom": "2px",
-                                                        "textTransform": "uppercase", "letterSpacing": "0.5px",
-                                                        "borderBottom": "1px solid #e1e7ef", "paddingBottom": "2px",
-                                                        "flexBasis": "100%", "textAlign": "left"}))
+            items.append(html.Div(groups[gi][2], style={"fontSize": "9px", "fontWeight": "700",
+                                                       "color": "#556", "marginTop": "4px", "marginBottom": "1px",
+                                                       "textTransform": "uppercase", "letterSpacing": "0.4px",
+                                                       "borderBottom": "1px solid #e1e7ef", "paddingBottom": "1px",
+                                                       "flexBasis": "100%", "textAlign": "left"}))
             gi += 1
         icon, color = _ICON[s["status"]]
         items.append(html.Div([
-            html.I(className=f"fas {icon}", style={"color": color, "fontSize": "20px"}),
-            html.Div(f"{s['n']}. {s['label']}", style={"fontSize": "12px", "fontWeight": "700" if s["status"] == "current" else "500",
-                                                       "color": "#223" if s["status"] != "todo" else "#8895a5", "marginTop": "4px"}),
-        ], title=s["text"], style={"textAlign": "center", "flex": "1 1 90px", "minWidth": "84px", "padding": "6px 2px"}))
-    return html.Div(items, style={"display": "flex", "flexWrap": "wrap", "gap": "2px", "borderBottom": "1px solid #e1e7ef", "paddingBottom": "8px"})
+            html.I(className=f"fas {icon}", style={"color": color, "fontSize": "15px"}),
+            html.Div(f"{s['n']}. {s['label']}", style={"fontSize": "11px", "fontWeight": "700" if s["status"] == "current" else "500",
+                                                       "color": "#223" if s["status"] != "todo" else "#8895a5", "marginTop": "3px"}),
+        ], title=s["text"], style={"textAlign": "center", "flex": "1 1 72px", "minWidth": "66px", "padding": "3px 1px"}))
+    return html.Div(items, style={"display": "flex", "flexWrap": "wrap", "gap": "2px", "borderBottom": "1px solid #e1e7ef", "paddingBottom": "6px"})
 
 
 def marker(society_id: int) -> str:
