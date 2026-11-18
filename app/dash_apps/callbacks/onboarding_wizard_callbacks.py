@@ -14,7 +14,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import dash_bootstrap_components as dbc
-from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
+from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 
 from app.dash_apps.pages import onboarding_page as op
 from app.dash_apps.pages.setup_wizard import (
@@ -1162,3 +1162,101 @@ def _register_xlsx_callbacks(app):
             a_out.append(float(item["amount"]) if item else no_update)
             r_out.append(item["remarks"] if item and item.get("remarks") else no_update)
         return a_out, r_out, (pending.get("fy") if pending.get("fy") else no_update), True
+
+    # BF ledger rows modal per account -----------------------------------------
+    @app.callback(
+        Output({"type": "sw-bf-ledger-modal", "acc_id": MATCH}, "is_open"),
+        Input({"type": "sw-bf-ledger", "acc_id": MATCH}, "n_clicks"),
+        Input({"type": "sw-bf-ledger-close", "acc_id": MATCH}, "n_clicks"),
+        State({"type": "sw-bf-ledger-modal", "acc_id": MATCH}, "is_open"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def bf_ledger_toggle(open_n, close_n, is_open):
+        trig = ctx.triggered_id
+        if not trig:
+            return no_update
+        if trig["type"] == "sw-bf-ledger-close":
+            return False
+        return not is_open if is_open is not None else True
+
+    @app.callback(
+        Output({"type": "sw-bf-ledger-grid", "acc_id": MATCH}, "data"),
+        Output({"type": "sw-bf-ledger-feedback", "acc_id": MATCH}, "children"),
+        Input({"type": "sw-bf-ledger-add", "acc_id": MATCH}, "n_clicks"),
+        Input({"type": "sw-bf-ledger-upload", "acc_id": MATCH}, "contents"),
+        Input({"type": "sw-bf-ledger-clear", "acc_id": MATCH}, "submit_n_clicks"),
+        State({"type": "sw-bf-ledger-upload", "acc_id": MATCH}, "filename"),
+        State({"type": "sw-bf-ledger-mode", "acc_id": MATCH}, "value"),
+        State({"type": "sw-bf-ledger-grid", "acc_id": MATCH}, "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def bf_ledger_grid(add_n, contents, clear_n, filename, mode, rows):
+        from app.services import pending_receivables as pr
+        trig = ctx.triggered_id
+        rows = rows or [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}]
+        if trig and trig["type"] == "sw-bf-ledger-add":
+            return rows + [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}], no_update
+        if trig and trig["type"] == "sw-bf-ledger-clear":
+            return [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}], \
+                   _alert("All ledger rows cleared.", ok=True)
+        if trig and trig["type"] == "sw-bf-ledger-upload" and contents:
+            data = _decode(contents)
+            if data is None:
+                return no_update, _alert("Could not read the uploaded file.", ok=False)
+            try:
+                head = parse_upload(data, filename or "", "Header", [])
+                incoming = []
+                for r in head.rows or []:
+                    incoming.append({
+                        "flat_number": r.get("flat_number") or r.get("flat no.") or r.get("account") or "",
+                        "amount": r.get("amount") or r.get("value") or r.get("value receivable") or None,
+                        "overdue_days": r.get("overdue_days") or r.get("days overdue") or None,
+                        "remarks": r.get("remarks") or r.get("remark") or "",
+                    })
+            except Exception as exc:                                          # noqa: BLE001
+                return no_update, _alert(str(exc), ok=False)
+            if not any(i.get("flat_number") or i.get("amount") for i in incoming):
+                return no_update, _alert("The file has no ledger rows.", ok=False)
+            merged, _added, _updated = pr.merge(rows, incoming, "replace" if mode == "replace" else "add")
+            total = sum((Decimal(str(i.get("amount") or 0)) for i in merged), Decimal(0))
+            msg = f"Imported {len(incoming)} row(s) from {filename}. Total ₹{total:,.2f}."
+            return merged, _alert(msg, ok=True)
+        return no_update, no_update
+
+    @app.callback(
+        Output({"type": "sw-bf-ledger-tieout", "acc_id": MATCH}, "children"),
+        Input({"type": "sw-bf-ledger-grid", "acc_id": MATCH}, "data"),
+        State({"type": "sw-bf-amt", "acc_id": MATCH}, "value"),
+    )
+    @require_session
+    def bf_ledger_tieout(rows, amt):
+        rows = rows or []
+        total = sum((Decimal(str(r.get("amount") or 0)) for r in rows if r.get("amount") not in (None, "")), Decimal(0))
+        if amt in (None, ""):
+            return html.Div(f"Ledger total ₹{total:,.2f} — enter the account value to tie out.", className="text-warning")
+        try:
+            entered = Decimal(str(amt))
+        except Exception:                                                     # noqa: BLE001
+            return html.Div("Ledger total — enter a valid account value.", className="text-danger")
+        diff = total - entered
+        if diff == 0:
+            return html.Div(f"✓ Ledger total ₹{total:,.2f} ties to account value ₹{entered:,.2f}.",
+                            className="text-success")
+        return html.Div(f"✗ Difference ₹{abs(diff):,.2f} — ledger total ₹{total:,.2f} vs account value ₹{entered:,.2f}.",
+                        className="text-danger")
+
+    @app.callback(
+        Output({"type": "sw-bf-ledger-download", "acc_id": MATCH}, "data"),
+        Input({"type": "sw-bf-ledger-template", "acc_id": MATCH}, "n_clicks"),
+        State({"type": "sw-bf-ledger-grid", "acc_id": MATCH}, "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def bf_ledger_download(n, rows):
+        if not n:
+            return no_update
+        from app.services import pending_receivables as pr
+        clean, _ = pr.clean_rows(rows or [], [])
+        return dcc.send_bytes(pr.build_template(clean, []), "ledger_template.xlsx")
