@@ -169,16 +169,30 @@ def create_app(config_name: str | None = None) -> Flask:
 
     # Fail closed: production must not start without a valid SECRET_VAULT_KEY that matches this database
     # and without a reachable database. Do not start in a degraded state.
+    #
+    # Offline/local runs: set ESTATEHUB_OFFLINE=1 to boot without a reachable
+    # database. DB-backed requests then return 503 via the registered error
+    # handlers instead of crashing the process at startup.
+    _offline = os.getenv("ESTATEHUB_OFFLINE", "").strip().lower() in ("1", "true", "yes", "on")
     if not app.config.get('TESTING'):
         from app.services.secret_vault import assert_vault_ready
         try:
             from database.db_manager import db as _vault_db
             assert_vault_ready(_vault_db)
+            app.config["DB_AVAILABLE"] = True
         except RuntimeError:
-            raise
+            if _offline:
+                log.warning("Database unreachable at startup — running in OFFLINE/degraded mode")
+                app.config["DB_AVAILABLE"] = False
+            else:
+                raise
         except Exception as e:                      # database unreachable at import: fail closed
-            log.error("Database unreachable at startup: %s", e)
-            raise RuntimeError(f"Database unavailable at startup: {e}") from e
+            if _offline:
+                log.warning("Database unreachable at startup — running in OFFLINE/degraded mode: %s", e)
+                app.config["DB_AVAILABLE"] = False
+            else:
+                log.error("Database unreachable at startup: %s", e)
+                raise RuntimeError(f"Database unavailable at startup: {e}") from e
 
     # Initialize background jobs
     if not app.config.get('TESTING') and os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
