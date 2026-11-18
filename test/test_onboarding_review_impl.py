@@ -106,3 +106,20 @@ def test_blank_or_missing_confirmation_is_rejected(monkeypatch):
         res, saved = _admin_save(monkeypatch, vals)
         assert not res["ok"] and any("confirm" in e.lower() for e in res["errors"])
         assert not (saved.get("draft", {}).get("administrator") or {}).get("stepup_hash")
+
+
+def test_stage_tracker_is_one_chevron_row(monkeypatch):
+    from app.dash_apps.pages import onboarding_page as op
+    rows = [{"n": i, "code": f"c{i}", "label": f"L{i}", "text": f"t{i}",
+             "status": "done" if i < 3 else "current" if i == 3 else "todo"} for i in range(1, 8)]
+    monkeypatch.setattr(op.ob, "stage_report", lambda sid: rows)
+    t = op.tracker(1)
+    assert t.className == "onb-chev" and len(t.children) == 7
+    assert t.children[1].className == "onb-chev-item done" and t.children[2].className == "onb-chev-item current"
+
+
+def test_rail_styles_only_set_cursor(monkeypatch):
+    from app.dash_apps.callbacks import onboarding_wizard_callbacks as cb
+    styles = cb._rail_item_styles({"tds": {"status": "skipped"}}, 0)
+    assert len(styles) == len(CATEGORIES) and all(set(s) == {"cursor"} for s in styles)
+    assert styles[CATEGORIES.index("TAN & TDS Rates")]["cursor"] == "default"

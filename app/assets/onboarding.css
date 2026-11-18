@@ -3,31 +3,33 @@
 
 .onb-root { width: 100%; max-width: none; }
 
-.onb-setup { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
-.onb-rail { position: sticky; top: calc(var(--header-height) + 16px); max-height: calc(100vh - var(--header-height) - 40px); overflow-y: auto; }
+.onb-setup { display: block; }
 .onb-main { min-width: 0; } /* lets wide tables scroll instead of stretching */
 
-@media (max-width: 992px) {
-    .onb-setup { grid-template-columns: 1fr; }
-    .onb-rail { position: static; max-height: none; }
+/* One-line chevron tracker (stage strip + wizard step strip). Each box points at the next; the strip
+   scrolls sideways on narrow screens instead of wrapping, so it never costs more than one row of height. */
+.onb-chev { display: flex; flex-wrap: nowrap; align-items: stretch; overflow-x: auto; padding: 2px 0 6px; margin-bottom: 8px; scrollbar-width: thin; }
+.onb-chev-item, .onb-rail-item {
+    --pt: 11px;                                   /* depth of the arrow point */
+    position: relative; flex: 1 1 0; min-width: 74px; height: 30px; margin-left: -4px; padding: 0 calc(var(--pt) + 2px) 0 calc(var(--pt) + 4px);
+    display: flex; align-items: center; justify-content: center; gap: 5px; box-sizing: border-box;
+    font-size: 11px; line-height: 1; white-space: nowrap; cursor: pointer; user-select: none;
+    background: var(--chev-bg, #e9edf2); color: var(--chev-fg, #5b6877); border: 0; border-radius: 0;
+    clip-path: polygon(0 0, calc(100% - var(--pt)) 0, 100% 50%, calc(100% - var(--pt)) 100%, 0 100%, var(--pt) 50%);
+    transition: filter 0.15s;
 }
-
-/* Rail step item */
-.onb-rail-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; font-size: 12px; cursor: pointer; border: 1px solid transparent; transition: background 0.15s, border-color 0.15s; }
-.onb-rail-item:hover { background: rgba(29, 116, 216, 0.06); border-color: rgba(29, 116, 216, 0.2); }
-.onb-rail-item.current { background: rgba(29, 116, 216, 0.10); border-color: var(--primary); color: var(--primary); font-weight: 600; }
-.onb-rail-item.done { color: var(--success); }
-.onb-rail-item.done .onb-rail-dot { color: var(--success); }
-.onb-rail-item.todo { color: var(--text-muted); }
-.onb-rail-item.error { color: var(--danger); border-color: var(--danger); }
-.onb-rail-item.needs_review { color: var(--warning); border-color: var(--warning); }
-.onb-rail-item.skipped { color: #9aa3ad; text-decoration: line-through; cursor: default; }
-.onb-rail-item.skipped:hover { background: transparent; border-color: transparent; }
-.onb-rail-dot { width: 20px; text-align: center; font-size: 11px; }
+.onb-chev > :first-child { margin-left: 0; padding-left: 10px; clip-path: polygon(0 0, calc(100% - var(--pt)) 0, 100% 50%, calc(100% - var(--pt)) 100%, 0 100%); border-radius: 6px 0 0 6px; }
+.onb-chev-item:hover, .onb-rail-item:hover { filter: brightness(0.96); }
+.onb-chev-item.done, .onb-rail-item.done { --chev-bg: #dff3ea; --chev-fg: #17734f; }
+.onb-chev-item.current, .onb-rail-item.current { --chev-bg: var(--primary, #1d74d8); --chev-fg: #fff; font-weight: 700; }
+.onb-chev-item.needs_review, .onb-rail-item.needs_review { --chev-bg: #fdecc8; --chev-fg: #8a5a00; }
+.onb-chev-item.error, .onb-rail-item.error { --chev-bg: #f8d9d5; --chev-fg: #a12d20; }
+.onb-chev-item.todo, .onb-rail-item.todo { --chev-bg: #e9edf2; --chev-fg: #6b7889; }
+.onb-chev-item.skipped, .onb-rail-item.skipped { --chev-bg: #f1f3f6; --chev-fg: #9aa3ad; text-decoration: line-through; cursor: default; }
+.onb-chev-item.skipped:hover, .onb-rail-item.skipped:hover { filter: none; }
+.onb-rail-dot { font-size: 11px; flex: 0 0 auto; }
 .onb-rail-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.onb-rail-head { padding: 10px 12px; border-bottom: 1px solid var(--line-soft); }
-.onb-rail-foot { padding: 10px 12px; border-top: 1px solid var(--line-soft); font-size: 11px; color: var(--text-muted); }
+/* A "current" step that is also needs_review/error keeps the current look but shows its state in the dot. */
 
 .sw-hscroll { overflow-x: auto; }
 
