@@ -1,17 +1,19 @@
 # app/services/onboarding_service.py
 """
-Society onboarding, Gold-Standard Plan v5 (stages 1-4 and the activation event).
+Society onboarding, Gold-Standard Plan v5 (stages 1-7 and the activation event).
 
-    registered -> committee seated -> setup draft -> active
+    registered -> committee seated -> setup draft -> active -> enrollment -> adoption -> advisers -> complete
 
   * stage 2  seat_founding_officer(): enrol the office-bearer's flat + login and seat them, with election evidence
              (resolution reference, minutes file and its SHA-256), in one go. When President, Secretary and Treasurer
              are all seated the society moves to 'committee seated' (fn_mark_committee_seated).
   * stage 3  the Setup Wizard saves a DRAFT (onboarding_declarations) and posts nothing.
-  * stage 4  build_annexes() renders Annex A (regime), B (review) and C (opening position) with their controls;
-             seal_annexes() seals them and writes the Agreement text with each annex's SHA-256 in it; the three
-             office-bearers then sign and the platform signs last (document_signing); the fourth signature calls
-             activate() -> fn_activate_society, which posts the opening position and sets the society active.
+  * stage 4  build_annexes() renders Annexes A (regime), B (review), C (opening position), D (data protection) and
+             E (source-documents index) with their controls; seal_annexes() seals them and writes the Agreement text
+             with each annex's SHA-256 in it, atomically; the three office-bearers then sign and the platform signs
+             last (document_signing); the fourth signature calls activate() -> fn_activate_society, which posts the
+             opening position and sets the society active.
+  * stages 5-7  Enrollment, Adoption, Adviser access (follow onboarding_phase once the society is active).
 
 Everything here takes the society id from the caller's server session, never from the browser.
 """
@@ -27,7 +29,7 @@ from decimal import Decimal, InvalidOperation
 
 from app.dash_apps.pages.wizard_registry import DEPENDS, SKIPPED_WHEN
 from app.services import pending_receivables as pr
-from app.utils import today_ist
+from app.utils import today_ist, now_ist
 from database.db_manager import db
 
 log = logging.getLogger(__name__)
@@ -48,10 +50,9 @@ OPTIONAL_DOCS = (("cash_count", "Cash-count certificate"), ("audited_report", "A
 FUND_TABS = ("SinkFund", "RepFund", "CorpusFund", "MajRepFund", "DepFund")
 BANK_TABS = ("BkAc", "SBI", "ICICI", "CiH", "Dp")
 RECEIVABLE_TABS = ("SDr", "SDrCash", "SDrDig")
-# Hard-coded operator defaults, used in the Agreement text when the environment
-# is not set. Signing is gated on the real environment values (see
-# assert_ready_to_sign): nobody signs until OPERATOR_LEGAL_NAME and
-# OPERATOR_ADDRESS are actually configured.
+# Operator defaults used in the Agreement text when the environment is not set. OPERATOR_LEGAL_NAME /
+# OPERATOR_ADDRESS from the environment override them; a deployment that sets them is asserting a real operator
+# and confirm_operator() must be run before signing. OPERATOR_PLACEHOLDER names the unconfirmed state.
 OPERATOR_LEGAL_NAME_DEFAULT = "EstateHub LLP"
 OPERATOR_ADDRESS_DEFAULT = "Agra, UP, India"
 OPERATOR_PLACEHOLDER = "[OPERATOR LEGAL ENTITY - TO BE CONFIRMED BY ADVOCATE BEFORE SIGNING]"
@@ -297,6 +298,10 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
         raise OnboardingError("Flat number and name are required.")
     if email_c is False:
         raise OnboardingError("Enter a valid email address.")
+    # Cross-society email: refused up front, before any INSERT, so a shared email
+    # never seats half a committee and then hits the users.email UNIQUE constraint mid-seating.
+    if _row("SELECT 1 AS x FROM users WHERE lower(email)=%s AND society_id<>%s LIMIT 1", (email_c, society_id)):
+        raise OnboardingError("That email is already registered to another society; each office-bearer needs a distinct email.")
     if phone_c is False:
         raise OnboardingError("Enter a valid phone number.")
     too_long = _length_problems(OFFICE_LABEL[office_code], flat, name, phone_c)
@@ -342,10 +347,10 @@ def seat_founding_officer(actor_id: int, society_id: int, office_code: str, flat
             err = validate_password(password)
             if err:
                 raise OnboardingError(err)
-            if _row("SELECT 1 AS x FROM users WHERE lower(email)=%s", (email_c,)):
-                raise OnboardingError("That email is already registered to another login.")
-            login = _row("INSERT INTO users (society_id, email, password_hash, role, login_method, linked_id, name, created_by) "
-                         "VALUES (%s,%s,%s,'apartment','password',%s,%s,%s) RETURNING id, email",
+            if _row("SELECT 1 AS x FROM users WHERE lower(email)=%s AND society_id=%s", (email_c, society_id)):
+                raise OnboardingError("That email is already registered to another login in this society.")
+            login = _row("INSERT INTO users (society_id, email, password_hash, role, login_method, linked_id, name, created_by, must_change_password) "
+                         "VALUES (%s,%s,%s,'apartment','password',%s,%s,%s,TRUE) RETURNING id, email",
                          (society_id, email_c, generate_password_hash(password), apt["id"], name, actor_id))
             created_user = True
         ok, msg = cs.appoint(actor_id, "admin", society_id, apt["id"], office_code, name, user_id=login["id"],
@@ -383,6 +388,8 @@ def update_seated_officer(actor_id: int, society_id: int, office_code: str, phon
     st = state_of(society_id)
     if st not in ("registered", "committee seated", "setup draft"):
         raise OnboardingError("Office-bearer details can only be changed before signing starts.")
+    if annexes_sealed(society_id):
+        raise OnboardingError("Office-bearer details are locked once the annexes are sealed.")
     ag = _row("SELECT id FROM society_agreements WHERE society_id=%s ORDER BY id DESC LIMIT 1", (society_id,))
     if ag:
         n = (db._execute("SELECT COUNT(*) AS n FROM document_signatures WHERE subject_kind='agreement' AND subject_id=%s",
@@ -552,6 +559,8 @@ def seat_founding_committee(actor_id: int, society_id: int, rows: list[dict], mi
             problems.append(f"{label}: flat {rec['flat']} already holds the {OFFICE_LABEL[held_flats[rec['flat'].lower()]]} seat.")
         if rec["email"] in held_emails:
             problems.append(f"{label}: {rec['email']} already holds the {OFFICE_LABEL[held_emails[rec['email']]]} seat.")
+        if _row("SELECT 1 AS x FROM users WHERE lower(email)=%s AND society_id<>%s LIMIT 1", (rec["email"], society_id)):
+            problems.append(f"{label}: {rec['email']} is already registered to another society.")
         if not _login_exists(society_id, rec["flat"], rec["email"]):
             err = validate_password(passwords.get(office) or "")
             if err:
@@ -624,6 +633,21 @@ def _save_declaration(society_id: int, d: dict, actor_id: int) -> None:
                 (society_id, json.dumps(d, default=str), actor_id))
 
 
+def save_election_rows(society_id: int, actor_id: int, rows: list[dict]) -> None:
+    """Persist validated Election Results rows into the draft (draft.election_rows) so 'Seat all three'
+    can re-read them from the server instead of Flask session (no PII in session)."""
+    d = declaration(society_id) or {}
+    draft = d.setdefault("draft", {})
+    draft["election_rows"] = rows
+    _save_declaration(society_id, d, actor_id)
+
+
+def get_election_rows(society_id: int) -> list[dict]:
+    """Read validated Election Results rows previously saved with save_election_rows."""
+    d = declaration(society_id) or {}
+    return (d.get("draft") or {}).get("election_rows") or []
+
+
 
 
 def save_step(society_id: int, actor_id: int, step_key: str, values: dict, cleared=()) -> dict:
@@ -636,6 +660,8 @@ def save_step(society_id: int, actor_id: int, step_key: str, values: dict, clear
     are marked needs_review; TDS/GST flip to skipped when their central flag is
     off.
     """
+    if annexes_sealed(society_id):
+        raise OnboardingError("The Setup Wizard is locked once the annexes are sealed.")
     d = declaration(society_id) or {}
     draft = d.setdefault("draft", {})
     steps = d.setdefault("steps", {})
@@ -898,6 +924,8 @@ def finalize_draft(society_id: int, actor_id: int, admin_password: str) -> str:
     """validate_all must be empty; write societies via fn_complete_society_setup(draft=True);
     state -> 'setup draft'. Keeps the 5 s throttle, lockout check and key seeding in one
     transaction (A14 atomicity)."""
+    if annexes_sealed(society_id):
+        raise OnboardingError("The Setup Wizard is locked once the annexes are sealed.")
     from app.services.auth_service import verify_password_with_lockout as _verify
     d = declaration(society_id)
     if d is None:
@@ -1368,6 +1396,14 @@ def store_evidence_file(society_id: int, purpose: str, acc_id: int | None, filen
         raise OnboardingError("The file does not look like a real {}.".format(ext.lstrip(".").upper()))
     digest = _sha(data)
     stored = f"{digest}{ext}"
+    # Registration-certificate dedupe: once a certificate SHA-256 is on file for a society, a different certificate
+    # can never replace it (the master's upload at registration is the authority). Re-uploading the same certificate is fine.
+    if purpose == "registration_certificate":
+        existing = _rows("SELECT sha256 FROM onboarding_evidence WHERE society_id=%s AND purpose='registration_certificate'",
+                         (society_id,)) or []
+        existing_shas = {r["sha256"] for r in existing}
+        if existing_shas and digest not in existing_shas:
+            raise OnboardingError("A registration certificate is already on file for this society and a different one cannot replace it.")
     # The file name IS its SHA-256, so the stored copy can be checked at any time (evidence_service.verify_row).
     # Prove it now too: never record evidence whose file is not on disk byte-for-byte as uploaded.
     try:
@@ -1412,6 +1448,20 @@ def get_evidence(society_id: int, purpose: str, acc_id: int | None = None) -> li
                      FROM onboarding_evidence
                     WHERE society_id=%s AND purpose=%s
                     ORDER BY uploaded_at DESC""", (society_id, purpose)) or []
+
+
+def verify_evidence(society_id: int, evidence_id: int, actor_id: int, ok: bool, note: str | None = None) -> dict:
+    """Manually verify (or un-verify) an evidence row: an admin confirms the uploaded scan matches the source document.
+    Returns the updated row. Refused if the row does not belong to this society."""
+    row = _row("SELECT id FROM onboarding_evidence WHERE id=%s AND society_id=%s", (evidence_id, society_id))
+    if not row:
+        raise OnboardingError("Evidence not found.")
+    db._execute("UPDATE onboarding_evidence SET manually_verified=%s, verified_by=%s, verified_at=%s, verification_note=%s WHERE id=%s",
+                (bool(ok), actor_id, now_ist() if bool(ok) else None, (note or "").strip()[:1000] or None, evidence_id))
+    _audit(society_id, actor_id, "EVIDENCE_VERIFIED" if ok else "EVIDENCE_VERIFICATION_REVOKED", "onboarding_evidence", evidence_id,
+           {"verified": bool(ok), "note": (note or "").strip()[:1000] or None})
+    return _row("SELECT id, purpose, filename, sha256, manually_verified, verified_by, verified_at, verification_note "
+                "FROM onboarding_evidence WHERE id=%s", (evidence_id,))
 
 
 # ── stage 3: setup draft submit (merged from setup_wizard.submit_setup_wizard) ──────────────────────────
@@ -2087,8 +2137,32 @@ def build_annexes(society_id: int, actor_id: int | None = None) -> dict:
     return annex_status(society_id)
 
 
+def annexes_sealed(society_id: int) -> bool:
+    """True when any annex for the society is sealed: the freeze-guard trigger (no more draft edits once sealed)."""
+    r = _row("SELECT 1 AS x FROM onboarding_annexes WHERE society_id=%s AND status='sealed' LIMIT 1", (society_id,))
+    return bool(r)
+
+
+def _write_agreement_on(cur, society_id: int, ag: dict) -> str:
+    """Build the Agreement text from the sealed annexes and store it on `cur` (same connection / transaction).
+
+    Reads sealed annexes through `cur` so a just-sealed annex is visible inside the same transaction.
+    """
+    cur.execute("SELECT annex_code, content, content_hash FROM onboarding_annexes WHERE society_id=%s AND status='sealed'", (society_id,))
+    sealed = {r["annex_code"]: r for r in cur.fetchall()}
+    if set(sealed) != set(ANNEX_CODES):
+        raise OnboardingError("Seal annexes A, B, C, D and E first.")
+    hashes = {k: v["content_hash"] for k, v in sealed.items()}
+    contents = {k: (v["content"] if isinstance(v["content"], dict) else json.loads(v["content"])) for k, v in sealed.items()}
+    text = agreement_text(society_id, ag.get("agreement_no") or "", hashes, contents)
+    cur.execute("UPDATE society_agreements SET body_text=%s, society_name=(SELECT name FROM societies WHERE id=%s) WHERE id=%s",
+                (text, society_id, ag["id"]))
+    return text
+
+
 def seal_annexes(society_id: int, actor_id: int) -> dict:
-    """Seal A, B, C, D, E (refused while any control blocks) and write the Agreement text with their hashes into it."""
+    """Seal A, B, C, D, E (refused while any control blocks) and write the Agreement text with their hashes into it,
+    all in ONE transaction: on any failure the annexes stay unsealed and nothing is committed."""
     if state_of(society_id) != "setup draft":
         raise OnboardingError("Submit the Setup Wizard before sealing the annexes.")
     drafts = {r["annex_code"]: r for r in _rows(
@@ -2098,15 +2172,48 @@ def seal_annexes(society_id: int, actor_id: int) -> dict:
     blocked = [c for c, v in drafts.items() if v["blocking"]]
     if blocked:
         raise OnboardingError("Fix the failing controls before sealing: Annex " + ", ".join(sorted(blocked)) + ".")
-    with db._conn() as conn:
-        cur = conn.cursor()
-        for code in drafts:
-            cur.execute("DELETE FROM onboarding_annexes WHERE society_id=%s AND annex_code=%s AND status IN ('superseded')", (society_id, code))
-            cur.execute("UPDATE onboarding_annexes SET status='superseded' WHERE society_id=%s AND annex_code=%s AND status='sealed'", (society_id, code))
-            cur.execute("UPDATE onboarding_annexes SET status='sealed', sealed_at=NOW() WHERE society_id=%s AND annex_code=%s AND status IN ('draft','submitted')",
-                        (society_id, code))
-    write_agreement(society_id)
+    from app.dash_apps.callbacks.drilldown_callbacks import _get_or_create_agreement
+    ag = _get_or_create_agreement(db, society_id)
+    if _row("SELECT 1 AS x FROM signed_records WHERE subject_kind='agreement' AND subject_id=%s AND status='valid'", (ag["id"],)):
+        raise OnboardingError("The Agreement is already sealed.")
+    try:
+        with db._conn() as conn:
+            cur = conn.cursor()
+            for code in drafts:
+                cur.execute("DELETE FROM onboarding_annexes WHERE society_id=%s AND annex_code=%s AND status IN ('superseded')", (society_id, code))
+                cur.execute("UPDATE onboarding_annexes SET status='superseded' WHERE society_id=%s AND annex_code=%s AND status='sealed'", (society_id, code))
+                cur.execute("UPDATE onboarding_annexes SET status='sealed', sealed_at=NOW() WHERE society_id=%s AND annex_code=%s AND status IN ('draft','submitted')",
+                            (society_id, code))
+            _write_agreement_on(cur, society_id, ag)
+    except OnboardingError:
+        raise
+    except Exception as exc:
+        log.exception("seal_annexes failed for society %s", society_id)
+        raise OnboardingError("Sealing failed; nothing was committed. Try again.") from exc
     return annex_status(society_id)
+
+
+def reissue_agreement(society_id: int, actor_id: int) -> dict:
+    """Rewrite the Agreement body_text from the sealed annexes. Refused once any agreement signature exists, so
+    existing signatures are never voided silently."""
+    from app.dash_apps.callbacks.drilldown_callbacks import _get_or_create_agreement
+    ag = _get_or_create_agreement(db, society_id)
+    if _row("SELECT 1 AS x FROM signed_records WHERE subject_kind='agreement' AND subject_id=%s AND status='valid'", (ag["id"],)):
+        raise OnboardingError("The Agreement is already signed; it cannot be reissued without voiding existing signatures.")
+    n = (db._execute("SELECT COUNT(*) AS n FROM document_signatures WHERE subject_kind='agreement' AND subject_id=%s",
+                     (ag["id"],), fetch_one=True) or {}).get("n", 0)
+    if n:
+        raise OnboardingError("The Agreement is already signed; it cannot be reissued without voiding existing signatures.")
+    try:
+        with db._conn() as conn:
+            cur = conn.cursor()
+            text = _write_agreement_on(cur, society_id, ag)
+    except OnboardingError:
+        raise
+    except Exception as exc:
+        log.exception("reissue_agreement failed for society %s", society_id)
+        raise OnboardingError("Reissue failed; nothing was committed. Try again.") from exc
+    return {**ag, "body_text": text}
 
 
 def seal_with_confirmation(society_id: int, actor_id: int, i_agree: str, admin_password: str) -> dict:
@@ -2122,7 +2229,33 @@ def seal_with_confirmation(society_id: int, actor_id: int, i_agree: str, admin_p
 
 
 def _operator() -> tuple[str, str]:
-    return OPERATOR_LEGAL_NAME_DEFAULT, OPERATOR_ADDRESS_DEFAULT       # fixed in code: the Agreement always names this entity
+    """The legal entity named as "the Operator" in the Agreement: OPERATOR_LEGAL_NAME / OPERATOR_ADDRESS from the
+    environment, else the hard-coded default. A deployment that sets these env vars is asserting a real operator;
+    confirm_operator() then records the per-society confirmation before signing is allowed."""
+    return (os.environ.get("OPERATOR_LEGAL_NAME") or OPERATOR_LEGAL_NAME_DEFAULT,
+            os.environ.get("OPERATOR_ADDRESS") or OPERATOR_ADDRESS_DEFAULT)
+
+
+def confirm_operator(society_id: int, actor_id: int, name: str, address: str) -> str:
+    """Record the operator's legal name and address for this society and mark it confirmed. Refused once any
+    agreement signature exists (the name is baked into the signed text, so changing it later would void signatures)."""
+    name = (name or "").strip()
+    address = (address or "").strip()
+    if not name:
+        raise OnboardingError("The operator's legal name is required.")
+    ag = _row("SELECT id FROM society_agreements WHERE society_id=%s ORDER BY id DESC LIMIT 1", (society_id,))
+    if ag:
+        n = (db._execute("SELECT COUNT(*) AS n FROM document_signatures WHERE subject_kind='agreement' AND subject_id=%s",
+                         (ag["id"],), fetch_one=True) or {}).get("n", 0)
+        if n:
+            raise OnboardingError("The Agreement is already signed; the operator can no longer be changed.")
+        if _row("SELECT 1 AS x FROM signed_records WHERE subject_kind='agreement' AND subject_id=%s AND status='valid'",
+                (ag["id"],)):
+            raise OnboardingError("The Agreement is already signed; the operator can no longer be changed.")
+    db._execute("UPDATE societies SET operator_name=%s, operator_address=%s, operator_confirmed_at=%s, operator_confirmed_by=%s WHERE id=%s",
+                (name[:100], address[:1000], now_ist(), actor_id, society_id))
+    _audit(society_id, actor_id, "OPERATOR_CONFIRMED", "society", society_id, {"name": name[:100], "address": address[:1000]})
+    return f"Operator confirmed: {name}."
 
 
 def set_esign_required(society_id: int, actor_id: int, required: bool) -> None:
@@ -2421,14 +2554,15 @@ def write_agreement(society_id: int) -> dict:
     ag = _get_or_create_agreement(db, society_id)
     if _row("SELECT 1 AS x FROM signed_records WHERE subject_kind='agreement' AND subject_id=%s AND status='valid'", (ag["id"],)):
         raise OnboardingError("The Agreement is already sealed.")
-    sealed = {r["annex_code"]: r for r in _rows("SELECT annex_code, content, content_hash FROM onboarding_annexes WHERE society_id=%s AND status='sealed'", (society_id,))}
-    if set(sealed) != set(ANNEX_CODES):
-        raise OnboardingError("Seal annexes A, B, C, D and E first.")
-    hashes = {k: v["content_hash"] for k, v in sealed.items()}
-    contents = {k: (v["content"] if isinstance(v["content"], dict) else json.loads(v["content"])) for k, v in sealed.items()}
-    text = agreement_text(society_id, ag.get("agreement_no") or "", hashes, contents)
-    db._execute("UPDATE society_agreements SET body_text=%s, society_name=(SELECT name FROM societies WHERE id=%s) WHERE id=%s",
-                (text, society_id, ag["id"]))
+    try:
+        with db._conn() as conn:
+            cur = conn.cursor()
+            text = _write_agreement_on(cur, society_id, ag)
+    except OnboardingError:
+        raise
+    except Exception as exc:
+        log.exception("write_agreement failed for society %s", society_id)
+        raise OnboardingError("The Agreement could not be written. Try again.") from exc
     return {**ag, "body_text": text}
 
 
@@ -2575,8 +2709,16 @@ def assert_ready_to_sign(society_id: int) -> None:
         raise OnboardingError("Annexes A, B, C, D and E must be sealed before the Agreement is signed.")
     if any(h not in (ag["body_text"] or "") for h in sealed.values()):
         raise OnboardingError("The Agreement text no longer matches the sealed annexes; reissue it from the annexes.")
-    if OPERATOR_LEGAL_NAME_DEFAULT not in (ag["body_text"] or ""):
+    op_name, _op_addr = _operator()
+    text = ag["body_text"] or ""
+    if op_name not in text:
         raise OnboardingError("The Agreement does not name the operator; reissue it from the annexes.")
+    # A deployment that asserts a real operator via OPERATOR_LEGAL_NAME requires the admin to confirm it
+    # (confirm_operator) before anyone signs; defaults are acceptable locally without confirmation.
+    if os.environ.get("OPERATOR_LEGAL_NAME"):
+        soc = _row("SELECT operator_confirmed_at FROM societies WHERE id=%s", (society_id,)) or {}
+        if not soc.get("operator_confirmed_at"):
+            raise OnboardingError("Confirm the operator before signing: on the Agreement stage the admin clicks Confirm operator.")
 
 
 # ── activation ────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -77,7 +77,7 @@ def marker(society_id: int) -> str:
 
 
 # ── stage 2 ───────────────────────────────────────────────────────────────────────────────────────────────────────
-def _office_card(office: str, seated: dict | None, society_id: int | None = None):
+def _office_card(office: str, seated: dict | None, society_id: int | None = None, locked: bool = False):
     label = ob.OFFICE_LABEL[office]
     if not seated:
         return html.Div([
@@ -91,22 +91,24 @@ def _office_card(office: str, seated: dict | None, society_id: int | None = None
                                            "border": "1px solid #c9d2dc", "borderRadius": "4px"})
     def fid(f):
         return {"type": f"{P}-f", "office": office, "field": f}
+    disabled = {"disabled": True} if locked else {}
+    lock_note = html.Div("Locked once the annexes are sealed — use “Reissue Agreement” while nothing is signed.", style=_MUTED) if locked else None
     return html.Div([html.I(className="fas fa-user-check me-2", style={"color": "#2e9e5b"}),
                      html.Strong(f"{label}: {seated['holder_name']}"), html.Span(f"  flat {seated['flat_number']}", style=_MUTED),
                      html.Div(f"Elected under {seated['resolution_ref']}; minutes SHA-256 {str(seated['evidence_hash'])[:16]}...", style=_MUTED),
                      html.Div([html.Strong("Signature: ", style={"fontSize": "11.5px", "color": "#556"}), sig_img], style={"marginTop": "6px"}),
                      html.Details([html.Summary("Edit details", style={"fontSize": "12px", "cursor": "pointer", "marginTop": "8px"}),
                                    dbc.Row([
-                                       dbc.Col(_field("Mobile", dbc.Input(id=fid("phone"), size="sm", value=seated.get("phone") or "", maxLength=20)), md=4),
+                                       dbc.Col(_field("Mobile", dbc.Input(id=fid("phone"), size="sm", value=seated.get("phone") or "", maxLength=20, **disabled)), md=4),
                                        dbc.Col(_field("Signature image", dcc.Upload(
                                            id=fid("sig"), accept=".png,.jpg,.jpeg,.webp", multiple=False,
-                                           children=html.Span("Replace signature", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"}),
-                                           style={"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px"})), md=4),
+                                           children=html.Span("Replace signature", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "default" if locked else "pointer"}),
+                                           style={"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px", "opacity": 0.5 if locked else 1})), md=4),
                                        dbc.Col(html.Div(id=fid("sig-preview"), style={"fontSize": "11.5px", "color": "#667", "marginTop": "6px"}), md=2),
-                                       dbc.Col(dbc.Button("Save", id=fid("save"), color="primary", size="sm", n_clicks=0, style={"fontSize": "12px"}), md=1),
+                                       dbc.Col(dbc.Button("Save", id=fid("save"), color="primary", size="sm", n_clicks=0, style={"fontSize": "12px"}, **disabled), md=1),
                                        dbc.Col(html.Div(id=fid("msg"), style={"fontSize": "12px"}), md=1),
-                                   ], className="g-2")], style={"marginTop": "8px"})],
-                  style=_CARD)
+                                   ], className="g-2")], style={"marginTop": "8px"}),
+                     lock_note], style=_CARD)
 
 
 def _seat_all_panel(seated: dict):
@@ -199,7 +201,7 @@ def _stage_committee(society_id: int):
                     "for each person: the Agreement needs four different people to sign.", style=_MUTED)]
     if s.get("onboarding_state") in ("registered", "committee seated") and not all(seated[o] for o in ob.CORE_OFFICES):
         out.append(_seat_all_panel(seated))
-    out += [_office_card(o, seated[o], society_id) for o in ob.CORE_OFFICES]
+    out += [_office_card(o, seated[o], society_id, locked=ob.annexes_sealed(society_id)) for o in ob.CORE_OFFICES]
     out.append(html.Div([
         html.Strong("Grievance officer (DPDP)"), html.Div("Named on the login page and in every privacy notice.", style=_MUTED),
         dbc.Row([dbc.Col(_field("Name", dbc.Input(id=f"{P}-g-name", size="sm", value=s.get("grievance_officer_name") or "")), md=4),
@@ -207,6 +209,7 @@ def _stage_committee(society_id: int):
                  dbc.Col(_field("Mobile", dbc.Input(id=f"{P}-g-phone", size="sm", value=s.get("grievance_officer_phone") or "")), md=3)], className="g-2"),
         dbc.Button("Save grievance officer", id=f"{P}-g-save", color="secondary", size="sm", outline=True, n_clicks=0)], style=_CARD))
     state = s.get("onboarding_state")
+    sealed = ob.annexes_sealed(society_id)
     named = bool((s.get("grievance_officer_name") or "").strip())
     if state == "committee seated":
         # The founding committee is complete, but Stage 2 is not finished until the grievance officer is named:
@@ -220,9 +223,12 @@ def _stage_committee(society_id: int):
         else:
             out.append(dbc.Alert("All three office-bearers are seated. Name the grievance officer above to continue to society setup.",
                                  color="info", className="py-2 mt-2", style={"fontSize": "12.5px"}))
-    elif state == "setup draft":
+    elif state == "setup draft" and not sealed:
         out.append(dbc.Button([html.I(className="fas fa-arrow-left me-2"), "Back to society setup"],
                               id=f"{P}-back-to-setup", color="secondary", size="sm", outline=True, n_clicks=0, style={"marginTop": "8px"}))
+    elif state == "setup draft" and sealed:
+        out.append(dbc.Alert("The annexes are sealed: the wizard is locked. Use “Reissue Agreement” while nothing is signed, "
+                             "or signing to finish.", color="info", className="py-2 mt-2", style={"fontSize": "12.5px"}))
     return out
 
 
@@ -296,9 +302,27 @@ def _stage_annexes(society_id: int):
         "CASE status WHEN 'sealed' THEN 1 ELSE 0 END", (society_id,), fetch_all=True) or []}   # last row per code wins: sealed beats draft
     codes = ob.ANNEX_CODES
     out = [html.H6("Stage 4: check, seal and sign"),
-           html.Div("The Setup Wizard saved a draft and posted nothing. The five annexes below (A to E) are generated from that draft and are what "
+           html.Div("The Setup Wizard saved a draft and posted nothing. The five annexes below (A to E) are generated from that draft and is what "
                     "the Agreement declares: the legal basis, the reviewed setup, the opening position and the data-protection schedule. "
                     "Each failing control blocks sealing and links to the step that fixes it.", style=_MUTED)]
+    # Operator confirmation: the Agreement names the Operator (the Licensor). Admin confirms before anyone signs.
+    soc = ob.db._execute("SELECT operator_name, operator_address, operator_confirmed_at FROM societies WHERE id=%s", (society_id,), fetch_one=True) or {}
+    op_confirmed = bool(soc.get("operator_confirmed_at"))
+    op_name = soc.get("operator_name") or ob.OPERATOR_LEGAL_NAME_DEFAULT
+    if op_confirmed:
+        out.append(html.Div([html.Strong("Operator confirmed: ", style={"fontSize": "12px"}), html.Span(op_name, style=_MUTED)], style={"marginTop": "8px"}))
+    else:
+        out.append(html.Div([
+            html.Strong("Confirm the operator before signing", style={"fontSize": "12.5px"}),
+            html.Div("The Agreement names the Operator (the Licensor). Confirm its legal name and address; signing is blocked until confirmed "
+                     "when OPERATOR_LEGAL_NAME is set for this deployment.", style=_MUTED),
+            dbc.Row([
+                dbc.Col(_field("Legal name", dbc.Input(id=f"{P}-op-name", size="sm", value=soc.get("operator_name") or "", maxLength=100)), md=4),
+                dbc.Col(_field("Address", dbc.Input(id=f"{P}-op-addr", size="sm", value=soc.get("operator_address") or "", maxLength=500)), md=5),
+                dbc.Col(dbc.Button("Confirm operator", id=f"{P}-confirm-operator", color="success", size="sm", n_clicks=0), md=2),
+            ], className="g-2 mt-1"),
+            html.Div(id=f"{P}-op-status", style={"fontSize": "12.5px", "marginTop": "4px"}),
+        ], style=_CARD))
     all_sealed = len(drafts) == len(codes) and all(v["status"] == "sealed" for v in drafts.values())
     if not all_sealed:
         out.append(dbc.Button([html.I(className="fas fa-sync me-2"), "Check annexes"], id=f"{P}-prepare", color="primary", size="sm", n_clicks=0,
@@ -322,6 +346,14 @@ def _stage_annexes(society_id: int):
         ], style=_CARD))
     elif all_sealed:
         out.append(html.Div("Annexes sealed and the Agreement issued. The office-bearers sign below.", style=_MUTED))
+        ag = ob.db._execute("SELECT id FROM society_agreements WHERE society_id=%s", (society_id,), fetch_one=True)
+        if ag:
+            n = (ob.db._execute("SELECT COUNT(*) AS n FROM document_signatures WHERE subject_kind='agreement' AND subject_id=%s",
+                                (ag["id"],), fetch_one=True) or {}).get("n", 0)
+            if not n:
+                out.append(dbc.Button([html.I(className="fas fa-edit me-2"), "Reissue Agreement"], id=f"{P}-reissue-agreement",
+                                      color="warning", outline=True, size="sm", n_clicks=0, style={"marginTop": "6px"}))
+                out.append(html.Div(id=f"{P}-reissue-status", style={"fontSize": "12.5px", "color": "#556", "marginTop": "4px"}))
     return out
 
 
@@ -832,6 +864,13 @@ def evidence_register(society_id: int):
         eid = r["id"]
         sha = str(r["sha256"]).lower()
         when = r["uploaded_at"].strftime("%d %b %Y %H:%M") if r.get("uploaded_at") else ""
+        verified = bool(r.get("manually_verified"))
+        vnote = r.get("verification_note") or ""
+        vwho = ""
+        if r.get("verified_at"):
+            vwho = f" by {(r.get('uploaded_by_name') or 'admin')} on {str(r['verified_at'])[:16]}"
+        vbadge = html.Span("Verified" + vwho, style={"color": "#2e7d32", "fontWeight": "600", "fontSize": "11px"}) if verified else \
+                 html.Span("Not verified", style={"color": "#b02a37", "fontSize": "11px"})
         body.append(html.Tr([
             html.Td([html.Div(ev.purpose_label(r["purpose"]), style={"fontWeight": "600"}),
                      html.Div(r["filename"], style={"color": "#667"})]),
@@ -843,13 +882,22 @@ def evidence_register(society_id: int):
             html.Td([dbc.Button("Verify", id={"type": f"{P}-ev-verify", "id": eid}, size="sm", outline=True,
                                 color="secondary", n_clicks=0, style={"padding": "0 8px", "fontSize": "11.5px"}),
                      html.Span(id={"type": f"{P}-ev-status", "id": eid}, style={"fontSize": "11.5px", "marginLeft": "8px"})]),
+            html.Td([
+                dbc.Input(id={"type": f"{P}-ev-note", "id": eid}, placeholder="note", size="sm", value=vnote or "",
+                          style={"fontSize": "11px", "width": "110px"}),
+                dbc.Button("Mark verified" if not verified else "Revoke", id={"type": f"{P}-ev-manual", "id": eid},
+                           size="sm", outline=True, color=("success" if not verified else "danger"),
+                           n_clicks=0, style={"padding": "0 8px", "fontSize": "11px", "marginTop": "3px"}),
+                html.Span(id={"type": f"{P}-ev-manual-status", "id": eid}, children=vbadge,
+                          style={"fontSize": "11px", "marginLeft": "6px"}),
+            ]),
         ], style={"fontSize": "12px", "verticalAlign": "top"}))
     return dbc.Card(dbc.CardBody([
         html.Div([html.Strong("Evidence register", style={"fontSize": "13px"}),
                   html.Span(f"  {len(rows)} stored scan(s)", style=_MUTED)]),
         html.Small("Every file is re-hashed (SHA-256) and compared with the fingerprint recorded at upload before it is shown. "
                    "A missing or altered file is refused.", className="text-muted d-block mb-2"),
-        html.Div(dbc.Table([html.Thead(html.Tr([html.Th(h) for h in ("Document", "Uploaded", "SHA-256", "Open", "Integrity")])),
+        html.Div(dbc.Table([html.Thead(html.Tr([html.Th(h) for h in ("Document", "Uploaded", "SHA-256", "Open", "Integrity", "Manual verification")])),
                             html.Tbody(body)], size="sm", borderless=True, className="mb-2"),
                  style={"overflowX": "auto"}),
         dbc.Button("Verify all", id=f"{P}-ev-verify-all", size="sm", color="secondary", outline=True, n_clicks=0, className="me-2"),

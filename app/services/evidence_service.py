@@ -54,7 +54,8 @@ def purpose_label(purpose: str) -> str:
 def list_register(society_id: int) -> list[dict]:
     """Every stored scan for the society, newest first. Reads the database only (no hashing)."""
     return ob._rows("""SELECT e.id, e.purpose, e.filename, e.stored_name, e.sha256, e.size_bytes, e.uploaded_at,
-                              u.name AS uploaded_by_name
+                              u.name AS uploaded_by_name,
+                              e.manually_verified, e.verified_by, e.verified_at, e.verification_note
                          FROM onboarding_evidence e
                          LEFT JOIN users u ON u.id = e.uploaded_by
                         WHERE e.society_id = %s
