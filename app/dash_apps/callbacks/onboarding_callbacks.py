@@ -69,9 +69,7 @@ def _body(sid, uid, role, view=None):
     return op.hub_body(role, sid, uid, view=view), op.marker(sid)
 
 
-def _committee_view(sid):
-    """Admin edits made on the committee screen should leave the admin on it (not jump into the wizard)."""
-    return "committee" if ob.state_of(sid) in ("committee seated", "setup draft") else None
+_committee_view = op._committee_view          # defined in the page module (no page -> callbacks import cycle)
 
 
 def register_onboarding_callbacks(app):
@@ -217,6 +215,8 @@ def register_onboarding_callbacks(app):
     def onb_officer_update(_clicks, phones, sig_contents_list, sig_filename_list):
         trig = ctx.triggered_id
         if not trig or not isinstance(trig, dict):
+            return no_update, no_update, no_update
+        if not (ctx.triggered and ctx.triggered[0].get("value")):          # a re-rendered card, not a click
             return no_update, no_update, no_update
         s = _session()
         if not s or s[2] != "admin" or not s[0]:
@@ -365,7 +365,7 @@ def register_onboarding_callbacks(app):
         from app.services import op_progress
         with op_progress.begin(op_token, "annex_build", "Checking the annexes", steps_total=3, society_id=sid) as trk:
             try:
-                trk.step(1, "Building Annexes A to D and testing each control")
+                trk.step(1, "Building Annexes A to E and testing each control")
                 ob.build_annexes(sid, uid)
             except ob.OnboardingError as exc:
                 trk.fail("Not ready")
@@ -560,7 +560,8 @@ def register_onboarding_callbacks(app):
         # society is committee-seated / in a setup draft) the poll must not replace
         # onb-body — that wipes unsaved inputs and jumps the DOM (F3). Only refresh the
         # tracker; re-render the body only on real state transitions.
-        setup_mounted = (view == "setup") or st in ("committee seated", "setup draft")
+        v = view or ""
+        setup_mounted = role == "admin" and (st == "committee seated" or (st == "setup draft" and (v.startswith("setup") or v == "committee")))
         if st == "active":
             return op.tracker(sid), op.hub_body(role, sid, uid), mk
         if setup_mounted:
@@ -1015,14 +1016,13 @@ def register_onboarding_callbacks(app):
                 if office in ob.CORE_OFFICES and not seated.get(office):
                     v = data[office].get(fname)
                     vals.append(v if v not in (None, "") else no_update)
-                    if fname == "flat":
-                        filled.append(ob.OFFICE_LABEL[office])
                 else:
                     vals.append(no_update)
             per_field.append(vals)
+        filled = [ob.OFFICE_LABEL[o] for o in ob.CORE_OFFICES if not seated.get(o)]
         g = data["grievance_officer"]
-        note = (("Filled the forms for: " + ", ".join(filled) + ". ") if filled else "Every office is already seated. ") + \
-               "Add each officer's temporary password, signature image and signed minutes, then press Seat. " \
+        note = (("Workbook checked for: " + ", ".join(filled) + ". ") if filled else "Every office is already seated. ") + \
+               "Add each officer's temporary password and signature image under 'Seat all three', then press it. " \
                "Grievance officer fields are filled; press Save to keep them."
         return (*per_field, g["name"], g["email"], g["phone"], _alert(note))
 

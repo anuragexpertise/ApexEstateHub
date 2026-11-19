@@ -17,7 +17,6 @@ import json
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
-from app.dash_apps.callbacks.onboarding_callbacks import _committee_view
 from app.dash_apps.pages.setup_wizard import (
     CATEGORIES,
     render_category_content,
@@ -28,11 +27,20 @@ from app.services import onboarding_service as ob
 from app.utils import today_ist
 
 P = "onb"
-
-P = "onb"
 _MUTED = {"fontSize": "12px", "color": "#667"}
 _CARD = {"padding": "14px 16px", "margin": "10px 0", "background": "#f6f8fb", "border": "1px solid #e1e7ef", "borderRadius": "10px"}
 _ICON = {"done": ("fa-check-circle", "#2e9e5b"), "current": ("fa-dot-circle", "#1d74d8"), "todo": ("fa-circle", "#b8c2cf")}
+
+
+def _committee_view(society_id: int):
+    """Admin edits made on the committee screen should leave the admin on it (not jump into the wizard)."""
+    return "committee" if ob.state_of(society_id) in ("committee seated", "setup draft") else None
+
+
+def _initial_view(society_id: int):
+    """View on a fresh page load. Only 'committee seated' opens on the committee screen (its Continue button is there);
+    'setup draft' is the annex/sign stage and must open on it, not on Stage 2."""
+    return "committee" if ob.state_of(society_id) == "committee seated" else None
 
 
 def _field(label, comp, width="100%"):
@@ -285,10 +293,10 @@ def step_from_view(view: str | None) -> int | None:
 def _stage_annexes(society_id: int):
     drafts = {r["annex_code"]: r for r in ob.db._execute(
         "SELECT * FROM onboarding_annexes WHERE society_id=%s AND status IN ('draft','submitted','sealed') ORDER BY annex_code, "
-        "CASE status WHEN 'sealed' THEN 0 ELSE 1 END", (society_id,), fetch_all=True) or []}
+        "CASE status WHEN 'sealed' THEN 1 ELSE 0 END", (society_id,), fetch_all=True) or []}   # last row per code wins: sealed beats draft
     codes = ob.ANNEX_CODES
     out = [html.H6("Stage 4: check, seal and sign"),
-           html.Div("The Setup Wizard saved a draft and posted nothing. The four annexes below are generated from that draft and are what "
+           html.Div("The Setup Wizard saved a draft and posted nothing. The five annexes below (A to E) are generated from that draft and are what "
                     "the Agreement declares: the legal basis, the reviewed setup, the opening position and the data-protection schedule. "
                     "Each failing control blocks sealing and links to the step that fixes it.", style=_MUTED)]
     all_sealed = len(drafts) == len(codes) and all(v["status"] == "sealed" for v in drafts.values())
@@ -296,7 +304,7 @@ def _stage_annexes(society_id: int):
         out.append(dbc.Button([html.I(className="fas fa-sync me-2"), "Check annexes"], id=f"{P}-prepare", color="primary", size="sm", n_clicks=0,
                               style={"marginBottom": "10px"}))
     if not drafts:
-        out.append(html.Div("Press Check annexes to generate Annexes A to D from your wizard draft.", style=_MUTED))
+        out.append(html.Div("Press Check annexes to generate Annexes A to E from your wizard draft.", style=_MUTED))
         return out
     for code in codes:
         if code in drafts:
@@ -305,7 +313,7 @@ def _stage_annexes(society_id: int):
     if ready:
         out.append(html.Div([
             html.Strong("Seal the annexes and issue the Agreement"),
-            html.Div("Sealing fixes these four annexes by their SHA-256 inside the Agreement text. Changing anything afterwards would void any "
+            html.Div("Sealing fixes these five annexes by their SHA-256 inside the Agreement text. Changing anything afterwards would void any "
                      "signature already given. Type I AGREE and confirm it is you.", style=_MUTED),
             dbc.Row([dbc.Col(dbc.Input(id=f"{P}-agree", size="sm", placeholder="Type I AGREE", autoComplete="off"), md=4),
                      dbc.Col(dbc.Input(id=f"{P}-seal-pw", size="sm", type="password", placeholder="Your login password", autoComplete="current-password"), md=4),
@@ -481,7 +489,7 @@ def signing_panel(society_id: int, user_id: int | None, role: str | None = None)
     ag = ob.db._execute("SELECT id, body_text FROM society_agreements WHERE society_id=%s", (society_id,), fetch_one=True)
     sealed = ob.annex_status(society_id)
     if not ag or not ag["body_text"] or any(sealed.get(c, {}).get("status") != "sealed" for c in ob.ANNEX_CODES):
-        return html.Div("The Agreement is issued for signing once the three annexes are sealed.", style=_MUTED)
+        return html.Div("The Agreement is issued for signing once all five annexes (A to E) are sealed.", style=_MUTED)
     st = ds.status("agreement", ag["id"])
     have = {x["office_code"] for x in st["signed"]}
     rows = []
@@ -919,9 +927,9 @@ def render_pending(role: str, society_id: int | None, user_id: int | None):
         dcc.Store(id=f"{P}-marker", data=marker(society_id)),
         dcc.Store(id="onb-setup-step", data=_initial_step(society_id)),
         dcc.Store(id="onb-wizard-step", storage_type="session", data=_initial_step(society_id)),
-        dcc.Store(id="onb-view", data=_committee_view(society_id) or "current"),
+        dcc.Store(id="onb-view", data=_initial_view(society_id) or "current"),
         html.Div(id="onb-celebrate-sink", style={"display": "none"}),
-        html.Div(hub_body(role, society_id, user_id, view=_committee_view(society_id)), id=f"{P}-body"),
+        html.Div(hub_body(role, society_id, user_id, view=_initial_view(society_id)), id=f"{P}-body"),
     ], className="portal-page onb-root")
 
 

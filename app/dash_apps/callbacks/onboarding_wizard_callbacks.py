@@ -446,6 +446,7 @@ def register_onboarding_wizard_callbacks(app):
         Output(f"{P}-marker", "data", allow_duplicate=True),
         Output("onb-finalize-modal", "is_open", allow_duplicate=True),
         Output("onb-finalize-error", "children", allow_duplicate=True),
+        Output("onb-view", "data", allow_duplicate=True),
         Input("onb-finalize-confirm", "n_clicks"),
         State("onb-finalize-password", "value"),
         State("op-token-store", "data"),
@@ -455,7 +456,7 @@ def register_onboarding_wizard_callbacks(app):
     def wizard_finalize(n_clicks, password, op_token=None):
         s = _session()
         if not n_clicks or not s or s[2] != "admin" or not s[0]:
-            return no_update, no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update, no_update
         sid, uid, role = s
         from app.services import op_progress
         with op_progress.begin(op_token, "setup_finalize", "Saving the Setup Wizard", steps_total=4, society_id=sid) as trk:
@@ -465,15 +466,15 @@ def register_onboarding_wizard_callbacks(app):
             except ob.OnboardingError as exc:
                 # Keep the modal open and say why inline, so a mistyped password is a retry, not a restart.
                 trk.fail("Not saved")
-                return _alert(str(exc), False), no_update, no_update, no_update, str(exc)
-            trk.step(2, "Preparing Annexes A to D from what you entered")
+                return _alert(str(exc), False), no_update, no_update, no_update, str(exc), no_update
+            trk.step(2, "Preparing Annexes A to E from what you entered")
             try:                                   # regenerate Annexes A-D from the draft just saved, so Annex C is never a stale snapshot
                 ob.build_annexes(sid, uid)
             except ob.OnboardingError:
                 pass
             trk.step(3, "Opening the onboarding hub")
             body, mk = op.hub_body(role, sid, uid), op.marker(sid)
-            return _alert(msg), body, mk, False, ""
+            return _alert(msg), body, mk, False, "", "current"
 
     # ── item 10/11 removed: receivables & reconciliation merged into per-account ledger rows in §4 ────
 

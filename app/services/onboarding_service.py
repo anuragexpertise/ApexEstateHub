@@ -1938,7 +1938,7 @@ CONTROL_FIX = {
     ("C", "balanced"): "Brought Forward", ("C", "accounts_known"): "Brought Forward", ("C", "funds_backed"): "Brought Forward",
     ("C", "arrears_tie"): "Brought Forward", ("C", "bank_agrees"): "Brought Forward",
     ("D", "grievance_officer"): "committee", ("D", "grievance_contact"): "committee", ("D", "stepup_set"): "Administrator",
-    ("E", "registration_certificate"): "Onboarding Hub", ("E", "index_complete"): "Onboarding Hub",
+    ("E", "registration_certificate"): "committee", ("E", "index_complete"): "committee",
 }
 
 # Categories of sub-processor. Provider names are read from the environment, never invented here.
