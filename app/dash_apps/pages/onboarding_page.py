@@ -396,7 +396,7 @@ def setup_stage(society_id: int, current_step: int | None = None) -> list:
             containers.append(html.Div([print_link, html.Div(review_body, id="onb-review-container")], id={"type": "onb-step", "key": cat},
                                        style={"display": "block" if i == current_step else "none", "paddingTop": "6px"}))
         else:
-            containers.append(html.Div(render_category_content(cat, society_id), id={"type": "onb-step", "key": cat},
+            containers.append(html.Div(render_category_content(cat, society_id, is_current=(i == current_step)), id={"type": "onb-step", "key": cat},
                                        style={"display": "block" if i == current_step else "none", "paddingTop": "6px"}))
     main = html.Div([
         html.Div(containers, id="onb-step-containers"),

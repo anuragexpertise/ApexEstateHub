@@ -1452,7 +1452,7 @@ def legal_regime_live(society_id=None, state=None, constitution=None):
     ]
 
 
-def render_category_content(category, society_id=None, state=None, constitution=None):
+def render_category_content(category, society_id=None, state=None, constitution=None, is_current=False):
     """
     Step body for one wizard category.
 
@@ -1462,7 +1462,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
     refresh_up_aoa_step_content in setup_wizard_callbacks.py.
     """
     elements = []
-    _imgs = _existing_society_images(society_id) if category in ("Society Details", "Administrator", "Accounts") else {}
+    _imgs = _existing_society_images(society_id) if (is_current and category in ("Society Details", "Administrator", "Accounts")) else {}
     
     # Render conversational header(s) if available. A category can have more
     # than one guidance row in conversation.xlsx (e.g. "Society Details" has
@@ -1500,7 +1500,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
 
     if category == "Society Details":
         s_name, s_addr, s_pan, s_reg, s_phone, s_email, s_gate_logic, s_duty_hrs, s_state, s_constitution = "", "", "", "", "", "", "both", "8", DEFAULT_STATE, "AOA"
-        if society_id:
+        if is_current and society_id:
             row = db._execute("SELECT name, address, phone, email, PAN_number, registration_number, gate_logic, duty_hrs, state, constitution FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row:
                 s_name = row.get("name", "") or ""
@@ -1524,7 +1524,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
         # (fn_compute_rcm / vendor.state comparison) depends on entirely —
         # previously state had no UI at all and every RCM check silently
         # fell back to guessing the state from the free-text address.
-        _state_choices = get_states()
+        _state_choices = get_states() if is_current else {}
         state_options = [{"label": "— Select State —", "value": ""}] + [
             {"label": f"{name}{' (jurisdiction-aware rules active)' if code == 'UP' else ''}", "value": code}
             for code, name in _state_choices.items() if code != "ALL"
@@ -1583,23 +1583,26 @@ def render_category_content(category, society_id=None, state=None, constitution=
         ]
     elif category == "Legal Regime Selection":
         # The six Yes/No answers come from the saved draft, so they survive a reload and the table below starts out right.
-        lr = _saved_legal_answers(society_id)
+        lr = _saved_legal_answers(society_id) if is_current else {}
 
         def yes_no(component_id, key):
             return dbc.RadioItems(id=component_id, options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}],
                                   value=lr[key], inline=True, className="mb-3")
 
-        try:
-            hierarchy_rows, _ = legal_hierarchy_rows(society_id, state, lr, constitution)
-        except Exception:                                                      # noqa: BLE001
-            _log.exception("Legal Hierarchy could not be rendered")
-            hierarchy_rows = []
+        hierarchy_rows = []
+        if is_current:
+            try:
+                hierarchy_rows, _ = legal_hierarchy_rows(society_id, state, lr, constitution)
+            except Exception:                                                      # noqa: BLE001
+                _log.exception("Legal Hierarchy could not be rendered")
+                hierarchy_rows = []
+        regime_live = legal_regime_live(society_id, state, constitution) if is_current else []
         return elements + [
             _render_banner("Legal Regime Selection", "Your State and Constitution, chosen on the Society Details step, decide which Acts, Rules and Bye-laws govern the society. "
                                                      "A lower level can never loosen a higher one."),
             # State/Constitution are only persisted on Next, so this card is re-rendered live from the Society Details dropdowns
             # (legal_regime_refresh). It is its own container so that re-rendering does not reset the radios further down this step.
-            html.Div(id="sw-legal-regime-live", children=legal_regime_live(society_id, state, constitution)),
+            html.Div(id="sw-legal-regime-live", children=regime_live),
             html.Hr(),
             html.H6([html.I(className="fas fa-sliders-h me-2"), "Central Act Settings"], className="text-primary mt-3 mb-2"),
             html.P("The Central Acts below apply to every society whatever you answer; nothing here is a choice. What depends on your society's facts is whether a duty "
@@ -1650,7 +1653,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
     elif category == "TAN & TDS Rates":
         from database.seed import tds_wizard_rows
         s_tan = ""
-        if society_id:
+        if is_current and society_id:
             row = db._execute("SELECT tan_number FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row:
                 s_tan = row.get("tan_number") or ""
@@ -1713,11 +1716,12 @@ def render_category_content(category, society_id=None, state=None, constitution=
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "GSTIN & GST Rate":
         s_gstin = ""
-        if society_id:
+        if is_current and society_id:
             row = db._execute("SELECT gstin FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row:
                 s_gstin = row.get("gstin") or ""
-        turnover_row = db._execute(
+        if is_current:
+            turnover_row = db._execute(
             "SELECT value FROM state_compliance_thresholds "
             "WHERE threshold_key = 'gst_turnover_lakh' AND is_active = TRUE LIMIT 1",
             fetch_one=True,
@@ -1726,9 +1730,9 @@ def render_category_content(category, society_id=None, state=None, constitution=
             "SELECT value FROM state_compliance_thresholds "
             "WHERE threshold_key = 'gst_per_member_monthly' AND is_active = TRUE LIMIT 1",
             fetch_one=True,
-        )
-        turnover_val = (turnover_row or {}).get("value", 20.0)
-        exempt_val = (exempt_row or {}).get("value", 7500.0)
+        ) if is_current else None
+        turnover_val = (turnover_row or {}).get("value", 20.0) if is_current else 20.0
+        exempt_val = (exempt_row or {}).get("value", 7500.0) if is_current else 7500.0
         readonly_style = {"opacity": "0.7", "backgroundColor": "#e9ecef"}
         return elements + [
             _render_banner("GSTIN & GST Rate", "Enter the GSTIN and the GST rates your CA advises. Turnover/exemption limits below are statutory constants maintained by Master, not editable per-society."),
@@ -1750,7 +1754,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
         s_amt, s_rate, s_due, s_cost, s_budget = 0.0, 0.0, 1, 0.0, 0.0
         s_billing_basis = "undivided_interest"        # society default; apartments can override at enrolment
         s_int = DEFAULT_INTEREST_RATE_PCT
-        if society_id:
+        if is_current and society_id:
             row = db._execute("SELECT apt_maintenance_amount, apt_maintenance_rate, apt_due_day, apt_sinking_fund_rate, apt_repair_fund_rate, apt_interest_pct, billing_basis, project_construction_cost, common_expense_budget_monthly FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
                 s_amt, s_rate, s_due = row.get("apt_maintenance_amount", 0.0) or 0.0, row.get("apt_maintenance_rate", 0.0) or 0.0, row.get("apt_due_day", 1) or 1
@@ -1790,16 +1794,22 @@ def render_category_content(category, society_id=None, state=None, constitution=
         from app.services import regime_rules_admin as rra
         from app.services.statutory_rules import fund_rules_for_state
         s_sink, s_repair = None, None          # no default: blank until the society enters the resolved rate
-        if society_id:
+        if is_current and society_id:
             row = db._execute("SELECT apt_sinking_fund_rate, apt_repair_fund_rate FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
                 s_sink, s_repair = row.get("apt_sinking_fund_rate") or None, row.get("apt_repair_fund_rate") or None
-        fp = fund_plan(society_id, state, constitution=constitution)
-        ff = fund_flags(society_id, state, constitution=constitution)
-        fund_rules = fund_rules_for_state(state)
-        try:
-            pol = rra.list_society_policies(society_id) if society_id else {}
-        except Exception:  # noqa: BLE001
+        if is_current:
+            fp = fund_plan(society_id, state, constitution=constitution)
+            ff = fund_flags(society_id, state, constitution=constitution)
+            fund_rules = fund_rules_for_state(state)
+            try:
+                pol = rra.list_society_policies(society_id) if society_id else {}
+            except Exception:  # noqa: BLE001
+                pol = {}
+        else:
+            fp = {"regime": "GENERIC", "plan": {}}
+            ff = {}
+            fund_rules = {}
             pol = {}
         cards = []
 
@@ -1915,7 +1925,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
         ]
     elif category == "Vendor Charges":
         s_v1, s_v7, s_v30 = DEFAULT_VENDOR_1DAY, DEFAULT_VENDOR_7DAY, DEFAULT_VENDOR_1MTH
-        if society_id:
+        if is_current and society_id:
             row = db._execute("SELECT vendor_1day, vendor_7day, vendor_1mth FROM ven_charges_fines_basis WHERE society_id = :id AND ven_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
                 s_v1 = row.get("vendor_1day") or DEFAULT_VENDOR_1DAY
@@ -1927,7 +1937,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
         ]
     elif category == "Accounts Heads":
         s_calc = str(fy_start_date())
-        if society_id:
+        if is_current and society_id:
             row = db._execute("SELECT calc_start_date FROM societies WHERE id = :id", {"id": society_id}, fetch_one=True)
             if row and row.get("calc_start_date"): s_calc = str(row["calc_start_date"])
         from database.seed import ACCOUNTS
@@ -1968,13 +1978,13 @@ def render_category_content(category, society_id=None, state=None, constitution=
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Brought Forward":
         s_fy = fy_start_year()
-        if society_id:
+        if is_current and society_id:
             row = db._execute("SELECT financial_year FROM brought_forward WHERE society_id = :id LIMIT 1", {"id": society_id}, fetch_one=True)
             if row: s_fy = row.get("financial_year") or s_fy
         # Values already saved in the wizard draft: the inputs below must show them, otherwise revisiting this step
         # shows zeros and the next Next/Previous saves an empty row list over the saved Brought Forward.
         _saved_bf = {}
-        if society_id:
+        if is_current and society_id:
             try:
                 from app.services import onboarding_service as _ob_bf
                 _bf_draft = (_ob_bf.load_draft(society_id).get("brought_forward")) or {}
@@ -2000,10 +2010,14 @@ def render_category_content(category, society_id=None, state=None, constitution=
             3260: "Gifts Given",
         }
         from app.services.up_aoa_fund_catalog import active_keys as _active_keys
-        _fp = _fund_plan_fn(society_id, state, constitution=constitution)
-        from app.services import regime_rules_admin as _rra
-        _modes = {k: _fp["plan"][k]["mode"] for k in ("sinking", "repair")}
-        _modes["depreciation"] = "fy_close" if _rra.policy_intent(society_id, "levy_depreciation_fund") == "yes" else "none"
+        if is_current:
+            _fp = _fund_plan_fn(society_id, state, constitution=constitution)
+            from app.services import regime_rules_admin as _rra
+            _modes = {k: _fp["plan"][k]["mode"] for k in ("sinking", "repair")}
+            _modes["depreciation"] = "fy_close" if _rra.policy_intent(society_id, "levy_depreciation_fund") == "yes" else "none"
+        else:
+            _fp = {"regime": "GENERIC", "plan": {}}
+            _modes = {}
         _held = _active_keys(_modes)
         _up = _fp["regime"] == "UP_AOA_2010"
 
@@ -2209,7 +2223,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
     elif category == "Administrator":
         return elements + [
             _render_banner("Administrator & step-up password", "Create this society's step-up password (SIGNING_SECRET). It confirms sensitive actions (QR re-issue, key rotation); the server creates and guards the society's signing keys. The Secretary is seated in the founding-committee stage and signs the Agreement there — no separate Secretary capture is needed here."),
-            _office_bearer_status(society_id),
+            _office_bearer_status(society_id) if is_current else html.Div(),
             html.Hr(),
             html.P("Create this society's step-up password.", className="text-danger fw-bold mb-1"),
             dbc.Alert([
