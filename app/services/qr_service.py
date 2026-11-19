@@ -677,7 +677,7 @@ def validate_visitor_qr(visitor_id: int, society_id: int, security_user_id: int 
 
 import math
 
-from app.utils import now_ist
+from app.utils import as_ist, now_ist
 
 
 def _haversine(lat1, lon1, lat2, lon2):
@@ -732,7 +732,7 @@ def validate_patrol_qr(location_id: int, society_id: int, security_user_id: int 
             
             if last_scan and last_scan.get("latitude") and lat is not None:
                 travel_dist = _haversine(lat, lon, last_scan["latitude"], last_scan["longitude"])
-                time_diff = (now_ist() - last_scan["scanned_at"]).total_seconds()
+                time_diff = (now_ist() - as_ist(last_scan["scanned_at"])).total_seconds()
                 
                 if time_diff > 0 and travel_dist is not None:
                     speed = travel_dist / time_diff  # meters per second
