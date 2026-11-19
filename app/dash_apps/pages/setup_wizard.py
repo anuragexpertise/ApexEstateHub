@@ -1548,7 +1548,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
             dbc.Select(id="sw-society-state", options=state_options, value=s_state, className="mb-1"),
             _label("Constitution", html_for="sw-society-constitution"),
             dbc.Select(id="sw-society-constitution", options=constitution_options, value=s_constitution, className="mb-3"),
-            html.Div(id="sw-regime-badge", children=regime_badge(s_state, s_constitution), className="mb-2"),
+            html.Div(id="sw-regime-badge", children=regime_badge(s_state, s_constitution) if is_current else html.Div(), className="mb-2"),
             html.P(
                 "State + Constitution together select the legal regime (Central Acts → State Act → Rules → Model Bye-laws → "
                 "Society Bye-laws → Policy / Resolutions → Board). In UP an AOA is itself registered as a society; "
@@ -1583,7 +1583,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
         ]
     elif category == "Legal Regime Selection":
         # The six Yes/No answers come from the saved draft, so they survive a reload and the table below starts out right.
-        lr = _saved_legal_answers(society_id) if is_current else {}
+        lr = _saved_legal_answers(society_id) if is_current else dict(LEGAL_ANSWER_DEFAULTS)
 
         def yes_no(component_id, key):
             return dbc.RadioItems(id=component_id, options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}],
@@ -1811,6 +1811,12 @@ def render_category_content(category, society_id=None, state=None, constitution=
             ff = {}
             fund_rules = {}
             pol = {}
+        if not is_current:
+            # Non-current steps render no DB-backed cards — only the banner,
+            # so re-rendering every step on wizard open hits the database once
+            # (for the visible step) instead of once per step.
+            return elements + [
+                _render_banner("Funds", "Funds this society holds: the prescribed ones (IFMS Corpus, Major Repair Fund, Reserve Fund) and any optional fund it opts into (Sinking, Repair & Maintenance, Depreciation). Optional funds stay provisional until the General Body resolution is on file.")]
         cards = []
 
         def policy_select(key, lock_regime_label=None):
