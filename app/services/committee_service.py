@@ -87,7 +87,8 @@ def _flag_stepup_review(sid: int, actor_id: int) -> None:
         db._execute("UPDATE societies SET stepup_review_required = TRUE WHERE id = %s", (sid,))
         holders = [r["user_id"] for r in _rows("""SELECT co.user_id FROM committee_offices co
                                                    WHERE co.society_id=%s AND co.office_code = ANY(%s) AND co.status='active'
-                                                     AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE)""",
+                                                     AND co.term_start <= (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+                                                     AND (co.term_end IS NULL OR co.term_end >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date)""",
                                                (sid, list(CORE_OFFICES)))]
         holders = [h for h in holders if h]
         for uid in set(holders + [actor_id]):

@@ -306,7 +306,8 @@ def can_manage(society_id: int, user_id: int, role: str | None) -> bool:
     if role == "admin":
         return bool(_row("SELECT 1 AS x FROM users WHERE id=%s AND society_id=%s", (user_id, society_id)))
     return bool(_row("SELECT 1 AS x FROM committee_offices WHERE society_id=%s AND user_id=%s AND status='active' AND office_code='secretary' "
-                     "AND term_start <= CURRENT_DATE AND (term_end IS NULL OR term_end >= CURRENT_DATE)", (society_id, user_id)))
+                     "AND term_start <= (NOW() AT TIME ZONE 'Asia/Kolkata')::date "
+                     "AND (term_end IS NULL OR term_end >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date)", (society_id, user_id)))
 
 
 def _require_manager(society_id, user_id, role):

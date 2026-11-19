@@ -300,7 +300,7 @@ CREATE TABLE users (
     login_method VARCHAR(20) DEFAULT 'password',
     is_master_admin BOOLEAN NOT NULL DEFAULT FALSE,
     failed_login_attempts INTEGER NOT NULL DEFAULT 0,
-    locked_until TIMESTAMP,
+    locked_until TIMESTAMPTZ,
     reset_token VARCHAR(64),
     reset_token_expires TIMESTAMP,
     -- A4: TRUE until the user sets a password of their own. Every account is
@@ -312,7 +312,7 @@ CREATE TABLE users (
     -- Not the same as locked_until, which a password reset clears.
     active BOOLEAN NOT NULL DEFAULT TRUE,
     -- A11: shared (cross-worker) 5-second throttle for Setup Wizard submits.
-    setup_submit_at TIMESTAMP,
+    setup_submit_at TIMESTAMPTZ,
     push_token TEXT,
     push_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     last_login TIMESTAMP,
@@ -15642,7 +15642,7 @@ BEGIN
           FROM committee_offices co
          WHERE co.society_id = p_society_id AND co.status = 'active'
            AND co.office_code IN ('president', 'secretary', 'treasurer')
-           AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE)
+           AND co.term_start <= (NOW() AT TIME ZONE 'Asia/Kolkata')::date AND (co.term_end IS NULL OR co.term_end >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
     LOOP
         SELECT * INTO ob FROM fn_get_standing(p_society_id, b.apartment_id, v_as_at) LIMIT 1;
         IF FOUND AND COALESCE(ob.arrears_bye_law7, 0) > 0 THEN
@@ -21985,7 +21985,7 @@ BEGIN
     END IF;
     SELECT co.id INTO v_office FROM committee_offices co
      WHERE co.society_id = v_society AND co.user_id = p_user_id AND co.office_code = p_role AND co.status = 'active'
-       AND co.term_start <= CURRENT_DATE AND (co.term_end IS NULL OR co.term_end >= CURRENT_DATE) LIMIT 1;
+       AND co.term_start <= (NOW() AT TIME ZONE 'Asia/Kolkata')::date AND (co.term_end IS NULL OR co.term_end >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date) LIMIT 1;
     IF v_office IS NULL THEN RAISE EXCEPTION 'You do not hold the office of % in this society today.', p_role; END IF;
     SELECT user_id INTO v_other FROM society_decision_approvals
      WHERE subject_kind = p_kind AND subject_id = p_subject_id AND item_hash = v_hash AND role <> p_role;

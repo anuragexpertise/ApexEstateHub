@@ -36,7 +36,7 @@ def format_date_ist(d: date | datetime | None = None) -> str:
     if d is None:
         d = today_ist()
     if isinstance(d, datetime):
-        d = d.astimezone(IST).date()
+        d = as_ist(d).astimezone(IST).date()
     return d.strftime("%d/%m/%Y")
 
 
@@ -49,8 +49,6 @@ def format_datetime_ist(dt: datetime | None = None) -> str:
     """Format a datetime as dd/mm/yyyy HH:MM in IST."""
     if dt is None:
         dt = now_ist()
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc).astimezone(IST)
-    else:
-        dt = dt.astimezone(IST)
+    # Naive DB timestamps hold IST wall-clock time (same rule as as_ist()); aware ones are converted.
+    dt = as_ist(dt) if dt.tzinfo is None else dt.astimezone(IST)
     return dt.strftime("%d/%m/%Y %H:%M")

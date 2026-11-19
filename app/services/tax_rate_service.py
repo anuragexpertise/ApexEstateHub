@@ -28,7 +28,7 @@ RESOURCE = "tax_rate_config"
 def treasurer_seated(society_id: int) -> bool:
     row = db._execute(
         "SELECT 1 AS x FROM committee_offices WHERE society_id = %s AND office_code = 'treasurer' "
-        "AND status = 'active' AND (term_end IS NULL OR term_end >= CURRENT_DATE) LIMIT 1",
+        "AND status = 'active' AND (term_end IS NULL OR term_end >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date) LIMIT 1",
         (society_id,), fetch_one=True)
     return bool(row)
 
@@ -36,7 +36,7 @@ def treasurer_seated(society_id: int) -> bool:
 def _is_acting_secretary(society_id: int, user_id: int) -> bool:
     row = db._execute(
         "SELECT 1 AS x FROM committee_offices WHERE society_id = %s AND office_code = 'secretary' "
-        "AND status = 'active' AND (term_end IS NULL OR term_end >= CURRENT_DATE) AND user_id = %s LIMIT 1",
+        "AND status = 'active' AND (term_end IS NULL OR term_end >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date) AND user_id = %s LIMIT 1",
         (society_id, user_id), fetch_one=True)
     return bool(row)
 

@@ -156,7 +156,8 @@ def verify(society_id: int, purpose: str, message, signature: str, key_version: 
 def _holds_office(d, society_id, user_id, office_code) -> bool:
     return bool(d._execute(
         "SELECT 1 FROM committee_offices WHERE society_id = %s AND user_id = %s AND office_code = %s AND status = 'active' "
-        "AND term_start <= CURRENT_DATE AND (term_end IS NULL OR term_end >= CURRENT_DATE)",
+        "AND term_start <= (NOW() AT TIME ZONE 'Asia/Kolkata')::date "
+        "AND (term_end IS NULL OR term_end >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date)",
         (society_id, user_id, office_code), fetch_one=True))
 
 
