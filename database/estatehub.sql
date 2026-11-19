@@ -157,7 +157,14 @@ CREATE TABLE societies (
     ),
     stepup_review_required BOOLEAN NOT NULL DEFAULT FALSE,
     stepup_initial BOOLEAN NOT NULL DEFAULT TRUE,
-    stepup_changed_at TIMESTAMPTZ
+    stepup_changed_at TIMESTAMPTZ,
+    -- V5 hardening: the legal entity named as "the Operator" in the Agreement, confirmed by the
+    -- society's administrator before anyone signs. Env OPERATOR_LEGAL_NAME / OPERATOR_ADDRESS override
+    -- these per-deployment; the row is the per-society record of what was confirmed and when.
+    operator_name VARCHAR(100),
+    operator_address TEXT,
+    operator_confirmed_at TIMESTAMPTZ,
+    operator_confirmed_by INT REFERENCES users (id)
 );
 
 -- V5.4: two-phase Setup Wizard drafts. The wizard submits a draft here and posts
@@ -23964,7 +23971,12 @@ CREATE TABLE onboarding_evidence (
     document_sha256 CHAR(64),
     snapshot_sha256 CHAR(64),
     uploaded_by INT REFERENCES users (id),
-    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Manual verification tick: an admin confirms the uploaded scan matches the source document.
+    manually_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    verified_by INT REFERENCES users (id),
+    verified_at TIMESTAMPTZ,
+    verification_note TEXT
 );
 
 CREATE INDEX ix_onb_evidence_soc ON onboarding_evidence (society_id, purpose);

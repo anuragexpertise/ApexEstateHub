@@ -11,12 +11,10 @@ yet active. Because of that every callback decides for itself, from the SERVER s
 """
 import base64
 import logging
-import time
 
 import dash_bootstrap_components as dbc
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
-from flask import session
 
 from app.dash_apps.pages import onboarding_page as op
 from app.security.audit_context import (
@@ -97,7 +95,7 @@ def register_onboarding_callbacks(app):
             return no_update, _alert("Only the society's administrator can seat the committee.", False), no_update
         from app.services import xlsx_templates as xt
         # Use the freshly-uploaded workbook, falling back to rows already imported via
-        # "Fill forms from Election Results.xlsx" so the workbook need not be chosen again.
+        # "Fill forms from Election Results.xlsx" (saved server-side in the draft, never in session).
         if xlsx_contents:
             raw = _decode(xlsx_contents)
             if not raw:
@@ -106,22 +104,30 @@ def register_onboarding_callbacks(app):
             if res.errors:
                 return no_update, _alert(" ".join(res.errors), False), no_update
             rows = res.rows
+            ob.save_election_rows(sid, uid, rows)
             workbook_sha = ob._sha(raw)
         else:
-            rows = session.get("onb_election_rows")
+            rows = ob.get_election_rows(sid)
             if not rows:
                 return no_update, _alert("Choose the filled Election Results.xlsx first (or use 'Fill forms from Election Results.xlsx').", False), no_update
             res = type("R", (), {"rows": rows, "errors": []})()
-            workbook_sha = session.get("onb_workbook_sha256") or ""
-        # Use the freshly-uploaded minutes, falling back to the scan already stored via
-        # "Upload signed election minutes scan" so the minutes need not be chosen again.
+            workbook_sha = ""
+        # Use the freshly-uploaded minutes, falling back to the scan already stored as evidence
+        # (purpose election_results) via "Upload signed election minutes scan".
         if minutes_contents:
             minutes_name_used = minutes_name or ""
             minutes_bytes = _decode(minutes_contents)
         else:
-            minutes_name_used = session.get("onb_minutes_name") or ""
-            minutes_b64 = session.get("onb_minutes_bytes")
-            minutes_bytes = base64.b64decode(minutes_b64) if minutes_b64 else None
+            ev = ob.get_evidence(sid, "election_results") or []
+            minutes_name_used = ""
+            minutes_bytes = None
+            if ev:
+                latest = ev[0]
+                minutes_name_used = latest.get("filename") or "election_minutes.pdf"
+                try:
+                    minutes_bytes = (ob.evidence_folder(sid) / latest["stored_name"]).read_bytes()
+                except OSError:
+                    minutes_bytes = None
         if not minutes_bytes:
             return no_update, _alert("Choose the signed minutes file first (or use 'Upload signed election minutes scan').", False), no_update
         k = len(ob.CORE_OFFICES)
@@ -136,10 +142,6 @@ def register_onboarding_callbacks(app):
         except ob.OnboardingError as exc:                 # nothing changed: leave the chosen files in place
             return no_update, _alert(str(exc), False), no_update
         body, mk = _body(sid, uid, role, view=_committee_view(sid))
-        session.pop("onb_election_rows", None)
-        session.pop("onb_workbook_sha256", None)
-        session.pop("onb_minutes_name", None)
-        session.pop("onb_minutes_bytes", None)
         return body, _alert(msg), mk
 
     @app.callback(
@@ -245,21 +247,6 @@ def register_onboarding_callbacks(app):
         body, mk = _body(sid, uid, role, view=_committee_view(sid))
         return body, _alert(msg), mk
 
-    # ── Administrator step: jump back to Stage 2 to finish an officer ─────────
-    @app.callback(
-        Output(f"{P}-body", "children", allow_duplicate=True),
-        Output("onb-view", "data", allow_duplicate=True),
-        Input("onb-back-to-committee", "n_clicks"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def onb_back_to_committee(n):
-        s = _session()
-        if not n or not s or s[2] != "admin" or not s[0]:
-            return no_update, no_update
-        sid, uid, role = s
-        return op.hub_body(role, sid, uid, view="committee"), "committee"
-
     # ── committee screen → wizard (only once the grievance officer is named) ──
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
@@ -332,18 +319,6 @@ def register_onboarding_callbacks(app):
             return _alert(str(exc), False), no_update, no_update
         view = _committee_view(sid)               # stay here so the "Continue to society setup" button is visible
         return _alert("Grievance officer saved."), op.hub_body(role, sid, uid, view=view), (view or no_update)
-
-    @app.callback(
-        Output("pwd-gate-store", "data", allow_duplicate=True),
-        Input(f"{P}-open-wizard", "n_clicks"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def onb_open_wizard(n):
-        s = _session()
-        if not n or not s or s[2] != "admin" or ob.state_of(s[0]) != "committee seated":
-            return no_update
-        return time.time()                       # trigger_setup_wizard listens on this store and now opens the wizard
 
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
@@ -432,6 +407,47 @@ def register_onboarding_callbacks(app):
                 celebration("sealed", "Agreement sealed",
                             "The annexes are sealed and the Agreement is issued for signing.",
                             ["Annexes sealed with their content hashes", "Agreement issued to the President, Secretary and Treasurer"]))
+
+    @app.callback(
+        Output(f"{P}-reissue-status", "children"),
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input(f"{P}-reissue-agreement", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_reissue_agreement(n):
+        s = _session()
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        try:
+            ob.reissue_agreement(sid, uid)
+        except ob.OnboardingError as exc:
+            return _alert(str(exc), False), no_update, no_update
+        body, mk = _body(sid, uid, role)
+        return _alert("Agreement reissued from the sealed annexes."), body, mk
+
+    @app.callback(
+        Output(f"{P}-op-status", "children"),
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input(f"{P}-confirm-operator", "n_clicks"),
+        State(f"{P}-op-name", "value"), State(f"{P}-op-addr", "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_confirm_operator(n, name, address):
+        s = _session()
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        try:
+            ob.confirm_operator(sid, uid, name or "", address or "")
+        except ob.OnboardingError as exc:
+            return _alert(str(exc), False), no_update, no_update
+        body, mk = _body(sid, uid, role)
+        return _alert("Operator confirmed."), body, mk
 
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
@@ -949,6 +965,8 @@ def register_onboarding_callbacks(app):
         if not n or not s or s[2] != "admin" or not s[0]:
             return no_update, no_update
         sid, uid, role = s
+        if ob.annexes_sealed(sid):
+            return no_update, _alert("The annexes are sealed: the wizard is locked. Use “Reissue Agreement” while nothing is signed.", False), no_update
         return op.hub_body(role, sid, uid, view="setup"), "setup"
 
     def _tds_wizard_names():
@@ -1003,8 +1021,7 @@ def register_onboarding_callbacks(app):
         data, errors = ob.validate_election_rows(res.rows)
         if errors:
             return (*keep, no_update, no_update, no_update, _alert("Fix the file and upload it again: " + " ".join(errors), False))
-        session["onb_election_rows"] = res.rows
-        session["onb_workbook_sha256"] = ob._sha(_decode(contents))
+        ob.save_election_rows(s[0], s[1], res.rows)
         seated = ob.seated_officers(s[0])
         filled = []
         per_field = []
@@ -1047,9 +1064,13 @@ def register_onboarding_callbacks(app):
             ob._check_evidence_file(filename or "", raw)
         except ob.OnboardingError as exc:
             return _alert(f"Signed minutes: {exc}", False)
-        session["onb_minutes_name"] = filename or ""
-        session["onb_minutes_bytes"] = base64.b64encode(raw).decode("ascii")
-        return _alert(f"Signed minutes scan stored: {filename}.", True)
+        sid, uid, _role = s
+        try:
+            ob.store_evidence_file(sid, "election_results", None, filename or "", raw, uid,
+                                   {"kind": "election_minutes", "source": "committee_hub"})
+        except ob.OnboardingError as exc:
+            return _alert(f"Signed minutes: {exc}", False)
+        return _alert(f"Signed minutes scan stored: {filename} (server SHA-256 on file).", True)
 
     # ── Upload registration certificate: store as evidence and stamp the society row ──
     @app.callback(
@@ -1185,6 +1206,42 @@ def register_onboarding_callbacks(app):
             summary = dbc.Alert(f"{len(results)} file(s) checked: every stored scan matches its recorded SHA-256.",
                                 color="success", className="py-2 mb-0", style={"fontSize": "12.5px"})
         return statuses, summary
+
+    # ── Evidence register: manual verification tick (admin confirms the scan matches the source document) ──
+    @app.callback(
+        Output({"type": f"{P}-ev-manual-status", "id": ALL}, "children"),
+        Input({"type": f"{P}-ev-manual", "id": ALL}, "n_clicks"),
+        State({"type": f"{P}-ev-note", "id": ALL}, "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_ev_manual_verify(_clicks, note_values):
+        from app.services import evidence_service as ev
+        trig = ctx.triggered_id
+        if trig is None or not (ctx.triggered and ctx.triggered[0].get("value")):
+            raise PreventUpdate
+        s = _session()
+        if not s or not s[0] or s[2] != "admin":
+            raise PreventUpdate
+        sid, uid, _role = s
+        row_ids = [o["id"]["id"] for o in ctx.outputs_list[0]]
+        notes = dict(zip(row_ids, note_values or []))
+        eid = trig["id"] if isinstance(trig, dict) else None
+        if eid:
+            try:
+                ob.verify_evidence(sid, int(eid), uid, True, notes.get(eid) or "")
+            except ob.OnboardingError as exc:
+                err = html.Span("Error: " + str(exc), style={"color": "#b02a37", "fontSize": "11px"})
+                return [err] * len(row_ids)
+        rows = ev.list_register(sid)
+        verified = {int(r["id"]): bool(r.get("manually_verified")) for r in rows}
+        out = []
+        for i in row_ids:
+            if verified.get(i):
+                out.append(html.Span("Verified", style={"color": "#2e7d32", "fontWeight": "600", "fontSize": "11px"}))
+            else:
+                out.append(html.Span("Not verified", style={"color": "#b02a37", "fontSize": "11px"}))
+        return out
 
     # ── post go-live: Annexures F, G, H (build by the admin; sign by President / Secretary / Treasurer) ──────────
     @app.callback(
