@@ -164,7 +164,7 @@ CREATE TABLE societies (
     operator_name VARCHAR(100),
     operator_address TEXT,
     operator_confirmed_at TIMESTAMPTZ,
-    operator_confirmed_by INT REFERENCES users (id)
+    operator_confirmed_by INT
 );
 
 -- V5.4: two-phase Setup Wizard drafts. The wizard submits a draft here and posts
