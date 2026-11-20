@@ -2189,12 +2189,25 @@ def render_category_content(category, society_id=None, state=None, constitution=
                     ], className="sw-bf-account-row border rounded p-2 mb-2", style={"background": "#fff"}))
             return html.Div(rows)
 
+        _bf_up_style = {"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px", "display": "inline-block", "marginRight": "8px"}
         inputs = [
             _render_banner("Brought Forward", "Enter brought forward (opening balance) amounts for accounts. You may start mid-year using an As-on date (not necessarily the start of the financial year)."),
             dbc.Row([
                 dbc.Col([_label("Financial Year (Start Year)"), dbc.Input(id="sw-bf-fy", type="number", value=s_fy, step=1, className="mb-3")], md=4),
                 dbc.Col([_label("As-on date (opening balances)"), html.Div(dcc.DatePickerSingle(id="sw-bf-as-on", date=str(_bf_as_on), display_format="YYYY-MM-DD"), className="mb-3")], md=4),
             ]),
+            # ── Intake 4: account / label balances (paired statements) ─────────────────────
+            dbc.Row([
+                dbc.Col(dbc.Button("Download the statement template", id="sw-bf-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(dcc.Upload(id="sw-bf-xlsx", accept=".xlsx", multiple=False, style=_bf_up_style,
+                                   children=html.Span("Choose the filled statement template (.xlsx)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
+                dbc.Col(dcc.Upload(id="sw-bf-pdf", accept=".pdf", multiple=False, style=_bf_up_style,
+                                   children=html.Span("Choose the signed statement (.pdf)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
+                dbc.Col(dbc.Button("File statements", id="sw-bf-file", color="primary", size="sm", n_clicks=0), md=2),
+            ], className="g-2 mt-1 align-items-center"),
+            html.Div(id="sw-bf-files", style={"fontSize": "12px", "color": "#667", "marginTop": "4px"}),
+            html.Div(id="sw-bf-status", style={"fontSize": "12.5px", "marginTop": "4px"}),
+            dcc.Download(id="sw-bf-tpl-dl"),
             dbc.Card(dbc.CardBody([
                 html.Div([html.I(className="fas fa-piggy-bank me-2 text-primary"),
                           html.Strong("Funds selected for this society")], className="mb-2"),

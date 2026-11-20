@@ -259,17 +259,12 @@ def validate_bye_law_rows(rows: list[dict], valid_ids, locked=()) -> ParseResult
     return ParseResult(rows=out, errors=errors)
 
 
-def parse_upload(contents: str, filename: str, sheet: str, required: list[str], max_rows: int = 500,
-                 max_bytes: int = 1_048_576) -> ParseResult:
+def parse_bytes(raw: bytes, filename: str, sheet: str, required: list[str], max_rows: int = 500,
+                max_bytes: int = 1_048_576) -> ParseResult:
+    """Parse an xlsx from raw bytes. Same contract as parse_upload but takes bytes instead of a data URL."""
     # Basic guards
     if filename and filename.lower().endswith(".xls"):
         return ParseResult(rows=[], errors=["Only .xlsx is accepted (not .xls)."])
-    if contents and "," in contents:
-        import base64
-        b = contents.split(",", 1)[1]
-        raw = base64.b64decode(b)
-    else:
-        raw = b""
     if len(raw) > max_bytes:
         return ParseResult(rows=[], errors=["File exceeds 1 MB."])
     try:
@@ -301,3 +296,134 @@ def parse_upload(contents: str, filename: str, sheet: str, required: list[str], 
             continue
         rows.append(rec)
     return ParseResult(rows=rows, errors=errors)
+
+
+def parse_upload(contents: str, filename: str, sheet: str, required: list[str], max_rows: int = 500,
+                 max_bytes: int = 1_048_576) -> ParseResult:
+    if contents and "," in contents:
+        import base64
+        b = contents.split(",", 1)[1]
+        raw = base64.b64decode(b)
+    else:
+        raw = b""
+    return parse_bytes(raw, filename, sheet, required, max_rows=max_rows, max_bytes=max_bytes)
+
+
+# ── CA / advocate questionnaire (intake 3) ───────────────────────────────────────
+CA_QUESTIONS = [
+    ("registration_no", "Society registration number (as on the certificate)", "text", True),
+    ("registration_date", "Date of registration (YYYY-MM-DD)", "date", True),
+    ("society_pan", "PAN of the society", "text", True),
+    ("society_tan", "TAN of the society (leave blank if none)", "text", False),
+    ("gst_status", "GST status (registered / not_required / below_threshold)", "choice", True),
+    ("gstin", "GSTIN (required only if registered)", "text", False),
+    ("tds_applicable", "Is TDS deduction applicable to the society's payments? (yes/no)", "yesno", True),
+    ("last_audit_fy", "Financial year of the last audited statements", "text", True),
+    ("audit_qualified", "Was the last audit report qualified? (yes/no)", "yesno", True),
+    ("audit_qualification", "If qualified, summarise the qualification", "text", False),
+    ("litigation_pending", "Any pending litigation or notice against the society? (yes/no)", "yesno", True),
+    ("litigation_summary", "If yes, give details", "text", False),
+    ("statutory_dues_pending", "Any statutory dues (GST / TDS / income tax) unpaid? (yes/no)", "yesno", True),
+    ("reviewer_name", "Name of the CA / advocate giving this review", "text", True),
+    ("reviewer_membership", "Membership / enrolment number", "text", True),
+    ("review_date", "Date of the review letter (YYYY-MM-DD)", "date", True),
+]
+
+CA_SHEET = "CA Questionnaire"
+
+
+def build_ca_questionnaire_template(prefill: dict | None = None) -> bytes:
+    """CA questionnaire xlsx: query column locked/grey, value column fillable. yes/no and GST-status picklists."""
+    prefill = prefill or {}
+    wb = Workbook()
+    ws = wb.active
+    ws.title = CA_SHEET
+    ws.append(["query", "value"])
+    for c in range(1, 3):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+    locked_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    yesno_rows, gst_row = [], None
+    for r, (key, query, kind, required) in enumerate(CA_QUESTIONS, start=2):
+        ws.cell(row=r, column=1, value=query).protection = Protection(locked=True)
+        ws.cell(row=r, column=1).fill = locked_fill
+        ws.cell(row=r, column=2, value=str(prefill.get(key) or ""))
+        if kind == "yesno":
+            yesno_rows.append(r)
+        if key == "gst_status":
+            gst_row = r
+    dv_yesno = DataValidation(type="list", formula1='"yes,no"', allow_blank=True)
+    dv_yesno.add(f"B2:B{len(CA_QUESTIONS) + 1}")
+    ws.add_data_validation(dv_yesno)
+    if gst_row:
+        dv_gst = DataValidation(type="list", formula1='"registered,not_required,below_threshold"', allow_blank=True)
+        dv_gst.add(f"B{gst_row}")
+        ws.add_data_validation(dv_gst)
+    ws.freeze_panes = "A2"
+    _protect_sheet(ws)
+
+    wi = wb.create_sheet("Instructions")
+    wi.append(["Notes"])
+    wi.append(["Answer every question marked required. Leave conditional questions (GSTIN, audit qualification, litigation summary) blank unless the trigger answer makes them required."])
+    wi.append(["yes/no answers must be exactly 'yes' or 'no'. GST status must be one of: registered, not_required, below_threshold."])
+    wi.append(["Dates use YYYY-MM-DD. Do not change the query column: it is locked."])
+    wi.append(["Upload this workbook together with the CA review letter (PDF). Only .xlsx is accepted."])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ── Account / label balances (intake 4) ──────────────────────────────────────────
+BALANCES_SHEET = "Account Balances"
+
+
+def build_balances_template(accounts: list[dict], as_on: str | None) -> bytes:
+    """Account/label balances xlsx: one pre-filled row per eligible bank/deposit/cash account, plus blank example rows."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = BALANCES_SHEET
+    headers = ["account_id", "account_name", "tab", "label", "as_on_date", "amount"]
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+    locked_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    r = 2
+    for acc in accounts:
+        ws.cell(row=r, column=1, value=acc["id"]).protection = Protection(locked=True)
+        ws.cell(row=r, column=2, value=acc["name"]).protection = Protection(locked=True)
+        ws.cell(row=r, column=3, value=acc["tab"]).protection = Protection(locked=True)
+        ws.cell(row=r, column=4, value="")
+        ws.cell(row=r, column=5, value=as_on or "YYYY-MM-DD")
+        ws.cell(row=r, column=6, value="")
+        for c in (1, 2, 3):
+            ws.cell(row=r, column=c).fill = locked_fill
+        r += 1
+    # two blank example rows per Dp and receivables account so the admin sees multiple ledger rows are allowed
+    example_keys = [a["id"] for a in accounts if a["tab"] in ("Dp", "SDrDig", "SDrCash")]
+    for acc_id in example_keys:
+        acc = next((a for a in accounts if a["id"] == acc_id), None)
+        if not acc:
+            continue
+        for _ in range(2):
+            ws.cell(row=r, column=1, value=acc["id"]).protection = Protection(locked=True)
+            ws.cell(row=r, column=2, value=acc["name"]).protection = Protection(locked=True)
+            ws.cell(row=r, column=3, value=acc["tab"]).protection = Protection(locked=True)
+            ws.cell(row=r, column=4, value="")
+            ws.cell(row=r, column=5, value=as_on or "YYYY-MM-DD")
+            ws.cell(row=r, column=6, value="")
+            for c in (1, 2, 3):
+                ws.cell(row=r, column=c).fill = locked_fill
+            r += 1
+    dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
+    dv.add(f"F2:F{r - 1}")
+    ws.add_data_validation(dv)
+    ws.freeze_panes = "A2"
+    _protect_sheet(ws)
+
+    wi = wb.create_sheet("Instructions")
+    wi.append(["Notes"])
+    wi.append(["label = ledger row: an FD number, a bank sub-account, or a flat number for receivables. Several rows per account are allowed; blank rows are ignored."])
+    wi.append(["as_on_date must equal the Brought Forward As-on date on every row. Amounts must be 0 or more."])
+    wi.append(["Do not change account_id, account_name or tab: they are locked. Only .xlsx is accepted."])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

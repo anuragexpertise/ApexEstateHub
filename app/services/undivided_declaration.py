@@ -299,8 +299,12 @@ def _validate_pdf(pdf_name: str, pdf: bytes) -> bytes:
 def apply(society_id: int, actor_id: int, xlsx_name: str, xlsx: bytes, pdf_name: str, pdf: bytes) -> str:
     """Validate everything, then write flats and evidence in ONE transaction. Raises OnboardingError on any problem,
     leaving the society untouched."""
-    if ob.state_of(society_id) != "active":
+    st = ob.state_of(society_id)
+    if st not in ("committee seated", "setup draft", "active"):
         raise ob.OnboardingError("The Declaration is entered after the Agreement is sealed, in Enrollment.")
+    if st in ("committee seated", "setup draft") and ob.annexes_sealed(society_id):
+        raise ob.OnboardingError("The annexes are sealed, so the Declaration can no longer change here. "
+                                 "Enter it in Enrollment after activation.")
     pdf = _validate_pdf(pdf_name, pdf)
     rows, errs = parse_workbook(xlsx)
     if errs:
@@ -311,6 +315,8 @@ def apply(society_id: int, actor_id: int, xlsx_name: str, xlsx: bytes, pdf_name:
 
     digest = ob._sha(pdf)
     xlsx_digest = ob._sha(xlsx)
+    from app.services import paired_intake as pi   # lazy: avoids a circular import
+    pi.keep_xlsx(society_id, xlsx)
     stored = f"{digest}.pdf"
     try:
         from app.dash_apps.callbacks.drilldown_callbacks import ASSETS_ROOT
@@ -319,7 +325,8 @@ def apply(society_id: int, actor_id: int, xlsx_name: str, xlsx: bytes, pdf_name:
         (folder / stored).write_bytes(pdf)
     except Exception:
         log.exception("could not keep the Declaration PDF for society %s", society_id)
-    meta = {"xlsx_name": (xlsx_name or "")[:200], "xlsx_sha256": xlsx_digest, "flats": len(rows),
+    meta = {"xlsx_name": (xlsx_name or "")[:200], "xlsx_sha256": xlsx_digest, "xlsx_stored": True,
+            "pair_key": "declaration", "balanced": True, "flats": len(rows),
             "created": len(pl["create"]), "updated": len(pl["update"]), "total_pct": f"{pl['total']:f}",
             "area_total": pl["area_total"], "areas_rounded": pl["rounded"]}
     with db._conn() as conn:                    # one transaction: commits on exit, rolls back on any error
@@ -333,9 +340,10 @@ def apply(society_id: int, actor_id: int, xlsx_name: str, xlsx: bytes, pdf_name:
         # The trigger only fires on a changed value; say so explicitly so identical figures still lock the basis.
         cur.execute("UPDATE societies SET undivided_interest_basis='declaration' WHERE id=%s", (society_id,))
         cur.execute("""INSERT INTO onboarding_evidence (society_id, purpose, acc_id, filename, stored_name, sha256,
-                                                        size_bytes, meta, uploaded_by)
-                       VALUES (%s,%s,NULL,%s,%s,%s,%s,%s::jsonb,%s)""",
-                    (society_id, PURPOSE, pdf_name[:200], stored, digest, len(pdf), json.dumps(meta), actor_id))
+                                                        size_bytes, meta, uploaded_by, verification_note)
+                       VALUES (%s,%s,NULL,%s,%s,%s,%s,%s::jsonb,%s,%s)""",
+                    (society_id, PURPOSE, pdf_name[:200], stored, digest, len(pdf), json.dumps(meta), actor_id,
+                     pi.verification_note(xlsx_name, xlsx_digest, "Builder's Declaration")))
     ob._audit(society_id, actor_id, "UNDIVIDED_DECLARATION_APPLIED", "society", society_id,
               {"pdf_sha256": digest, **meta})
     try:

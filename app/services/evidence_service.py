@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import logging
 import os
 from datetime import datetime
@@ -53,13 +54,25 @@ def purpose_label(purpose: str) -> str:
 
 def list_register(society_id: int) -> list[dict]:
     """Every stored scan for the society, newest first. Reads the database only (no hashing)."""
-    return ob._rows("""SELECT e.id, e.purpose, e.filename, e.stored_name, e.sha256, e.size_bytes, e.uploaded_at,
+    rows = ob._rows("""SELECT e.id, e.purpose, e.filename, e.stored_name, e.sha256, e.size_bytes, e.uploaded_at,
                               u.name AS uploaded_by_name,
-                              e.manually_verified, e.verified_by, e.verified_at, e.verification_note
+                              e.manually_verified, e.verified_by, e.verified_at, e.verification_note,
+                              e.meta
                          FROM onboarding_evidence e
                          LEFT JOIN users u ON u.id = e.uploaded_by
                         WHERE e.society_id = %s
                         ORDER BY e.uploaded_at DESC, e.id DESC""", (int(society_id),))
+    out = []
+    for r in rows:
+        meta = r.get("meta")
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except Exception:  # noqa: BLE001
+                meta = {}
+        meta = meta or {}
+        out.append({**r, "doc_name": meta.get("doc_name"), "kind": meta.get("kind")})
+    return out
 
 
 def _get_row(society_id: int, evidence_id: int) -> dict:

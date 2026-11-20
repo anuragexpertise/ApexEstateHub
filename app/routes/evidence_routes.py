@@ -85,6 +85,6 @@ def evidence_file(evidence_id: int):
     if request.args.get("as") == "pdf":
         data, mime = ev.as_pdf(row, data), "application/pdf"
         name = os.path.splitext(name)[0] + ".pdf"
-    as_attachment = request.args.get("download") == "1"
+    as_attachment = request.args.get("download") == "1" or request.args.get("as") == "pdf"
     _audit(sid, uid, "EVIDENCE_DOWNLOADED" if as_attachment else "EVIDENCE_VIEWED", evidence_id, {"as": request.args.get("as") or "original"})
     return _private(send_file(io.BytesIO(data), mimetype=mime, as_attachment=as_attachment, download_name=name))
