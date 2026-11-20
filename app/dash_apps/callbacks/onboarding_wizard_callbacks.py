@@ -11,6 +11,7 @@ step lives in the onb-setup-step store (mirrored to the session onb-wizard-step 
 """
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 
 import dash_bootstrap_components as dbc
@@ -57,6 +58,24 @@ def _session():
     if not uid:
         return None
     return (int(sid) if sid else None), int(uid), role
+
+
+log = logging.getLogger(__name__)
+
+
+def _draft_edit_block(s) -> str | None:
+    """Why this session may not change the Setup Wizard draft, or None when it may.
+
+    The Brought Forward callbacks write the declaration directly (ob._save_declaration), which does not apply the
+    rules ob.save_step does, so the same two are applied here: only the society's administrator edits the draft,
+    and nothing changes once the annexes are sealed or the society is past the wizard."""
+    if not s or not s[0]:
+        return "Your session has expired. Please sign in again."
+    if s[2] != "admin":
+        return "Only the administrator can edit the Setup Wizard."
+    if ob.annexes_sealed(s[0]) or ob.state_of(s[0]) not in ("committee seated", "setup draft"):
+        return "The Setup Wizard is locked once the annexes are sealed."
+    return None
 
 
 def _alert(msg, ok=True):
@@ -883,6 +902,11 @@ def _register_xlsx_callbacks(app):
         rows = rows or [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}]
         acc_id = int(trig["acc_id"]) if isinstance(trig, dict) else None
 
+        blocked = _draft_edit_block(s) if isinstance(trig, dict) else None
+        if blocked:
+            return no_update, _alert(blocked, ok=False)
+        save_failed = []
+
         def _persist(merged):
             if s and s[0] and acc_id is not None:
                 try:
@@ -895,16 +919,23 @@ def _register_xlsx_callbacks(app):
                         bf.setdefault("rows", []).append(br)
                     br["ledger_rows"] = merged
                     ob._save_declaration(s[0], d, s[1])
-                except Exception:                                              # noqa: BLE001, S110
-                    pass
+                except Exception:                                              # noqa: BLE001
+                    log.exception("could not save ledger rows for society %s account %s", s[0], acc_id)
+                    save_failed.append(True)
             return merged
+
+        def _note(ok_msg):
+            """Success text, or a warning when the rows are on screen but did not reach the draft."""
+            if save_failed:
+                return _alert("The rows are shown but could not be saved. Try again before moving on.", ok=False)
+            return _alert(ok_msg, ok=True) if ok_msg else no_update
 
         if trig and trig["type"] == "sw-bf-ledger-add":
             merged = rows + [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}]
-            return _persist(merged), no_update
+            return _persist(merged), _note(None)
         if trig and trig["type"] == "sw-bf-ledger-clear":
             merged = [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}]
-            return _persist(merged), _alert("All ledger rows cleared.", ok=True)
+            return _persist(merged), _note("All ledger rows cleared.")
         if trig and trig["type"] == "sw-bf-ledger-upload" and contents:
             data = _decode(contents)
             if data is None:
@@ -926,7 +957,7 @@ def _register_xlsx_callbacks(app):
             merged, _added, _updated = pr.merge(rows, incoming, "replace" if mode == "replace" else "add")
             total = sum((Decimal(str(i.get("amount") or 0)) for i in merged), Decimal(0))
             msg = f"Imported {len(incoming)} row(s) from {filename}. Total ₹{total:,.2f}."
-            return _persist(merged), _alert(msg, ok=True)
+            return _persist(merged), _note(msg)
         return no_update, no_update
 
     @app.callback(
@@ -981,6 +1012,9 @@ def _register_xlsx_callbacks(app):
         trig = ctx.triggered_id
         if not isinstance(trig, dict):
             return no_update
+        blocked = _draft_edit_block(s)
+        if blocked:
+            return html.Div(blocked, className="text-danger")
         acc_id = int(trig["acc_id"])
         raw = None
         try:
@@ -1003,8 +1037,10 @@ def _register_xlsx_callbacks(app):
                 br.update({"evidence_id": ev["id"], "sha256": ev["sha256"],
                            "filename": ev["filename"], "purpose": "brought_forward"})
                 ob._save_declaration(sid, d, uid)
-            except Exception:                                              # noqa: BLE001, S110
-                pass
+            except Exception:                                              # noqa: BLE001
+                log.exception("evidence %s stored but not linked to the draft (society %s, account %s)", ev["id"], sid, acc_id)
+                return html.Div(f"{ev['filename']} was stored but could not be linked to this account. Attach it again.",
+                                className="text-danger")
             return html.Div(f"✓ Attached {ev['filename']} (SHA-256 {str(ev['sha256'])[:16]}…)",
                             className="text-success")
         except ob.OnboardingError as exc:

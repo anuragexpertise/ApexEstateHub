@@ -56,7 +56,8 @@ class TestV4RepoStandStatus:
                                    "007_asset_accumulated_depreciation.sql",
                                    "008_instrument_verification_fixes.sql",
                                    "009_widen_notification_no.sql",
-                                   "010_issued_documents.sql"}
+                                   "010_issued_documents.sql",
+                                   "011_ist_timezone_alignment.sql"}
 
     def test_float_count_reduced_from_v3(self):
         total = 0
