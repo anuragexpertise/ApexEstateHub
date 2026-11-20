@@ -2151,7 +2151,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                         dbc.ModalFooter(dbc.Button("Close", id={"type": "sw-bf-ledger-close", "acc_id": acc_id},
                                                    color="primary", className="ms-auto", n_clicks=0)),
                     ], id={"type": "sw-bf-ledger-modal", "acc_id": acc_id}, is_open=False, size="xl",
-                        centered=True, backdrop="static"),
+                        centered=True, backdrop="static")
                     rows.append(html.Div([
                         dbc.Row([
                             dbc.Col(html.Small(name, className="fw-bold"), md=3),

@@ -96,6 +96,7 @@ def _admin_save(monkeypatch, values):
     monkeypatch.setattr(ob, "declaration", lambda sid: {})
     monkeypatch.setattr(ob, "_save_declaration", lambda sid, d, aid: saved.update(d))
     monkeypatch.setattr(ob, "_committee_complete", lambda sid: True)
+    monkeypatch.setattr(ob, "annexes_sealed", lambda sid: False)   # no live DB in this unit test
     return ob.save_step(1, 1, "administrator", values), saved
 
 
