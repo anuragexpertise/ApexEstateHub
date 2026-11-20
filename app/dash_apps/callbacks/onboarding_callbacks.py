@@ -133,6 +133,7 @@ def register_onboarding_callbacks(app):
         k = len(ob.CORE_OFFICES)
         sig_files = {o: (rest[k + i], _decode(rest[i])) for i, o in enumerate(ob.CORE_OFFICES)}
         passwords = {o: rest[2 * k + i] or "" for i, o in enumerate(ob.CORE_OFFICES)}
+        exc_out = None
         try:
             msg = ob.seat_founding_committee(uid, sid, rows, minutes_name_used, minutes_bytes, sig_files,
                                              passwords, workbook_sha256=workbook_sha)
