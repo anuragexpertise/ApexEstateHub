@@ -33,6 +33,16 @@
 
 ---
 
+## Recent Changes — 20 Nov 2026
+
+| Change | Files | Description |
+|---|---|---|
+| `onb_seat_all` fix | `app/dash_apps/callbacks/onboarding_callbacks.py:136` | Added `exc_out = None` initialization to prevent `NameError` on the success path after `PartialSeating` exception handling. |
+| `sw_bf_file` fix | `app/dash_apps/callbacks/onboarding_wizard_callbacks.py:328–354` | Added admin role check and form refresh (returns body + marker) after filing brought-forward statements. |
+| AuthZ manifest: 3 CA callbacks | `docs/authz_manifest.json` | Added `onb_ca_template` (legacy-gated), `onb_ca_files` (exempt), `onb_ca_file` (action: `enrollment.commit`). |
+
+---
+
 ## 0. Getting started
 
 ### What you need
