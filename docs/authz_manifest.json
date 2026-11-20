@@ -743,9 +743,6 @@
     "callback:onboarding_callbacks.py::onb_officer_update": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_callbacks.py::onb_opt_doc": {
-      "classification": "legacy-gated"
-    },
     "callback:onboarding_callbacks.py::onb_phase_next": {
       "classification": "legacy-gated"
     },
@@ -757,13 +754,14 @@
       "classification": "exempt",
       "reason": "Session-guarded UI toggle: returns only the poller's disabled flag, derived from the caller's own society state in the server session; reads and writes no society data."
     },
+    "callback:onboarding_callbacks.py::onb_seat_poll": {
+      "classification": "exempt",
+      "reason": "Session-guarded read-only poll of the caller's OWN society's seat-all background job (society from the server session); writes nothing."
+    },
     "callback:onboarding_callbacks.py::onb_prepare": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_print_agreement": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_callbacks.py::onb_reg_cert": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_reissue_agreement": {
@@ -823,6 +821,12 @@
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::sw_bf_file": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::sw_bf_pr_file": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::sw_bf_pr_tpl": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::sw_bf_template": {

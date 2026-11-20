@@ -372,6 +372,50 @@ def register_onboarding_wizard_callbacks(app):
         body, mk = op.hub_body(role, sid, uid), op.marker(sid)
         return _alert(msg, True), f"Template: {xlsx_n or 'not chosen'}    Statement: {pdf_n or 'not chosen'}", body, mk
 
+    # ── Intake 5: pending receivables template download ────────────────────────────────────
+    @app.callback(
+        Output("sw-bf-pr-tpl-dl", "data"),
+        Input("sw-bf-pr-tpl", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def sw_bf_pr_tpl(n):
+        s = _session()
+        if not n or not s or not s[0]:
+            return no_update
+        sid, uid, role = s
+        known = ob.known_flat_numbers(sid)
+        return dcc.send_bytes(pi.pr.build_template(known_flats=known), "Pending Receivables.xlsx")
+
+    # ── Intake 5: pending receivables file upload ──────────────────────────────────────────
+    @app.callback(
+        Output("sw-bf-pr-status", "children"),
+        Output("sw-bf-pr-files", "children"),
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input("sw-bf-pr-file", "n_clicks"),
+        State("sw-bf-pr-xlsx", "contents"), State("sw-bf-pr-xlsx", "filename"),
+        State("sw-bf-pr-pdf", "contents"), State("sw-bf-pr-pdf", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def sw_bf_pr_file(n, xlsx_c, xlsx_n, pdf_c, pdf_n):
+        s = _session()
+        if not n or not s or not s[0]:
+            return no_update, no_update, no_update, no_update
+        sid, uid, role = s
+        if role != "admin":
+            return _alert("Only the administrator can file pending receivables.", False), no_update, no_update, no_update
+        xlsx, pdf = _decode(xlsx_c), _decode(pdf_c)
+        if not xlsx or not pdf:
+            return _alert("Choose both the filled Pending Receivables.xlsx and the signed arrears statement (.pdf).", False), no_update, no_update, no_update
+        try:
+            msg = pi.apply_pending_receivables(sid, uid, xlsx_n or "", xlsx, pdf_n or "", pdf)
+        except ob.OnboardingError as exc:
+            return _alert(str(exc), False), no_update, no_update, no_update
+        body, mk = op.hub_body(role, sid, uid), op.marker(sid)
+        return _alert(msg, True), f"Workbook: {xlsx_n or 'not chosen'}    Statement: {pdf_n or 'not chosen'}", body, mk
+
     # ── nav + per-step save ──────────────────────────────────────────────────────
     _rail_inputs = [Input({"type": "onb-rail", "key": cat}, "n_clicks") for cat in CATEGORIES]
 
@@ -941,7 +985,7 @@ def _register_xlsx_callbacks(app):
             if data is None:
                 return no_update, _alert("Could not read the uploaded file.", ok=False)
             try:
-                head = parse_upload(data, filename or "", "Header", [])
+                head = parse_upload(contents, filename or "", "Header", [])
                 incoming = []
                 for r in head.rows or []:
                     incoming.append({

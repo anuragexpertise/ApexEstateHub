@@ -377,11 +377,40 @@ BALANCES_SHEET = "Account Balances"
 
 
 def build_balances_template(accounts: list[dict], as_on: str | None) -> bytes:
-    """Account/label balances xlsx: one pre-filled row per eligible bank/deposit/cash account, plus blank example rows."""
+    """Account/label balances xlsx: two sheets (Assets Dr / Liabilities & Equity Cr) plus a Tally sheet.
+    Every account with has_bf=True is listed; amounts are filled by the admin or read from the Tally sheet."""
     wb = Workbook()
-    ws = wb.active
-    ws.title = BALANCES_SHEET
-    headers = ["account_id", "account_name", "tab", "label", "as_on_date", "amount"]
+
+    dr = [a for a in accounts if a["side"] == "Dr"]
+    cr = [a for a in accounts if a["side"] == "Cr"]
+
+    _bf_accounts_sheet(wb, "Assets (Dr)", dr, as_on)
+    _bf_accounts_sheet(wb, "Liabilities & Equity (Cr)", cr, as_on)
+    _bf_tally_sheet(wb, accounts, as_on)
+
+    wh = wb.create_sheet("Header")
+    wh.append(["financial_year", "as_on_date"])
+    wh.append(["", as_on or "YYYY-MM-DD"])
+
+    wi = wb.create_sheet("Instructions")
+    wi.append(["Notes"])
+    wi.append(["Two sections: Assets (Dr) and Liabilities & Equity (Cr). Every account with has_bf = True is listed."])
+    wi.append(["The Tally sheet is pre-filled from your Tally/ERP export: read it to fill the grid without typing each account by hand."])
+    wi.append(["label = ledger row: an FD number, a bank sub-account, or a flat number for receivables. Several rows per account are allowed; blank rows are ignored."])
+    wi.append(["as_on_date must equal the Brought Forward As-on date on every row. Amounts must be 0 or more."])
+    wi.append(["Do not change account_id, account_name, tab or side: they are locked. Only .xlsx is accepted."])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _bf_accounts_sheet(wb, title: str, accounts: list[dict], as_on: str | None) -> None:
+    """One accounts sheet: locked id/name/tab/side, editable label/as_on_date/amount."""
+    ws = wb.active if wb.sheetnames == [] else wb.create_sheet(title)
+    if wb.sheetnames == []:
+        ws.title = title
+    headers = ["account_id", "account_name", "tab", "side", "label", "as_on_date", "amount"]
     ws.append(headers)
     for c in range(1, len(headers) + 1):
         ws.cell(row=1, column=c).font = Font(bold=True)
@@ -391,39 +420,42 @@ def build_balances_template(accounts: list[dict], as_on: str | None) -> bytes:
         ws.cell(row=r, column=1, value=acc["id"]).protection = Protection(locked=True)
         ws.cell(row=r, column=2, value=acc["name"]).protection = Protection(locked=True)
         ws.cell(row=r, column=3, value=acc["tab"]).protection = Protection(locked=True)
-        ws.cell(row=r, column=4, value="")
-        ws.cell(row=r, column=5, value=as_on or "YYYY-MM-DD")
-        ws.cell(row=r, column=6, value="")
-        for c in (1, 2, 3):
+        ws.cell(row=r, column=4, value=acc["side"]).protection = Protection(locked=True)
+        ws.cell(row=r, column=5, value="")
+        ws.cell(row=r, column=6, value=as_on or "YYYY-MM-DD")
+        ws.cell(row=r, column=7, value="")
+        for c in (1, 2, 3, 4):
             ws.cell(row=r, column=c).fill = locked_fill
         r += 1
-    # two blank example rows per Dp and receivables account so the admin sees multiple ledger rows are allowed
-    example_keys = [a["id"] for a in accounts if a["tab"] in ("Dp", "SDrDig", "SDrCash")]
-    for acc_id in example_keys:
-        acc = next((a for a in accounts if a["id"] == acc_id), None)
-        if not acc:
-            continue
-        for _ in range(2):
-            ws.cell(row=r, column=1, value=acc["id"]).protection = Protection(locked=True)
-            ws.cell(row=r, column=2, value=acc["name"]).protection = Protection(locked=True)
-            ws.cell(row=r, column=3, value=acc["tab"]).protection = Protection(locked=True)
-            ws.cell(row=r, column=4, value="")
-            ws.cell(row=r, column=5, value=as_on or "YYYY-MM-DD")
-            ws.cell(row=r, column=6, value="")
-            for c in (1, 2, 3):
-                ws.cell(row=r, column=c).fill = locked_fill
-            r += 1
     dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
-    dv.add(f"F2:F{r - 1}")
-    ws.add_data_validation(dv)
+    if r > 2:
+        dv.add(f"G2:G{r - 1}")
+        ws.add_data_validation(dv)
     ws.freeze_panes = "A2"
     _protect_sheet(ws)
 
-    wi = wb.create_sheet("Instructions")
-    wi.append(["Notes"])
-    wi.append(["label = ledger row: an FD number, a bank sub-account, or a flat number for receivables. Several rows per account are allowed; blank rows are ignored."])
-    wi.append(["as_on_date must equal the Brought Forward As-on date on every row. Amounts must be 0 or more."])
-    wi.append(["Do not change account_id, account_name or tab: they are locked. Only .xlsx is accepted."])
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
+
+def _bf_tally_sheet(wb, accounts: list[dict], as_on: str | None) -> None:
+    """Tally sheet: pre-fillable from the society's Tally/ERP export to fill the grid without typing."""
+    ws = wb.create_sheet("Tally")
+    headers = ["account_id", "account_name", "tab", "side", "amount"]
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+    locked_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    r = 2
+    for acc in accounts:
+        ws.cell(row=r, column=1, value=acc["id"]).protection = Protection(locked=True)
+        ws.cell(row=r, column=2, value=acc["name"]).protection = Protection(locked=True)
+        ws.cell(row=r, column=3, value=acc["tab"]).protection = Protection(locked=True)
+        ws.cell(row=r, column=4, value=acc["side"]).protection = Protection(locked=True)
+        ws.cell(row=r, column=5, value="")
+        for c in (1, 2, 3, 4):
+            ws.cell(row=r, column=c).fill = locked_fill
+        r += 1
+    dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
+    if r > 2:
+        dv.add(f"E2:E{r - 1}")
+        ws.add_data_validation(dv)
+    ws.freeze_panes = "A2"
+    _protect_sheet(ws)

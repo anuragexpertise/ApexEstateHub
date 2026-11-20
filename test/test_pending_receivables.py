@@ -98,6 +98,36 @@ def test_upload_falls_back_to_first_sheet_and_csv_semicolons():
     assert rows == [{"flat_number": "B-1", "amount": "75.00", "overdue_days": None, "remarks": "hello"}] and not errs
 
 
+# ---- B2 regression: str vs bytes -------------------------------------------------
+def test_parse_upload_accepts_str_data_url():
+    """B2: a dcc.Upload data-URL string (str) must decode to bytes, not raise
+    'a bytes-like object is required, not \'str\''."""
+    data = xlsx([["flat_number", "amount", "overdue_days", "remarks"],
+                 ["A-101", 30000, 5, "Mar dues"]])
+    import base64
+    data_url = "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64," + base64.b64encode(data).decode()
+    rows, errs, info = pr.parse_upload(data_url, "r.xlsx")
+    assert errs == [] and info["rows_read"] == 1
+    assert rows[0] == {"flat_number": "A-101", "amount": "30000.00", "overdue_days": 5, "remarks": "Mar dues"}
+
+
+def test_parse_upload_accepts_raw_bytes():
+    """B2: raw bytes still work (the pre-str path)."""
+    data = xlsx([["flat_number", "amount", "overdue_days", "remarks"],
+                 ["A-102", "1,250.50", None, None]])
+    rows, errs, _ = pr.parse_upload(data, "r.xlsx")
+    assert errs == [] and rows[0]["amount"] == "1250.50"
+
+
+def test_parse_upload_non_xlsx_user_visible_error():
+    """B2: a non-xlsx file returns a user-visible UploadError, not a stack trace."""
+    with pytest.raises(pr.UploadError) as e:
+        pr.parse_upload(b"not a zip file at all", "r.xlsx")
+    assert "valid .xlsx" in str(e.value)
+
+
+
+
 @pytest.mark.parametrize("data,name,frag", [
     (b"", "x.xlsx", "empty"),
     (b"not a zip", "x.xlsx", "not a valid .xlsx"),

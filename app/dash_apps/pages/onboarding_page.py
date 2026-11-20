@@ -138,12 +138,28 @@ def _seat_all_panel(seated: dict):
                    className="text-muted d-block mb-2"),
         dbc.Row([
             dbc.Col(_field("Election Results.xlsx", upload(f"{P}-all-xlsx", "Choose the filled workbook (.xlsx)", ".xlsx")), md=6),
-            dbc.Col(_field("Signed minutes (PDF, PNG or JPG, up to 5 MB)", upload(f"{P}-all-minutes", "Choose the minutes file", ".pdf,.png,.jpg,.jpeg")), md=6),
+            dbc.Col(_field("Election Results minutes (PDF, PNG or JPG)", upload(f"{P}-all-minutes", "Choose the signed minutes", ".pdf,.png,.jpg,.jpeg")), md=6),
         ], className="g-2"),
+        dbc.Row([
+            dbc.Col(dbc.Button([html.I(className="fas fa-file-excel me-2"), "Election Results.xlsx template"], id=f"{P}-election-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+            dbc.Col(dcc.Upload(id=f"{P}-election-xlsx", children=html.Span([html.I(className="fas fa-table me-2"), "Fill forms from Election Results.xlsx"], style={"fontSize": "11.5px", "textDecoration": "underline", "cursor": "pointer"}), multiple=False, accept=".xlsx", style={"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px", "fontSize": "11.5px"}), md="auto"),
+        ], className="g-2 mt-2"),
+        dcc.Download(id=f"{P}-election-tpl-dl"),
+        html.Div(id=f"{P}-election-import-status", style={"fontSize":"12px","marginTop":"4px"}),
         *rows,
         html.Div(id=f"{P}-all-chosen", style={"fontSize": "11.5px", "color": "#667", "margin": "4px 0"}),
         dbc.Button([html.I(className="fas fa-users me-2"), "Seat all three"], id=f"{P}-all-go", color="primary", size="sm", n_clicks=0),
         html.Span("  Their flats and logins are created now; they must change the password at first sign-in.", style=_MUTED),
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Seating founding committee")),
+            dbc.ModalBody([
+                dbc.Progress(id=f"{P}-seat-bar", value=5, striped=True, animated=True, label="Starting", style={"height": "20px"}),
+                html.Div(id=f"{P}-seat-msg", style={"fontSize": "12px", "marginTop": "6px"}),
+            ]),
+            dbc.ModalFooter(dbc.Button("Close", id=f"{P}-seat-close", color="secondary", size="sm", n_clicks=0)),
+        ], id=f"{P}-seat-modal", is_open=False, centered=True, backdrop="static"),
+        dcc.Store(id=f"{P}-seat-jobid", data=None),
+        dcc.Interval(id=f"{P}-seat-poll", interval=1500, n_intervals=0, disabled=True),
     ], className="py-2"), className="mb-2")
 
 
@@ -175,46 +191,10 @@ def _stage_committee(society_id: int):
     seated = ob.seated_officers(society_id)
     s = ob.db._execute("SELECT grievance_officer_name, grievance_officer_email, grievance_officer_phone, onboarding_state FROM societies WHERE id=%s",
                        (society_id,), fetch_one=True) or {}
-    up_style = {"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px", "display": "inline-block", "marginRight": "8px"}
-    out = [html.H6("Stage 2: seat the founding committee"),
-           dbc.Card(dbc.CardBody([
-               html.Strong("Minutes evidence (mandatory)", className="d-block mb-1", style={"fontSize":"13px"}),
-               html.Small("The signed minutes of the election are the real third-party document. Upload the scan here; "
-                          "the server computes its SHA-256 and Annex B records it. No separate print/sign/scan loop is needed "
-                          "for the Election Results data itself.", className="text-muted d-block mb-2"),
-               dbc.Row([
-                   dbc.Col(dcc.Upload(id=f"{P}-reg-cert-upload", children=dbc.Button([html.I(className="fas fa-file-certificate me-2"), "Upload registration certificate"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
-                   dbc.Col(dbc.Button([html.I(className="fas fa-file-excel me-2"), "Election Results.xlsx template"], id=f"{P}-election-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
-                   dbc.Col(dcc.Upload(id=f"{P}-election-xlsx", children=dbc.Button([html.I(className="fas fa-table me-2"), "Fill forms from Election Results.xlsx"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".xlsx"), md="auto"),
-               ], className="g-2"), dcc.Download(id=f"{P}-election-tpl-dl"),
-               html.Div(id=f"{P}-election-import-status", style={"fontSize":"12.5px","marginTop":"6px"}),
-               html.Div(id=f"{P}-reg-cert-status", style={"fontSize":"12.5px","marginTop":"6px"}),
-               ], className="py-2"), className="mb-2"),
-            dbc.Card(dbc.CardBody([
-                html.Strong("CA / advocate review questionnaire (optional but recommended)", className="d-block mb-1", style={"fontSize":"13px"}),
-                html.Small("Download the questionnaire, have the CA / advocate fill every required question, then upload it together with their signed review letter (PDF). The server pairs the two files and records a SHA-256 for each.", className="text-muted d-block mb-2"),
-                dbc.Row([
-                    dbc.Col(dbc.Button("Download the questionnaire", id=f"{P}-ca-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
-                    dbc.Col(dcc.Upload(id=f"{P}-ca-xlsx", accept=".xlsx", multiple=False, style=up_style,
-                                       children=html.Span("Choose the filled questionnaire (.xlsx)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
-                    dbc.Col(dcc.Upload(id=f"{P}-ca-pdf", accept=".pdf", multiple=False, style=up_style,
-                                       children=html.Span("Choose the signed review letter (.pdf)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
-                    dbc.Col(dbc.Button("File CA review", id=f"{P}-ca-file", color="primary", size="sm", n_clicks=0), md=2),
-                ], className="g-2 mt-1 align-items-center"),
-                html.Div(id=f"{P}-ca-status", style=_MUTED),
-                html.Div(id=f"{P}-ca-files", style=_MUTED),
-                dcc.Download(id=f"{P}-ca-tpl-dl"),
-            ], className="py-2"), className="mb-2"),
-            dbc.Card(dbc.CardBody([
-                html.Strong("Optional documents (non-blocking)", className="d-block mb-1", style={"fontSize":"13px"}),
-               html.Small("Listed in Annex E but do not block sealing. Upload any you have on file.", className="text-muted d-block mb-2"),
-               *[_opt_doc_row(o, society_id) for o in ob.OPTIONAL_DOCS],
-           ], className="py-2"), className="mb-2"),
-            html.Div("The President, Secretary and Treasurer sign the Agreement, so they must hold office first. Each is seated with the "
-                    "resolution that elected them and the signed minutes; the file's SHA-256 is kept as evidence. Use a different flat "
-                    "for each person: the Agreement needs four different people to sign.", style=_MUTED)]
-    if s.get("onboarding_state") in ("registered", "committee seated") and not all(seated[o] for o in ob.CORE_OFFICES):
-        out.append(_seat_all_panel(seated))
+    out = [html.H6("Stage 2: seat the founding committee")]
+    # A3: the seat-all panel is the first card of the stage (always renders; already-seated offices show as done).
+    out.append(_seat_all_panel(seated))
+    # A4: President, Secretary, Treasurer, then Grievance Officer.
     out += [_office_card(o, seated[o], society_id, locked=ob.annexes_sealed(society_id)) for o in ob.CORE_OFFICES]
     out.append(html.Div([
         html.Strong("Grievance officer (DPDP)"), html.Div("Named on the login page and in every privacy notice.", style=_MUTED),
@@ -222,6 +202,26 @@ def _stage_committee(society_id: int):
                  dbc.Col(_field("Email", dbc.Input(id=f"{P}-g-email", size="sm", value=s.get("grievance_officer_email") or "")), md=5),
                  dbc.Col(_field("Mobile", dbc.Input(id=f"{P}-g-phone", size="sm", value=s.get("grievance_officer_phone") or "")), md=3)], className="g-2"),
         dbc.Button("Save grievance officer", id=f"{P}-g-save", color="secondary", size="sm", outline=True, n_clicks=0)], style=_CARD))
+    # A5: CA / advocate review questionnaire (optional but recommended).
+    up_style = {"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px", "display": "inline-block", "marginRight": "8px"}
+    out.append(dbc.Card(dbc.CardBody([
+        html.Strong("CA / advocate review questionnaire (optional but recommended)", className="d-block mb-1", style={"fontSize":"13px"}),
+        html.Small("Download the questionnaire, have the CA / advocate fill every required question, then upload it together with their signed review letter (PDF). The server pairs the two files and records a SHA-256 for each.", className="text-muted d-block mb-2"),
+        dbc.Row([
+            dbc.Col(dbc.Button("Download the questionnaire", id=f"{P}-ca-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+            dbc.Col(dcc.Upload(id=f"{P}-ca-xlsx", accept=".xlsx", multiple=False, style=up_style,
+                               children=html.Span("Choose the filled questionnaire (.xlsx)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
+            dbc.Col(dcc.Upload(id=f"{P}-ca-pdf", accept=".pdf", multiple=False, style=up_style,
+                               children=html.Span("Choose the signed review letter (.pdf)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
+            dbc.Col(dbc.Button("File CA review", id=f"{P}-ca-file", color="primary", size="sm", n_clicks=0), md=2),
+        ], className="g-2 mt-1 align-items-center"),
+        html.Div(id=f"{P}-ca-status", style=_MUTED),
+        html.Div(id=f"{P}-ca-files", style=_MUTED),
+        dcc.Download(id=f"{P}-ca-tpl-dl"),
+    ], className="py-2"), className="mb-2"))
+    out.append(html.Div("The President, Secretary and Treasurer sign the Agreement, so they must hold office first. Each is seated with the "
+            "resolution that elected them and the signed minutes; the file's SHA-256 is kept as evidence. Use a different flat "
+            "for each person: the Agreement needs four different people to sign.", style=_MUTED))
     state = s.get("onboarding_state")
     sealed = ob.annexes_sealed(society_id)
     named = bool((s.get("grievance_officer_name") or "").strip())

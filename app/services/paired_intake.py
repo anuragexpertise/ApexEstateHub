@@ -18,6 +18,7 @@ from decimal import Decimal
 
 from app.services import onboarding_service as ob
 from app.services import xlsx_templates as xt
+from app.services import pending_receivables as pr
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +51,9 @@ INTAKES = {
     "balances": Intake(key="balances", label="Account / label balances",
                        purpose="account_statement", pdf_label="Account statement",
                        xlsx_filename="Account Balances.xlsx", stage="brought_forward"),
+    "pending_receivables": Intake(key="pending_receivables", label="Pending Receivables",
+                                  purpose="pending_receivables", pdf_label="Arrears statement",
+                                  xlsx_filename="Pending Receivables.xlsx", stage="brought_forward"),
 }
 
 
@@ -242,25 +246,30 @@ def latest_ca_answers(society_id: int) -> dict:
 # ── Intake 4: account / label balances ─────────────────────────────────────────
 
 def eligible_accounts() -> list[dict]:
-    """Leaf bank/deposit/cash accounts that carry a brought-forward flag."""
+    """Every account that carries a brought-forward flag (has_bf = True), Dr side first then Cr."""
     from database.seed import ACCOUNTS
-    tabs = set(ob.BANK_TABS) | set(ob.RECEIVABLE_TABS)
     out = []
     for acc in ACCOUNTS:
-        if acc[2] in tabs and acc[6]:
+        if acc[6]:
             out.append({"id": acc[0], "name": acc[1], "tab": acc[2], "side": acc[5]})
+    out.sort(key=lambda a: (a["side"] != "Dr", a["id"]))
     return out
 
 
-def check_balance_rows(society_id: int, rows: list[dict]) -> tuple[list[dict], dict, list[str]]:
-    """Validate parsed balances rows. Returns (clean rows, per-account totals, all errors)."""
+def check_balance_rows(society_id: int, rows: list[dict], default_as_on: str | None = None) -> tuple[list[dict], dict, list[str]]:
+    """Validate parsed balances rows. Returns (clean rows, per-account totals, all errors).
+
+    Rows from the Tally sheet (no label/as_on_date columns) are accepted with defaults:
+    label = "" and as_on_date = default_as_on. Deposit/receivables label requirement is
+    waived for Tally rows (ledger rows are added separately per B3).
+    """
     clean: list[dict] = []
     errors: list[str] = []
     accounts = {str(a["id"]): a for a in eligible_accounts()}
     labels_seen: set = set()
     d = ob.declaration(society_id) or {}
     bf = (d.get("draft") or {}).get("brought_forward") or {}
-    as_on = bf.get("as_on_date")
+    as_on = bf.get("as_on_date") or default_as_on
     have_as_on = bool(as_on)
     if not have_as_on:
         errors.append("Set the As-on date for Brought Forward first.")
@@ -286,7 +295,8 @@ def check_balance_rows(society_id: int, rows: list[dict]) -> tuple[list[dict], d
             errors.append(f"Row {i}: amount must be 0 or more.")
             continue
         acc = accounts[acc_id]
-        if acc["tab"] in ("Dp", "SDrDig", "SDrCash") and not label:
+        is_tally = r.get("_sheet") == "Tally"
+        if not is_tally and acc["tab"] in ("Dp", "SDrDig", "SDrCash") and not label:
             errors.append(f"Row {i}: label is required for {acc['tab']} account {acc['name']}.")
             continue
         key = (acc_id, label)
@@ -294,8 +304,9 @@ def check_balance_rows(society_id: int, rows: list[dict]) -> tuple[list[dict], d
             errors.append(f"Row {i}: duplicate account {acc_id} with label '{label}'.")
             continue
         labels_seen.add(key)
+        row_as_on = str(r.get("as_on_date") or "").strip() or default_as_on or ""
         try:
-            row_as_on = ob._iso_day(r.get("as_on_date"))
+            row_as_on = ob._iso_day(row_as_on)
         except ValueError:
             errors.append(f"Row {i}: as_on_date must be YYYY-MM-DD.")
             continue
@@ -304,7 +315,7 @@ def check_balance_rows(society_id: int, rows: list[dict]) -> tuple[list[dict], d
             continue
         clean.append({"account_id": int(acc_id), "label": label, "amount": str(amount),
                       "tab": acc["tab"], "side": acc["side"], "name": acc["name"],
-                      "as_on_date": row_as_on})
+                      "as_on_date": row_as_on, "sheet": r.get("_sheet") or ""})
     totals: dict = {}
     for c in clean:
         totals[str(c["account_id"])] = str((Decimal(totals.get(str(c["account_id"]), "0")) + Decimal(c["amount"])).quantize(Decimal("0.01")))
@@ -313,46 +324,123 @@ def check_balance_rows(society_id: int, rows: list[dict]) -> tuple[list[dict], d
 
 def apply_balances(society_id: int, actor_id: int, xlsx_name: str, xlsx: bytes,
                    pdf_name: str, pdf: bytes) -> str:
-    """File the balances workbook with the statements PDF and merge totals into the draft."""
+    """File the balances workbook with the statements PDF and merge totals into the draft.
+
+    Reads the Assets (Dr), Liabilities & Equity (Cr) and Tally sheets. Tally-sheet rows
+    fill the grid directly (B5) without requiring label or as_on_date.
+    """
     if ob.annexes_sealed(society_id):
         raise ob.OnboardingError("The annexes are sealed, so brought-forward balances can no longer change here.")
-    res = xt.parse_bytes(xlsx, xlsx_name or "", xt.BALANCES_SHEET,
-                         ["account_id", "account_name", "tab", "label", "as_on_date", "amount"])
-    if res.errors:
-        raise ob.OnboardingError(" ".join(res.errors))
-    clean, totals, errors = check_balance_rows(society_id, res.rows)
+    draft_as_on = (ob.declaration(society_id) or {}).get("draft", {}).get("brought_forward", {}).get("as_on_date", "")
+    all_rows: list[dict] = []
+    for sheet, required in (("Assets (Dr)", ["account_id", "account_name", "tab", "side", "label", "as_on_date", "amount"]),
+                            ("Liabilities & Equity (Cr)", ["account_id", "account_name", "tab", "side", "label", "as_on_date", "amount"]),
+                            ("Tally", ["account_id", "account_name", "tab", "side", "amount"])):
+        res = xt.parse_bytes(xlsx, xlsx_name or "", sheet, required)
+        if res.errors:
+            continue  # sheet may not exist in older uploads
+        for r in res.rows:
+            r["_sheet"] = sheet
+            all_rows.append(r)
+    if not all_rows:
+        raise ob.OnboardingError("No data found in the workbook.")
+    clean, totals, errors = check_balance_rows(society_id, all_rows, default_as_on=draft_as_on)
+    if errors:
+        raise ob.OnboardingError(" ".join(errors))
+    clean, _totals, errors = check_balance_rows(society_id, all_rows, default_as_on=draft_as_on)
     if errors:
         raise ob.OnboardingError(" ".join(errors))
     accounts_map = {a["id"]: a for a in eligible_accounts()}
-    total_all = str(sum((Decimal(t) for t in totals.values()), Decimal(0)).quantize(Decimal("0.01")))
-    as_on = clean[0]["as_on_date"] if clean else (ob.declaration(society_id) or {}).get("draft", {}).get("brought_forward", {}).get("as_on_date", "")
+    # B7: Tally-sheet totals replace manual per-account amounts for the same account.
+    tally_by_acc: dict[int, dict] = {}
+    manual_by_acc: dict[int, list[dict]] = {}
+    for c in clean:
+        if c.get("sheet") == "Tally":
+            tally_by_acc[c["account_id"]] = c
+        else:
+            manual_by_acc.setdefault(c["account_id"], []).append(c)
+    chosen: dict[int, dict | list[dict]] = {}
+    for acc_id, c in tally_by_acc.items():
+        chosen[acc_id] = c
+    for acc_id, rows_ in manual_by_acc.items():
+        if acc_id not in chosen:
+            chosen[acc_id] = rows_
+    if not chosen:
+        raise ob.OnboardingError("No data found in the workbook.")
+    total_all = str(sum(
+        Decimal(c["amount"]) if not isinstance(c, list) else
+        sum((Decimal(r["amount"]) for r in c), Decimal(0))
+        for c in chosen.values()
+    ).quantize(Decimal("0.01")))
+    first = next(iter(chosen.values()))
+    as_on = first["as_on_date"] if not isinstance(first, list) else first[0]["as_on_date"]
+    as_on = as_on or draft_as_on
     filed = file_pair(society_id, actor_id, "balances", xlsx_name or "", xlsx,
                       pdf_name or "", pdf,
-                      {"rows": len(clean), "accounts": len(totals), "total": total_all, "as_on": as_on})
+                      {"rows": len(chosen), "accounts": len(chosen), "total": total_all, "as_on": as_on})
     psha = ob._sha(pdf)
     d = ob.declaration(society_id) or {}
     bf = d.setdefault("draft", {}).setdefault("brought_forward", {})
     rows_bf = bf.setdefault("rows", [])
     existing = {int(r["acc_id"]): r for r in rows_bf if r.get("acc_id") is not None}
-    by_account: dict = {}
-    for c in clean:
-        by_account.setdefault(c["account_id"], []).append(c)
-    for acc_id, rows_ in by_account.items():
+    for acc_id, c in chosen.items():
         acc = accounts_map[acc_id]
-        total = str(sum((Decimal(c["amount"]) for c in rows_), Decimal(0)).quantize(Decimal("0.01")))
-        labelled = [c for c in rows_ if c["label"]]
+        if isinstance(c, list):
+            total = str(sum((Decimal(r["amount"]) for r in c), Decimal(0)).quantize(Decimal("0.01")))
+            labelled = [r for r in c if r["label"]]
+            remarks_src = c[0]
+        else:
+            total = c["amount"]
+            labelled = [c] if c["label"] else []
+            remarks_src = c
         row = {
             "acc_id": acc_id, "tab": acc["tab"], "side": acc["side"],
             "bf_amount": total,
-            "remarks": "Per account statement " + rows_[0]["as_on_date"],
+            "remarks": "Per account statement " + remarks_src["as_on_date"],
             "evidence_id": filed["id"], "sha256": psha, "filename": pdf_name or "",
         }
         if labelled:
-            row["ledger_rows"] = [{"flat_number": c["label"], "amount": c["amount"],
-                                   "overdue_days": None, "remarks": ""} for c in labelled]
+            row["ledger_rows"] = [{"flat_number": r["label"], "amount": r["amount"],
+                                   "overdue_days": None, "remarks": ""} for r in labelled]
         existing[acc_id] = row
     bf["rows"] = list(existing.values())
     ob._save_declaration(society_id, d, actor_id)
     dup = " (duplicate; re-applied)" if filed.get("duplicate") else ""
     return (f"Balances filed: {len(clean)} row(s), {len(totals)} account(s), total {total_all}. "
+            f"PDF SHA-256 {psha[:16]}….{dup}")
+
+
+def apply_pending_receivables(society_id: int, actor_id: int, xlsx_name: str, xlsx: bytes,
+                              pdf_name: str, pdf: bytes) -> str:
+    """File Pending Receivables.xlsx + arrears PDF as a pending_receivables pair, tie out to SDR, and
+    merge receivables into the brought-forward draft."""
+    if ob.annexes_sealed(society_id):
+        raise ob.OnboardingError("The annexes are sealed, so pending receivables can no longer change here.")
+    # Known flats for canonical flat-name resolution.
+    known_flats = ob.known_flat_numbers(society_id)
+    clean, errors, info = pr.parse_upload(xlsx, xlsx_name or "", known_flats=known_flats)
+    if errors:
+        raise ob.OnboardingError(" ".join(errors))
+    if not clean:
+        raise ob.OnboardingError("The workbook has no receivables rows.")
+    # Tie out against Sundry Debtors total from Brought Forward.
+    d = ob.declaration(society_id) or {}
+    bf = d.get("draft", {}).get("brought_forward", {})
+    sdr = pr.sdr_total(bf.get("rows") or [])
+    rt = pr.total(clean)
+    if rt != sdr:
+        raise ob.OnboardingError(
+            f"Pending receivables total (₹{rt:,.2f}) does not tie to Sundry Debtors balance "
+            f"(₹{sdr:,.2f}). Fix the workbook or the Brought Forward amounts first.")
+    # File the pair.
+    filed = file_pair(society_id, actor_id, "pending_receivables", xlsx_name or "", xlsx,
+                      pdf_name or "", pdf,
+                      {"rows": len(clean), "total": str(rt.quantize(Decimal("0.01")))})
+    psha = ob._sha(pdf)
+    # Merge into draft brought_forward.receivables.
+    bf = d.setdefault("draft", {}).setdefault("brought_forward", {})
+    bf["receivables"] = clean
+    ob._save_declaration(society_id, d, actor_id)
+    dup = " (duplicate; re-applied)" if filed.get("duplicate") else ""
+    return (f"Pending receivables filed: {len(clean)} flat(s), total ₹{rt:,.2f}. "
             f"PDF SHA-256 {psha[:16]}….{dup}")

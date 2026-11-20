@@ -3937,23 +3937,6 @@
     "public": false
   },
   {
-    "id": "callback:onboarding_callbacks.py::onb_opt_doc",
-    "kind": "dash-callback",
-    "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
-    "function": "onb_opt_doc",
-    "line": 1181,
-    "route": "/dashboard/_dash-update-component",
-    "methods": [
-      "POST"
-    ],
-    "outputs": [],
-    "guards": [
-      "require_session"
-    ],
-    "actions": [],
-    "public": false
-  },
-  {
     "id": "callback:onboarding_callbacks.py::onb_phase_next",
     "kind": "dash-callback",
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
@@ -3982,6 +3965,32 @@
     ],
     "outputs": [
       "onb-tracker"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:onboarding_callbacks.py::onb_seat_poll",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
+    "function": "onb_seat_poll",
+    "line": 164,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "onb-seat-bar",
+      "onb-seat-msg",
+      "onb-seat-modal",
+      "onb-seat-poll",
+      "onb-body",
+      "onb-toast",
+      "onb-marker",
+      "onb-seat-jobid"
     ],
     "guards": [
       "require_session"
@@ -4031,23 +4040,6 @@
     "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
     "function": "onb_print_agreement",
     "line": 523,
-    "route": "/dashboard/_dash-update-component",
-    "methods": [
-      "POST"
-    ],
-    "outputs": [],
-    "guards": [
-      "require_session"
-    ],
-    "actions": [],
-    "public": false
-  },
-  {
-    "id": "callback:onboarding_callbacks.py::onb_reg_cert",
-    "kind": "dash-callback",
-    "file": "app/dash_apps/callbacks/onboarding_callbacks.py",
-    "function": "onb_reg_cert",
-    "line": 1138,
     "route": "/dashboard/_dash-update-component",
     "methods": [
       "POST"
@@ -4376,6 +4368,47 @@
     "outputs": [
       "sw-bf-status",
       "sw-bf-files"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:onboarding_wizard_callbacks.py::sw_bf_pr_file",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
+    "function": "sw_bf_pr_file",
+    "line": 387,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "sw-bf-pr-status",
+      "sw-bf-pr-files",
+      "onb-body",
+      "onb-marker"
+    ],
+    "guards": [
+      "require_session"
+    ],
+    "actions": [],
+    "public": false
+  },
+  {
+    "id": "callback:onboarding_wizard_callbacks.py::sw_bf_pr_tpl",
+    "kind": "dash-callback",
+    "file": "app/dash_apps/callbacks/onboarding_wizard_callbacks.py",
+    "function": "sw_bf_pr_tpl",
+    "line": 376,
+    "route": "/dashboard/_dash-update-component",
+    "methods": [
+      "POST"
+    ],
+    "outputs": [
+      "sw-bf-pr-tpl-dl"
     ],
     "guards": [
       "require_session"

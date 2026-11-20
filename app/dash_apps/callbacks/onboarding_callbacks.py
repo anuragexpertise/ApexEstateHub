@@ -74,9 +74,10 @@ def register_onboarding_callbacks(app):
     # ── Apply Election Results.xlsx: seat every open office in one action ─────────────────────────────────────────────
     # Plain ids (not pattern-matching): the panel always renders all three offices, so every State below is in the layout.
     @app.callback(
-        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-seat-jobid", "data"),
+        Output(f"{P}-seat-modal", "is_open"),
+        Output(f"{P}-seat-poll", "disabled"),
         Output(f"{P}-toast", "children", allow_duplicate=True),
-        Output(f"{P}-marker", "data", allow_duplicate=True),
         Input(f"{P}-all-go", "n_clicks"),
         State(f"{P}-all-xlsx", "contents"), State(f"{P}-all-xlsx", "filename"),
         State(f"{P}-all-minutes", "contents"), State(f"{P}-all-minutes", "filename"),
@@ -89,27 +90,28 @@ def register_onboarding_callbacks(app):
     def onb_seat_all(n, xlsx_contents, xlsx_name, minutes_contents, minutes_name, *rest):
         s = _session()
         if not n or not s:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
         sid, uid, role = s
         if role != "admin" or not sid:
-            return no_update, _alert("Only the society's administrator can seat the committee.", False), no_update
+            return no_update, no_update, no_update, _alert("Only the society's administrator can seat the committee.", False)
         from app.services import xlsx_templates as xt
+        from app.services import onboarding_jobs as jobs
         # Use the freshly-uploaded workbook, falling back to rows already imported via
         # "Fill forms from Election Results.xlsx" (saved server-side in the draft, never in session).
         if xlsx_contents:
             raw = _decode(xlsx_contents)
             if not raw:
-                return no_update, _alert("Choose the filled Election Results.xlsx first.", False), no_update
+                return no_update, no_update, no_update, _alert("Choose the filled Election Results.xlsx first.", False)
             res = xt.parse_upload(xlsx_contents, xlsx_name or "", "Election Results", ["office"], max_rows=10)
             if res.errors:
-                return no_update, _alert(" ".join(res.errors), False), no_update
+                return no_update, no_update, no_update, _alert(" ".join(res.errors), False)
             rows = res.rows
             ob.save_election_rows(sid, uid, rows)
             workbook_sha = ob._sha(raw)
         else:
             rows = ob.get_election_rows(sid)
             if not rows:
-                return no_update, _alert("Choose the filled Election Results.xlsx first (or use 'Fill forms from Election Results.xlsx').", False), no_update
+                return no_update, no_update, no_update, _alert("Choose the filled Election Results.xlsx first (or use 'Fill forms from Election Results.xlsx').", False)
             res = type("R", (), {"rows": rows, "errors": []})()
             workbook_sha = ""
         # Use the freshly-uploaded minutes, falling back to the scan already stored as evidence
@@ -129,32 +131,75 @@ def register_onboarding_callbacks(app):
                 except OSError:
                     minutes_bytes = None
         if not minutes_bytes:
-            return no_update, _alert("Choose the signed minutes file first (or use 'Upload signed election minutes scan').", False), no_update
+            return no_update, no_update, no_update, _alert("Choose the signed minutes file first (or use 'Upload signed election minutes scan').", False)
         k = len(ob.CORE_OFFICES)
         sig_files = {o: (rest[k + i], _decode(rest[i])) for i, o in enumerate(ob.CORE_OFFICES)}
         passwords = {o: rest[2 * k + i] or "" for i, o in enumerate(ob.CORE_OFFICES)}
-        exc_out = None
-        try:
-            msg = ob.seat_founding_committee(uid, sid, rows, minutes_name_used, minutes_bytes, sig_files,
-                                             passwords, workbook_sha256=workbook_sha)
-        except ob.PartialSeating as exc:                  # some offices are now seated: show them, keep the message
-            exc_out = exc
-            msg = str(exc)
-        except ob.OnboardingError as exc:                 # nothing changed: leave the chosen files in place
-            return no_update, _alert(str(exc), False), no_update
-        # File the election pair (workbook + minutes) unless there was no fresh workbook.
-        filing_note = ""
-        if xlsx_contents:
+        # All three signature images are mandatory.
+        for office in ob.CORE_OFFICES:
+            _sig_name, sig_bytes = sig_files.get(office) or (None, None)
+            if not sig_bytes:
+                return no_update, no_update, no_update, _alert(f"{ob.OFFICE_LABEL[office]}: attach the signature image.", False)
+        # Capture everything the background job needs.
+        job_kwargs = dict(
+            uid=uid, sid=sid, rows=rows, minutes_name=minutes_name_used, minutes_bytes=minutes_bytes,
+            sig_files=sig_files, passwords=passwords, workbook_sha256=workbook_sha,
+            xlsx_name=xlsx_name or "", raw=raw,
+        )
+
+        def _seat(progress=None, **kw):
+            ob.save_election_rows(kw["sid"], kw["uid"], kw["rows"])
             try:
-                from app.services import paired_intake as pi
-                pi.file_election_pair(sid, uid, xlsx_name or "", raw, minutes_name_used, minutes_bytes)
-            except Exception:
-                log.exception("could not file the election pair for society %s", sid)
-                filing_note = " No workbook was filed with the minutes."
-        else:
-            filing_note = " No workbook was uploaded, so no pair was filed."
-        body, mk = _body(sid, uid, role, view=_committee_view(sid))
-        return body, _alert(msg + filing_note, not exc_out), mk
+                msg = ob.seat_founding_committee(kw["uid"], kw["sid"], kw["rows"], kw["minutes_name"],
+                                                  kw["minutes_bytes"], kw["sig_files"], kw["passwords"],
+                                                  workbook_sha256=kw["workbook_sha256"])
+            except ob.PartialSeating as exc:
+                msg = str(exc)
+            if kw["xlsx_name"]:
+                try:
+                    from app.services import paired_intake as pi
+                    pi.file_election_pair(kw["sid"], kw["uid"], kw["xlsx_name"], kw["raw"], kw["minutes_name"], kw["minutes_bytes"])
+                except Exception:  # noqa: BLE001
+                    log.exception("could not file the election pair for society %s", kw["sid"])
+            return {"msg": msg}
+
+        job_id = jobs.start("seat_founding_committee", sid, uid, _seat, **job_kwargs)
+        return job_id, True, False, no_update
+
+    # ── Seat-all progress poll ────────────────────────────────────────────────
+    @app.callback(
+        Output(f"{P}-seat-bar", "value"),
+        Output(f"{P}-seat-bar", "label"),
+        Output(f"{P}-seat-msg", "children"),
+        Output(f"{P}-seat-modal", "is_open", allow_duplicate=True),
+        Output(f"{P}-seat-poll", "disabled", allow_duplicate=True),
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Output(f"{P}-seat-jobid", "data", allow_duplicate=True),
+        Input(f"{P}-seat-poll", "n_intervals"),
+        State(f"{P}-seat-jobid", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_seat_poll(_n, job_id):
+        s = _session()
+        if not s or not job_id:
+            return no_update, no_update, no_update, no_update, True, no_update, no_update, no_update, no_update
+        sid, uid, role = s
+        from app.services import onboarding_jobs as jobs
+        job = jobs.get(job_id, society_id=sid)
+        if not job:
+            return no_update, no_update, no_update, False, True, no_update, no_update, no_update, None
+        if job["status"] == "done":
+            body, mk = _body(sid, uid, role, view=_committee_view(sid))
+            result = job.get("result") or {}
+            msg = result.get("msg") if isinstance(result, dict) else None
+            return 100, "100%", "Done", False, True, body, _alert(msg or "Committee seated.", True), mk, None
+        if job["status"] == "failed":
+            return no_update, no_update, no_update, False, True, no_update, _alert(job.get("error") or "Seating failed.", False), no_update, None
+        pct = max(op.JOB_PERCENT.get(int(job.get("step") or 0), 5), 5)
+        return pct, f"{pct}%", job.get("message") or "Working...", no_update, no_update, no_update, no_update, no_update, no_update
 
     @app.callback(
         Output(f"{P}-all-chosen", "children"),
@@ -1123,101 +1168,6 @@ def register_onboarding_callbacks(app):
                "Add each officer's temporary password and signature image under 'Seat all three', then press it. " \
                "Grievance officer fields are filled; press Save to keep them."
         return (*per_field, g["name"], g["email"], g["phone"], _alert(note))
-
-    # ── Upload registration certificate: store as evidence and stamp the society row ──
-    @app.callback(
-        Output(f"{P}-reg-cert-status", "children", allow_duplicate=True),
-        Output(f"{P}-body", "children", allow_duplicate=True),
-        Output(f"{P}-marker", "data", allow_duplicate=True),
-        Input(f"{P}-reg-cert-upload", "contents"),
-        State(f"{P}-reg-cert-upload", "filename"),
-        State("onb-view", "data"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def onb_reg_cert(contents, filename, view):
-        s = _session()
-        if not contents or not s or not s[0]:
-            return no_update, no_update, no_update
-        if s[2] != "admin":
-            return _alert("Only the society's administrator can upload the registration certificate.", False), no_update, no_update
-        sid, uid, role = s
-        raw = _decode(contents)
-        if not raw:
-            return _alert("Upload the registration certificate (PDF, PNG or JPG).", False), no_update, no_update
-        try:
-            ob._check_evidence_file(filename or "", raw)
-        except ob.OnboardingError as exc:
-            return _alert(f"Registration certificate: {exc}", False), no_update, no_update
-        try:
-            ev = ob.store_evidence_file(sid, "registration_certificate", None, filename or "", raw, uid,
-                                        {"kind": "registration_certificate", "source": "committee_hub"})
-            ob.db._execute("""UPDATE societies SET registration_certificate_file=%s, registration_certificate_hash=%s
-                               WHERE id=%s""",
-                           (filename or "registration_certificate.pdf", ev["sha256"], sid))
-        except ob.OnboardingError as exc:
-            return _alert(f"Registration certificate: {exc}", False), no_update, no_update
-        body = op.hub_body(role, sid, uid, view=view or "committee")
-        return (_alert(f"Registration certificate recorded: {filename} (SHA-256 {ev['sha256'][:16]}...).", True),
-                body, op.marker(sid))
-
-    # ── Upload optional document: store as evidence for Annex E (non-blocking) ──
-    _OPT_LABEL = dict(ob.OPTIONAL_DOCS)
-
-    # The per-row status output is ALL, not MATCH: Dash rejects a callback whose MATCH output sits beside plain
-    # outputs (onb-body / onb-marker) with "Mismatched `MATCH` wildcards across `Output`s", and that one rejected
-    # callback stops the whole front-end callback graph, so the login society dropdown never loaded.
-    # ALL outputs may be mixed freely with plain ones; the callback returns one entry per row (no_update for the others).
-    @app.callback(
-        Output({"type": f"{P}-opt-doc-status", "code": ALL}, "children"),
-        Output(f"{P}-body", "children", allow_duplicate=True),
-        Output(f"{P}-marker", "data", allow_duplicate=True),
-        Input({"type": f"{P}-opt-doc-upload", "code": ALL}, "contents"),
-        State({"type": f"{P}-opt-doc-upload", "code": ALL}, "filename"),
-        State("onb-view", "data"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def onb_opt_doc(contents_list, filename_list, view):
-        trig = ctx.triggered_id
-        if not isinstance(trig, dict) or not ctx.outputs_list:
-            raise PreventUpdate
-        code = trig.get("code")
-        row_codes = [o["id"]["code"] for o in ctx.outputs_list[0]]       # layout order of the status divs
-        in_codes = [i["id"]["code"] for i in ctx.inputs_list[0]]
-        if code not in in_codes:
-            raise PreventUpdate
-        contents = contents_list[in_codes.index(code)]
-        filename = filename_list[in_codes.index(code)]
-
-        def row_msg(msg):
-            """Show msg in the triggered row only; leave the other rows alone."""
-            return [msg if c == code else no_update for c in row_codes]
-
-        s = _session()
-        if not contents or not s or not s[0]:
-            raise PreventUpdate
-        if s[2] != "admin":
-            return (row_msg(_alert("Only the society's administrator can upload optional documents.", False)),
-                    no_update, no_update)
-        sid, uid, role = s
-        label = _OPT_LABEL.get(code, code)
-        raw = _decode(contents)
-        if not raw:
-            return row_msg(_alert(f"Upload the {label} (PDF, PNG or JPG).", False)), no_update, no_update
-        try:
-            ob._check_evidence_file(filename or "", raw)
-        except ob.OnboardingError as exc:
-            return row_msg(_alert(f"{label}: {exc}", False)), no_update, no_update
-        try:
-            ob.store_evidence_file(sid, code, None, filename or "", raw, uid,
-                                   {"kind": "optional_document", "source": "committee_hub"})
-        except ob.OnboardingError as exc:
-            return row_msg(_alert(f"{label}: {exc}", False)), no_update, no_update
-        # The hub body is rebuilt, which replaces every status div; the row now shows "On file: <name>" itself
-        # (see onboarding_page._opt_doc_row), so the rows are left untouched here.
-        body = op.hub_body(role, sid, uid, view=view or "committee")
-        return [no_update for _ in row_codes], body, op.marker(sid)
 
     # ── Evidence register: re-hash stored scans against the SHA-256 recorded at upload (tamper check) ──
     # ALL outputs beside a plain one are valid; MATCH would not be (see onb_opt_doc above).
