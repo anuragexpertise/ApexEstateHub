@@ -2909,7 +2909,7 @@ def _annex_f_content(society_id: int) -> dict:
     from app.services import undivided_declaration as ud
     ev = ud.latest_evidence(society_id)
     decl_pdf_sha = ev.get("sha256") if ev else None
-    decl_xlsx_sha = (ev.get("meta") or {}).get("workbook_sha256") if ev else None
+    decl_xlsx_sha = (ev.get("meta") or {}).get("xlsx_sha256") if ev else None
     meta = (ev or {}).get("meta") or {}
     balanced = bool(meta.get("balanced"))
     total_pct = meta.get("total_pct")

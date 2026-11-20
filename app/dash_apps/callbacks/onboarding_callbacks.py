@@ -137,12 +137,23 @@ def register_onboarding_callbacks(app):
             msg = ob.seat_founding_committee(uid, sid, rows, minutes_name_used, minutes_bytes, sig_files,
                                              passwords, workbook_sha256=workbook_sha)
         except ob.PartialSeating as exc:                  # some offices are now seated: show them, keep the message
-            body, mk = _body(sid, uid, role, view=_committee_view(sid))
-            return body, _alert(str(exc), False), mk
+            exc_out = exc
+            msg = str(exc)
         except ob.OnboardingError as exc:                 # nothing changed: leave the chosen files in place
             return no_update, _alert(str(exc), False), no_update
+        # File the election pair (workbook + minutes) unless there was no fresh workbook.
+        filing_note = ""
+        if xlsx_contents:
+            try:
+                from app.services import paired_intake as pi
+                pi.file_election_pair(sid, uid, xlsx_name or "", raw, minutes_name_used, minutes_bytes)
+            except Exception:
+                log.exception("could not file the election pair for society %s", sid)
+                filing_note = " No workbook was filed with the minutes."
+        else:
+            filing_note = " No workbook was uploaded, so no pair was filed."
         body, mk = _body(sid, uid, role, view=_committee_view(sid))
-        return body, _alert(msg), mk
+        return body, _alert(msg + filing_note, False if exc_out else True), mk
 
     @app.callback(
         Output(f"{P}-all-chosen", "children"),
@@ -864,6 +875,55 @@ def register_onboarding_callbacks(app):
     def onb_decl_files(xlsx_name, pdf_name):
         return f"Workbook: {xlsx_name or 'not chosen'}    Signed Declaration: {pdf_name or 'not chosen'}"
 
+    # ── CA / advocate questionnaire (intake 3) ────────────────────────────────
+    @app.callback(
+        Output(f"{P}-ca-tpl-dl", "data"),
+        Input(f"{P}-ca-tpl", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_ca_template(n):
+        s = _session()
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update
+        from app.services import xlsx_templates as xt
+        return dcc.send_bytes(xt.build_ca_questionnaire_template(), "CA Questionnaire.xlsx")
+
+    @app.callback(
+        Output(f"{P}-ca-files", "children"),
+        Input(f"{P}-ca-xlsx", "filename"), Input(f"{P}-ca-pdf", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_ca_files(xlsx_name, pdf_name):
+        return f"Questionnaire: {xlsx_name or 'not chosen'}    Review letter: {pdf_name or 'not chosen'}"
+
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-toast", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
+        Input(f"{P}-ca-file", "n_clicks"),
+        State(f"{P}-ca-xlsx", "contents"), State(f"{P}-ca-xlsx", "filename"),
+        State(f"{P}-ca-pdf", "contents"), State(f"{P}-ca-pdf", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_ca_file(n, xlsx_c, xlsx_n, pdf_c, pdf_n):
+        s = _session()
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update, no_update
+        sid, uid, role = s
+        xlsx, pdf = _decode(xlsx_c), _decode(pdf_c)
+        if not xlsx or not pdf:
+            return no_update, _alert("Choose both the filled questionnaire (.xlsx) and the signed review letter (.pdf).", False), no_update
+        from app.services import paired_intake as pi
+        try:
+            msg = pi.apply_ca_review(sid, uid, xlsx_n or "", xlsx, pdf_n or "", pdf)
+        except ob.OnboardingError as exc:
+            return no_update, _alert(str(exc), False), no_update
+        body, mk = _body(sid, uid, role)
+        return body, _alert(msg), mk
+
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
         Output(f"{P}-toast", "children", allow_duplicate=True),
@@ -928,7 +988,11 @@ def register_onboarding_callbacks(app):
                 trk.fail("Not completed")
                 return no_update, _alert(str(exc), False), no_update
             trk.step(2, "Refreshing the page")
-            body, mk = _body(sid, uid, role)
+        body, mk = _body(sid, uid, role)
+        if ob.state_of(sid) != "active":
+            # The Declaration is done; the admin must next open Apartment Charges to enter Intake 4.
+            body = op.hub_body(role, sid, uid, view="setup:Apartment Charges")
+            mk = op.marker(sid)
         return body, _alert(msg), mk
 
     @app.callback(
@@ -1059,57 +1123,31 @@ def register_onboarding_callbacks(app):
                "Grievance officer fields are filled; press Save to keep them."
         return (*per_field, g["name"], g["email"], g["phone"], _alert(note))
 
-    # ── Upload signed election minutes scan: store for reuse by "Seat all three" ──
-    @app.callback(
-        Output(f"{P}-election-status", "children", allow_duplicate=True),
-        Input(f"{P}-election-scan", "contents"),
-        State(f"{P}-election-scan", "filename"),
-        prevent_initial_call=True,
-    )
-    @require_session
-    def onb_election_scan(contents, filename):
-        s = _session()
-        if not contents or not s or not s[0]:
-            return no_update
-        if s[2] != "admin":
-            return _alert("Only the society's administrator can upload the minutes scan.", False)
-        raw = _decode(contents)
-        if not raw:
-            return _alert("Upload the signed minutes scan (PDF, PNG or JPG).", False)
-        try:
-            ob._check_evidence_file(filename or "", raw)
-        except ob.OnboardingError as exc:
-            return _alert(f"Signed minutes: {exc}", False)
-        sid, uid, _role = s
-        try:
-            ob.store_evidence_file(sid, "election_results", None, filename or "", raw, uid,
-                                   {"kind": "election_minutes", "source": "committee_hub"})
-        except ob.OnboardingError as exc:
-            return _alert(f"Signed minutes: {exc}", False)
-        return _alert(f"Signed minutes scan stored: {filename} (server SHA-256 on file).", True)
-
     # ── Upload registration certificate: store as evidence and stamp the society row ──
     @app.callback(
         Output(f"{P}-reg-cert-status", "children", allow_duplicate=True),
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
         Input(f"{P}-reg-cert-upload", "contents"),
         State(f"{P}-reg-cert-upload", "filename"),
+        State("onb-view", "data"),
         prevent_initial_call=True,
     )
     @require_session
-    def onb_reg_cert(contents, filename):
+    def onb_reg_cert(contents, filename, view):
         s = _session()
         if not contents or not s or not s[0]:
-            return no_update
+            return no_update, no_update, no_update
         if s[2] != "admin":
-            return _alert("Only the society's administrator can upload the registration certificate.", False)
-        sid, uid, _role = s
+            return _alert("Only the society's administrator can upload the registration certificate.", False), no_update, no_update
+        sid, uid, role = s
         raw = _decode(contents)
         if not raw:
-            return _alert("Upload the registration certificate (PDF, PNG or JPG).", False)
+            return _alert("Upload the registration certificate (PDF, PNG or JPG).", False), no_update, no_update
         try:
             ob._check_evidence_file(filename or "", raw)
         except ob.OnboardingError as exc:
-            return _alert(f"Registration certificate: {exc}", False)
+            return _alert(f"Registration certificate: {exc}", False), no_update, no_update
         try:
             ev = ob.store_evidence_file(sid, "registration_certificate", None, filename or "", raw, uid,
                                         {"kind": "registration_certificate", "source": "committee_hub"})
@@ -1117,8 +1155,10 @@ def register_onboarding_callbacks(app):
                                WHERE id=%s""",
                            (filename or "registration_certificate.pdf", ev["sha256"], sid))
         except ob.OnboardingError as exc:
-            return _alert(f"Registration certificate: {exc}", False)
-        return _alert(f"Registration certificate recorded: {filename} (SHA-256 {ev['sha256'][:16]}...).", True)
+            return _alert(f"Registration certificate: {exc}", False), no_update, no_update
+        body = op.hub_body(role, sid, uid, view=view or "committee")
+        return (_alert(f"Registration certificate recorded: {filename} (SHA-256 {ev['sha256'][:16]}...).", True),
+                body, op.marker(sid))
 
     # ── Upload optional document: store as evidence for Annex E (non-blocking) ──
     _OPT_LABEL = dict(ob.OPTIONAL_DOCS)

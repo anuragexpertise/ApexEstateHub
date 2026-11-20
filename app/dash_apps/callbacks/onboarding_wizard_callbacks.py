@@ -33,8 +33,10 @@ from app.security.audit_context import (
 )
 from app.security.guards import require_session
 from app.services import onboarding_service as ob
+from app.services import paired_intake as pi
 from app.services import regime_rules_admin as rra
 from app.services.xlsx_templates import (
+    build_balances_template,
     build_tds_template,
     parse_upload,
 )
@@ -301,6 +303,51 @@ def _frontier(statuses):
 
 def register_onboarding_wizard_callbacks(app):
     _register_xlsx_callbacks(app)
+    # ── Intake 4: statement template download + file statements (Brought Forward) ─────
+    @app.callback(
+        Output("sw-bf-tpl-dl", "data"),
+        Input("sw-bf-tpl", "n_clicks"),
+        State("onb-setup-step", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def sw_bf_template(n, step):
+        s = _session()
+        if not n or not s or not s[0]:
+            return no_update
+        try:
+            idx = int(step or 0)
+        except (TypeError, ValueError):
+            return no_update
+        if CATEGORIES[idx] != "Brought Forward":
+            return no_update
+        draft = ob.load_draft(s[0])
+        as_on = (draft.get("draft") or {}).get("brought_forward", {}).get("as_on_date")
+        return dcc.send_bytes(build_balances_template(pi.eligible_accounts(), as_on), "Account Balances.xlsx")
+
+    @app.callback(
+        Output("sw-bf-status", "children"),
+        Output("sw-bf-files", "children"),
+        Input("sw-bf-file", "n_clicks"),
+        State("sw-bf-xlsx", "contents"), State("sw-bf-xlsx", "filename"),
+        State("sw-bf-pdf", "contents"), State("sw-bf-pdf", "filename"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def sw_bf_file(n, xlsx_c, xlsx_n, pdf_c, pdf_n):
+        s = _session()
+        if not n or not s or not s[0]:
+            return no_update, no_update
+        sid, uid, role = s
+        xlsx, pdf = _decode(xlsx_c), _decode(pdf_c)
+        if not xlsx or not pdf:
+            return _alert("Choose both the filled statement template (.xlsx) and the signed statement (.pdf).", False), no_update
+        try:
+            msg = pi.apply_balances(sid, uid, xlsx_n or "", xlsx, pdf_n or "", pdf)
+        except ob.OnboardingError as exc:
+            return _alert(str(exc), False), no_update
+        return _alert(msg, True), f"Template: {xlsx_n or 'not chosen'}    Statement: {pdf_n or 'not chosen'}"
+
     # ── nav + per-step save ──────────────────────────────────────────────────────
     _rail_inputs = [Input({"type": "onb-rail", "key": cat}, "n_clicks") for cat in CATEGORIES]
 

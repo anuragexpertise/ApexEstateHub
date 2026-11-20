@@ -175,6 +175,7 @@ def _stage_committee(society_id: int):
     seated = ob.seated_officers(society_id)
     s = ob.db._execute("SELECT grievance_officer_name, grievance_officer_email, grievance_officer_phone, onboarding_state FROM societies WHERE id=%s",
                        (society_id,), fetch_one=True) or {}
+    up_style = {"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px", "display": "inline-block", "marginRight": "8px"}
     out = [html.H6("Stage 2: seat the founding committee"),
            dbc.Card(dbc.CardBody([
                html.Strong("Minutes evidence (mandatory)", className="d-block mb-1", style={"fontSize":"13px"}),
@@ -182,17 +183,30 @@ def _stage_committee(society_id: int):
                           "the server computes its SHA-256 and Annex B records it. No separate print/sign/scan loop is needed "
                           "for the Election Results data itself.", className="text-muted d-block mb-2"),
                dbc.Row([
-                   dbc.Col(dcc.Upload(id=f"{P}-election-scan", children=dbc.Button([html.I(className="fas fa-file-upload me-2"), "Upload signed election minutes scan"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
                    dbc.Col(dcc.Upload(id=f"{P}-reg-cert-upload", children=dbc.Button([html.I(className="fas fa-file-certificate me-2"), "Upload registration certificate"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".pdf,.png,.jpg,.jpeg"), md="auto"),
                    dbc.Col(dbc.Button([html.I(className="fas fa-file-excel me-2"), "Election Results.xlsx template"], id=f"{P}-election-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
                    dbc.Col(dcc.Upload(id=f"{P}-election-xlsx", children=dbc.Button([html.I(className="fas fa-table me-2"), "Fill forms from Election Results.xlsx"], color="secondary", size="sm", outline=True, n_clicks=0), multiple=False, accept=".xlsx"), md="auto"),
                ], className="g-2"), dcc.Download(id=f"{P}-election-tpl-dl"),
                html.Div(id=f"{P}-election-import-status", style={"fontSize":"12.5px","marginTop":"6px"}),
-               html.Div(id=f"{P}-election-status", style={"fontSize":"12.5px","marginTop":"6px"}),
                html.Div(id=f"{P}-reg-cert-status", style={"fontSize":"12.5px","marginTop":"6px"}),
+               ], className="py-2"), className="mb-2"),
+            dbc.Card(dbc.CardBody([
+                html.Strong("CA / advocate review questionnaire (optional but recommended)", className="d-block mb-1", style={"fontSize":"13px"}),
+                html.Small("Download the questionnaire, have the CA / advocate fill every required question, then upload it together with their signed review letter (PDF). The server pairs the two files and records a SHA-256 for each.", className="text-muted d-block mb-2"),
+                dbc.Row([
+                    dbc.Col(dbc.Button("Download the questionnaire", id=f"{P}-ca-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                    dbc.Col(dcc.Upload(id=f"{P}-ca-xlsx", accept=".xlsx", multiple=False, style=up_style,
+                                       children=html.Span("Choose the filled questionnaire (.xlsx)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
+                    dbc.Col(dcc.Upload(id=f"{P}-ca-pdf", accept=".pdf", multiple=False, style=up_style,
+                                       children=html.Span("Choose the signed review letter (.pdf)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
+                    dbc.Col(dbc.Button("File CA review", id=f"{P}-ca-file", color="primary", size="sm", n_clicks=0), md=2),
+                ], className="g-2 mt-1 align-items-center"),
+                html.Div(id=f"{P}-ca-status", style=_MUTED),
+                html.Div(id=f"{P}-ca-files", style=_MUTED),
+                dcc.Download(id=f"{P}-ca-tpl-dl"),
             ], className="py-2"), className="mb-2"),
-           dbc.Card(dbc.CardBody([
-               html.Strong("Optional documents (non-blocking)", className="d-block mb-1", style={"fontSize":"13px"}),
+            dbc.Card(dbc.CardBody([
+                html.Strong("Optional documents (non-blocking)", className="d-block mb-1", style={"fontSize":"13px"}),
                html.Small("Listed in Annex E but do not block sealing. Upload any you have on file.", className="text-muted d-block mb-2"),
                *[_opt_doc_row(o, society_id) for o in ob.OPTIONAL_DOCS],
            ], className="py-2"), className="mb-2"),
@@ -849,8 +863,9 @@ def grievance_named(society_id: int) -> bool:
 
 
 def evidence_register(society_id: int):
-    """Admin-only list of every stored scan: View / Download (served by app/routes/evidence_routes.py, hash-checked
-    on every read) and a Verify button that re-hashes the stored file against the SHA-256 recorded at upload."""
+    """Admin-only list of every stored scan: grouped by kind (agreements, other documents, evidence scans),
+    each row showing the document name (from meta.doc_name), the stored file, View / Download / As PDF,
+    and a Verify button that re-hashes the stored file against the SHA-256 recorded at upload."""
     from app.services import evidence_service as ev
     try:
         rows = ev.list_register(society_id)
@@ -859,45 +874,59 @@ def evidence_register(society_id: int):
     if not rows:
         return html.Div()
     link = {"fontSize": "11.5px", "marginRight": "10px"}
-    body = []
+    groups = {"agreement": [], "other_document": [], "other": []}
     for r in rows:
-        eid = r["id"]
-        sha = str(r["sha256"]).lower()
-        when = r["uploaded_at"].strftime("%d %b %Y %H:%M") if r.get("uploaded_at") else ""
-        verified = bool(r.get("manually_verified"))
-        vnote = r.get("verification_note") or ""
-        vwho = ""
-        if r.get("verified_at"):
-            vwho = f" by {(r.get('uploaded_by_name') or 'admin')} on {str(r['verified_at'])[:16]}"
-        vbadge = html.Span("Verified" + vwho, style={"color": "#2e7d32", "fontWeight": "600", "fontSize": "11px"}) if verified else \
-                 html.Span("Not verified", style={"color": "#b02a37", "fontSize": "11px"})
-        body.append(html.Tr([
-            html.Td([html.Div(ev.purpose_label(r["purpose"]), style={"fontWeight": "600"}),
-                     html.Div(r["filename"], style={"color": "#667"})]),
-            html.Td([html.Div(when), html.Div(f"{(r.get('size_bytes') or 0) / 1024:.0f} KB", style={"color": "#667"})]),
-            html.Td(html.Code(sha[:16] + "…", title=sha, style={"fontSize": "11px"})),
-            html.Td([html.A("View", href=f"/evidence/{eid}", target="_blank", style=link),
-                     html.A("Download", href=f"/evidence/{eid}?download=1", style=link),
-                     html.A("As PDF", href=f"/evidence/{eid}?as=pdf", target="_blank", style=link)]),
-            html.Td([dbc.Button("Verify", id={"type": f"{P}-ev-verify", "id": eid}, size="sm", outline=True,
-                                color="secondary", n_clicks=0, style={"padding": "0 8px", "fontSize": "11.5px"}),
-                     html.Span(id={"type": f"{P}-ev-status", "id": eid}, style={"fontSize": "11.5px", "marginLeft": "8px"})]),
-            html.Td([
-                dbc.Input(id={"type": f"{P}-ev-note", "id": eid}, placeholder="note", size="sm", value=vnote or "",
-                          style={"fontSize": "11px", "width": "110px"}),
-                dbc.Button("Mark verified" if not verified else "Revoke", id={"type": f"{P}-ev-manual", "id": eid},
-                           size="sm", outline=True, color=("success" if not verified else "danger"),
-                           n_clicks=0, style={"padding": "0 8px", "fontSize": "11px", "marginTop": "3px"}),
-                html.Span(id={"type": f"{P}-ev-manual-status", "id": eid}, children=vbadge,
-                          style={"fontSize": "11px", "marginLeft": "6px"}),
-            ]),
-        ], style={"fontSize": "12px", "verticalAlign": "top"}))
+        k = r.get("kind")
+        groups["agreement" if k == "agreement" else ("other_document" if k == "other_document" else "other")].append(r)
+    group_labels = {"agreement": "Agreements", "other_document": "Other documents", "other": "Evidence scans"}
+    body = []
+    for gkey in ("agreement", "other_document", "other"):
+        grecs = groups[gkey]
+        if not grecs:
+            continue
+        body.append(html.Tr([html.Th(group_labels[gkey], colSpan=7,
+                                     style={"background": "#eef2f5", "fontSize": "11.5px", "color": "#334",
+                                            "fontWeight": "600", "padding": "6px 4px"})]))
+        for r in grecs:
+            eid = r["id"]
+            sha = str(r["sha256"]).lower()
+            when = r["uploaded_at"].strftime("%d %b %Y %H:%M") if r.get("uploaded_at") else ""
+            verified = bool(r.get("manually_verified"))
+            vnote = r.get("verification_note") or ""
+            vwho = ""
+            if r.get("verified_at"):
+                vwho = f" by {(r.get('uploaded_by_name') or 'admin')} on {str(r['verified_at'])[:16]}"
+            vbadge = html.Span("Verified" + vwho, style={"color": "#2e7d32", "fontWeight": "600", "fontSize": "11px"}) if verified else \
+                     html.Span("Not verified", style={"color": "#b02a37", "fontSize": "11px"})
+            body.append(html.Tr([
+                html.Td(r.get("doc_name") or "", style={"fontSize": "12px", "color": "#667"}),
+                html.Td([html.Div(ev.purpose_label(r["purpose"]), style={"fontWeight": "600"}),
+                         html.Div(r["filename"], style={"color": "#667"})]),
+                html.Td([html.Div(when), html.Div(f"{(r.get('size_bytes') or 0) / 1024:.0f} KB", style={"color": "#667"})]),
+                html.Td(html.Code(sha[:16] + "…", title=sha, style={"fontSize": "11px"})),
+                html.Td([html.A("View", href=f"/evidence/{eid}", target="_blank", style=link),
+                         html.A("Download", href=f"/evidence/{eid}?download=1", style=link),
+                         html.A("As PDF", href=f"/evidence/{eid}?as=pdf", target="_blank", style=link)]),
+                html.Td([dbc.Button("Verify", id={"type": f"{P}-ev-verify", "id": eid}, size="sm", outline=True,
+                                    color="secondary", n_clicks=0, style={"padding": "0 8px", "fontSize": "11.5px"}),
+                         html.Span(id={"type": f"{P}-ev-status", "id": eid}, style={"fontSize": "11.5px", "marginLeft": "8px"})]),
+                html.Td([
+                    dbc.Input(id={"type": f"{P}-ev-note", "id": eid}, placeholder="note", size="sm", value=vnote or "",
+                              style={"fontSize": "11px", "width": "110px"}),
+                    dbc.Button("Mark verified" if not verified else "Revoke", id={"type": f"{P}-ev-manual", "id": eid},
+                               size="sm", outline=True, color=("success" if not verified else "danger"),
+                               n_clicks=0, style={"padding": "0 8px", "fontSize": "11px", "marginTop": "3px"}),
+                    html.Span(id={"type": f"{P}-ev-manual-status", "id": eid}, children=vbadge,
+                              style={"fontSize": "11px", "marginLeft": "6px"}),
+                ]),
+            ], style={"fontSize": "12px", "verticalAlign": "top"}))
     return dbc.Card(dbc.CardBody([
         html.Div([html.Strong("Evidence register", style={"fontSize": "13px"}),
                   html.Span(f"  {len(rows)} stored scan(s)", style=_MUTED)]),
         html.Small("Every file is re-hashed (SHA-256) and compared with the fingerprint recorded at upload before it is shown. "
                    "A missing or altered file is refused.", className="text-muted d-block mb-2"),
-        html.Div(dbc.Table([html.Thead(html.Tr([html.Th(h) for h in ("Document", "Uploaded", "SHA-256", "Open", "Integrity", "Manual verification")])),
+        html.Div(dbc.Table([html.Thead(html.Tr([html.Th(h) for h in ("Document name", "Document", "Uploaded", "SHA-256",
+                                                                   "Open", "Integrity", "Manual verification")])),
                             html.Tbody(body)], size="sm", borderless=True, className="mb-2"),
                  style={"overflowX": "auto"}),
         dbc.Button("Verify all", id=f"{P}-ev-verify-all", size="sm", color="secondary", outline=True, n_clicks=0, className="me-2"),
