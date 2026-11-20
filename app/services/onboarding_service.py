@@ -2002,7 +2002,7 @@ SUB_PROCESSOR_CATEGORIES = (
 def _annex_d(society_id: int, soc: dict) -> tuple[dict, dict]:
     """Annex D: data-protection and custody schedule (generated). Society = Data Fiduciary, Operator = Processor."""
     import os as _os
-    operator, op_addr = _operator()
+    operator, op_addr = _operator(society_id, soc)
     mode = (soc.get("signing_mode") or ("esign" if soc.get("esign_required") else "password"))
     email, phone = (soc.get("grievance_officer_email") or "").strip(), (soc.get("grievance_officer_phone") or "").strip()
     stepup = bool((soc.get("stepup_password_hash") or "").strip()) if "stepup_password_hash" in soc else None
@@ -2172,7 +2172,10 @@ def seal_annexes(society_id: int, actor_id: int) -> dict:
     blocked = [c for c, v in drafts.items() if v["blocking"]]
     if blocked:
         raise OnboardingError("Fix the failing controls before sealing: Annex " + ", ".join(sorted(blocked)) + ".")
+    if not operator_confirmed(society_id):
+        raise OnboardingError("Confirm the operator (legal name and address) before sealing: it is named in the Agreement.")
     from app.dash_apps.callbacks.drilldown_callbacks import _get_or_create_agreement
+    existed = bool(_row("SELECT 1 AS x FROM society_agreements WHERE society_id=%s", (society_id,)))
     ag = _get_or_create_agreement(db, society_id)
     if _row("SELECT 1 AS x FROM signed_records WHERE subject_kind='agreement' AND subject_id=%s AND status='valid'", (ag["id"],)):
         raise OnboardingError("The Agreement is already sealed.")
@@ -2185,9 +2188,16 @@ def seal_annexes(society_id: int, actor_id: int) -> dict:
                 cur.execute("UPDATE onboarding_annexes SET status='sealed', sealed_at=NOW() WHERE society_id=%s AND annex_code=%s AND status IN ('draft','submitted')",
                             (society_id, code))
             _write_agreement_on(cur, society_id, ag)
-    except OnboardingError:
-        raise
     except Exception as exc:
+        # The seal rolled back. A blank Agreement row created just for this attempt would make the signing panel
+        # think an Agreement exists, so remove it (a pre-existing row is left alone).
+        if not existed:
+            try:
+                db._execute("DELETE FROM society_agreements WHERE id=%s AND COALESCE(body_text,'')=''", (ag["id"],))
+            except Exception:                                              # noqa: BLE001
+                log.exception("could not remove the blank Agreement row for society %s", society_id)
+        if isinstance(exc, OnboardingError):
+            raise
         log.exception("seal_annexes failed for society %s", society_id)
         raise OnboardingError("Sealing failed; nothing was committed. Try again.") from exc
     return annex_status(society_id)
@@ -2228,12 +2238,21 @@ def seal_with_confirmation(society_id: int, actor_id: int, i_agree: str, admin_p
     return seal_annexes(society_id, actor_id)
 
 
-def _operator() -> tuple[str, str]:
-    """The legal entity named as "the Operator" in the Agreement: OPERATOR_LEGAL_NAME / OPERATOR_ADDRESS from the
-    environment, else the hard-coded default. A deployment that sets these env vars is asserting a real operator;
-    confirm_operator() then records the per-society confirmation before signing is allowed."""
+def _operator(society_id: int | None = None, soc: dict | None = None) -> tuple[str, str]:
+    """The legal entity named as "the Operator" in the Agreement. Order: the society's CONFIRMED record
+    (societies.operator_name / operator_address), else OPERATOR_LEGAL_NAME / OPERATOR_ADDRESS from the environment,
+    else the built-in default. Signing is gated on the confirmation itself (assert_ready_to_sign)."""
+    if soc is None and society_id:
+        soc = _row("SELECT operator_name, operator_address, operator_confirmed_at FROM societies WHERE id=%s", (society_id,)) or {}
+    if soc:
+        if soc.get("operator_confirmed_at") and (soc.get("operator_name") or "").strip():
+            return soc["operator_name"].strip(), (soc.get("operator_address") or "").strip() or OPERATOR_ADDRESS_DEFAULT
     return (os.environ.get("OPERATOR_LEGAL_NAME") or OPERATOR_LEGAL_NAME_DEFAULT,
             os.environ.get("OPERATOR_ADDRESS") or OPERATOR_ADDRESS_DEFAULT)
+
+
+def operator_confirmed(society_id: int) -> bool:
+    return bool((_row("SELECT operator_confirmed_at FROM societies WHERE id=%s", (society_id,)) or {}).get("operator_confirmed_at"))
 
 
 def confirm_operator(society_id: int, actor_id: int, name: str, address: str) -> str:
@@ -2483,7 +2502,7 @@ def import_legacy_resolution(society_id: int, actor_id: int, held_on, meeting_ty
 
 def agreement_text(society_id: int, agreement_no: str, annex_hashes: dict, annexes: dict) -> str:
     soc = _row("SELECT * FROM societies WHERE id=%s", (society_id,)) or {}
-    op_name, op_addr = _operator()
+    op_name, op_addr = _operator(society_id)
     officers = seated_officers(society_id)
     def _sign_line(o):
         v = officers[o] or {}
@@ -2709,16 +2728,13 @@ def assert_ready_to_sign(society_id: int) -> None:
         raise OnboardingError("Annexes A, B, C, D and E must be sealed before the Agreement is signed.")
     if any(h not in (ag["body_text"] or "") for h in sealed.values()):
         raise OnboardingError("The Agreement text no longer matches the sealed annexes; reissue it from the annexes.")
-    op_name, _op_addr = _operator()
+    op_name, _op_addr = _operator(society_id)
     text = ag["body_text"] or ""
     if op_name not in text:
         raise OnboardingError("The Agreement does not name the operator; reissue it from the annexes.")
-    # A deployment that asserts a real operator via OPERATOR_LEGAL_NAME requires the admin to confirm it
-    # (confirm_operator) before anyone signs; defaults are acceptable locally without confirmation.
-    if os.environ.get("OPERATOR_LEGAL_NAME"):
-        soc = _row("SELECT operator_confirmed_at FROM societies WHERE id=%s", (society_id,)) or {}
-        if not soc.get("operator_confirmed_at"):
-            raise OnboardingError("Confirm the operator before signing: on the Agreement stage the admin clicks Confirm operator.")
+    # The operator is named in the signed text, so the admin must have confirmed it (always, on every deployment).
+    if not operator_confirmed(society_id):
+        raise OnboardingError("Confirm the operator before signing: on the Agreement stage the admin clicks Confirm operator.")
 
 
 # ── activation ────────────────────────────────────────────────────────────────────────────────────────────────────

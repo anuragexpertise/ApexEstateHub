@@ -308,14 +308,14 @@ def _stage_annexes(society_id: int):
     # Operator confirmation: the Agreement names the Operator (the Licensor). Admin confirms before anyone signs.
     soc = ob.db._execute("SELECT operator_name, operator_address, operator_confirmed_at FROM societies WHERE id=%s", (society_id,), fetch_one=True) or {}
     op_confirmed = bool(soc.get("operator_confirmed_at"))
-    op_name = soc.get("operator_name") or ob.OPERATOR_LEGAL_NAME_DEFAULT
+    op_name = ob._operator(society_id)[0]
     if op_confirmed:
         out.append(html.Div([html.Strong("Operator confirmed: ", style={"fontSize": "12px"}), html.Span(op_name, style=_MUTED)], style={"marginTop": "8px"}))
     else:
         out.append(html.Div([
             html.Strong("Confirm the operator before signing", style={"fontSize": "12.5px"}),
-            html.Div("The Agreement names the Operator (the Licensor). Confirm its legal name and address; signing is blocked until confirmed "
-                     "when OPERATOR_LEGAL_NAME is set for this deployment.", style=_MUTED),
+            html.Div("The Agreement names the Operator (the Licensor). Confirm its legal name and address: sealing and signing are blocked "
+                     "until you do, and the name you confirm is the one written into the Agreement.", style=_MUTED),
             dbc.Row([
                 dbc.Col(_field("Legal name", dbc.Input(id=f"{P}-op-name", size="sm", value=soc.get("operator_name") or "", maxLength=100)), md=4),
                 dbc.Col(_field("Address", dbc.Input(id=f"{P}-op-addr", size="sm", value=soc.get("operator_address") or "", maxLength=500)), md=5),
