@@ -268,12 +268,23 @@ def _grid_from_csv(data: bytes):
     return [list(r) for r in csv.reader(io.StringIO(text), dialect)]
 
 
-def parse_upload(data: bytes, filename: str = "", known_flats=()):
+def parse_upload(data: bytes | str, filename: str = "", known_flats=()):
     """Read an .xlsx or .csv of receivables.
+
+    `data` may be raw bytes (decoded already) or a dcc.Upload data-URL string
+    ("data:...;base64,..."); a str is decoded to bytes here so callers never
+    hit ``a bytes-like object is required, not 'str'``.
 
     Returns ``(clean_rows, errors, info)``; raises UploadError when the file is unusable. `info` carries
     ``rows_read`` and the spreadsheet ``header_row``. Row numbers in errors are spreadsheet rows.
     """
+    import base64
+    if isinstance(data, str):
+        if "," in data:
+            _, data = data.split(",", 1)
+            data = base64.b64decode(data)
+        else:
+            data = data.encode("utf-8")
     if not data:
         raise UploadError("The file is empty.")
     if len(data) > MAX_BYTES:

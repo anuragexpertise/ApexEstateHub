@@ -123,10 +123,15 @@ IDs are used in reports. "Master" means the platform master admin.
 ## 6. Ask the owner before coding (if not answered by the repo)
 
 1. Is "Grievance Officer" required to be seated, or optional like the CA questionnaire?
+Ans 1. Yes, mandatory (DPDP Act requirement - need not be an owner)
 2. Should TDS Rates and GST Rates be free-entry tables or an upload of the CA's letter (PDF) plus entered rates?
+Ans 2. Leave them. TDS /GST rates are default displayed can be edited/ or uploaded. their CA letter (PDF) should be paired evidence
 3. For Reserves and Funds: one ledger-row group or one per fund?
-4. Where should evidence files live on Render (DB blob, Aiven, or an object store)?
+Ans 3. One per fund
+4. Where should evidence files live on Render (DB blob, Aiven, or an object store)? 
+Ans 4. Leave it now.may shift later to some cloud store
 5. Is a seeded/dev reset (drop and recreate all tables) acceptable on the Aiven alpha database?
+Ans 5. Yes, drop and recreate all tables
 
 ## 7. Stop conditions
 

@@ -232,13 +232,14 @@ def test_balances_template_round_trip():
     accounts = [{"id": 1311, "name": "SBI", "tab": "SBI", "side": "Dr"},
                 {"id": 1510, "name": "SDrDig", "tab": "SDrDig", "side": "Dr"}]
     data = xt.build_balances_template(accounts, "2026-09-30")
-    res = xt.parse_bytes(data, "b.xlsx", xt.BALANCES_SHEET,
-                         ["account_id", "account_name", "tab", "label", "as_on_date", "amount"])
+    res = xt.parse_bytes(data, "b.xlsx", "Assets (Dr)",
+                         ["account_id", "account_name", "tab", "side", "label", "as_on_date", "amount"])
     assert res.errors == [], res.errors
     ids = [r["account_id"] for r in res.rows]
     assert 1311 in ids and 1510 in ids
     sbi = next(r for r in res.rows if r["account_id"] == 1311)
     assert sbi["as_on_date"] == "2026-09-30"
+    assert sbi["side"] == "Dr"
 
 
 def test_ca_questions_keys_unique():
@@ -485,8 +486,8 @@ def test_apply_balances_refused_when_sealed(monkeypatch, tmp_path):
     tables = {"societies": [_society()], "onboarding_evidence": [], "onboarding_annexes": [{"society_id": 1, "status": "sealed"}]}
     _wire(monkeypatch, tables)
     monkeypatch.setattr(ob, "evidence_folder", lambda sid: tmp_path / "evidence")
-    xlsx = _tiny_xlsx(xt.BALANCES_SHEET, ["account_id", "account_name", "tab", "label", "as_on_date", "amount"],
-                      [[1311, "SBI", "SBI", "", "2026-09-30", "100.00"]])
+    xlsx = _tiny_xlsx("Assets (Dr)", ["account_id", "account_name", "tab", "side", "label", "as_on_date", "amount"],
+                      [[1311, "SBI", "SBI", "Dr", "", "2026-09-30", "100.00"]])
     pdf = b"%PDF-1.4 stmt"
     with pytest.raises(ob.OnboardingError, match="sealed"):
         pi.apply_balances(1, 1, "b.xlsx", xlsx, "b.pdf", pdf)
@@ -499,9 +500,9 @@ def test_apply_balances_merges_and_leaves_others(monkeypatch, tmp_path):
     }])
     fake = _wire(monkeypatch, tables)
     monkeypatch.setattr(ob, "evidence_folder", lambda sid: tmp_path / "evidence")
-    xlsx = _tiny_xlsx(xt.BALANCES_SHEET, ["account_id", "account_name", "tab", "label", "as_on_date", "amount"],
-                      [[1311, "SBI", "SBI", "", "2026-09-30", "100.00"],
-                       [1311, "SBI", "SBI", "L1", "2026-09-30", "50.00"]])
+    xlsx = _tiny_xlsx("Assets (Dr)", ["account_id", "account_name", "tab", "side", "label", "as_on_date", "amount"],
+                      [[1311, "SBI", "SBI", "Dr", "", "2026-09-30", "100.00"],
+                       [1311, "SBI", "SBI", "Dr", "L1", "2026-09-30", "50.00"]])
     pdf = b"%PDF-1.4 stmt"
     msg = pi.apply_balances(1, 1, "b.xlsx", xlsx, "b.pdf", pdf)
     assert "2 row(s)" in msg and "1 account(s)" in msg

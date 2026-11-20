@@ -52,6 +52,70 @@ def purpose_label(purpose: str) -> str:
     return PURPOSE_LABEL.get(purpose, (purpose or "").replace("_", " ").capitalize())
 
 
+def save_evidence(raw_bytes: bytes, filename: str, mime: str, kind: str,
+                  society_id: int | None = None, user_id: int | None = None) -> str:
+    """Validate, store, and register an evidence file; return its SHA-256.
+
+    Content-addressed storage: the file is written as ``<sha256><ext>`` in the
+    society's evidence folder, so re-uploading the same bytes overwrites with
+    identical content. One register row per (society, kind, sha256) — re-uploading
+    the same file does not create a duplicate row.
+
+    Raises ``EvidenceError`` with a safe, user-visible message for unsupported
+    types, oversize files, or invalid magic bytes.
+
+    ``society_id`` / ``user_id`` default to the current Flask-Login session;
+    they are parameters so the function can be tested outside a request.
+    """
+    from app.security.audit_context import get_current_society_id, get_current_user_id
+
+    if society_id is None:
+        society_id = get_current_society_id()
+    if not society_id:
+        raise EvidenceError("no_session", "No society in session. Please sign in again.")
+    society_id = int(society_id)
+
+    if user_id is None:
+        user_id = get_current_user_id()
+
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in ob.EVIDENCE_TYPES:
+        raise EvidenceError("unsupported", f"Unsupported file type '{ext}'. Use PDF, PNG or JPG.")
+    if mime and mime != MIME.get(ext):
+        raise EvidenceError("unsupported", f"MIME type {mime} does not match file extension {ext}.")
+
+    if not raw_bytes:
+        raise EvidenceError("empty", "The file is empty.")
+    if len(raw_bytes) > ob.EVIDENCE_MAX_BYTES:
+        raise EvidenceError("oversize", f"File is larger than {ob.EVIDENCE_MAX_BYTES // (1024 * 1024)} MB.")
+
+    expected_magic = ob.EVIDENCE_TYPES.get(ext)
+    if expected_magic and not raw_bytes.startswith(expected_magic):
+        raise EvidenceError("invalid", f"The file does not look like a real {ext.lstrip('.').upper()}.")
+
+    digest = hashlib.sha256(raw_bytes).hexdigest()
+    stored = f"{digest}{ext}"
+
+    folder = ob.evidence_folder(society_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / stored
+    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+        path.write_bytes(raw_bytes)
+
+    row = ob._row("""SELECT id FROM onboarding_evidence
+                      WHERE society_id=%s AND purpose=%s AND sha256=%s
+                      ORDER BY uploaded_at DESC LIMIT 1""",
+                  (society_id, kind, digest))
+    if not row:
+        ob._row("""INSERT INTO onboarding_evidence (society_id, purpose, filename, stored_name,
+                          sha256, size_bytes, meta, uploaded_by)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s) RETURNING id""",
+                    (society_id, kind, filename, stored, digest, len(raw_bytes),
+                     json.dumps({"kind": kind}), user_id))
+
+    return digest
+
+
 def list_register(society_id: int) -> list[dict]:
     """Every stored scan for the society, newest first. Reads the database only (no hashing)."""
     rows = ob._rows("""SELECT e.id, e.purpose, e.filename, e.stored_name, e.sha256, e.size_bytes, e.uploaded_at,
