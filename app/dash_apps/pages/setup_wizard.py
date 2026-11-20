@@ -1583,20 +1583,19 @@ def render_category_content(category, society_id=None, state=None, constitution=
         ]
     elif category == "Legal Regime Selection":
         # The six Yes/No answers come from the saved draft, so they survive a reload and the table below starts out right.
-        lr = _saved_legal_answers(society_id) if is_current else dict(LEGAL_ANSWER_DEFAULTS)
+        lr = _saved_legal_answers(society_id)
 
         def yes_no(component_id, key):
             return dbc.RadioItems(id=component_id, options=[{"label": "Yes", "value": True}, {"label": "No", "value": False}],
                                   value=lr[key], inline=True, className="mb-3")
 
         hierarchy_rows = []
-        if is_current:
-            try:
-                hierarchy_rows, _ = legal_hierarchy_rows(society_id, state, lr, constitution)
-            except Exception:                                                      # noqa: BLE001
-                _log.exception("Legal Hierarchy could not be rendered")
-                hierarchy_rows = []
-        regime_live = legal_regime_live(society_id, state, constitution) if is_current else []
+        try:
+            hierarchy_rows, _ = legal_hierarchy_rows(society_id, state, lr, constitution)
+        except Exception:                                                      # noqa: BLE001
+            _log.exception("Legal Hierarchy could not be rendered")
+            hierarchy_rows = []
+        regime_live = legal_regime_live(society_id, state, constitution)
         return elements + [
             _render_banner("Legal Regime Selection", "Your State and Constitution, chosen on the Society Details step, decide which Acts, Rules and Bye-laws govern the society. "
                                                      "A lower level can never loosen a higher one."),
@@ -1794,29 +1793,17 @@ def render_category_content(category, society_id=None, state=None, constitution=
         from app.services import regime_rules_admin as rra
         from app.services.statutory_rules import fund_rules_for_state
         s_sink, s_repair = None, None          # no default: blank until the society enters the resolved rate
-        if is_current and society_id:
+        if society_id:
             row = db._execute("SELECT apt_sinking_fund_rate, apt_repair_fund_rate FROM apt_charges_fines_basis WHERE society_id = :id AND apt_id IS NULL AND end_date IS NULL LIMIT 1", {"id": society_id}, fetch_one=True)
             if row:
                 s_sink, s_repair = row.get("apt_sinking_fund_rate") or None, row.get("apt_repair_fund_rate") or None
-        if is_current:
-            fp = fund_plan(society_id, state, constitution=constitution)
-            ff = fund_flags(society_id, state, constitution=constitution)
-            fund_rules = fund_rules_for_state(state)
-            try:
-                pol = rra.list_society_policies(society_id) if society_id else {}
-            except Exception:  # noqa: BLE001
-                pol = {}
-        else:
-            fp = {"regime": "GENERIC", "plan": {}}
-            ff = {}
-            fund_rules = {}
+        fp = fund_plan(society_id, state, constitution=constitution)
+        ff = fund_flags(society_id, state, constitution=constitution)
+        fund_rules = fund_rules_for_state(state)
+        try:
+            pol = rra.list_society_policies(society_id) if society_id else {}
+        except Exception:  # noqa: BLE001
             pol = {}
-        if not is_current:
-            # Non-current steps render no DB-backed cards — only the banner,
-            # so re-rendering every step on wizard open hits the database once
-            # (for the visible step) instead of once per step.
-            return elements + [
-                _render_banner("Funds", "Funds this society holds: the prescribed ones (IFMS Corpus, Major Repair Fund, Reserve Fund) and any optional fund it opts into (Sinking, Repair & Maintenance, Depreciation). Optional funds stay provisional until the General Body resolution is on file.")]
         cards = []
 
         def policy_select(key, lock_regime_label=None):
