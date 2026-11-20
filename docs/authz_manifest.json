@@ -672,21 +672,21 @@
     "callback:onboarding_callbacks.py::onb_back_to_setup": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_callbacks.py::onb_continue_setup": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_callbacks.py::onb_ca_template": {
+    "callback:onboarding_callbacks.py::onb_ca_file": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_ca_files": {
       "classification": "exempt",
       "reason": "Session-guarded UI echo of the chosen file names; reads and writes no server data."
     },
-    "callback:onboarding_callbacks.py::onb_ca_file": {
-      "classification": "action",
-      "actions": [
-        "enrollment.commit"
-      ]
+    "callback:onboarding_callbacks.py::onb_ca_template": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_confirm_operator": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_continue_setup": {
+      "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_decl_apply": {
       "classification": "action",
@@ -704,9 +704,6 @@
     "callback:onboarding_callbacks.py::onb_election_import": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_callbacks.py::onb_election_scan": {
-      "classification": "legacy-gated"
-    },
     "callback:onboarding_callbacks.py::onb_election_template": {
       "classification": "legacy-gated"
     },
@@ -714,6 +711,9 @@
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_esign_start": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_ev_manual_verify": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_ev_verify": {
@@ -743,10 +743,6 @@
     "callback:onboarding_callbacks.py::onb_officer_update": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_callbacks.py::onb_open_wizard": {
-      "classification": "exempt",
-      "reason": "Pure UI trigger: bumps pwd-gate-store so the wizard re-checks. Server re-verifies admin role and 'committee seated' state before anything opens; writes nothing."
-    },
     "callback:onboarding_callbacks.py::onb_opt_doc": {
       "classification": "legacy-gated"
     },
@@ -768,6 +764,9 @@
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_reg_cert": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_callbacks.py::onb_reissue_agreement": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_callbacks.py::onb_seal": {
@@ -798,35 +797,35 @@
     "callback:onboarding_callbacks.py::onb_sync_step_stores": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_wizard_callbacks.py::bf_apply": {
+    "callback:onboarding_wizard_callbacks.py::bf_attach_upload": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_wizard_callbacks.py::bf_reconciliation_render": {
+    "callback:onboarding_wizard_callbacks.py::bf_ledger_download": {
+      "classification": "exempt",
+      "reason": "Builds a blank .xlsx template from the rows the client sends; reads no server data and writes nothing."
+    },
+    "callback:onboarding_wizard_callbacks.py::bf_ledger_grid": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_wizard_callbacks.py::bf_reconciliation_update": {
-      "classification": "legacy-gated"
+    "callback:onboarding_wizard_callbacks.py::bf_ledger_tieout": {
+      "classification": "exempt",
+      "reason": "Pure computation on the rows already in the browser grid against the typed value; reads and writes no server data."
     },
-    "callback:onboarding_wizard_callbacks.py::bf_recv_download": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_wizard_callbacks.py::bf_recv_grid_update": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_wizard_callbacks.py::bf_recv_sync": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_wizard_callbacks.py::bf_template": {
-      "classification": "legacy-gated"
-    },
-    "callback:onboarding_wizard_callbacks.py::bf_upload": {
-      "classification": "legacy-gated"
+    "callback:onboarding_wizard_callbacks.py::bf_ledger_toggle": {
+      "classification": "exempt",
+      "reason": "Pure UI: opens or closes the ledger-rows modal; reads and writes no server data."
     },
     "callback:onboarding_wizard_callbacks.py::clear_admin_passwords": {
       "classification": "exempt",
       "reason": "Session-guarded UI reset: blanks two step-up password inputs in the browser when the Administrator step opens; touches no stored data."
     },
     "callback:onboarding_wizard_callbacks.py::legal_regime_refresh": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::sw_bf_file": {
+      "classification": "legacy-gated"
+    },
+    "callback:onboarding_wizard_callbacks.py::sw_bf_template": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::tds_apply": {
@@ -857,6 +856,9 @@
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::wizard_save_policy": {
+      "classification": "legacy-gated"
+    },
+    "callback:op_progress_callbacks.py::poll_progress": {
       "classification": "legacy-gated"
     },
     "callback:paper_sign_callbacks.py::adopt_import": {

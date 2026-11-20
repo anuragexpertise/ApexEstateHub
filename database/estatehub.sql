@@ -24088,7 +24088,7 @@ CREATE TABLE onboarding_jobs (
 );
 
 -- progress of database-intensive operations (bar shown by the shell-level modal; created lazily by app/services/op_progress.py too)
-CREATE TABLE IF NOT EXISTS op_progress (
+CREATE TABLE op_progress (
     token UUID PRIMARY KEY,
     user_id INT,
     society_id INT,

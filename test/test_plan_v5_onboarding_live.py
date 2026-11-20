@@ -182,6 +182,7 @@ def test_10_seal_annexes_puts_their_hashes_in_the_agreement(world):
     ob.set_grievance_officer(sid, "G. Officer", "grievance@example.com", None)    # Annex D needs one
     db._execute("INSERT INTO onboarding_evidence (society_id, purpose, filename, stored_name, sha256, size_bytes, uploaded_by) "
                 "VALUES (%s,'registration_certificate','reg.pdf','x.pdf',%s,10,%s)", (sid, "e" * 64, world["admin"]))   # Annex E blocks without it
+    ob.confirm_operator(sid, world["admin"], "EstateHub LLP", "Agra, UP, India")      # sealing is gated on this since dcc5dd9
     ob.build_annexes(sid, world["admin"])
     st = ob.seal_annexes(sid, world["admin"])
     assert {k: v["status"] for k, v in st.items()} == {"A": "sealed", "B": "sealed", "C": "sealed", "D": "sealed", "E": "sealed"}

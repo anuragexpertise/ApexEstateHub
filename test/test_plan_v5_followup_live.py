@@ -28,7 +28,8 @@ def w():
     p.start()
     sid = ss.create_society_checked({"name": f"V5 Follow {PID}", "address": "x", "pan": "ABCDE1234H", "reg_num": "R3", "reg_cert_hash": "c" * 64,
                                      "state": "UP", "constitution": "AOA", "validity": str(date.today() + timedelta(days=30)), "created_by": MASTER_ID})
-    db._execute("UPDATE societies SET onboarding_state='setup draft' WHERE id=%s", (sid,))
+    db._execute("UPDATE societies SET onboarding_state='setup draft', operator_name='EstateHub LLP', operator_address='Agra, UP, India', "
+                "operator_confirmed_at=NOW() WHERE id=%s", (sid,))          # signing is gated on a confirmed operator (assert_ready_to_sign)
     db._execute("INSERT INTO onboarding_annexes (society_id, annex_code, content, content_hash, status) VALUES "
                 "(%s,'A','{}','a','sealed'),(%s,'B','{}','b','sealed'),(%s,'C','{}','c','sealed'),(%s,'D','{}','d','sealed'),(%s,'E','{}','e','sealed')", (sid, sid, sid, sid, sid))
     ag = db._execute("INSERT INTO society_agreements (society_id, body_text) VALUES (%s,%s) RETURNING id",
