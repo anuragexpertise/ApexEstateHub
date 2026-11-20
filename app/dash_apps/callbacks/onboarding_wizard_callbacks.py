@@ -328,6 +328,8 @@ def register_onboarding_wizard_callbacks(app):
     @app.callback(
         Output("sw-bf-status", "children"),
         Output("sw-bf-files", "children"),
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output(f"{P}-marker", "data", allow_duplicate=True),
         Input("sw-bf-file", "n_clicks"),
         State("sw-bf-xlsx", "contents"), State("sw-bf-xlsx", "filename"),
         State("sw-bf-pdf", "contents"), State("sw-bf-pdf", "filename"),
@@ -337,16 +339,19 @@ def register_onboarding_wizard_callbacks(app):
     def sw_bf_file(n, xlsx_c, xlsx_n, pdf_c, pdf_n):
         s = _session()
         if not n or not s or not s[0]:
-            return no_update, no_update
-        sid, uid, _role = s
+            return no_update, no_update, no_update, no_update
+        sid, uid, role = s
+        if role != "admin":
+            return _alert("Only the administrator can file brought-forward statements.", False), no_update, no_update, no_update
         xlsx, pdf = _decode(xlsx_c), _decode(pdf_c)
         if not xlsx or not pdf:
-            return _alert("Choose both the filled statement template (.xlsx) and the signed statement (.pdf).", False), no_update
+            return _alert("Choose both the filled statement template (.xlsx) and the signed statement (.pdf).", False), no_update, no_update, no_update
         try:
             msg = pi.apply_balances(sid, uid, xlsx_n or "", xlsx, pdf_n or "", pdf)
         except ob.OnboardingError as exc:
-            return _alert(str(exc), False), no_update
-        return _alert(msg, True), f"Template: {xlsx_n or 'not chosen'}    Statement: {pdf_n or 'not chosen'}"
+            return _alert(str(exc), False), no_update, no_update, no_update
+        body, mk = op.hub_body(role, sid, uid), op.marker(sid)
+        return _alert(msg, True), f"Template: {xlsx_n or 'not chosen'}    Statement: {pdf_n or 'not chosen'}", body, mk
 
     # ── nav + per-step save ──────────────────────────────────────────────────────
     _rail_inputs = [Input({"type": "onb-rail", "key": cat}, "n_clicks") for cat in CATEGORIES]
