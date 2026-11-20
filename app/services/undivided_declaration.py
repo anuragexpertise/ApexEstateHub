@@ -315,7 +315,7 @@ def apply(society_id: int, actor_id: int, xlsx_name: str, xlsx: bytes, pdf_name:
 
     digest = ob._sha(pdf)
     xlsx_digest = ob._sha(xlsx)
-    from app.services import paired_intake as pi   # lazy: avoids a circular import
+    from app.services import paired_intake as pi  # lazy: avoids a circular import
     pi.keep_xlsx(society_id, xlsx)
     stored = f"{digest}.pdf"
     try:

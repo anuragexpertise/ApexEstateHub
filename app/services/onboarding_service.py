@@ -29,7 +29,7 @@ from decimal import Decimal, InvalidOperation
 
 from app.dash_apps.pages.wizard_registry import DEPENDS, SKIPPED_WHEN
 from app.services import pending_receivables as pr
-from app.utils import today_ist, now_ist
+from app.utils import now_ist, today_ist
 from database.db_manager import db
 
 log = logging.getLogger(__name__)
@@ -234,7 +234,7 @@ def _check_signature_file(filename: str, data: bytes) -> None:
         from PIL import Image
         with Image.open(BytesIO(data)) as im:
             im.load()
-    except Exception as exc:                                    # noqa: BLE001 - Pillow raises many types for a bad file
+    except Exception as exc:
         log.info("signature image rejected: %s", type(exc).__name__)
         raise OnboardingError("The signature image is damaged or incomplete. Save it again as a PNG or JPG and upload it again.") from exc
 
@@ -260,7 +260,7 @@ def _store_signature(society_id: int, filename: str, data: bytes) -> str:
     _check_signature_file(filename, data)
     try:
         webp = _c2w(data)
-    except Exception as exc:                                    # noqa: BLE001 - defence in depth behind _check_signature_file
+    except Exception as exc:
         log.exception("could not convert a signature image for society %s", society_id)
         raise OnboardingError("The signature image could not be processed. Upload a fresh PNG or JPG file.") from exc
     if webp is None:
@@ -2194,7 +2194,7 @@ def seal_annexes(society_id: int, actor_id: int) -> dict:
         if not existed:
             try:
                 db._execute("DELETE FROM society_agreements WHERE id=%s AND COALESCE(body_text,'')=''", (ag["id"],))
-            except Exception:                                              # noqa: BLE001
+            except Exception:
                 log.exception("could not remove the blank Agreement row for society %s", society_id)
         if isinstance(exc, OnboardingError):
             raise
@@ -2244,9 +2244,8 @@ def _operator(society_id: int | None = None, soc: dict | None = None) -> tuple[s
     else the built-in default. Signing is gated on the confirmation itself (assert_ready_to_sign)."""
     if soc is None and society_id:
         soc = _row("SELECT operator_name, operator_address, operator_confirmed_at FROM societies WHERE id=%s", (society_id,)) or {}
-    if soc:
-        if soc.get("operator_confirmed_at") and (soc.get("operator_name") or "").strip():
-            return soc["operator_name"].strip(), (soc.get("operator_address") or "").strip() or OPERATOR_ADDRESS_DEFAULT
+    if soc and soc.get("operator_confirmed_at") and (soc.get("operator_name") or "").strip():
+        return soc["operator_name"].strip(), (soc.get("operator_address") or "").strip() or OPERATOR_ADDRESS_DEFAULT
     return (os.environ.get("OPERATOR_LEGAL_NAME") or OPERATOR_LEGAL_NAME_DEFAULT,
             os.environ.get("OPERATOR_ADDRESS") or OPERATOR_ADDRESS_DEFAULT)
 

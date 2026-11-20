@@ -153,7 +153,7 @@ def register_onboarding_callbacks(app):
         else:
             filing_note = " No workbook was uploaded, so no pair was filed."
         body, mk = _body(sid, uid, role, view=_committee_view(sid))
-        return body, _alert(msg + filing_note, False if exc_out else True), mk
+        return body, _alert(msg + filing_note, not exc_out), mk
 
     @app.callback(
         Output(f"{P}-all-chosen", "children"),
@@ -534,7 +534,7 @@ def register_onboarding_callbacks(app):
                 return dcc.send_bytes(data, row["filename"]), no_update
         except ob.OnboardingError as exc:
             return no_update, _alert(str(exc), False)
-        except Exception:                                              # noqa: BLE001
+        except Exception:
             log.exception("Agreement PDF failed for society %s; sending the printable HTML instead", s[0])
         try:
             name, page = ob.agreement_print_html(s[0])

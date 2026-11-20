@@ -338,7 +338,7 @@ def register_onboarding_wizard_callbacks(app):
         s = _session()
         if not n or not s or not s[0]:
             return no_update, no_update
-        sid, uid, role = s
+        sid, uid, _role = s
         xlsx, pdf = _decode(xlsx_c), _decode(pdf_c)
         if not xlsx or not pdf:
             return _alert("Choose both the filled statement template (.xlsx) and the signed statement (.pdf).", False), no_update
