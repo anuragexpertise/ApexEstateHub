@@ -85,7 +85,7 @@ def test_agreement_text_execution_block_lists_flat_and_signature(monkeypatch):
     officers = {"president": _officer("Pat", "A-1", "a" * 64 + ".webp"), "secretary": _officer("Sam", "A-2", None), "treasurer": None}
     monkeypatch.setattr(ob, "seated_officers", lambda sid: officers)
     monkeypatch.setattr(ob, "_row", lambda *a, **k: {"name": "Soc", "plan": "x"})
-    monkeypatch.setattr(ob, "_operator", lambda: ("Op LLP", "Agra"))
+    monkeypatch.setattr(ob, "_operator", lambda *a, **k: ("Op LLP", "Agra"))
     hashes = {k: "h" * 64 for k in "ABCDE"}
     text = ob.agreement_text(5, "AG-1", hashes, {"A": {}, "B": {}, "C": {}, "D": {}, "E": {"documents": []}})
     assert "flat A-1 (signature image 5/signatures/" in text
