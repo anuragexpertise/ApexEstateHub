@@ -247,6 +247,22 @@ def register_onboarding_callbacks(app):
         body, mk = _body(sid, uid, role, view=_committee_view(sid))
         return body, _alert(msg), mk
 
+    # ── "Complete missing details" (setup wizard, serving office-bearers list) → Stage 2 ──────────────────
+    # The button lives in setup_wizard.py (render of the office-bearer list), so this callback is NOT dead.
+    @app.callback(
+        Output(f"{P}-body", "children", allow_duplicate=True),
+        Output("onb-view", "data", allow_duplicate=True),
+        Input("onb-back-to-committee", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def onb_back_to_committee(n):
+        s = _session()
+        if not n or not s or s[2] != "admin" or not s[0]:
+            return no_update, no_update
+        sid, uid, role = s
+        return op.hub_body(role, sid, uid, view="committee"), "committee"
+
     # ── committee screen → wizard (only once the grievance officer is named) ──
     @app.callback(
         Output(f"{P}-body", "children", allow_duplicate=True),
@@ -465,8 +481,8 @@ def register_onboarding_callbacks(app):
         if not n or not s:
             return no_update, no_update, no_update, no_update
         sid, uid, role = s
-        ag = ob.db._execute("SELECT id FROM society_agreements WHERE society_id=%s", (sid,), fetch_one=True) if sid else None
-        if not ag:
+        ag = ob.db._execute("SELECT id, body_text FROM society_agreements WHERE society_id=%s", (sid,), fetch_one=True) if sid else None
+        if not ag or not (ag.get("body_text") or "").strip():
             return no_update, _alert("There is no Agreement to sign yet.", False), no_update, no_update
         try:
             from app.services import esign_adapter as es
@@ -1208,8 +1224,11 @@ def register_onboarding_callbacks(app):
         return statuses, summary
 
     # ── Evidence register: manual verification tick (admin confirms the scan matches the source document) ──
+    # One click flips the row: "Mark verified" -> verified, "Revoke" -> not verified. Label and colour follow the new state.
     @app.callback(
         Output({"type": f"{P}-ev-manual-status", "id": ALL}, "children"),
+        Output({"type": f"{P}-ev-manual", "id": ALL}, "children"),
+        Output({"type": f"{P}-ev-manual", "id": ALL}, "color"),
         Input({"type": f"{P}-ev-manual", "id": ALL}, "n_clicks"),
         State({"type": f"{P}-ev-note", "id": ALL}, "value"),
         prevent_initial_call=True,
@@ -1227,21 +1246,27 @@ def register_onboarding_callbacks(app):
         row_ids = [o["id"]["id"] for o in ctx.outputs_list[0]]
         notes = dict(zip(row_ids, note_values or []))
         eid = trig["id"] if isinstance(trig, dict) else None
-        if eid:
-            try:
-                ob.verify_evidence(sid, int(eid), uid, True, notes.get(eid) or "")
-            except ob.OnboardingError as exc:
-                err = html.Span("Error: " + str(exc), style={"color": "#b02a37", "fontSize": "11px"})
-                return [err] * len(row_ids)
-        rows = ev.list_register(sid)
-        verified = {int(r["id"]): bool(r.get("manually_verified")) for r in rows}
-        out = []
+        n = len(row_ids)
+        if eid is None:
+            raise PreventUpdate
+        try:
+            cur = next((r for r in ev.list_register(sid) if int(r["id"]) == int(eid)), None)
+            if cur is None:
+                raise ob.OnboardingError("Evidence not found.")
+            ob.verify_evidence(sid, int(eid), uid, not bool(cur.get("manually_verified")), notes.get(eid) or "")
+        except ob.OnboardingError as exc:
+            err = html.Span("Error: " + str(exc), style={"color": "#b02a37", "fontSize": "11px"})
+            return [err if i == eid else no_update for i in row_ids], [no_update] * n, [no_update] * n
+        verified = {int(r["id"]): r for r in ev.list_register(sid)}
+        status, label, color = [], [], []
         for i in row_ids:
-            if verified.get(i):
-                out.append(html.Span("Verified", style={"color": "#2e7d32", "fontWeight": "600", "fontSize": "11px"}))
-            else:
-                out.append(html.Span("Not verified", style={"color": "#b02a37", "fontSize": "11px"}))
-        return out
+            r = verified.get(int(i)) or {}
+            ok = bool(r.get("manually_verified"))
+            status.append(html.Span("Verified" if ok else "Not verified",
+                                    style={"color": "#2e7d32" if ok else "#b02a37", "fontWeight": "600" if ok else "400", "fontSize": "11px"}))
+            label.append("Revoke" if ok else "Mark verified")
+            color.append("danger" if ok else "success")
+        return status, label, color
 
     # ── post go-live: Annexures F, G, H (build by the admin; sign by President / Secretary / Treasurer) ──────────
     @app.callback(

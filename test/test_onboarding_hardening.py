@@ -40,7 +40,10 @@ class _ScriptedCursor:
             return [r for r in t[table] if pred(r)]
 
         # ── SELECTs ───────────────────────────────────────────────────────────
-        if "ONBOARDING_STATE FROM SOCIETIES" in u:
+        if u.startswith("DELETE FROM SOCIETY_AGREEMENTS"):
+            t["society_agreements"] = [r for r in t["society_agreements"]
+                                       if not (r["id"] == p[0] and not (r.get("body_text") or ""))]
+        elif "ONBOARDING_STATE FROM SOCIETIES" in u:
             self.last_rows = rows("societies", lambda r: r["id"] == self._id(u, p))
         elif "FROM SOCIETIES WHERE ID=" in u:
             self.last_rows = rows("societies", lambda r: r["id"] == self._id(u, p))
@@ -226,7 +229,7 @@ def _wire(monkeypatch, tables):
 
 def test_seal_annexes_is_atomic_and_writes_agreement_in_same_transaction(monkeypatch):
     tables = {
-        "societies": [_society()],
+        "societies": [_society(operator_confirmed="2026-11-20T00:00:00+05:30")],
         "onboarding_annexes": [_annex(c) for c in ob.ANNEX_CODES],
         "society_agreements": [_agreement(body_text="")],
         "signed_records": [],
@@ -286,7 +289,8 @@ def test_operator_gate_unconfirmed_refused_when_env_set(monkeypatch):
     ob.assert_ready_to_sign(1)  # no raise once confirmed and the name matches the text
 
 
-def test_operator_gate_defaults_acceptable_without_env(monkeypatch):
+def test_operator_gate_refuses_unconfirmed_even_without_env(monkeypatch):
+    """Bug 3: with no OPERATOR_LEGAL_NAME the built-in default used to pass silently."""
     monkeypatch.delenv("OPERATOR_LEGAL_NAME", raising=False)
     monkeypatch.delenv("OPERATOR_ADDRESS", raising=False)
     tables = {
@@ -296,7 +300,37 @@ def test_operator_gate_defaults_acceptable_without_env(monkeypatch):
         "signed_records": [], "document_signatures": [], "onboarding_evidence": [], "users": [],
     }
     _wire(monkeypatch, tables)
-    ob.assert_ready_to_sign(1)  # defaults are acceptable locally, no confirmation required
+    with pytest.raises(ob.OnboardingError, match="Confirm the operator"):
+        ob.assert_ready_to_sign(1)
+    ob.confirm_operator(1, 1, ob.OPERATOR_LEGAL_NAME_DEFAULT, "Agra, UP, India")
+    ob.assert_ready_to_sign(1)
+
+
+def test_confirmed_operator_is_the_one_used(monkeypatch):
+    """The name the admin confirms must be what _operator() returns (it used to be stored and then ignored)."""
+    monkeypatch.setenv("OPERATOR_LEGAL_NAME", "Env Name Ltd")
+    tables = {
+        "societies": [_society(operator_confirmed=None)],
+        "onboarding_annexes": [], "society_agreements": [], "signed_records": [],
+        "document_signatures": [], "onboarding_evidence": [], "users": [],
+    }
+    _wire(monkeypatch, tables)
+    assert ob._operator(1)[0] == "Env Name Ltd"          # unconfirmed: environment
+    ob.confirm_operator(1, 1, "Acme Pvt Ltd", "Noida, UP")
+    assert ob._operator(1) == ("Acme Pvt Ltd", "Noida, UP")   # confirmed record wins
+
+
+def test_seal_refused_until_operator_confirmed(monkeypatch):
+    tables = {
+        "societies": [_society(operator_confirmed=None)],
+        "onboarding_annexes": [_annex(c) for c in ob.ANNEX_CODES],
+        "society_agreements": [], "signed_records": [], "document_signatures": [],
+        "onboarding_evidence": [], "users": [],
+    }
+    _wire(monkeypatch, tables)
+    with pytest.raises(ob.OnboardingError, match="Confirm the operator"):
+        ob.seal_annexes(1, 1)
+    assert not ob.annexes_sealed(1)
 
 
 # ── T4: freeze guard once any annex is sealed ────────────────────────────────
@@ -398,3 +432,26 @@ def test_registration_certificate_dupe_refuses_different_sha(monkeypatch, tmp_pa
     fake = _wire(monkeypatch, tables)
     out = ob.store_evidence_file(1, "registration_certificate", None, "cert.pdf", same, 1, {})
     assert out["sha256"] == digest
+
+
+def test_failed_seal_removes_the_blank_agreement_row_it_created(monkeypatch):
+    """Bug 4: a rolled-back seal must not leave an empty Agreement row (the signing panel would think one exists)."""
+    tables = {
+        "societies": [_society(operator_confirmed="2026-11-20T00:00:00+05:30")],
+        "onboarding_annexes": [_annex(c) for c in ob.ANNEX_CODES],
+        "society_agreements": [], "signed_records": [], "document_signatures": [],
+        "onboarding_evidence": [], "users": [],
+    }
+    fake = _wire(monkeypatch, tables)
+    import app.dash_apps.callbacks.drilldown_callbacks as dd
+
+    def _create(db, sid):
+        row = _agreement(sid=sid, body_text="")
+        tables["society_agreements"].append(row)
+        return dict(row)
+    monkeypatch.setattr(dd, "_get_or_create_agreement", _create)
+    monkeypatch.setattr(ob, "agreement_text", lambda *a, **k: (_ for _ in ()).throw(ob.OnboardingError("boom")))
+    with pytest.raises(ob.OnboardingError, match="boom"):
+        ob.seal_annexes(1, 1)
+    assert not ob.annexes_sealed(1)
+    assert [r for r in tables["society_agreements"] if not (r.get("body_text") or "").strip()] == []
