@@ -591,7 +591,12 @@ CREATE TABLE vendors (
     gstin VARCHAR(15),
     rcm_category VARCHAR(50),
     state VARCHAR(50),
-    payee_type VARCHAR(20) CHECK (payee_type IN ('individual', 'huf', 'company', 'firm', 'llp', 'other')) DEFAULT 'other'
+    payee_type VARCHAR(20) CHECK (payee_type IN ('individual', 'huf', 'company', 'firm', 'llp', 'other')) DEFAULT 'other',
+    -- T7: MSME flag per MSMED Act 2006. msme_registered=1 means the vendor is a
+    -- micro/small/medium enterprise; payments to such vendors must be made within
+    -- 45 days (s.15 MSMED Act) else interest is payable (s.16).
+    msme_registered BOOLEAN NOT NULL DEFAULT FALSE,
+    msme_udyam_number VARCHAR(50)
 );
 
 CREATE TABLE security_staff (
@@ -13036,6 +13041,172 @@ BEGIN
         balance := v_running;
         RETURN NEXT;
     END LOOP;
+END;
+$$;
+
+-- T7: MSME flag and creditor controls
+-- ====================================
+-- Per MSMED Act 2006: s.15 requires payment to MSME vendors within 45 days of
+-- acceptance of goods/services; s.16 makes interest payable on delayed payments.
+-- s.16(2): interest at 3x the bank rate notified by RBI, compounded monthly.
+
+-- fn_vendor_outstanding
+-- Returns per-vendor outstanding (payables not yet paid) as at p_asof.
+-- outstanding = sum(verified/pending payables) - sum(confirmed expense payments).
+CREATE OR REPLACE FUNCTION fn_vendor_outstanding(
+    p_society_id INT,
+    p_vendor_id INT,
+    p_asof DATE DEFAULT CURRENT_DATE
+)
+RETURNS TABLE (
+    vendor_id INT,
+    business_name VARCHAR(100),
+    msme_registered BOOLEAN,
+    bills_outstanding NUMERIC(15,2),
+    payments_made NUMERIC(15,2),
+    net_outstanding NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        v.id::INT AS vendor_id,
+        COALESCE(v.business_name, v.name, 'Vendor #' || v.id)::VARCHAR(100) AS business_name,
+        COALESCE(v.msme_registered, FALSE)::BOOLEAN AS msme_registered,
+        COALESCE(b.bills_total, 0)::NUMERIC(15,2) AS bills_outstanding,
+        COALESCE(p.payments_total, 0)::NUMERIC(15,2) AS payments_made,
+        (COALESCE(b.bills_total, 0) - COALESCE(p.payments_total, 0))::NUMERIC(15,2) AS net_outstanding
+    FROM vendors v
+    LEFT JOIN (
+        SELECT entity_id, COALESCE(SUM(amount), 0) AS bills_total
+        FROM payables
+        WHERE society_id = p_society_id
+          AND role = 'vendor'
+          AND status IN ('pending', 'verified')
+          AND shift_date <= p_asof
+        GROUP BY entity_id
+    ) b ON b.entity_id = v.id
+    LEFT JOIN (
+        SELECT entity_id, COALESCE(SUM(amount), 0) AS payments_total
+        FROM expenses
+        WHERE society_id = p_society_id
+          AND role = 'vendor'
+          AND status = 'confirmed'
+          AND expense_date <= p_asof
+        GROUP BY entity_id
+    ) p ON p.entity_id = v.id
+    WHERE v.society_id = p_society_id
+      AND v.id = p_vendor_id;
+END;
+$$;
+
+-- fn_vendor_aging
+-- Returns aging buckets for a vendor's outstanding bills as at p_asof:
+--   current     : not yet due (within 45 days of bill date)
+--   bucket_46_90: 46-90 days overdue
+--   bucket_90plus: more than 90 days overdue
+-- MSME vendors have a 45-day payment window per s.15 MSMED Act 2006.
+CREATE OR REPLACE FUNCTION fn_vendor_aging(
+    p_society_id INT,
+    p_vendor_id INT,
+    p_asof DATE DEFAULT CURRENT_DATE
+)
+RETURNS TABLE (
+    vendor_id INT,
+    business_name VARCHAR(100),
+    msme_registered BOOLEAN,
+    current_due NUMERIC(15,2),
+    bucket_46_90 NUMERIC(15,2),
+    bucket_90plus NUMERIC(15,2),
+    total_outstanding NUMERIC(15,2),
+    days_overdue INT
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        v.id::INT AS vendor_id,
+        COALESCE(v.business_name, v.name, 'Vendor #' || v.id)::VARCHAR(100) AS business_name,
+        COALESCE(v.msme_registered, FALSE)::BOOLEAN AS msme_registered,
+        COALESCE(SUM(CASE
+            WHEN (p.shift_date + 45) > p_asof THEN p.amount
+            ELSE 0
+        END), 0)::NUMERIC(15,2) AS current_due,
+        COALESCE(SUM(CASE
+            WHEN (p.shift_date + 45) <= p_asof
+              AND (p.shift_date + 90) > p_asof THEN p.amount
+            ELSE 0
+        END), 0)::NUMERIC(15,2) AS bucket_46_90,
+        COALESCE(SUM(CASE
+            WHEN (p.shift_date + 90) <= p_asof THEN p.amount
+            ELSE 0
+        END), 0)::NUMERIC(15,2) AS bucket_90plus,
+        COALESCE(SUM(p.amount), 0)::NUMERIC(15,2) AS total_outstanding,
+        COALESCE(MAX(CASE WHEN p.shift_date + 45 <= p_asof
+            THEN (p_asof - (p.shift_date + 45))::INT
+            ELSE 0 END), 0) AS days_overdue
+    FROM payables p
+    JOIN vendors v ON v.id = p.entity_id AND v.society_id = p_society_id
+    WHERE p.society_id = p_society_id
+      AND p.role = 'vendor'
+      AND p.status IN ('pending', 'verified')
+      AND p.shift_date <= p_asof
+      AND v.id = p_vendor_id
+    GROUP BY v.id, v.business_name, v.name, v.msme_registered;
+END;
+$$;
+
+-- fn_msme_payment_compliance
+-- Checks whether a vendor's overdue bills violate the MSME 45-day rule.
+-- Returns one row per vendor with compliance status and interest exposure.
+-- interest_exposure = bucket_46_90 + bucket_90plus (amounts past the 45-day window).
+CREATE OR REPLACE FUNCTION fn_msme_payment_compliance(
+    p_society_id INT,
+    p_vendor_id INT,
+    p_asof DATE DEFAULT CURRENT_DATE
+)
+RETURNS TABLE (
+    vendor_id INT,
+    business_name VARCHAR(100),
+    msme_registered BOOLEAN,
+    compliant BOOLEAN,
+    reason TEXT,
+    interest_exposure NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        v.id::INT AS vendor_id,
+        COALESCE(v.business_name, v.name, 'Vendor #' || v.id)::VARCHAR(100) AS business_name,
+        COALESCE(v.msme_registered, FALSE)::BOOLEAN AS msme_registered,
+        CASE
+            WHEN NOT COALESCE(v.msme_registered, FALSE) THEN TRUE
+            WHEN COALESCE(a.bucket_90plus, 0) > 0 THEN FALSE
+            WHEN COALESCE(a.bucket_46_90, 0) > 0 THEN FALSE
+            ELSE TRUE
+        END AS compliant,
+        CASE
+            WHEN NOT COALESCE(v.msme_registered, FALSE) THEN 'Not MSME-registered — 45-day rule not applicable'
+            WHEN COALESCE(a.bucket_90plus, 0) > 0 THEN format('MSME payment overdue by >90 days: Rs %s past 45-day window (s.15/s.16 MSMED Act)', trim(to_char(a.bucket_90plus, 'FM999,999,990.00')))
+            WHEN COALESCE(a.bucket_46_90, 0) > 0 THEN format('MSME payment overdue 46-90 days: Rs %s past 45-day window (s.15/s.16 MSMED Act)', trim(to_char(a.bucket_46_90, 'FM999,999,990.00')))
+            ELSE 'Compliant — all MSME payments within 45 days'
+        END AS reason,
+        COALESCE(a.bucket_46_90, 0) + COALESCE(a.bucket_90plus, 0) AS interest_exposure
+    FROM vendors v
+    LEFT JOIN LATERAL (
+        SELECT
+            COALESCE(SUM(CASE WHEN (p.shift_date + 45) <= p_asof AND (p.shift_date + 90) > p_asof THEN p.amount ELSE 0 END), 0) AS bucket_46_90,
+            COALESCE(SUM(CASE WHEN (p.shift_date + 90) <= p_asof THEN p.amount ELSE 0 END), 0) AS bucket_90plus
+        FROM payables p
+        WHERE p.society_id = p_society_id
+          AND p.role = 'vendor'
+          AND p.status IN ('pending', 'verified')
+          AND p.shift_date <= p_asof
+          AND p.entity_id = v.id
+    ) a ON TRUE
+    WHERE v.society_id = p_society_id
+      AND v.id = p_vendor_id;
 END;
 $$;
 
