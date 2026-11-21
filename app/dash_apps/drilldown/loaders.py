@@ -3593,7 +3593,7 @@ def get_fund_balances(society_id: int) -> list[dict]:
     Get current balances for every statutory fund/equity account (Capital
     Account, Reserves & Funds, Sinking Fund Reserve, Repair & Maintenance
     Fund Reserve, Corpus Fund, and any other Cr-natured account under the
-    same group — Gifts Received, Provisions, etc).
+    same group — Earmarked Gifts Fund, Provisions, etc).
 
     Resolved dynamically as any account descending from whichever account
     is named ILIKE '%Equity%' ("Equity / Reserves & Funds" in the seeded
