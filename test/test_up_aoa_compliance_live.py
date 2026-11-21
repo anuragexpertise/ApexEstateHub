@@ -189,7 +189,7 @@ def test_s22_requires_more_than_six_months_default(cur):
 # ── cash / cheque limits ───────────────────────────────────────────────────────
 def _pending_expense(cur, amount, mode):
     cur.execute("""INSERT INTO expenses (society_id, expense_date, acc_id, particulars, amount, mode, status)
-                   VALUES (%s,%s,51110,'test repair',%s,%s,'pending') RETURNING id""",
+                   VALUES (%s,%s,5102,'test repair',%s,%s,'pending') RETURNING id""",
                 (SOC, date(2026, 9, 5), amount, mode))
     return cur.fetchone()[0]
 
