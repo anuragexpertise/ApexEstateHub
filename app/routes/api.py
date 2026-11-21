@@ -1,7 +1,10 @@
 # app/routes/api.py
-from flask import Blueprint, jsonify
+from datetime import date
+
+from flask import Blueprint, jsonify, request
 
 from app.auth.jwt_handler import token_required
+from app.services.msme_service import msme_payment_compliance
 from database.db_manager import db  # ← Fix import
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -64,3 +67,26 @@ def get_kpis(current_user):
     """, (society_id, society_id, society_id, society_id, society_id), fetch_one=True)
 
     return jsonify(kpis or {})
+
+
+@api_bp.route('/msme/compliance', methods=['GET'])
+@token_required
+def get_msme_compliance(current_user):
+    """MSME 45-day payment compliance for one vendor of the user's society.
+
+    Query params: vendor_id (required), asof (optional YYYY-MM-DD).
+    Mirrors fn_msme_payment_compliance (s.15/s.16 MSMED Act 2006).
+    """
+    society_id = current_user.society_id
+    vendor_id = request.args.get('vendor_id', type=int)
+    if not vendor_id:
+        return jsonify({'error': 'vendor_id is required'}), 400
+    asof = None
+    asof_str = request.args.get('asof')
+    if asof_str:
+        try:
+            asof = date.fromisoformat(asof_str)
+        except ValueError:
+            return jsonify({'error': 'asof must be YYYY-MM-DD'}), 400
+    result = msme_payment_compliance(society_id, vendor_id, asof)
+    return jsonify(result or {})
