@@ -372,3 +372,16 @@ def test_statement_download_uses_the_saved_year_and_as_on_date(callbacks, monkey
     assert res["filename"] == "Statement 2027.xlsx"
     ws = _xlsx_from_download(res)["2027"]
     assert ws["G2"].value == "2027-03-31"
+
+
+def test_statement_download_works_with_the_real_account_list(callbacks, monkeypatch):
+    """Regression: eligible_accounts() lacked the account_id/account_tab/account_name keys the template builder reads,
+    so the download raised KeyError. Nothing is stubbed here."""
+    monkeypatch.setattr(ob, "load_draft", lambda sid: {"brought_forward": {"fy": 2027, "as_on_date": "2027-03-31"}})
+    step = cb.CATEGORIES.index("Brought Forward")
+    res = callbacks["sw_bf_template"](1, step)
+    ws = _xlsx_from_download(res)["2027"]
+    accounts = pi.eligible_accounts()
+    assert accounts and ws.max_row == len(accounts) + 1
+    assert [ws.cell(row=r, column=1).value for r in range(2, ws.max_row + 1)] == [a["id"] for a in accounts]
+    assert ws["C2"].value == accounts[0]["name"] and ws["B2"].value == accounts[0]["tab"]
