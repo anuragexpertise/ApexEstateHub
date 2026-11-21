@@ -1,11 +1,13 @@
 # app/routes/api.py
 from datetime import date
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, make_response, request
 
 from app.auth.jwt_handler import token_required
+from app.services.icai_statements import statements
 from app.services.msme_service import msme_payment_compliance
 from database.db_manager import db  # ← Fix import
+from database.financial_statements_export import export_trial_balance
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -90,3 +92,36 @@ def get_msme_compliance(current_user):
             return jsonify({'error': 'asof must be YYYY-MM-DD'}), 400
     result = msme_payment_compliance(society_id, vendor_id, asof)
     return jsonify(result or {})
+
+
+@api_bp.route('/statements', methods=['GET'])
+@token_required
+def get_icai_statements(current_user):
+    """ICAI statutory statements (Balance Sheet, Income & Expenditure,
+    Receipts & Payments, Trial Balance) for the user's society.
+
+    Query params: fy (optional, defaults to current FY).
+    """
+    society_id = current_user.society_id
+    fy = request.args.get('fy', type=int)
+    return jsonify(statements(society_id, fy))
+
+
+@api_bp.route('/statements/trial-balance/export', methods=['GET'])
+@token_required
+def export_icai_trial_balance(current_user):
+    """Download the Trial Balance as XLSX (export_trial_balance from
+    database/financial_statements_export.py)."""
+    society_id = current_user.society_id
+    fy = request.args.get('fy', type=int)
+    if not fy:
+        fy = date.today().year
+        if date.today().month < 4:
+            fy -= 1
+    xlsx = export_trial_balance(db, society_id, fy, format="xlsx")
+    response = make_response(xlsx)
+    response.headers['Content-Type'] = ('application/vnd.openxmlformats-'
+                                        'officedocument.spreadsheetml.sheet')
+    response.headers['Content-Disposition'] = (
+        f'attachment; filename="trial_balance_fy{fy}.xlsx"')
+    return response
