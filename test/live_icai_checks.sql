@@ -2,7 +2,7 @@
 --
 -- Live ICAI correction checks, run against the seeded scratch DB:
 --
-#    psql -v ON_ERROR_STOP=1 -f test/live_icai_checks.sql
+--    psql -v ON_ERROR_STOP=1 -f test/live_icai_checks.sql
 --
 -- Every check is a DO $$ ... RAISE EXCEPTION ... $$ block that aborts the
 -- script (ON_ERROR_STOP) when the condition it guards is not met.
@@ -64,6 +64,201 @@ BEGIN
     END IF;
 END $$;
 
+
+-- ============================================================================
+-- H2 (G4): trigger checks (C4) — each change is rolled back inside the block
+-- ============================================================================
+
+BEGIN;
+
+-- C4-1: delete of accounts row 1/1500 raises
+DO $$
+DECLARE v_raised BOOLEAN := FALSE;
+BEGIN
+    BEGIN
+        DELETE FROM accounts WHERE society_id = 1 AND id = 1500;
+    EXCEPTION WHEN OTHERS THEN
+        v_raised := TRUE;
+    END;
+    IF NOT v_raised THEN
+        RAISE EXCEPTION 'C4: delete of accounts 1/1500 did not raise';
+    END IF;
+END $$;
+
+-- C4-2: changing drcr_account of 1500 raises
+DO $$
+DECLARE v_raised BOOLEAN := FALSE;
+BEGIN
+    BEGIN
+        UPDATE accounts SET drcr_account = 'Cr' WHERE society_id = 1 AND id = 1500;
+    EXCEPTION WHEN OTHERS THEN
+        v_raised := TRUE;
+    END;
+    IF NOT v_raised THEN
+        RAISE EXCEPTION 'C4: changing drcr_account of 1500 did not raise';
+    END IF;
+END $$;
+
+-- C4-3: renaming 1500 succeeds and adds exactly one audit_events row
+DO $$
+DECLARE v_before INT; v_after INT;
+BEGIN
+    SELECT count(*) INTO v_before FROM audit_events;
+    UPDATE accounts SET name = 'Sundry Debtors (renamed)' WHERE society_id = 1 AND id = 1500;
+    SELECT count(*) INTO v_after FROM audit_events;
+    IF v_after IS NULL OR v_after <> v_before + 1 THEN
+        RAISE EXCEPTION 'C4: rename did not add exactly one audit row (before % after %)', v_before, v_after;
+    END IF;
+END $$;
+
+-- C4-4: is_active = false then inserting a transaction for 1500 raises
+DO $$
+DECLARE v_raised BOOLEAN := FALSE;
+BEGIN
+    BEGIN
+        UPDATE accounts SET is_active = FALSE WHERE society_id = 1 AND id = 1500;
+        INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, amount, status, mode, journal_id, transaction_number, created_by)
+        VALUES (1, 'Dr', '2026-04-05', 1500, 100.00, 'paid', 'cash', 999999, 'C4-INACTIVE-A', 1),
+               (1, 'Cr', '2026-04-05', 1311, 100.00, 'paid', 'cash', 999999, 'C4-INACTIVE-B', 1);
+    EXCEPTION WHEN OTHERS THEN
+        v_raised := TRUE;
+    END;
+    IF NOT v_raised THEN
+        RAISE EXCEPTION 'C4: insert to inactive account 1500 did not raise';
+    END IF;
+END $$;
+
+-- C4-5: inserting a transaction for active 1500 succeeds
+DO $$
+BEGIN
+    UPDATE accounts SET is_active = TRUE WHERE society_id = 1 AND id = 1500;
+    INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, amount, status, mode, journal_id, transaction_number, created_by)
+    VALUES (1, 'Dr', '2026-04-05', 1500, 100.00, 'paid', 'cash', 999998, 'C4-ACTIVE-A', 1),
+           (1, 'Cr', '2026-04-05', 1311, 100.00, 'paid', 'cash', 999998, 'C4-ACTIVE-B', 1);
+EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'C4: insert to active account 1500 failed: %', SQLERRM;
+END $$;
+
+
+-- ============================================================================
+-- H2 (G4): year-end close appropriation (C5)
+-- ============================================================================
+
+-- C5: run fn_fy_close_reserve_appropriation(1, 2026) inside a rollback and
+-- assert surplus unchanged, balance sheet still balanced, 3220 credit up by
+-- 117,675.00, 3300 debit 117,675.00, 5100 zero.
+DO $$
+DECLARE
+    v_surplus_before NUMERIC(15,2); v_surplus_after NUMERIC(15,2);
+    v_assets_before NUMERIC(15,2); v_assets_after NUMERIC(15,2);
+    v_lieq_before NUMERIC(15,2); v_lieq_after NUMERIC(15,2);
+    v_3220_before NUMERIC(15,2); v_3220_after NUMERIC(15,2);
+    v_3300_before NUMERIC(15,2); v_3300_after NUMERIC(15,2);
+    v_5100_after NUMERIC(15,2);
+BEGIN
+    SELECT surplus INTO v_surplus_before FROM fn_fy_close_preview(1, 2026);
+    SELECT COALESCE(SUM(amount) FILTER (WHERE statement_section='Assets'),0)
+        INTO v_assets_before FROM fn_balance_sheet_fy(1,2026);
+    SELECT COALESCE(SUM(amount) FILTER (WHERE statement_section IN ('Liabilities','Equity')),0)
+        INTO v_lieq_before FROM fn_balance_sheet_fy(1,2026);
+    SELECT COALESCE(closing_cr,0) INTO v_3220_before FROM fn_trial_balance_fy(1,2026) WHERE account_id=3220;
+    SELECT COALESCE(closing_dr,0) INTO v_3300_before FROM fn_trial_balance_fy(1,2026) WHERE account_id=3300;
+
+    PERFORM fn_fy_close_reserve_appropriation(1, 2026);
+
+    SELECT surplus INTO v_surplus_after FROM fn_fy_close_preview(1, 2026);
+    SELECT COALESCE(SUM(amount) FILTER (WHERE statement_section='Assets'),0)
+        INTO v_assets_after FROM fn_balance_sheet_fy(1,2026);
+    SELECT COALESCE(SUM(amount) FILTER (WHERE statement_section IN ('Liabilities','Equity')),0)
+        INTO v_lieq_after FROM fn_balance_sheet_fy(1,2026);
+    SELECT COALESCE(closing_cr,0) INTO v_3220_after FROM fn_trial_balance_fy(1,2026) WHERE account_id=3220;
+    SELECT COALESCE(closing_dr,0) INTO v_3300_after FROM fn_trial_balance_fy(1,2026) WHERE account_id=3300;
+    SELECT COALESCE(closing_dr,0)+COALESCE(closing_cr,0) INTO v_5100_after FROM fn_trial_balance_fy(1,2026) WHERE account_id=5100;
+
+    IF v_surplus_after IS DISTINCT FROM v_surplus_before THEN
+        RAISE EXCEPTION 'C5: surplus changed: % -> %', v_surplus_before, v_surplus_after;
+    END IF;
+    IF ABS(v_assets_after - v_assets_before) > 0.01 THEN
+        RAISE EXCEPTION 'C5: assets changed: % -> %', v_assets_before, v_assets_after;
+    END IF;
+    IF ABS(v_lieq_after - v_lieq_before) > 0.01 THEN
+        RAISE EXCEPTION 'C5: liabilities+equity changed: % -> %', v_lieq_before, v_lieq_after;
+    END IF;
+    IF ABS(v_assets_after - v_lieq_after) > 0.01 THEN
+        RAISE EXCEPTION 'C5: after close balance sheet not balanced: Assets % != Liab+Eq %', v_assets_after, v_lieq_after;
+    END IF;
+    IF ABS(v_3220_after - v_3220_before - 117675.00) > 0.01 THEN
+        RAISE EXCEPTION 'C5: 3220 credit not up by 117675: % -> %', v_3220_before, v_3220_after;
+    END IF;
+    IF ABS(v_3300_after - 117675.00) > 0.01 THEN
+        RAISE EXCEPTION 'C5: 3300 debit not 117675: %', v_3300_after;
+    END IF;
+    IF ABS(v_5100_after) > 0.01 THEN
+        RAISE EXCEPTION 'C5: 5100 not zero after close: %', v_5100_after;
+    END IF;
+END $$;
+
+
+-- ============================================================================
+-- H2 (G4): contra account (C1)
+-- ============================================================================
+
+-- C1: 1190 is in section Assets with amount -1,650.00; net fixed assets =
+-- gross - 1,650.00
+DO $$
+DECLARE v_sec TEXT; v_amt NUMERIC(15,2); v_total NUMERIC(15,2); v_gross NUMERIC(15,2);
+BEGIN
+    SELECT statement_section, amount INTO v_sec, v_amt
+    FROM fn_balance_sheet_fy(1, 2026) WHERE account_code = 1190;
+    IF v_sec IS NULL OR v_sec <> 'Assets' OR v_amt IS NULL OR ABS(v_amt - (-1650.00)) > 0.01 THEN
+        RAISE EXCEPTION 'C1: 1190 must be in Assets with -1650.00, got % %', v_sec, v_amt;
+    END IF;
+    SELECT SUM(amount) INTO v_total FROM fn_balance_sheet_fy(1, 2026) WHERE statement_section = 'Assets';
+    SELECT SUM(amount) INTO v_gross FROM fn_balance_sheet_fy(1, 2026) WHERE statement_section = 'Assets' AND account_code <> 1190;
+    IF v_total IS NULL OR v_gross IS NULL THEN
+        RAISE EXCEPTION 'C1: missing asset rows';
+    END IF;
+    IF ABS(v_total - (v_gross - 1650.00)) > 0.01 THEN
+        RAISE EXCEPTION 'C1: net fixed assets check failed: total % != gross % - 1650', v_total, v_gross;
+    END IF;
+END $$;
+
+
+-- ============================================================================
+-- H2 (G4): invariants (I5, I6, I7)
+-- ============================================================================
+
+-- I5: Assets = Liabilities + Equity for FY 2025 and FY 2026
+DO $$
+DECLARE v_fy INT; v_assets NUMERIC(15,2); v_lieq NUMERIC(15,2);
+BEGIN
+    FOR v_fy IN 2025 .. 2026 LOOP
+        SELECT COALESCE(SUM(amount) FILTER (WHERE statement_section='Assets'),0),
+               COALESCE(SUM(amount) FILTER (WHERE statement_section IN ('Liabilities','Equity')),0)
+        INTO v_assets, v_lieq
+        FROM fn_balance_sheet_fy(1, v_fy);
+        IF ABS(v_assets - v_lieq) > 0.01 THEN
+            RAISE EXCEPTION 'I5: FY % balance sheet not balanced: Assets % != Liab+Eq %', v_fy, v_assets, v_lieq;
+        END IF;
+    END LOOP;
+END $$;
+
+-- I7: surplus for the year = total income - total expense from the same
+-- closing report (FY 2026)
+DO $$
+DECLARE v_surplus NUMERIC(15,2); v_income NUMERIC(15,2); v_expense NUMERIC(15,2);
+BEGIN
+    SELECT COALESCE(SUM(amount) FILTER (WHERE statement_section='Income'),0),
+           COALESCE(SUM(amount) FILTER (WHERE statement_section='Expenditure'),0)
+    INTO v_income, v_expense
+    FROM fn_income_expenditure_fy(1, 2026);
+    SELECT surplus INTO v_surplus FROM fn_fy_close_preview(1, 2026);
+    IF ABS(v_surplus - (v_income - v_expense)) > 0.01 THEN
+        RAISE EXCEPTION 'I7: surplus % != income % - expense %', v_surplus, v_income, v_expense;
+    END IF;
+END $$;
+
+ROLLBACK;
 
 -- ============================================================================
 -- EXPECT FAIL until C1 — E2: contra accounts belong in Assets
