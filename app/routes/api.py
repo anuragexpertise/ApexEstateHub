@@ -4,7 +4,7 @@ from datetime import date
 from flask import Blueprint, jsonify, make_response, request
 
 from app.auth.jwt_handler import token_required
-from app.services.icai_statements import statements
+from app.services.icai_statements import statements, export_gate
 from app.services.msme_service import msme_payment_compliance
 from database.db_manager import db  # ← Fix import
 from database.financial_statements_export import export_trial_balance
@@ -118,6 +118,9 @@ def export_icai_trial_balance(current_user):
         fy = date.today().year
         if date.today().month < 4:
             fy -= 1
+    gate = export_gate(society_id, fy)
+    if not gate["allowed"]:
+        return jsonify({"error": "Export refused: " + gate["reason"], "gate": gate}), 409
     xlsx = export_trial_balance(db, society_id, fy, format="xlsx")
     response = make_response(xlsx)
     response.headers['Content-Type'] = ('application/vnd.openxmlformats-'

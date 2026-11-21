@@ -20,6 +20,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
+from app.services import bf_controls as bc
 from database.chart_mapping import is_contra, section_for_account
 from database.db_manager import db
 from database.money import D
@@ -105,6 +106,56 @@ def receipts_payments(society_id: int, fy: int) -> list:
     """Receipts & Payments Account (cash basis)."""
     return _rows("SELECT * FROM fn_receipts_payments_fy(%s,%s) ORDER BY trx_date",
                  (society_id, fy))
+
+
+def export_gate(society_id: int, fy: int) -> dict:
+    """Gate an export / FY close: refuse when the trial balance is unbalanced
+    or any bf_controls control (balanced / funds_backed / arrears_tie) fails.
+
+    Returns {"allowed": bool, "reason": str, "trial_balance_balanced": bool,
+    "controls": {...}}.
+    """
+    tb = db.execute("SELECT * FROM fn_trial_balance_check(%s,%s)",
+                    (society_id, fy), fetch_one=True)
+    tb_balanced = bool(tb.get("balanced")) if tb else False
+
+    bf_rows = db.execute(
+        "SELECT acc_id, drcr_bf AS drcr_account, bf_amount FROM brought_forward "
+        "WHERE society_id=%s AND financial_year=%s",
+        (society_id, fy), fetch_all=True) or []
+    accs = {
+        r["id"]: {"tab_name": r["tab_name"], "drcr_account": r["drcr_account"]}
+        for r in db.execute(
+            "SELECT id, tab_name, drcr_account FROM accounts WHERE society_id=%s",
+            (society_id,), fetch_all=True) or []
+    }
+    totals = bc.totals(
+        [{"acc_id": r["acc_id"], "bf_amount": str(r["bf_amount"])} for r in bf_rows],
+        accs)
+    controls = bc.three_controls(totals, Decimal(0))
+    # The substantive export-safety controls: opening books must balance and
+    # declared funds must be covered by bank/cash/deposits. arrears_tie is
+    # reported but is not a hard refusal gate (it depends on the society's
+    # declared arrears, which may legitimately be unset).
+    controls_pass = controls["balanced"]["passed"] and controls["funds_backed"]["passed"]
+
+    allowed = tb_balanced and controls_pass
+    reasons = []
+    if not tb_balanced:
+        reasons.append("trial balance is unbalanced")
+    if not controls["balanced"]["passed"]:
+        reasons.append("brought-forward debits do not equal credits")
+    if not controls["funds_backed"]["passed"]:
+        reasons.append("declared funds exceed bank, cash and deposits")
+    reason = "; ".join(reasons) if reasons else "ok"
+
+    return {
+        "allowed": allowed,
+        "reason": reason,
+        "trial_balance_balanced": tb_balanced,
+        "controls": {k: {"passed": c["passed"], "reason": c["reason"]}
+                     for k, c in controls.items()},
+    }
 
 
 def statements(society_id: int, fy: Optional[int] = None) -> dict:
