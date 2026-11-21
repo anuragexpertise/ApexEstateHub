@@ -87,7 +87,7 @@ class TestScenarioK_LockedFundDisplay:
 
     def test_no_legend_when_nothing_is_locked(self):
         text = str(build_balances_table([
-            {"acc_id": 3300, "name": "Gifts Received", "balance": 2500.0,
+            {"acc_id": 3300, "name": "Earmarked Gifts Fund", "balance": 2500.0,
              "statutory_lock_pct": 0, "locked_amount": 0, "available_amount": 2500.0},
         ]))
         assert "Statutory principal is protected" not in text
@@ -221,5 +221,5 @@ class TestScenarioK_FundTypeMetadata:
         assert "inviolable" in info["purpose"].lower()
 
     def test_unrecognised_fund_falls_back_to_its_own_name(self):
-        info = resolve_fund_type_info("Gifts Received")
-        assert info["label"] == "Gifts Received"
+        info = resolve_fund_type_info("Earmarked Gifts Fund")
+        assert info["label"] == "Earmarked Gifts Fund"

@@ -832,6 +832,9 @@
     "callback:onboarding_wizard_callbacks.py::sw_bf_template": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_wizard_callbacks.py::sw_bf_rollup": {
+      "classification": "legacy-gated"
+    },
     "callback:onboarding_wizard_callbacks.py::tds_apply": {
       "classification": "legacy-gated"
     },

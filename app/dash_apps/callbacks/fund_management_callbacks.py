@@ -69,7 +69,7 @@ FUND_TYPE_PATTERNS = [
 def resolve_fund_type_info(name: str) -> dict:
     """Match a fund's real account name (ILIKE-style substring) to its
     approval/purpose metadata. Falls back to the account's own name when no
-    pattern matches, so an unrecognized fund (e.g. "Gifts Received") still
+    pattern matches, so an unrecognized fund (e.g. "Earmarked Gifts Fund") still
     displays sensibly instead of "Unknown Fund"."""
     n = (name or "").lower()
     for pattern, info in FUND_TYPE_PATTERNS:
