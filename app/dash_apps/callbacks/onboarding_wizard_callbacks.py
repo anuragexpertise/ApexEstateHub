@@ -339,7 +339,7 @@ def register_onboarding_wizard_callbacks(app):
         if CATEGORIES[idx] != "Brought Forward":
             return no_update
         draft = ob.load_draft(s[0])
-        bf = (draft.get("draft") or {}).get("brought_forward", {})
+        bf = draft.get("brought_forward") or {}
         fy = bf.get("fy") or fy_start_year()
         as_on = bf.get("as_on_date")
         return dcc.send_bytes(build_bf_statement_template(pi.eligible_accounts(), fy, as_on),
@@ -460,7 +460,7 @@ def register_onboarding_wizard_callbacks(app):
         sid, uid, role = s
         known = ob.known_flat_numbers(sid)
         draft = ob.load_draft(sid)
-        bf = (draft.get("draft") or {}).get("brought_forward") or {}
+        bf = draft.get("brought_forward") or {}
         fy = bf.get("fy") or fy_start_year()
         as_on = bf.get("as_on_date")
         return dcc.send_bytes(pi.pr.build_template(known_flats=known, fy=fy, as_on=as_on),
@@ -1118,7 +1118,14 @@ def _register_xlsx_callbacks(app):
             return no_update
         from app.services import pending_receivables as pr
         clean, _ = pr.clean_rows(rows or [], [])
-        return dcc.send_bytes(pr.build_template(clean, []), "ledger_template.xlsx")
+        s = _session()
+        fy = fy_start_year()
+        if s and s[0]:
+            try:
+                fy = (ob.load_draft(s[0]).get("brought_forward") or {}).get("fy") or fy
+            except Exception:
+                log.exception("could not read brought-forward FY for society %s", s[0])
+        return dcc.send_bytes(pr.build_template(fy, clean, []), "ledger_template.xlsx")
 
     # BF per-account attachment upload -> evidence register (server SHA-256) -----------------
     @app.callback(
