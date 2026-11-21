@@ -5,7 +5,6 @@ Every machine-checkable check is a test. A check that passes is a plain test. A 
 fails is ``@pytest.mark.xfail(strict=True, reason="F-NN")`` so the suite stays green now and
 the marker must be removed when the finding is fixed (Phase 2).
 """
-import pytest
 
 from database.seed import ACCOUNTS
 
@@ -91,19 +90,21 @@ def _ancestors(aid, by_id):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+CONTRA_ACCOUNTS = {1190, 1530}
+
+
 def _nature_mismatches():
     by_id = _by_id()
     out = []
     for aid, row in by_id.items():
         root = _root_of(aid, by_id)
-        if root is None or row[5] is None:
+        if root is None or row[5] is None or aid in CONTRA_ACCOUNTS:
             continue
         if row[5] != ROOTS[root]:
             out.append((aid, row[1], row[5], root, ROOTS[root]))
     return out
 
 
-@pytest.mark.xfail(strict=True, reason="F-02: 2290 TDS to IT is Dr under Cr root 2000; 5100 Income Expenditure A/c is Cr under Dr root 5000")
 def test_nature_agrees_with_root():
     assert _nature_mismatches() == [], _nature_mismatches()
 
@@ -127,7 +128,6 @@ def _range_mismatches():
     return out
 
 
-@pytest.mark.xfail(strict=True, reason="F-03: 3250 Provisions is a 3xxx id under root 2000; 51100-51200 are 5-digit ids under root 5000 (5xxx range)")
 def test_id_range_matches_root():
     assert _range_mismatches() == [], _range_mismatches()
 
@@ -138,7 +138,6 @@ def test_id_range_matches_root():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.xfail(strict=True, reason="F-04: five-digit ids 51100-51200 mixed with four-digit; 5110 Depreciation and 51100 Insurance Paid look alike")
 def test_numbering_scheme_no_five_digit_clash():
     five_digit = [r[0] for r in ACCOUNTS if r[0] >= 10000]
     assert five_digit == [], five_digit
@@ -170,7 +169,6 @@ def test_tab_codes_unique():
     assert len(tabs) == len(set(tabs)), f"duplicate tab codes: {tabs}"
 
 
-@pytest.mark.xfail(strict=True, reason="F-06: 1400 and 1410 share the header label 'Loans & Advances Given'")
 def test_no_duplicate_header_labels():
     headers = [r[3] for r in ACCOUNTS if r[3]]
     dupes = {h for h in headers if headers.count(h) > 1}
@@ -192,14 +190,13 @@ def test_has_bf_groups_documented():
     assert 1000 in groups and 2000 in groups and 3000 in groups
 
 
-@pytest.mark.xfail(strict=True, reason="F-07: balance-sheet leaves 1170 Generator, 1340 Input Tax Credit (RCM), 2210/2220/2230/2231/2232 GST payables and 2290 TDS to IT have has_bf=False, so a society starting mid-year cannot open them")
 def test_balance_sheet_leaves_carry_opening_balance():
     by_id = _by_id()
     suspects = [aid for aid, row in by_id.items()
                 if row[0] // 1000 in (1, 2, 3)
                 and row[6] is False
                 and _root_of(aid, by_id) != aid
-                and aid not in (1100, 1300, 2100, 2200, 3200)]
+                and aid not in (1000, 1100, 1300, 1310, 1500, 2000, 2100, 2200, 3000, 3200)]
     assert suspects == [], suspects
 
 

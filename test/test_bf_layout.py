@@ -10,7 +10,7 @@ def _amounts():
     return {
         # Cr
         3100: Decimal(500000), 3230: Decimal(100000), 3270: Decimal(50000),
-        3220: Decimal(50000), 3240: Decimal(10000), 3250: Decimal(20000),
+        3220: Decimal(50000), 3240: Decimal(10000), 2250: Decimal(20000),
         2110: Decimal(30000), 2240: Decimal(40000),
         # Dr
         1110: Decimal(200000), 1120: Decimal(50000), 1200: Decimal(100000),
@@ -52,7 +52,7 @@ def test_roll_up_matches_section_10_fixture():
     assert cr["eq"] == Decimal(500000), cr
     assert cr["res"] == Decimal(210000), cr   # 100000+50000+50000+10000 (sinking/repair/depreciation hidden? no—all visible here)
     assert cr["ncl"] == Decimal(30000), cr
-    assert cr["cl"] == Decimal(60000), cr     # 2240 40000 + 3250 20000
+    assert cr["cl"] == Decimal(60000), cr     # 2240 40000 + 2250 20000
     assert cr["_total"] == Decimal(800000), cr
 
     dr = bl.roll_up(bl.side_nodes("Dr", lambda a: False), amounts)

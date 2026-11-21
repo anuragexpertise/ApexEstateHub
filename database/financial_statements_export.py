@@ -1204,6 +1204,82 @@ def export_balance_sheet(db, society_id: int, fy: int, format: str = "xlsx") -> 
     return buf.getvalue()
 
 
+def export_trial_balance(db, society_id: int, fy: int, format: str = "xlsx") -> bytes:
+    """Generate Trial Balance export (standalone).
+
+    Uses fn_trial_balance_fy(p_society_id, p_fy) which returns
+    account_id, account_name, closing_dr, closing_cr.
+    """
+    from database.db_manager import db as _db
+    if db is None:
+        db = _db
+
+    row = db._execute("SELECT name FROM societies WHERE id=%s", (society_id,), fetch_one=True)
+    society_name = row.get("name", "Society") if row else "Society"
+
+    try:
+        rows = db._execute(
+            "SELECT * FROM fn_trial_balance_fy(%s,%s) ORDER BY account_id",
+            (society_id, fy), fetch_all=True
+        ) or []
+    except Exception:
+        rows = []
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    ws = wb.create_sheet(title="Trial Balance")
+
+    ws.cell(row=1, column=1, value=society_name).font = Font(name="Arial", size=12, bold=True)
+    ws.cell(row=2, column=1, value=f"Trial Balance for FY {fy}-{fy+1}").font = _FONT_TITLE
+    ws.cell(row=3, column=1, value=f"Period: 1 April {fy} – 31 March {fy+1}").font = Font(name="Arial", size=9, italic=True)
+
+    headers = ["Account Code", "Account Name", "Closing Debit", "Closing Credit"]
+    for col, hdr in enumerate(headers, start=1):
+        cell = ws.cell(row=4, column=col, value=hdr)
+        cell.font = _FONT_HEADER
+        cell.fill = _FILL_HEADER
+        cell.alignment = _ALIGN_C
+        cell.border = _BORDER_ALL
+
+    widths = {"A": 16, "B": 40, "C": 18, "D": 18}
+    _apply_header(ws, 4, widths)
+
+    r = 5
+    total_dr = D(0)
+    total_cr = D(0)
+    for row in rows:
+        acc_id = row.get("account_id")
+        acc_name = row.get("account_name") or ""
+        dr = D(row.get("closing_dr") or 0)
+        cr = D(row.get("closing_cr") or 0)
+        total_dr += dr
+        total_cr += cr
+        _write_row(ws, r, [acc_id, acc_name, dr, cr], _FONT_BODY, fmt=_FMT_AMT)
+        r += 1
+
+    _write_row(ws, r, ["Total", "", total_dr, total_cr], _FONT_TOTAL, _FILL_TOTAL, fmt=_FMT_AMT)
+    r += 2
+
+    note = ws.cell(
+        row=r, column=1,
+        value=(
+            "Trial Balance prepared from fn_trial_balance_fy(p_society_id, p_fy). "
+            "closing_dr / closing_cr are derived from fn_fy_closing_report's Cr-positive "
+            "own_closing: positive balance → closing_cr, negative balance → closing_dr. "
+            "Whole-ledger identity: SUM(closing_dr) = SUM(closing_cr)."
+        ),
+    )
+    note.font = Font(name="Arial", size=8, italic=True)
+    note.alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+    ws.row_dimensions[r].height = 45
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
 def export_asset_holdings(db, society_id: int, fy: int, format: str = "xlsx") -> bytes:
     """Generate ALL Holdings export (standalone)."""
     from database.db_manager import db as _db

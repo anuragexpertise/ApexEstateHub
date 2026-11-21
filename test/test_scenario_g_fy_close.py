@@ -7,13 +7,23 @@ Tests:
   3. Balance sheet balances (total Dr == total Cr).
   4. Ledger entries for an account are FY-scoped.
   5. Account list returns society-scoped accounts.
+  6. fn_trial_balance_fy is defined in estatehub.sql (pglast).
+  7. Whole-ledger check: SUM(closing_dr) == SUM(closing_cr).
 """
 
-import pytest
 from datetime import date
 
-from app.services import auth_service, society_service
+import pglast
 from app.dash_apps.drilldown import loaders
+
+SQL = None
+
+
+def _sql():
+    global SQL
+    if SQL is None:
+        SQL = open("database/estatehub.sql", encoding="utf-8").read()
+    return SQL
 
 
 def _seed_financial_world(patched_db):
@@ -161,3 +171,81 @@ class TestScenarioG_FinancialYearClose:
         capital = next((r for r in bs.get("cr_side", []) if "Capital" in r.get("account_name", "")), None)
         assert capital is not None
         assert capital["amount"] >= 5000
+
+    def test_fn_trial_balance_fy_defined_in_sql(self):
+        """T6: fn_trial_balance_fy is defined in database/estatehub.sql and parses cleanly."""
+        sql = _sql()
+        assert "CREATE OR REPLACE FUNCTION fn_trial_balance_fy(" in sql, "fn_trial_balance_fy not defined in estatehub.sql"
+        stmts = pglast.parse_sql(sql)
+        fn_texts = [str(s) for s in stmts if "fn_trial_balance_fy" in str(s)]
+        assert len(fn_texts) == 1, f"expected 1 fn_trial_balance_fy definition, found {len(fn_texts)}"
+        t = fn_texts[0]
+        assert "account_id" in t and "closing_dr" in t and "closing_cr" in t, \
+            "fn_trial_balance_fy missing RETURNS TABLE columns: account_id, closing_dr, closing_cr"
+
+    def test_trial_balance_whole_ledger_check(self, patched_db):
+        """T6: Whole-ledger check — SUM(closing_dr) == SUM(closing_cr) for the seeded society."""
+        _seed_financial_world(patched_db)
+        rows = patched_db._fn_trial_balance(
+            {"p0": 1, "p1": 2025}, fetch_one=False, fetch_all=True
+        )
+        assert rows is not None
+        total_dr = sum(float(r.get("dr_total", 0) or 0) for r in rows)
+        total_cr = sum(float(r.get("cr_total", 0) or 0) for r in rows)
+        assert abs(total_dr - total_cr) < 0.01, f"books out of balance: Dr={total_dr} Cr={total_cr}"
+
+    def test_trial_balance_prior_year_available(self, patched_db):
+        """T6: Prior year available by calling with p_fy - 1."""
+        _seed_financial_world(patched_db)
+        rows_curr = patched_db._fn_trial_balance(
+            {"p0": 1, "p1": 2025}, fetch_one=False, fetch_all=True
+        )
+        rows_prev = patched_db._fn_trial_balance(
+            {"p0": 1, "p1": 2024}, fetch_one=False, fetch_all=True
+        )
+        assert rows_curr is not None
+        # Prior year with no transactions: all zero
+        for r in rows_prev:
+            assert float(r.get("dr_total", 0) or 0) == 0
+            assert float(r.get("cr_total", 0) or 0) == 0
+
+    def test_fn_statement_functions_defined_in_sql(self):
+        """T8: fn_cash_flow_fy and fn_receipts_payments_fy are defined in estatehub.sql and parse cleanly."""
+        sql = _sql()
+        for fn in ("fn_cash_flow_fy", "fn_receipts_payments_fy"):
+            assert f"CREATE OR REPLACE FUNCTION {fn}(" in sql, f"{fn} not defined in estatehub.sql"
+        stmts = pglast.parse_sql(sql)
+        fn_texts = {}
+        for s in stmts:
+            t = str(s)
+            for fn in ("fn_cash_flow_fy", "fn_receipts_payments_fy"):
+                if fn in t:
+                    fn_texts.setdefault(fn, []).append(t)
+        for fn in ("fn_cash_flow_fy", "fn_receipts_payments_fy"):
+            assert fn in fn_texts, f"{fn} not found in parsed statements"
+            assert len(fn_texts[fn]) == 1, f"expected 1 {fn} definition, found {len(fn_texts[fn])}"
+
+    def test_export_trial_balance_exists(self):
+        """T10: export_trial_balance function exists in financial_statements_export."""
+        from database.financial_statements_export import export_trial_balance
+        assert callable(export_trial_balance)
+
+    def test_fn_account_guard_defined_in_sql(self):
+        """T4: fn_account_guard is defined in estatehub.sql and parses cleanly."""
+        sql = _sql()
+        assert "CREATE OR REPLACE FUNCTION fn_account_guard(" in sql, "fn_account_guard not defined in estatehub.sql"
+        stmts = pglast.parse_sql(sql)
+        fn_texts = [str(s) for s in stmts if "fn_account_guard" in str(s)]
+        assert len(fn_texts) == 1, f"expected 1 fn_account_guard definition, found {len(fn_texts)}"
+        t = fn_texts[0]
+        assert "allowed" in t and "reason" in t, "fn_account_guard missing allowed/reason columns"
+
+    def test_fn_drift_check_defined_in_sql(self):
+        """T4: fn_drift_check is defined in estatehub.sql and parses cleanly."""
+        sql = _sql()
+        assert "CREATE OR REPLACE FUNCTION fn_drift_check(" in sql, "fn_drift_check not defined in estatehub.sql"
+        stmts = pglast.parse_sql(sql)
+        fn_texts = [str(s) for s in stmts if "fn_drift_check" in str(s)]
+        assert len(fn_texts) == 1, f"expected 1 fn_drift_check definition, found {len(fn_texts)}"
+        t = fn_texts[0]
+        assert "drift" in t and "msg" in t, "fn_drift_check missing drift/msg columns"

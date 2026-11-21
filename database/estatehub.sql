@@ -11492,6 +11492,133 @@ BEGIN
 END;
 $$;
 
+-- fn_cash_flow_fy
+-- ===============
+-- Cash Flow Statement for a given FY (indirect method variant: cash-basis
+-- classification of every paid transaction into Operating / Investing /
+-- Financing activities).
+-- Returns: activity_category ('Operating'|'Investing'|'Financing'),
+-- account_code, account_name, inflow, outflow (NUMERIC(15,2)).
+-- Only non-journal, paid, cash/bank-mode transactions are included.
+-- Opening and closing cash & bank balances are shown as memo lines.
+CREATE OR REPLACE FUNCTION fn_cash_flow_fy(
+    p_society_id INT,
+    p_fy         INT
+)
+RETURNS TABLE (
+    activity_category VARCHAR,
+    account_code      INT,
+    account_name      VARCHAR,
+    inflow            NUMERIC(15,2),
+    outflow           NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
+    v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
+BEGIN
+    RETURN QUERY
+    WITH closing AS (
+        SELECT * FROM fn_fy_closing_report(p_society_id, p_fy)
+    ),
+    bkac_base AS (
+        SELECT sort_path FROM closing WHERE tab_name = 'BkAc' LIMIT 1
+    ),
+    cash_bank_accs AS (
+        SELECT c.account_id
+        FROM closing c
+        CROSS JOIN bkac_base b
+        WHERE c.tab_name = 'CiH'
+           OR (b.sort_path IS NOT NULL AND c.sort_path LIKE b.sort_path || '.%')
+    ),
+    pl_roots AS (
+        SELECT sort_path FROM closing WHERE tab_name IN ('Inc', 'Exp')
+    ),
+    classified AS (
+        SELECT
+            t.id,
+            t.acc_id,
+            a.name AS account_name,
+            a.tab_name,
+            a.drcr_account,
+            t.amount,
+            t.entry_side,
+            t.mode,
+            CASE
+                -- Financing: capital, loans, funds, deposits received
+                WHEN c2.tab_name IN ('CapAc', 'Res', 'Eq', 'NCL', 'CL') THEN 'Financing'
+                -- Investing: fixed assets, investments
+                WHEN c2.tab_name IN ('FA', 'Inv') THEN 'Investing'
+                -- Operating: income and expense
+                WHEN c2.tab_name IN ('Inc', 'Exp') THEN 'Operating'
+                -- Cash & bank legs are excluded (they are the medium, not the activity)
+                ELSE NULL
+            END AS activity_category
+        FROM transactions t
+        JOIN accounts a ON a.id = t.acc_id AND a.society_id = p_society_id
+        LEFT JOIN closing c2 ON c2.account_id = t.acc_id
+        WHERE t.society_id = p_society_id
+          AND t.status = 'paid'
+          AND t.trx_date BETWEEN v_fy_start AND v_fy_end
+          AND t.mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto')
+          AND t.entry_side IN ('Dr', 'Cr')
+          AND t.acc_id NOT IN (SELECT account_id FROM cash_bank_accs)
+    ),
+    operating AS (
+        SELECT 'Operating'::VARCHAR AS activity_category,
+               ca.acc_id::INT AS account_code,
+               ca.account_name::VARCHAR AS account_name,
+               COALESCE(SUM(CASE WHEN ca.entry_side = 'Cr' THEN ca.amount ELSE 0 END), 0)::NUMERIC(15,2) AS inflow,
+               COALESCE(SUM(CASE WHEN ca.entry_side = 'Dr' THEN ca.amount ELSE 0 END), 0)::NUMERIC(15,2) AS outflow
+        FROM classified ca
+        WHERE ca.activity_category = 'Operating'
+        GROUP BY ca.acc_id, ca.account_name
+    ),
+    investing AS (
+        SELECT 'Investing'::VARCHAR AS activity_category,
+               ca.acc_id::INT AS account_code,
+               ca.account_name::VARCHAR AS account_name,
+               COALESCE(SUM(CASE WHEN ca.entry_side = 'Cr' THEN ca.amount ELSE 0 END), 0)::NUMERIC(15,2) AS inflow,
+               COALESCE(SUM(CASE WHEN ca.entry_side = 'Dr' THEN ca.amount ELSE 0 END), 0)::NUMERIC(15,2) AS outflow
+        FROM classified ca
+        WHERE ca.activity_category = 'Investing'
+        GROUP BY ca.acc_id, ca.account_name
+    ),
+    financing AS (
+        SELECT 'Financing'::VARCHAR AS activity_category,
+               ca.acc_id::INT AS account_code,
+               ca.account_name::VARCHAR AS account_name,
+               COALESCE(SUM(CASE WHEN ca.entry_side = 'Cr' THEN ca.amount ELSE 0 END), 0)::NUMERIC(15,2) AS inflow,
+               COALESCE(SUM(CASE WHEN ca.entry_side = 'Dr' THEN ca.amount ELSE 0 END), 0)::NUMERIC(15,2) AS outflow
+        FROM classified ca
+        WHERE ca.activity_category = 'Financing'
+        GROUP BY ca.acc_id, ca.account_name
+    ),
+    cb AS (
+        SELECT
+            COALESCE(SUM(CASE WHEN c.total_closing < 0 THEN ABS(c.total_closing) ELSE 0 END), 0) AS dr_balance,
+            COALESCE(SUM(CASE WHEN c.total_closing >= 0 THEN c.total_closing ELSE 0 END), 0) AS cr_balance
+        FROM closing c
+        WHERE c.account_id IN (SELECT account_id FROM cash_bank_accs)
+    )
+    SELECT o.activity_category, o.account_code, o.account_name, o.inflow, o.outflow
+    FROM (
+        SELECT 1 AS sort_order, * FROM operating
+        UNION ALL
+        SELECT 2, * FROM investing
+        UNION ALL
+        SELECT 3, * FROM financing
+        UNION ALL
+        SELECT 4, 'Memo'::VARCHAR, NULL::INT, 'Cash & Bank Balances c/f (Dr)'::VARCHAR,
+               dr_balance::NUMERIC(15,2), 0::NUMERIC(15,2) FROM cb WHERE dr_balance > 0
+        UNION ALL
+        SELECT 5, 'Memo'::VARCHAR, NULL::INT, 'Cash & Bank Balances c/f (Cr)'::VARCHAR,
+               0::NUMERIC(15,2), cr_balance::NUMERIC(15,2) FROM cb WHERE cr_balance > 0
+    ) o
+    ORDER BY o.sort_order, o.account_name;
+END;
+$$;
+
 -- fn_income_expenditure_fy
 -- ========================
 -- Income & Expenditure Account (Accrual Basis) for a given FY.
@@ -11733,6 +11860,38 @@ BEGIN
         FROM ie_surplus s
     ) o
     ORDER BY o.sort_order, o.statutory_display_order NULLS LAST, o.account_name;
+END;
+$$;
+
+-- fn_trial_balance_fy
+-- ===================
+-- Trial balance for a given FY: every account's closing Dr and Cr balance.
+-- Returns: account_id, closing_dr, closing_cr (both NUMERIC(15,2)).
+-- own_closing from fn_fy_closing_report is Cr-positive:
+--   positive  -> credit balance  -> closing_cr = own_closing, closing_dr = 0
+--   negative  -> debit balance   -> closing_dr = -own_closing, closing_cr = 0
+-- The prior year is available by calling this function with p_fy - 1.
+-- Whole-ledger identity: SUM(closing_dr) = SUM(closing_cr) for every society.
+CREATE OR REPLACE FUNCTION fn_trial_balance_fy(
+    p_society_id INT,
+    p_fy         INT
+)
+RETURNS TABLE (
+    account_id    INT,
+    account_name  VARCHAR,
+    closing_dr    NUMERIC(15,2),
+    closing_cr    NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        c.account_id::INT AS account_id,
+        c.account_name::VARCHAR AS account_name,
+        GREATEST(-c.own_closing, 0)::NUMERIC(15,2) AS closing_dr,
+        GREATEST(c.own_closing, 0)::NUMERIC(15,2) AS closing_cr
+    FROM fn_fy_closing_report(p_society_id, p_fy) c
+    ORDER BY c.account_id;
 END;
 $$;
 
@@ -16737,6 +16896,144 @@ BEGIN
     compliant := TRUE; -- Always compliant if register exists
     msg := 'OK: Accounts inspection log available';
     RETURN NEXT; RETURN;
+END $$;
+
+-- fn_account_guard
+-- ================
+-- Account guard: returns whether a posting to the given account is allowed.
+-- Returns: (allowed BOOLEAN, reason TEXT).
+-- Blocks posting when the account does not exist, is a root/group node
+-- (has no direct postings in this engine), or is locked by a closed FY.
+CREATE OR REPLACE FUNCTION fn_account_guard(p_society_id INT, p_acc_id INT)
+RETURNS TABLE (allowed BOOLEAN, reason TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_acc accounts%ROWTYPE;
+    v_closed INT;
+BEGIN
+    SELECT * INTO v_acc
+    FROM accounts
+    WHERE id = p_acc_id AND society_id = p_society_id;
+
+    IF NOT FOUND THEN
+        allowed := FALSE;
+        reason := format('Account %s does not exist in society %s', p_acc_id, p_society_id);
+        RETURN NEXT; RETURN;
+    END IF;
+
+    -- Root and header nodes (parent NULL or top-level roots) are not postable.
+    IF v_acc.parent_account_id IS NULL AND v_acc.id IN (1000, 2000, 3000, 4000, 5000) THEN
+        allowed := FALSE;
+        reason := format('Account %s (%s) is a root node — postings go to leaf accounts only', p_acc_id, v_acc.name);
+        RETURN NEXT; RETURN;
+    END IF;
+
+    -- Group nodes that carry no direct transactions are not postable.
+    -- A node is a group if some other account lists it as parent.
+    IF EXISTS (
+        SELECT 1 FROM accounts a2
+        WHERE a2.society_id = p_society_id AND a2.parent_account_id = p_acc_id
+    ) THEN
+        allowed := FALSE;
+        reason := format('Account %s (%s) is a group/header node — postings go to leaf accounts only', p_acc_id, v_acc.name);
+        RETURN NEXT; RETURN;
+    END IF;
+
+    -- Block posting if any FY for this society is closed and not reversed.
+    SELECT COUNT(*) INTO v_closed
+    FROM fy_closures c
+    WHERE c.society_id = p_society_id AND c.status <> 'reversed';
+
+    IF v_closed > 0 THEN
+        allowed := FALSE;
+        reason := format('Account %s (%s) is locked — at least one FY is closed for this society', p_acc_id, v_acc.name);
+        RETURN NEXT; RETURN;
+    END IF;
+
+    allowed := TRUE;
+    reason := format('OK: posting to %s (%s) is allowed', p_acc_id, v_acc.name);
+    RETURN NEXT; RETURN;
+END $$;
+
+-- fn_drift_check
+-- =============
+-- Drift check: compares the sum of all transaction Dr/Cr per account against
+-- fn_trial_balance_fy's closing_dr / closing_cr. Returns any accounts where
+-- the two disagree, plus an overall balanced flag.
+-- Returns: (account_id INT, account_name TEXT, ledger_dr NUMERIC, ledger_cr NUMERIC,
+--           trial_dr NUMERIC, trial_cr NUMERIC, drift BOOLEAN, msg TEXT)
+CREATE OR REPLACE FUNCTION fn_drift_check(p_society_id INT, p_fy INT)
+RETURNS TABLE (
+    account_id    INT,
+    account_name  TEXT,
+    ledger_dr     NUMERIC(15,2),
+    ledger_cr     NUMERIC(15,2),
+    trial_dr      NUMERIC(15,2),
+    trial_cr      NUMERIC(15,2),
+    drift         BOOLEAN,
+    msg           TEXT
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_root_diff NUMERIC(15,2);
+BEGIN
+    -- Overall whole-ledger identity: root account total must be ~0.
+    SELECT COALESCE(MAX(ABS(c.total_closing)), 0) INTO v_root_diff
+    FROM fn_fy_closing_report(p_society_id, p_fy) c
+    WHERE c.parent_account_id IS NULL;
+
+    RETURN QUERY
+    WITH ledger AS (
+        SELECT
+            t.acc_id AS account_id,
+            COALESCE(SUM(CASE WHEN t.entry_side = 'Dr' THEN t.amount ELSE 0 END), 0) AS ledger_dr,
+            COALESCE(SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount ELSE 0 END), 0) AS ledger_cr
+        FROM transactions t
+        WHERE t.society_id = p_society_id
+          AND t.status = 'paid'
+          AND t.trx_date BETWEEN MAKE_DATE(p_fy, 4, 1) AND MAKE_DATE(p_fy + 1, 3, 31)
+        GROUP BY t.acc_id
+    ),
+    trial AS (
+        SELECT account_id, closing_dr, closing_cr
+        FROM fn_trial_balance_fy(p_society_id, p_fy)
+    )
+    SELECT
+        COALESCE(l.account_id, t.account_id) AS account_id,
+        a.name AS account_name,
+        COALESCE(l.ledger_dr, 0) AS ledger_dr,
+        COALESCE(l.ledger_cr, 0) AS ledger_cr,
+        COALESCE(t.closing_dr, 0) AS trial_dr,
+        COALESCE(t.closing_cr, 0) AS trial_cr,
+        (ABS(COALESCE(l.ledger_dr, 0) - COALESCE(t.closing_dr, 0)) > 0.01
+         OR ABS(COALESCE(l.ledger_cr, 0) - COALESCE(t.closing_cr, 0)) > 0.01) AS drift,
+        CASE
+            WHEN ABS(COALESCE(l.ledger_dr, 0) - COALESCE(t.closing_dr, 0)) > 0.01
+              OR ABS(COALESCE(l.ledger_cr, 0) - COALESCE(t.closing_cr, 0)) > 0.01
+            THEN format('Drift on account %s: ledger Dr=%s Cr=%s vs trial Dr=%s Cr=%s',
+                        COALESCE(l.account_id, t.account_id),
+                        trim(to_char(COALESCE(l.ledger_dr, 0), 'FM999,999,990.00')),
+                        trim(to_char(COALESCE(l.ledger_cr, 0), 'FM999,999,990.00')),
+                        trim(to_char(COALESCE(t.closing_dr, 0), 'FM999,999,990.00')),
+                        trim(to_char(COALESCE(t.closing_cr, 0), 'FM999,999,990.00')))
+            ELSE 'OK'
+        END AS msg
+    FROM ledger l
+    FULL OUTER JOIN trial t ON l.account_id = t.account_id
+    LEFT JOIN accounts a ON a.id = COALESCE(l.account_id, t.account_id)
+    WHERE (ABS(COALESCE(l.ledger_dr, 0) - COALESCE(t.closing_dr, 0)) > 0.01
+           OR ABS(COALESCE(l.ledger_cr, 0) - COALESCE(t.closing_cr, 0)) > 0.01)
+       OR v_root_diff > 0.01;
+
+    -- If no drift rows and root is balanced, return a single OK row.
+    IF NOT FOUND AND v_root_diff <= 0.01 THEN
+        account_id := NULL; account_name := NULL;
+        ledger_dr := 0; ledger_cr := 0;
+        trial_dr := 0; trial_cr := 0;
+        drift := FALSE;
+        msg := 'OK: No drift — trial balance matches ledger for all accounts';
+        RETURN NEXT;
+    END IF;
 END $$;
 
 -- 5b. Publication of Accounts (bye-law 50)

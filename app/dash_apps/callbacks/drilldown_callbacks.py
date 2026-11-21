@@ -91,6 +91,7 @@ from app.utils.ux_toasts import error_toast
 from database import (
     asset_export,
     cashbook_export,
+    chart_ids,
     financial_statements_export,
     gst_export,
     income_tax_export,
@@ -4957,7 +4958,7 @@ def _save_vendor_pass(db, d, sid):
     if pass_type != "free_1mth" and mode != "cash" and not (d.get("cheque_no") or d.get("transaction_id")):
         return False, "Cheque No. or Payment Gateway ID is required for non-cash payables", None
 
-    acc_id = 4230 # SocC
+    acc_id = chart_ids.SOCIETY_CHARGE  # SocC
 
     particulars = (d.get("particulars") or "").strip()
     if not particulars:

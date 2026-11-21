@@ -17,18 +17,20 @@ from app.services import bf_controls as _bc
 
 LAYOUT = {
     "Cr": [   # LEFT column, titled "Liabilities & Equity (Cr)"
-        {"key": "eq", "label": "Equity", "children": [3100]},
+        {"key": "eq", "label": "Equity", "children": [3100, 3300]},
         {"key": "res", "label": "Reserves & Funds", "children": [3230, 3270, 3220, 3210, 3280, 3240]},
-        {"key": "ncl", "label": "Non-Current Liabilities", "children": [2110]},
-        {"key": "cl", "label": "Current Liabilities", "children": [2240, 3250]},
+        {"key": "ncl", "label": "Non-Current Liabilities", "children": [2110, 2120]},
+        {"key": "cl", "label": "Current Liabilities", "children": [2240, 2250, 2255, 2260, 2270, 2280, 2290, 2295,
+            2210, 2220, 2230, 2231, 2232]},
+        {"key": "contra", "label": "Contra Assets", "children": [1190, 1530]},
     ],
     "Dr": [   # RIGHT column, titled "Assets (Dr)"
         {"key": "nca", "label": "Non-Current Assets", "children": [
-            {"key": "fa", "label": "Fixed Assets", "children": [1110, 1140, 1130, 1120, 1160, 1150]},
+            {"key": "fa", "label": "Fixed Assets", "children": [1110, 1140, 1130, 1120, 1160, 1150, 1170]},
             1200]},                                   # Non-Current Investments
         {"key": "ca", "label": "Current Assets", "children": [
             {"key": "bank", "label": "Bank A/c", "children": [1311, 1312]},
-            1320, 1330]},
+            1320, 1330, 1340, 1350, 1360, 1370]},
         {"key": "lag", "label": "Loans & Advances Given", "acc": 1400, "children": [1410]},
         {"key": "sdr", "label": "Sundry Debtors", "children": [1510, 1520]},
     ],
