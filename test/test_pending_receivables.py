@@ -1,8 +1,9 @@
+import datetime
 import io
 from decimal import Decimal
 
 import pytest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from app.services import pending_receivables as pr
 
@@ -196,3 +197,79 @@ def test_tie_out_and_validation_errors():
     assert pr.validation_errors([], Decimal("5")) == []            # nothing entered is allowed
     bad = pr.validation_errors([{"flat_number": "A", "amount": "1"}, {"flat_number": "a", "amount": "1"}], Decimal("2"))
     assert len(bad) == 1 and "already on row 1" in bad[0]
+
+
+# ---- Apt-Arrears template + strict importer (NMF tasks B and C) -----------------------------------------------
+_HDR = ["flat_no", "amount", "due_days", "remarks", "as_on_date"]
+_YEAR = {"known_flats": ["101"], "fy": 2026, "as_on": "2026-04-01"}
+
+
+def _apt(as_on_cell, sheet="2026", header=None, flat="101"):
+    return xlsx([header or _HDR, [flat, 500, 10, "", as_on_cell]], sheet=sheet)
+
+
+def test_template_has_one_year_sheet_new_headers_and_no_legacy_sheet():
+    wb = load_workbook(io.BytesIO(pr.build_template(fy=2026, known_flats=["101"], as_on="2026-04-01")))
+    assert wb.sheetnames[0] == "2026" and "Receivables" not in wb.sheetnames
+    ws = wb["2026"]
+    assert [c.value for c in ws[1]] == _HDR
+    assert ws["E2"].value == "2026-04-01"                     # as_on_date prefilled on every flat row
+    notes = " ".join(str(r[0].value) for r in wb["Instructions"].iter_rows())
+    assert "due_days" in notes and "as_on_date" in notes
+    assert "overdue_days" not in notes and "flat_number" not in notes
+
+
+def test_build_template_requires_a_financial_year():
+    with pytest.raises(TypeError):
+        pr.build_template()
+
+
+def test_template_round_trip_with_year_and_as_on_date():
+    rows = [{"flat_number": "07", "amount": "100.50", "overdue_days": 4, "remarks": "x"}]
+    data = pr.build_template(fy=2026, rows=rows, known_flats=["07"], as_on="2026-04-01")
+    back, errs, _ = pr.parse_upload(data, "t.xlsx", known_flats=["07"], fy=2026, as_on="2026-04-01")
+    assert errs == [] and back == [{"flat_number": "07", "amount": "100.50", "overdue_days": 4, "remarks": "x"}]
+
+
+@pytest.mark.parametrize("cell", ["2026-04-01", datetime.date(2026, 4, 1), datetime.datetime(2026, 4, 1)])
+def test_as_on_date_accepts_text_date_and_datetime_cells(cell):
+    clean, errs, _ = pr.parse_upload(_apt(cell), "t.xlsx", **_YEAR)
+    assert errs == [] and len(clean) == 1
+
+
+@pytest.mark.parametrize("cell", ["2026-05-01", datetime.date(2026, 5, 1), datetime.datetime(2026, 5, 1, 9, 30)])
+def test_as_on_date_mismatch_names_the_row(cell):
+    _, errs, _ = pr.parse_upload(_apt(cell), "t.xlsx", **_YEAR)
+    assert errs == ["Row 2: as_on_date must be 2026-04-01."]
+
+
+def test_blank_as_on_date_cell_is_allowed():
+    _, errs, _ = pr.parse_upload(_apt(None), "t.xlsx", **_YEAR)
+    assert errs == []
+
+
+def test_old_receivables_sheet_is_rejected_with_a_clear_message():
+    old = xlsx([["flat_number", "amount", "overdue_days", "remarks"], ["101", 500, 10, ""]], sheet="Receivables")
+    with pytest.raises(pr.UploadError, match=r"no sheet named '2026'.*fresh Apt-Arrears template"):
+        pr.parse_upload(old, "t.xlsx", **_YEAR)
+
+
+def test_wrong_year_sheet_is_rejected_and_names_the_expected_sheet():
+    with pytest.raises(pr.UploadError, match="no sheet named '2026'"):
+        pr.parse_upload(_apt("2026-04-01", sheet="2025"), "t.xlsx", **_YEAR)
+
+
+@pytest.mark.parametrize("header,frag", [
+    (["flat_number", "amount", "due_days", "remarks", "as_on_date"], "old 'flat_number' column"),
+    (["flat_no", "amount", "overdue_days", "remarks", "as_on_date"], "old 'overdue_days' column"),
+])
+def test_old_column_names_are_rejected_even_on_the_right_sheet(header, frag):
+    with pytest.raises(pr.UploadError, match=frag):
+        pr.parse_upload(_apt("2026-04-01", header=header), "t.xlsx", **_YEAR)
+
+
+def test_missing_header_message_uses_the_new_column_names():
+    with pytest.raises(pr.UploadError) as exc:
+        pr.parse_upload(xlsx([["a", "b"], [1, 2]], sheet="2026"), "t.xlsx", **_YEAR)
+    msg = str(exc.value)
+    assert "flat_no" in msg and "due_days" in msg and "overdue_days" not in msg and "flat_number" not in msg
