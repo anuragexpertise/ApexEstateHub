@@ -65,41 +65,6 @@ def build_tds_template(rows: list[dict]) -> bytes:
     return buf.getvalue()
 
 
-def build_bf_template(rows: list[dict], fy: int | None = None) -> bytes:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Brought Forward"
-    headers = ["account_id", "tab", "account_name", "side", "bf_amount", "remarks"]
-    ws.append(headers)
-    for c in range(1, len(headers) + 1):
-        ws.cell(row=1, column=c).font = Font(bold=True)
-    locked_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-    for r, item in enumerate(rows or [], start=2):
-        for c, h in enumerate(headers, start=1):
-            val = item.get(h) if h in item else item.get("bf_amount") if h == "bf_amount" else item.get(h)
-            cell = ws.cell(row=r, column=c, value=val)
-            if h in ("account_id", "tab", "account_name", "side"):
-                cell.protection = Protection(locked=True)
-                cell.fill = locked_fill
-    dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
-    dv.add("E2:E500")
-    ws.add_data_validation(dv)
-    ws.freeze_panes = "A2"
-
-    wh = wb.create_sheet("Header")
-    wh.append(["financial_year","as_on_date"])
-    wh.append([fy or "", "YYYY-MM-DD"])
-
-    wi = wb.create_sheet("Instructions")
-    wi.append(["Notes"])
-    wi.append(["Match on account_id; do not change locked columns. As-on date may be mid-year (not necessarily financial-year start). Attach bank/deposit/cash account statements for the same As-on date."])
-    wi.append(["Blank = 0. Amounts must be >= 0."])
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
-
-
 ELECTION_COLUMNS = ["office", "flat_number", "name", "email", "mobile", "flat_area_sqft", "resolution_ref"]
 
 
@@ -125,62 +90,6 @@ def build_election_template(rows: list[dict] | None = None) -> bytes:
     wi.append(["The grievance_officer row needs only name, email and (optionally) mobile."])
     wi.append(["Passwords, signature images and the signed minutes are not taken from this file: add them on each office card, then print, sign, scan and upload the signed Election Results."])
     wi.append(["Only .xlsx is accepted."])
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
-
-
-STATEMENT_COLUMNS = ["account_id", "account_name", "tab", "as_on_date", "closing_balance"]
-
-
-def build_statement_template(acc: dict, as_on: str | None) -> bytes:
-    """Account Statement.xlsx for ONE bank / deposit / cash account. The as_on_date must equal the Brought Forward As-on date."""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Header"
-    ws.append(STATEMENT_COLUMNS)
-    for c in range(1, len(STATEMENT_COLUMNS) + 1):
-        ws.cell(row=1, column=c).font = Font(bold=True)
-    ws.append([acc.get("id"), acc.get("name") or "", acc.get("tab_name") or "", as_on or "YYYY-MM-DD", ""])
-    locked_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-    for c in (1, 2, 3):
-        ws.cell(row=2, column=c).fill = locked_fill
-    dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
-    dv.add("E2:E2")
-    ws.add_data_validation(dv)
-    wi = wb.create_sheet("Instructions")
-    wi.append(["Notes"])
-    wi.append(["Fill closing_balance with the balance per the bank / deposit statement or the cash count as on as_on_date."])
-    wi.append(["as_on_date must be the same As-on date as Brought Forward; a statement as on any other date is rejected."])
-    wi.append(["Do not change account_id: the file is only accepted for the account it was downloaded for. Only .xlsx is accepted."])
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
-
-
-def build_statement_templates(accounts: list[dict], as_on: str | None) -> bytes:
-    """One XLSX with one sheet per bank/deposit/cash account — a single 'Account Statements' file for upload."""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Accounts"
-    ws.append(["account_id", "account_name", "tab", "as_on_date", "closing_balance"])
-    for c in range(1, 6):
-        ws.cell(row=1, column=c).font = Font(bold=True)
-    for acc in accounts:
-        ws.append([acc.get("id"), acc.get("name") or "", acc.get("tab_name") or "", as_on or "YYYY-MM-DD", ""])
-    locked_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-    for r in range(2, len(accounts) + 2):
-        for c in (1, 2, 3):
-            ws.cell(row=r, column=c).fill = locked_fill
-    dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
-    dv.add(f"E2:E{len(accounts) + 1}")
-    ws.add_data_validation(dv)
-    wi = wb.create_sheet("Instructions")
-    wi.append(["Notes"])
-    wi.append(["Fill closing_balance with the balance per the bank / deposit statement or the cash count as on as_on_date, one row per account."])
-    wi.append(["as_on_date must be the same As-on date as Brought Forward; a statement as on any other date is rejected."])
-    wi.append(["Do not change account_id. Each row maps to its account; upload this single file for all accounts."])
-    wi.append(["Each account still needs its own 'Attach scan' evidence in the reconciliation cards."])
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -373,89 +282,39 @@ def build_ca_questionnaire_template(prefill: dict | None = None) -> bytes:
 
 
 # ── Account / label balances (intake 4) ──────────────────────────────────────────
-BALANCES_SHEET = "Account Balances"
 
 
-def build_balances_template(accounts: list[dict], as_on: str | None) -> bytes:
-    """Account/label balances xlsx: two sheets (Assets Dr / Liabilities & Equity Cr) plus a Tally sheet.
-    Every account with has_bf=True is listed; amounts are filled by the admin or read from the Tally sheet."""
+def build_bf_statement_template(accounts: list[dict], fy: int, as_on: str | None) -> bytes:
+    """Brought Forward statement xlsx: ONE sheet named ``str(fy)``.
+
+    Header row: account_id, account_tab, account_name, label, side, amount, as_on_date.
+    One row per visible has_bf account (in bf_layout order: Cr then Dr). account_id / account_tab / account_name / side /
+    as_on_date are pre-filled and locked; label and amount are blank for the admin to fill. Amount cells accept >= 0.
+    No Tally / Header / Instructions sheets, and the sheet is not protected.
+    """
     wb = Workbook()
-
-    dr = [a for a in accounts if a["side"] == "Dr"]
-    cr = [a for a in accounts if a["side"] == "Cr"]
-
-    _bf_accounts_sheet(wb, "Assets (Dr)", dr, as_on)
-    _bf_accounts_sheet(wb, "Liabilities & Equity (Cr)", cr, as_on)
-    _bf_tally_sheet(wb, accounts, as_on)
-
-    wh = wb.create_sheet("Header")
-    wh.append(["financial_year", "as_on_date"])
-    wh.append(["", as_on or "YYYY-MM-DD"])
-
-    wi = wb.create_sheet("Instructions")
-    wi.append(["Notes"])
-    wi.append(["Two sections: Assets (Dr) and Liabilities & Equity (Cr). Every account with has_bf = True is listed."])
-    wi.append(["The Tally sheet is pre-filled from your Tally/ERP export: read it to fill the grid without typing each account by hand."])
-    wi.append(["label = ledger row: an FD number, a bank sub-account, or a flat number for receivables. Several rows per account are allowed; blank rows are ignored."])
-    wi.append(["as_on_date must equal the Brought Forward As-on date on every row. Amounts must be 0 or more."])
-    wi.append(["Do not change account_id, account_name, tab or side: they are locked. Only .xlsx is accepted."])
-
+    ws = wb.active
+    ws.title = str(fy)
+    headers = ["account_id", "account_tab", "account_name", "label", "side", "amount", "as_on_date"]
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+    locked_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    for r, acc in enumerate(accounts or [], start=2):
+        ws.cell(row=r, column=1, value=acc["account_id"]).protection = Protection(locked=True)
+        ws.cell(row=r, column=2, value=acc["account_tab"]).protection = Protection(locked=True)
+        ws.cell(row=r, column=3, value=acc["account_name"]).protection = Protection(locked=True)
+        ws.cell(row=r, column=4, value="")
+        ws.cell(row=r, column=5, value=acc["side"]).protection = Protection(locked=True)
+        ws.cell(row=r, column=6, value="")
+        ws.cell(row=r, column=7, value=as_on or "YYYY-MM-DD").protection = Protection(locked=True)
+        for c in (1, 2, 3, 5, 7):
+            ws.cell(row=r, column=c).fill = locked_fill
+    dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
+    if accounts:
+        dv.add(f"F2:F{len(accounts) + 1}")
+        ws.add_data_validation(dv)
+    ws.freeze_panes = "A2"
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
-
-
-def _bf_accounts_sheet(wb, title: str, accounts: list[dict], as_on: str | None) -> None:
-    """One accounts sheet: locked id/name/tab/side, editable label/as_on_date/amount."""
-    ws = wb.active if wb.sheetnames == [] else wb.create_sheet(title)
-    if wb.sheetnames == []:
-        ws.title = title
-    headers = ["account_id", "account_name", "tab", "side", "label", "as_on_date", "amount"]
-    ws.append(headers)
-    for c in range(1, len(headers) + 1):
-        ws.cell(row=1, column=c).font = Font(bold=True)
-    locked_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-    r = 2
-    for acc in accounts:
-        ws.cell(row=r, column=1, value=acc["id"]).protection = Protection(locked=True)
-        ws.cell(row=r, column=2, value=acc["name"]).protection = Protection(locked=True)
-        ws.cell(row=r, column=3, value=acc["tab"]).protection = Protection(locked=True)
-        ws.cell(row=r, column=4, value=acc["side"]).protection = Protection(locked=True)
-        ws.cell(row=r, column=5, value="")
-        ws.cell(row=r, column=6, value=as_on or "YYYY-MM-DD")
-        ws.cell(row=r, column=7, value="")
-        for c in (1, 2, 3, 4):
-            ws.cell(row=r, column=c).fill = locked_fill
-        r += 1
-    dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
-    if r > 2:
-        dv.add(f"G2:G{r - 1}")
-        ws.add_data_validation(dv)
-    ws.freeze_panes = "A2"
-    _protect_sheet(ws)
-
-
-def _bf_tally_sheet(wb, accounts: list[dict], as_on: str | None) -> None:
-    """Tally sheet: pre-fillable from the society's Tally/ERP export to fill the grid without typing."""
-    ws = wb.create_sheet("Tally")
-    headers = ["account_id", "account_name", "tab", "side", "amount"]
-    ws.append(headers)
-    for c in range(1, len(headers) + 1):
-        ws.cell(row=1, column=c).font = Font(bold=True)
-    locked_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-    r = 2
-    for acc in accounts:
-        ws.cell(row=r, column=1, value=acc["id"]).protection = Protection(locked=True)
-        ws.cell(row=r, column=2, value=acc["name"]).protection = Protection(locked=True)
-        ws.cell(row=r, column=3, value=acc["tab"]).protection = Protection(locked=True)
-        ws.cell(row=r, column=4, value=acc["side"]).protection = Protection(locked=True)
-        ws.cell(row=r, column=5, value="")
-        for c in (1, 2, 3, 4):
-            ws.cell(row=r, column=c).fill = locked_fill
-        r += 1
-    dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
-    if r > 2:
-        dv.add(f"E2:E{r - 1}")
-        ws.add_data_validation(dv)
-    ws.freeze_panes = "A2"
-    _protect_sheet(ws)

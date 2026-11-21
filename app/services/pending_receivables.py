@@ -318,10 +318,14 @@ def parse_upload(data: bytes | str, filename: str = "", known_flats=()):
 
 def build_template(rows=(), known_flats=()):
     """Template workbook: a 'Receivables' sheet (text-formatted flat column so Excel keeps '101' and '07'),
-    plus Instructions and, when flats are already registered, a reference list."""
+    plus Instructions and, when flats are already registered, a reference list.
+    One row per known flat when no explicit rows are given."""
     from openpyxl import Workbook
     from openpyxl.styles import Font
     from openpyxl.worksheet.datavalidation import DataValidation
+    if not rows and known_flats:
+        rows = [{"flat_number": normalise_flat(f), "amount": "", "overdue_days": "", "remarks": ""}
+                for f in known_flats]
     wb = Workbook()
     ws = wb.active
     ws.title = "Receivables"

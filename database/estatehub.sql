@@ -8613,7 +8613,7 @@ $$;
 -- legal_regime_profiles) would silently break a fixed-id list. This also
 -- naturally excludes the "Equity / Reserves & Funds" header itself (its own
 -- name matches '%Equity%' so it's the recursion ROOT, never a row in the
--- tree) and any Dr-natured child (e.g. "Gifts Given") that isn't itself a
+-- tree) and any Dr-natured child (e.g. an expense) that isn't itself a
 -- fund/equity balance.
 
 CREATE OR REPLACE FUNCTION fn_funds_account_fy(
@@ -11774,7 +11774,7 @@ CREATE OR REPLACE FUNCTION fn_gst_default_supply_class(p_tab_name TEXT) RETURNS 
 LANGUAGE sql IMMUTABLE AS $$
     SELECT CASE
         WHEN p_tab_name IN ('CGST','SGST','IGST','CGSTRCM','SGSTRCM','IGSTRCM') THEN 'tax'
-        WHEN p_tab_name IN ('CL','CapAc','Eq','Res','Lb','NCL','LAT','Prov','SCr','DepFund','InExp') THEN 'not_a_supply'
+        WHEN p_tab_name IN ('CL','CapAc','Eq','Res','Lb','NCL','LAT','Prov','SCr','DepFund','InExp','Gifts') THEN 'not_a_supply'
         WHEN p_tab_name IN ('SocM','SocC') THEN 'taxable'      -- the member maintenance / society charges
         WHEN p_tab_name = 'IncExmpt' THEN 'exempt'
         ELSE NULL END;
@@ -16368,7 +16368,7 @@ BEGIN
 END $$;
 
 -- 3. Depreciation Fund (society policy: not in the Model Bye-Laws 2011; bye-law 46(d) is about loans)
---    Its own account (3280, tab DepFund), separate from the Depreciation EXPENSE account (5110) and from 3240 Gifts Received.
+--    Its own account (3280, tab DepFund), separate from the Depreciation EXPENSE account (5110) and from 3240 Earmarked Gifts Fund.
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION fn_ensure_depreciation_fund(p_society_id INT)
 RETURNS INT LANGUAGE plpgsql AS $$

@@ -242,7 +242,7 @@ RECEIPT_PARTICULARS_TEMPLATES = {
     'donation': {
         'label': 'Donation / Gift Received',
         'particulars': lambda r, d=None: f"Donation — {_dd_mon_yyyy(d)}",
-        'account_hint': 'Gifts Received',               # acc 22
+        'account_hint': 'Donations & Gifts Received',               # acc 4140
         'role': 'other',
     },
     'event_income': {

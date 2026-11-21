@@ -226,7 +226,7 @@ FUNDS = {
                               "5% default are the society's own / engine defaults, not legal figures."),
         "source": "Society policy by General Body resolution; not in the UP Apartment Act 2010 or the Model Bye-Laws 2011",
         "description": ("Opt-in fund for replacing worn-out assets. It has its own account, separate from the Depreciation expense "
-                        "(5110) and from Gifts Received (3240)."),
+                        "(5110) and from Earmarked Gifts Fund (3240)."),
         "applicability": "Only if the General Body resolves to keep it.",
         "levy_when": "Once a year, dated the last day of the year (fn_appropriate_depreciation_fund); not on the monthly bill.",
         "rate": ("The society's own: a % of asset value, a rate per sq ft, or a rate per flat (Legal rules > depreciation_fund_*). "
@@ -238,7 +238,7 @@ FUNDS = {
             "id": 3280, "seed_name": "Depreciation Fund", "head_code": "DEPRECIATION_FUND", "lock_pct": 0.0,
             "head_source": "Society policy (General Body resolution); not in the Model Bye-Laws 2011",
             "engine_lookup": ("fixed id 3280, tab DepFund (fn_ensure_depreciation_fund creates it if missing); NOT 5110 (Depreciation "
-                              "expense) and NOT 3240 (Gifts Received)"),
+                              "expense) and NOT 3240 (Earmarked Gifts Fund)"),
         },
         "parameters": [
             {"key": "levy_depreciation_fund", "label": "Opt in (keep a Depreciation Fund)", "unit": "yes/no", "kind": "policy",

@@ -1,5 +1,6 @@
 """Annex D (data-protection and custody schedule) and the confirmation-gated seal."""
 import pytest
+
 from app.services import onboarding_service as ob
 
 
@@ -41,7 +42,7 @@ def test_every_control_has_a_fix_target():
     keys = {("D", k) for k in d_ctl}
     keys |= {("A", "regime_assigned"), ("A", "unverified_instruments"),
              ("B", "wizard_submitted"), ("B", "committee_seated"), ("B", "grievance_officer"), ("B", "rates_pending_ca"),
-             ("C", "balanced"), ("C", "accounts_known"), ("C", "funds_backed"), ("C", "arrears_tie"), ("C", "bank_agrees")}
+             ("C", "balanced"), ("C", "accounts_known"), ("C", "funds_backed"), ("C", "arrears_tie")}
     assert keys <= set(ob.CONTROL_FIX)
 
 

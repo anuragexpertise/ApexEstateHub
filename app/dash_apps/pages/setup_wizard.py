@@ -1299,7 +1299,6 @@ def render_review(draft, society_id=None):
             ("Total Dr / Total Cr", f"₹{bf_dr:,.2f} / ₹{bf_cr:,.2f}"),
         ]),
         ("Pending receivables by apartment", _receivables_review_rows(bf)),
-        ("Reconciliation & evidence", _reconciliation_review_rows(bf)),
     ]
 
     def card(title, items):
@@ -1402,27 +1401,6 @@ def _receivables_review_rows(bf):
     if errors:
         out.append(("Receivable problems", html.Ul([html.Li(e) for e in errors], className="text-danger mb-0")))
     return out
-
-
-def _saved_reconciliation(society_id):
-    try:
-        from app.services import onboarding_service as _ob
-        return _ob.get_bank_reconciliation(society_id) if society_id else {}
-    except Exception:                                                      # noqa: BLE001
-        return {}
-
-
-def _reconciliation_review_rows(bf):
-    rec = bf.get("reconciliation") or {}
-    if not rec:
-        return [("Reconciliation & evidence", "Not yet completed.")]
-    items = []
-    for key, val in rec.items():
-        if key.endswith(("_sha256", "_stored")):
-            continue
-        items.append((key.replace("_", " ").title(), str(val)))
-    return [("Reconciliation & evidence", items if items else "Not yet completed.")]
-
 
 def legal_regime_live(society_id=None, state=None, constitution=None):
     """'Your Legal Regime' card of the Legal Regime Selection step: State and Constitution (both chosen on Society Details)
@@ -2010,14 +1988,14 @@ def render_category_content(category, society_id=None, state=None, constitution=
             except Exception:                                              # noqa: BLE001
                 return 0.0
         from database.seed import ACCOUNTS
+        ACCOUNTS_BY_ID = {a[0]: a for a in ACCOUNTS}
 
         # UP AOA labels for the equity / fund accounts. The fund rows come from the shared fund catalogue
         # (status, rate and applicability); the rest are plain accounts with a fixed label.
         UP_AOA_FUND_LABELS = {
             3100: "Capital Account / Share Capital (entrance fee \u20b91,000 + share)",
-            3240: "Gifts Received",
+            3240: "Gifts Received (Earmarked Fund)",
             3250: "Provisions",
-            3260: "Gifts Given",
         }
         from app.services.up_aoa_fund_catalog import active_keys as _active_keys
         if is_current:
@@ -2057,51 +2035,6 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 return _fi["label"]
             return UP_AOA_FUND_LABELS.get(acc_id, default_name) if _up else default_name
 
-        def _render_node(acc, depth):
-            out = []
-            indent = {"paddingLeft": f"{12 + depth * 14}px"}
-            if acc[6]:   # postable account -> amount + remarks inputs (ids unchanged)
-                aoa_label = _get_aoa_label(acc[0], acc[3] or "")
-                _fi = _fi_for(acc[0])
-                _name_kids = [aoa_label]
-                if _fi and _fi["tags"]:   # fund account: status badges (Statutory / Model Bye-Law / Optional - Provisional) + rate hint
-                    _name_kids.append(html.Div([_fund_badge(t, c) for t, c in _fi["tags"]], className="mt-1"))
-                    _name_kids.append(html.Small(_fi["hint"], className="d-block text-muted"))
-                _name_kids.append(html.Small(f"{acc[2] or ''} · {acc[5] or ''}"))
-                # B3: warning when a mandatory-group account has a balance but no ledger rows
-                _bf_row = _saved_bf.get(acc[0]) or {}
-                _bf_amt = _bf_row.get("bf_amount") or 0
-                try:
-                    _bf_amt = float(_bf_amt)
-                except (TypeError, ValueError):
-                    _bf_amt = 0.0
-                _has_ledger = bool(_bf_row.get("ledger_rows"))
-                if acc[0] in BF_LEDGER_MANDATORY_ACCOUNTS and _bf_amt > 0 and not _has_ledger:
-                    _name_kids.append(html.Span(" ⚠ ledger rows required", style={"color": "#b26a00", "fontWeight": "600", "fontSize": "11px", "marginLeft": "6px"}))
-                out.append(html.Div([
-                    html.Div(_name_kids, className="sw-bf-name"),
-                    dbc.Input(id={"type": "sw-bf-amt", "acc_id": acc[0]}, type="number", value=_saved_amt(acc[0]), step=0.01, min=0, size="sm"),
-                    dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc[0]}, type="text", placeholder="Remarks...", size="sm", className="sw-bf-remarks",
-                              value=(_saved_bf.get(acc[0]) or {}).get("remarks") or None),
-                ], className="sw-bf-row", style={**indent, "paddingRight": "12px"}))
-            else:        # group heading
-                out.append(html.Div(acc[3] or "", className="sw-bf-group", style=indent))
-            for child in children.get(acc[0], []):
-                if _has_bf(child):
-                    out.extend(_render_node(child, depth + 1))
-            return out
-
-        def _side(title, subtitle, root_ids):
-            body = []
-            for rid in root_ids:
-                root = next((a for a in ACCOUNTS if a[0] == rid), None)
-                if root and _has_bf(root):
-                    body.extend(_render_node(root, 0))
-            return html.Div([
-                html.Div([html.Span(title), html.Span(subtitle)], className="sw-bf-side-head"),
-                *body,
-            ], className="sw-bf-side")
-
         _bf_as_on = (_bf_draft.get("as_on_date") if '_bf_draft' in locals() else None) or str(fy_start_date())
         # Funds selected/held for this society (prescribed + opted on the Funds step)
         from app.services.up_aoa_fund_catalog import FUNDS as _BF_FUNDS
@@ -2121,110 +2054,144 @@ def render_category_content(category, society_id=None, state=None, constitution=
             ], className="mb-1"))
         _not_opted = [_BF_FUNDS[k]["name"] for k in ("sinking", "repair", "depreciation") if k not in _held_keys]
 
-        def _bf_account_rows(root_id):
-            """All descendant accounts under root_id that carry a BF flag, rendered recursively with indent."""
-            rows = []
-
-            def _render(acc, depth):
-                acc_id = acc[0]
-                name = acc[3] or f"Account {acc_id}"
-                saved = (_saved_bf.get(acc_id) or {})
-                indent = {"paddingLeft": f"{16 + depth * 14}px"} if depth > 0 else {}
-                # B3: warning when a mandatory-group account has a balance but no ledger rows
-                _bf_amt = saved.get("bf_amount") or 0
-                try:
-                    _bf_amt = float(_bf_amt)
-                except (TypeError, ValueError):
-                    _bf_amt = 0.0
-                _has_ledger = bool(saved.get("ledger_rows"))
-                _warn = (acc_id in BF_LEDGER_MANDATORY_ACCOUNTS and _bf_amt > 0 and not _has_ledger)
-                _name_el = [html.Small(name, className="fw-bold")]
-                if _warn:
-                    _name_el.append(html.Span(" ⚠ ledger rows required",
-                                              style={"color": "#b26a00", "fontWeight": "600",
-                                                     "fontSize": "11px", "marginLeft": "6px"}))
-                ledger_modal = dbc.Modal([
-                    dbc.ModalHeader(dbc.ModalTitle(f"Ledger rows — {name}")),
-                    dbc.ModalBody([
-                        dash_table.DataTable(
-                            id={"type": "sw-bf-ledger-grid", "acc_id": acc_id},
-                            columns=[{"id": "flat_number", "name": "Flat no.", "type": "text"},
-                                     {"id": "amount", "name": "Value receivable (₹)", "type": "numeric"},
-                                     {"id": "overdue_days", "name": "Days overdue", "type": "numeric"},
-                                     {"id": "remarks", "name": "Remarks", "type": "text"}],
-                            data=saved.get("ledger_rows") or [{"flat_number": "", "amount": None,
-                                                                "overdue_days": None, "remarks": ""}],
-                            editable=True, row_deletable=True, page_size=25, sort_action="native",
-                            style_table={"overflowX": "auto"},
-                            style_cell={"fontSize": "12.5px", "padding": "4px 8px",
-                                        "textAlign": "left", "minWidth": "90px"},
-                            style_header={"fontWeight": "700"},
-                            style_cell_conditional=[{"if": {"column_id": "remarks"}, "minWidth": "220px"}],
-                        ),
-                        dbc.Row([
-                            dbc.Col(dbc.Button("+ Add row", id={"type": "sw-bf-ledger-add", "acc_id": acc_id},
-                                               color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
-                            dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Template (xlsx)"],
-                                               id={"type": "sw-bf-ledger-template", "acc_id": acc_id},
-                                               color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
-                            dbc.Col(dcc.Download(id={"type": "sw-bf-ledger-download", "acc_id": acc_id}), md="auto"),
-                            dbc.Col(dcc.Upload(id={"type": "sw-bf-ledger-upload", "acc_id": acc_id},
-                                               children=dbc.Button([html.I(className="fas fa-upload me-2"),
-                                                                    "Upload xlsx / csv"], color="secondary",
-                                                                   size="sm", outline=True, n_clicks=0),
-                                               multiple=False, accept=".xlsx,.csv"), md="auto"),
-                            dbc.Col(dcc.RadioItems(id={"type": "sw-bf-ledger-mode", "acc_id": acc_id}, value="add",
-                                                   inline=True,
-                                                   options=[{"label": " Add to / update existing rows", "value": "add"},
-                                                            {"label": " Replace all rows", "value": "replace"}],
-                                                   inputStyle={"marginLeft": "10px"},
-                                                   labelStyle={"fontSize": "12px", "marginRight": "6px"}), md="auto"),
-                            dbc.Col(dcc.ConfirmDialogProvider(
+        def _bf_acc_row(acc, depth):
+            """One postable account row: AO/AOA label, amount input, ledger button, remarks, attachment,
+            warning + ledger modal. Driven by bf_layout account ids."""
+            acc_id = acc[0]
+            name = acc[3] or f"Account {acc_id}"
+            saved = (_saved_bf.get(acc_id) or {})
+            indent = {"paddingLeft": f"{16 + depth * 14}px"} if depth > 0 else {}
+            # B3: warning when a mandatory-group account has a balance but no ledger rows
+            _bf_amt = saved.get("bf_amount") or 0
+            try:
+                _bf_amt = float(_bf_amt)
+            except (TypeError, ValueError):
+                _bf_amt = 0.0
+            _has_ledger = bool(saved.get("ledger_rows"))
+            _warn = (acc_id in BF_LEDGER_MANDATORY_ACCOUNTS and _bf_amt > 0 and not _has_ledger)
+            _name_el = [html.Small(name, className="fw-bold")]
+            if _warn:
+                _name_el.append(html.Span(" ⚠ ledger rows required",
+                                          style={"color": "#b26a00", "fontWeight": "600",
+                                                 "fontSize": "11px", "marginLeft": "6px"}))
+            ledger_modal = dbc.Modal([
+                dbc.ModalHeader(dbc.ModalTitle(f"Ledger rows — {name}")),
+                dbc.ModalBody([
+                    dash_table.DataTable(
+                        id={"type": "sw-bf-ledger-grid", "acc_id": acc_id},
+                        columns=[{"id": "flat_number", "name": "Flat no.", "type": "text"},
+                                 {"id": "amount", "name": "Value receivable (₹)", "type": "numeric"},
+                                 {"id": "overdue_days", "name": "Days overdue", "type": "numeric"},
+                                 {"id": "remarks", "name": "Remarks", "type": "text"}],
+                        data=saved.get("ledger_rows") or [{"flat_number": "", "amount": None,
+                                                           "overdue_days": None, "remarks": ""}],
+                        editable=True, row_deletable=True, page_size=25, sort_action="native",
+                        style_table={"overflowX": "auto"},
+                        style_cell={"fontSize": "12.5px", "padding": "4px 8px",
+                                    "textAlign": "left", "minWidth": "90px"},
+                        style_header={"fontWeight": "700"},
+                        style_cell_conditional=[{"if": {"column_id": "remarks"}, "minWidth": "220px"}],
+                    ),
+                    dbc.Row([
+                        dbc.Col(dbc.Button("+ Add row", id={"type": "sw-bf-ledger-add", "acc_id": acc_id},
+                                           color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                        dbc.Col(dbc.Button([html.I(className="fas fa-download me-2"), "Template (xlsx)"],
+                                           id={"type": "sw-bf-ledger-template", "acc_id": acc_id},
+                                           color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                        dbc.Col(dcc.Download(id={"type": "sw-bf-ledger-download", "acc_id": acc_id}), md="auto"),
+                        dbc.Col(dcc.Upload(id={"type": "sw-bf-ledger-upload", "acc_id": acc_id},
+                                           children=dbc.Button([html.I(className="fas fa-upload me-2"),
+                                                                "Upload xlsx / csv"], color="secondary",
+                                                               size="sm", outline=True, n_clicks=0),
+                                           multiple=False, accept=".xlsx,.csv"), md="auto"),
+                        dbc.Col(dcc.RadioItems(id={"type": "sw-bf-ledger-mode", "acc_id": acc_id}, value="add",
+                                               inline=True,
+                                               options=[{"label": " Add to / update existing rows", "value": "add"},
+                                                        {"label": " Replace all rows", "value": "replace"}],
+                                               inputStyle={"marginLeft": "10px"},
+                                               labelStyle={"fontSize": "12px", "marginRight": "6px"}), md="auto"),
+                        dbc.Col(dcc.ConfirmDialogProvider(
                                     children=dbc.Button("Clear all", color="danger", size="sm", outline=True, n_clicks=0),
                                     id={"type": "sw-bf-ledger-clear", "acc_id": acc_id},
                                     message="Remove every ledger row from the grid?"), md="auto"),
-                        ], className="g-2 mt-1 align-items-center"),
-                        html.Div(id={"type": "sw-bf-ledger-feedback", "acc_id": acc_id},
-                                 style={"fontSize": "12.5px", "marginTop": "4px"}),
-                        html.Div(id={"type": "sw-bf-ledger-tieout", "acc_id": acc_id},
-                                 className="mb-3", style={"fontSize": "12px", "fontWeight": "700"}),
-                    ]),
-                    dbc.ModalFooter(dbc.Button("Close", id={"type": "sw-bf-ledger-close", "acc_id": acc_id},
-                                               color="primary", className="ms-auto", n_clicks=0)),
-                ], id={"type": "sw-bf-ledger-modal", "acc_id": acc_id}, is_open=False, size="xl",
-                    centered=True, backdrop="static")
-                rows.append(html.Div([
-                    dbc.Row([
-                        dbc.Col(_name_el, md=3),
-                        dbc.Col(dbc.Input(id={"type": "sw-bf-amt", "acc_id": acc_id}, type="number",
-                                          value=saved.get("bf_amount"), step=0.01, min=0, size="sm",
-                                          className="sw-bf-val"), md=2),
-                        dbc.Col(dbc.Button("+ Ledger-rows", id={"type": "sw-bf-ledger", "acc_id": acc_id},
-                                           color="secondary", size="sm", outline=True, n_clicks=0), md=2),
-                        dbc.Col(dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc_id}, type="text",
-                                          placeholder="Remarks...", value=saved.get("remarks"), size="sm",
-                                          className="sw-bf-remarks"), md=3),
-                        dbc.Col(dcc.Upload(id={"type": "sw-bf-attach", "acc_id": acc_id},
-                                           children=dbc.Button("+ Attachment", color="secondary",
-                                                               size="sm", outline=True, n_clicks=0),
-                                           multiple=False, accept=".pdf,.png,.jpg,.jpeg,.webp"), md=2),
-                    ], className="g-1 align-items-center mb-2", style=indent),
-                    html.Div(id={"type": "sw-bf-attach-feedback", "acc_id": acc_id},
+                    ], className="g-2 mt-1 align-items-center"),
+                    html.Div(id={"type": "sw-bf-ledger-feedback", "acc_id": acc_id},
                              style={"fontSize": "12.5px", "marginTop": "4px"}),
-                    html.Small("Admin: attachment verified to match the entered value for this account/label.",
-                               className="text-muted d-block mt-1 mb-3", style={"fontSize": "11px"}),
-                    ledger_modal,
-                ], className="sw-bf-account-row border rounded p-2 mb-2", style={"background": "#fff", **indent}))
-                # recurse into children
-                for child in ACCOUNTS:
-                    if child[4] == acc_id and _has_bf(child):
-                        _render(child, depth + 1)
+                    html.Div(id={"type": "sw-bf-ledger-tieout", "acc_id": acc_id},
+                             className="mb-3", style={"fontSize": "12px", "fontWeight": "700"}),
+                ]),
+                dbc.ModalFooter(dbc.Button("Close", id={"type": "sw-bf-ledger-close", "acc_id": acc_id},
+                                           color="primary", className="ms-auto", n_clicks=0)),
+            ], id={"type": "sw-bf-ledger-modal", "acc_id": acc_id}, is_open=False, size="xl",
+                centered=True, backdrop="static")
+            return html.Div([
+                dbc.Row([
+                    dbc.Col(_name_el, md=3),
+                    dbc.Col(dbc.Input(id={"type": "sw-bf-amt", "acc_id": acc_id}, type="number",
+                                      value=saved.get("bf_amount"), step=0.01, min=0, size="sm",
+                                      className="sw-bf-val"), md=2),
+                    dbc.Col(dbc.Button("+ Ledger-rows", id={"type": "sw-bf-ledger", "acc_id": acc_id},
+                                       color="secondary", size="sm", outline=True, n_clicks=0), md=2),
+                    dbc.Col(dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc_id}, type="text",
+                                      placeholder="Remarks...", value=saved.get("remarks"), size="sm",
+                                      className="sw-bf-remarks"), md=3),
+                    dbc.Col(dcc.Upload(id={"type": "sw-bf-attach", "acc_id": acc_id},
+                                       children=dbc.Button("+ Attachment", color="secondary",
+                                                           size="sm", outline=True, n_clicks=0),
+                                       multiple=False, accept=".pdf,.png,.jpg,.jpeg,.webp"), md=2),
+                ], className="g-1 align-items-center mb-2", style=indent),
+                html.Div(id={"type": "sw-bf-attach-feedback", "acc_id": acc_id},
+                         style={"fontSize": "12.5px", "marginTop": "4px"}),
+                html.Small("Admin: attachment verified to match the entered value for the account/label.",
+                           className="text-muted d-block mt-1 mb-3", style={"fontSize": "11px"}),
+                ledger_modal,
+            ], className="sw-bf-account-row border rounded p-2 mb-2", style={"background": "#fff", **indent})
 
-            for acc in ACCOUNTS:
-                if acc[4] == root_id and _has_bf(acc):
-                    _render(acc, 0)
+        def _bf_side(side):
+            """Render one side (Cr / Dr) from bf_layout: group headers, account rows, a group-total
+            cell per group (sw-bf-total node=<key>) and the side total (sw-bf-side-total-<side>)."""
+            from app.services import bf_layout as bl
+            is_hidden = lambda acc_id: bool((_bf_fund_info(acc_id, _held, _up) or {}).get("hidden"))
+            els = []
+            side_total = Decimal(0)
+            for node in bl.side_nodes(side, is_hidden):
+                if isinstance(node, int):
+                    continue
+                key = node["key"]
+                label = node["label"]
+                # depth-first collect of postable account ids in this group
+                accs = []
 
-            return html.Div(rows)
+                def collect(n, out):
+                    if isinstance(n, int):
+                        out.append(n); return
+                    if n.get("acc") is not None:
+                        out.append(n["acc"])
+                    for c in n.get("children") or []:
+                        collect(c, out)
+
+                collect(node, accs)
+                group_total = Decimal(0)
+                rows = []
+                for acc_id in accs:
+                    acc = ACCOUNTS_BY_ID[acc_id]
+                    rows.append(_bf_acc_row(acc, 1))
+                    saved = (_saved_bf.get(acc_id) or {})
+                    try:
+                        group_total += Decimal(str(saved.get("bf_amount") or 0))
+                    except (TypeError, ValueError, ArithmeticError):
+                        pass
+                side_total += group_total
+                els.append(html.Div([
+                    html.Div([
+                        html.Strong(label, className="text-primary"),
+                        html.Span(f"  ₹{group_total:,.2f}", id={"type": "sw-bf-total", "node": key},
+                                  className="ms-3 fw-bold text-muted"),
+                    ], className="sw-bf-group-head mb-2"),
+                    *rows,
+                ], className="sw-bf-group", style={"paddingLeft": "4px"}))
+            els.append(html.Div(f"₹{side_total:,.2f}", id=f"sw-bf-side-total-{side}", className="fw-bold text-primary"))
+            return html.Div(els, className="sw-bf-side")
 
         _bf_up_style = {"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px", "display": "inline-block", "marginRight": "8px"}
         inputs = [
@@ -2274,22 +2241,39 @@ def render_category_content(category, society_id=None, state=None, constitution=
                        "label, value and remarks, add ledger sub-rows if needed, and attach the supporting statement. Admin "
                        "verifies that each attachment matches the entered value for the account/label.",
                        className="text-muted small mb-3"),
-                dbc.Row([
-                    dbc.Col(html.Strong("Assets (Dr)", className="text-primary"), md=6),
-                    dbc.Col(html.Strong("Liabilities & Equity (Cr)", className="text-primary"), md=6),
-                ], className="mb-2"),
                 html.Div([
                     html.Div([
-                        html.H6("Assets", className="text-primary mb-2", style={"fontSize": "13px"}),
-                        _bf_account_rows(1000),
+                        html.H6("Liabilities & Equity (Cr)", className="text-primary mb-2", style={"fontSize": "13px"}),
+                        _bf_side("Cr"),
                     ], className="sw-bf-side"),
                     html.Div([
-                        html.H6("Liabilities & Equity", className="text-primary mb-2", style={"fontSize": "13px"}),
-                        _bf_account_rows(2000),
-                        _bf_account_rows(3000),
+                        html.H6("Assets (Dr)", className="text-primary mb-2", style={"fontSize": "13px"}),
+                        _bf_side("Dr"),
                     ], className="sw-bf-side"),
                 ], className="sw-bf-grid"),
             ], className="mb-3"),
+            # ── Apt-Arrears grid (persisted into draft.brought_forward.receivables on Next) ─────
+            html.H6("Apt-Arrears (Sundry Debtors detail)", className="mt-4 mb-2 text-primary"),
+            html.P("One row per flat. The total ties to the Sundry Debtors balance and feeds the arrears_tie control.",
+                   className="text-muted small mb-2"),
+            dash_table.DataTable(
+                id="sw-bf-arrears-grid",
+                columns=[
+                    {"id": "flat_number", "name": "flat_no"},
+                    {"id": "amount", "name": "amount", "type": "numeric"},
+                    {"id": "overdue_days", "name": "due_days", "type": "numeric"},
+                    {"id": "remarks", "name": "remarks"},
+                ],
+                data=[], editable=True, row_deletable=True, page_size=25,
+                style_cell={"fontSize": "12px", "padding": "4px 6px"},
+                style_header={"fontWeight": "700"},
+            ),
+            dbc.Row([
+                dbc.Col(dbc.Button("+ Add row", id="sw-bf-arrears-add", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(html.Div(id="sw-bf-arrears-total", className="fw-bold", style={"fontSize": "12.5px"}), md="auto"),
+            ], className="g-2 mt-1 align-items-center"),
+            # ── controls panel (computed server-side at render, refreshed by sw_bf_rollup) ─────
+            html.Div(id="sw-bf-controls", className="mt-3"),
         ]
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Administrator":

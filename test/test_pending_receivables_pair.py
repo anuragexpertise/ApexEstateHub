@@ -1,7 +1,7 @@
 """S7 acceptance: arrears pair — Pending Receivables.xlsx + arrears PDF intake (B6)."""
 
-import json
 import io
+import json
 
 import pytest
 from openpyxl import Workbook
@@ -142,15 +142,20 @@ def test_apply_pending_receivables_happy(monkeypatch, tmp_path):
     assert flats == {"A-101", "A-102"}
 
 
-def test_apply_pending_receivables_tieout_failure(monkeypatch, tmp_path):
+def test_apply_pending_receivables_tieout_now_succeeds(monkeypatch, tmp_path):
+    # The tie-out is no longer an upload error; it is shown by the arrears_tie control and enforced
+    # by validate_step on Next (§6 / §7.3). Uploading mismatched arrears must succeed here.
     tables = _tables()
     _install_fake_db(monkeypatch, tables)
     monkeypatch.setattr(ob, "evidence_folder", lambda sid: tmp_path / "evidence")
 
     xlsx = _make_xlsx([("A-101", 20000.00)])
     pdf = b"%PDF-1.4 arrears statement"
-    with pytest.raises(ob.OnboardingError, match="does not tie to Sundry Debtors"):
-        pi.apply_pending_receivables(1, 1, "pr.xlsx", xlsx, "arrears.pdf", pdf)
+    msg = pi.apply_pending_receivables(1, 1, "pr.xlsx", xlsx, "arrears.pdf", pdf)
+    assert "Pending receivables filed" in msg
+    decl = json.loads(tables["onboarding_declarations"][-1]["declaration_json"])
+    rec = (decl.get("draft") or {}).get("brought_forward", {}).get("receivables", [])
+    assert len(rec) == 1 and rec[0]["flat_number"] == "A-101"
 
 
 def test_apply_pending_receivables_refused_when_sealed(monkeypatch, tmp_path):
