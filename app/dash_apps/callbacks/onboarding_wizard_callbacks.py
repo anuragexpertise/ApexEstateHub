@@ -390,7 +390,10 @@ def register_onboarding_wizard_callbacks(app):
             return no_update, no_update, no_update, no_update
         sid, uid, role = s
         amounts = {}
-        for iid, val in (ctx.inputs_list[0] or []):
+        # ctx.inputs_list[0] is a list of {"id": {...}, "property": "value", "value": ...} dicts, one per
+        # pattern-matched input (not (id, value) pairs).
+        for item in (ctx.inputs_list[0] or []):
+            iid, val = item.get("id"), item.get("value")
             if iid is None or val in (None, ""):
                 continue
             aid = iid.get("acc_id") if isinstance(iid, dict) else None

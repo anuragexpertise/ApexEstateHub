@@ -312,8 +312,8 @@ def parse_upload(data: bytes | str, filename: str = "", known_flats=(), fy=None,
             header_idx, colmap = i, m
             break
     if header_idx is None:
-        raise UploadError("Could not find the header row. The first row must contain 'flat_number' and 'amount' "
-                          "(optionally 'overdue_days' and 'remarks'). Download the template to start from.")
+        raise UploadError("Could not find the header row. The first row must contain 'flat_no' and 'amount' "
+                          "(optionally 'due_days', 'remarks' and 'as_on_date'). Download the template to start from.")
 
     # When a financial year is given, require the new template column names (flat_no / due_days) and reject
     # the old flat_number / overdue_days headers, telling the user to download a fresh template.

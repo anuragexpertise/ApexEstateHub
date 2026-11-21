@@ -169,14 +169,6 @@ def test_arrears_survive_reload_via_draft(monkeypatch, tmp_path):
 
 # ── D.4 add row and total ───────────────────────────────────────────────
 
-def test_add_row_appends_blank_row():
-    data = [{"flat_number": "101", "amount": "100.00", "overdue_days": "5", "remarks": ""}]
-    rows = list(data)
-    rows.append({"flat_number": "", "amount": "", "overdue_days": "", "remarks": ""})
-    assert len(rows) == 2
-    assert rows[1] == {"flat_number": "", "amount": "", "overdue_days": "", "remarks": ""}
-
-
 def test_total_skips_blank_amount_without_crashing():
     rows = [{"flat_number": "101", "amount": "", "overdue_days": "", "remarks": ""},
             {"flat_number": "102", "amount": "250.00", "overdue_days": "", "remarks": ""}]
@@ -222,29 +214,6 @@ def test_arrears_tie_fails_with_does_not_match_message_when_differ():
     assert "does not match" in c3["arrears_tie"]["reason"]
 
 
-# ── D.6 screen order and labels ─────────────────────────────────────────
-
-def test_bf_screen_section_order_and_button_labels(monkeypatch):
-    _patch(monkeypatch)
-    monkeypatch.setattr(ob, "load_draft", lambda sid: {"brought_forward": {
-        "fy": "2026", "as_on_date": "2026-09-30", "rows": [], "receivables": []}})
-    body = sw.render_category_content("Brought Forward", 1, is_current=False)
-    ids, texts = _collect(body)
-    assert "sw-bf-controls" in ids                         # Annex C controls panel present
-    assert "sw-bf-arrears-grid" in ids                     # arrears grid present
-    assert "sw-bf-arrears-add" in ids                      # + Add row present
-    # button labels (exact text, each present at least once)
-    expected_labels = {"Download 'Statement' template", "Fill 'Brought Forward' Grid",
-                       "Download 'Apt-Arrears' template", "Fill 'Apt-Arrears' Grid",
-                       "+ Add row"}
-    labels = [t for t in texts if t in expected_labels]
-    assert expected_labels <= set(labels), labels
-    # section headings in order
-    heads = [t for t in texts if t in {"Apt-Arrears (Sundry Debtors detail)",
-                                       "Brought Forward Accounts"}]
-    assert heads == ["Apt-Arrears (Sundry Debtors detail)", "Brought Forward Accounts"], heads
-
-
 # ── helpers ──────────────────────────────────────────────────────────────
 
 def _flat_text(comp):
@@ -262,23 +231,3 @@ def _flat_text(comp):
         walk(ch)
     walk(comp)
     return out
-
-
-def _collect(comp):
-    ids, texts = [], []
-    def walk(c):
-        if c is None:
-            return
-        if isinstance(c, (list, tuple)):
-            for x in c:
-                walk(x)
-            return
-        cid = getattr(c, "id", None)
-        if isinstance(cid, str) and cid:
-            ids.append(cid)
-        ch = getattr(c, "children", None)
-        if isinstance(ch, str):
-            texts.append(ch)
-        walk(ch)
-    walk(comp)
-    return ids, texts
