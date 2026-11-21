@@ -780,7 +780,7 @@ INSTRUMENT_PURCHASES = [
     {"company_name": "Huwaei","asset_name": "CCTV Recorder Unit",          "asset_SNo": "CCTV-2026-07",
      "purchase_date": "2026-09-18", "purchase_value": 6000.00, "half_rate": True, "reference": "NEFT0918CCTV"},
 ]
-INSTRUMENT_FULL_RATE = 15.0
+
 # Period-end depreciation journal date. Was 2027-03-31; moved to the last day of
 # the seeded half-year so it sits on SEED_CUTOFF_DATE and inside FY 2026-27.
 YEAR_END_DATE = "2026-09-30"
@@ -2257,8 +2257,9 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
     full_base = sum(i["purchase_value"] for i in INSTRUMENT_PURCHASES if not i["half_rate"])
     half_base = sum(i["purchase_value"] for i in INSTRUMENT_PURCHASES if i["half_rate"])
 
-    dep_full = round(full_base * (INSTRUMENT_FULL_RATE / 100), 2)
-    dep_half = round(half_base * (INSTRUMENT_FULL_RATE / 100) * 0.5, 2)
+    dep_percent = next(row[7] for row in ACCOUNTS if row[0] == 1130)
+    dep_full = round(full_base * (dep_percent / 100), 2)
+    dep_half = round(half_base * (dep_percent / 100) * 0.5, 2)
     total_dep = round(dep_full + dep_half, 2)
 
     if total_dep <= 0:
@@ -2276,7 +2277,7 @@ def seed_instruments_depreciation(cur, conn, society_id: int, admin_uid: int):
         return
 
     journal_id = _one(cur, "SELECT NEXTVAL('seq_transaction_number') AS n")["n"]
-    desc = (f"Depreciation on Instruments @ {INSTRUMENT_FULL_RATE}% "
+    desc = (f"Depreciation on Instruments @ {dep_percent}% "
             f"(full ₹{dep_full} + half-year ₹{dep_half} on post-1-Sep additions)")
 
     # Dr Depreciation A/c (5110) / Cr Accumulated Depreciation (1190)

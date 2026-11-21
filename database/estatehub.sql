@@ -539,6 +539,24 @@ END;
 $$;
 
 
+-- trg_3280_guard — Accumulated Depreciation / Depreciation Fund (3280) may
+-- only be credited by the statutory reserve appropriation (source_table
+-- 'fy_close', posted by fn_fy_close_reserve_appropriation). Any other posting
+-- crediting 3280 is refused so the fund is never inflated outside the close.
+CREATE OR REPLACE FUNCTION trg_3280_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.acc_id = 3280 AND NEW.entry_side = 'Cr'
+       AND NEW.source_table IS DISTINCT FROM 'fy_close' THEN
+        RAISE EXCEPTION
+            'refusing to credit Depreciation Fund 3280 outside the statutory reserve appropriation (posted by fn_fy_close_reserve_appropriation with source_table fy_close)'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
 
 CREATE TABLE apartments (
     id SERIAL PRIMARY KEY,
@@ -2000,6 +2018,10 @@ CREATE TABLE transactions (
 CREATE TRIGGER trg_transactions_active_account
 BEFORE INSERT ON transactions
 FOR EACH ROW EXECUTE FUNCTION trg_transactions_active_account();
+
+CREATE TRIGGER trg_3280_guard
+BEFORE INSERT ON transactions
+FOR EACH ROW EXECUTE FUNCTION trg_3280_guard();
 
 CREATE UNIQUE INDEX uq_transactions_one_reversal_per_leg ON transactions (reverses_id)
 WHERE

@@ -258,6 +258,35 @@ BEGIN
     END IF;
 END $$;
 
+
+-- ============================================================================
+-- H4 (G6): Depreciation Fund (3280) guard
+-- ============================================================================
+
+-- C6: 3280 may only be credited by the statutory reserve appropriation
+-- (source_table 'fy_close', posted by fn_fy_close_reserve_appropriation).
+-- A direct credit is refused; the appropriation path succeeds.
+DO $$
+DECLARE v_raised BOOLEAN := FALSE;
+BEGIN
+    BEGIN
+        INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, amount, status, mode, journal_id, transaction_number, source_table, created_by)
+        VALUES (1, 'Cr', '2026-04-05', 3280, 100.00, 'paid', 'cash', 999997, 'C6-DIRECT-A', 'manual', 1),
+               (1, 'Dr', '2026-04-05', 1311, 100.00, 'paid', 'cash', 999997, 'C6-DIRECT-B', 'manual', 1);
+    EXCEPTION WHEN OTHERS THEN
+        v_raised := TRUE;
+    END;
+    IF NOT v_raised THEN
+        RAISE EXCEPTION 'C6: direct credit to 3280 was not refused';
+    END IF;
+
+    INSERT INTO transactions (society_id, entry_side, trx_date, acc_id, amount, status, mode, journal_id, transaction_number, source_table, created_by)
+    VALUES (1, 'Cr', '2026-04-05', 3280, 100.00, 'paid', 'cash', 999996, 'C6-APPROP-A', 'fy_close', 1),
+           (1, 'Dr', '2026-04-05', 3300, 100.00, 'paid', 'cash', 999996, 'C6-APPROP-B', 'fy_close', 1);
+EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'C6: appropriation-path credit to 3280 was refused: %', SQLERRM;
+END $$;
+
 ROLLBACK;
 
 -- ============================================================================

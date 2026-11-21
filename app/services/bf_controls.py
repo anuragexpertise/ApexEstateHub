@@ -67,3 +67,18 @@ def three_controls(t, arrears_total) -> dict:
         f"Arrears by flat (Rs {arrears_total}) tie to the receivables control (Rs {t['debtors_dr']}).",
     )
     return {"balanced": balanced, "funds_backed": funds_backed, "arrears_tie": arrears_tie}
+
+
+def fixed_asset_tie(register_gross, register_accum_dep, chart_gross, chart_accum_dep):
+    """fixed_asset_tie: the fixed-asset register must tie to the chart of
+    accounts — gross cost equals the sum of the asset-class accounts, and
+    accumulated depreciation equals the Accumulated Depreciation (1190)
+    balance. Returns a control dict like the Annex C controls."""
+    passed = register_gross == chart_gross and register_accum_dep == chart_accum_dep
+    if passed:
+        reason = f"Fixed-asset register ties: gross Rs {register_gross} and accumulated depreciation Rs {register_accum_dep} match the chart."
+    else:
+        reason = (f"Fixed-asset register does not tie: register gross Rs {register_gross} "
+                  f"vs chart gross Rs {chart_gross}; register accumulated depreciation Rs {register_accum_dep} "
+                  f"vs chart Rs {chart_accum_dep}.")
+    return _ctl(passed, reason, blocking=True)

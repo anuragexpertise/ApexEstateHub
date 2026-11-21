@@ -61,3 +61,26 @@ def test_balanced_empty_fails():
          "fund_cr": Decimal(0), "bank_dr": Decimal(0), "debtors_dr": Decimal(0)}
     c = bc.three_controls(t, Decimal(0))
     assert not c["balanced"]["passed"]
+
+
+def test_fixed_asset_tie_passes():
+    # two asset classes: Furniture cost 10000/dep 1500, Instruments cost 5000/dep 500
+    c = bc.fixed_asset_tie(
+        register_gross=Decimal(15000), register_accum_dep=Decimal(2000),
+        chart_gross=Decimal(15000), chart_accum_dep=Decimal(2000))
+    assert c["passed"]
+    assert c["blocking"]
+
+
+def test_fixed_asset_tie_gross_mismatch_fails():
+    c = bc.fixed_asset_tie(
+        register_gross=Decimal(15001), register_accum_dep=Decimal(2000),
+        chart_gross=Decimal(15000), chart_accum_dep=Decimal(2000))
+    assert not c["passed"]
+
+
+def test_fixed_asset_tie_dep_mismatch_fails():
+    c = bc.fixed_asset_tie(
+        register_gross=Decimal(15000), register_accum_dep=Decimal(2001),
+        chart_gross=Decimal(15000), chart_accum_dep=Decimal(2000))
+    assert not c["passed"]

@@ -31,3 +31,6 @@ Judgement calls made (so the maintainer can review):
 - Depreciation journal credits 1190 Accumulated Depreciation (not 1130 Instruments); deleted 5110→5100 transfer journal (F-09).
 - Contra accounts 1190/1530 excluded from nature-consistency test.
 - BLE001 `except Exception:` in financial_statements_export.py matches existing file convention (not fixed to avoid churn).
+
+## ICAI3.md (H1-H10) additional notes
+- H4/G6 Depreciation: removed INSTRUMENT_FULL_RATE (seed now uses account 1130's depreciation_percent=15); depreciation journal still credits 1190 (Accumulated Depreciation) once per asset — live query: 5110 Dr 1,650 / 1190 Cr 1,650, counted once. Added fixed_asset_tie control + unit test (two asset classes). Added trg_3280_guard: 3280 Depreciation Fund may only be credited by the statutory reserve appropriation (source_table 'fy_close'); direct credits refused (live check C6). 3280 Dr balance 79,525 on master is PRE-EXISTING: absent (0 txns) at commit 530c6c7, introduced after it — not caused by this work; guard prevents future direct credits.
