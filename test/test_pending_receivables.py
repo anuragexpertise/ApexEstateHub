@@ -146,6 +146,46 @@ def test_template_round_trip_keeps_leading_zero_flats():
     assert errs == [] and back == [{"flat_number": "07", "amount": "100.50", "overdue_days": 4, "remarks": "x"}]
 
 
+def test_arrears_template_new_sheet_and_columns():
+    from openpyxl import load_workbook
+    import io
+    buf = io.BytesIO(pr.build_template(known_flats=["07", "08"], fy="2026", as_on="2026-09-30"))
+    wb = load_workbook(buf)
+    assert wb.sheetnames[0] == "2026"
+    ws = wb["2026"]
+    assert [c.value for c in ws[1]] == ["flat_no", "amount", "due_days", "remarks", "as_on_date"]
+    # as_on_date prefilled on every row; flat column text-formatted
+    assert ws["E2"].value == "2026-09-30" and ws["E3"].value == "2026-09-30"
+    assert ws["A2"].number_format == "@"
+
+
+def test_parse_upload_reads_fy_sheet_and_validates_as_on_date():
+    from openpyxl import Workbook
+    import io
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "2026"
+    ws.append(["flat_no", "amount", "due_days", "remarks", "as_on_date"])
+    ws.append(["07", "100.00", "", "", "2026-09-30"])
+    ws.append(["08", "200.00", "", "", "2026-09-30"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    back, errs, _ = pr.parse_upload(buf.getvalue(), "t.xlsx", known_flats=["07", "08"], fy="2026", as_on="2026-09-30")
+    assert errs == []
+    assert {r["flat_number"] for r in back} == {"07", "08"}
+
+    # wrong as_on_date is flagged on that row
+    wb2 = Workbook()
+    ws2 = wb2.active
+    ws2.title = "2026"
+    ws2.append(["flat_no", "amount", "due_days", "remarks", "as_on_date"])
+    ws2.append(["07", "100.00", "", "", "2025-01-01"])
+    buf2 = io.BytesIO()
+    wb2.save(buf2)
+    back2, errs2, _ = pr.parse_upload(buf2.getvalue(), "t.xlsx", known_flats=["07", "08"], fy="2026", as_on="2026-09-30")
+    assert any("as_on_date must be 2026-09-30" in e for e in errs2)
+
+
 # ---- tie-out / validator --------------------------------------------------------------------------------------
 def test_tie_out_and_validation_errors():
     rows = [{"flat_number": "A", "amount": "30000.00"}]

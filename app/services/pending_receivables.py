@@ -24,11 +24,11 @@ MAX_FLAT_LEN = 20
 
 # Header spellings accepted in an uploaded file -> canonical column
 _ALIASES = {
-    "flat_number": {"flat_number", "flat", "flat no", "flat no.", "flat number", "flatno", "apartment",
-                    "apartment no", "apartment number", "unit", "unit no"},
+    "flat_number": {"flat_number", "flat_no", "flat", "flat no", "flat no.", "flat number", "flatno",
+                    "apartment", "apartment no", "apartment number", "unit", "unit no"},
     "amount": {"amount", "value receivable", "value receivable (₹)", "value receivable (rs)", "outstanding",
                "due", "dues", "arrears", "balance"},
-    "overdue_days": {"overdue_days", "days overdue", "overdue days", "days", "age", "age (days)"},
+    "overdue_days": {"overdue_days", "due_days", "days overdue", "overdue days", "days", "age", "age (days)"},
     "remarks": {"remarks", "remark", "note", "notes", "comment", "comments", "narration"},
 }
 
@@ -239,14 +239,14 @@ def _canonical_header(h):
     return None
 
 
-def _grid_from_xlsx(data: bytes):
+def _grid_from_xlsx(data: bytes, sheet: str | None = None):
     from openpyxl import load_workbook
     try:
         wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     except Exception as exc:
         raise UploadError("This is not a valid .xlsx file.") from exc
     names = wb.sheetnames
-    ws = wb["Receivables"] if "Receivables" in names else wb[names[0]]
+    ws = wb[sheet] if sheet and sheet in names else (wb["Receivables"] if "Receivables" in names else wb[names[0]])
     rows = []
     for row in ws.iter_rows(values_only=True):
         rows.append(list(row))
@@ -268,7 +268,7 @@ def _grid_from_csv(data: bytes):
     return [list(r) for r in csv.reader(io.StringIO(text), dialect)]
 
 
-def parse_upload(data: bytes | str, filename: str = "", known_flats=()):
+def parse_upload(data: bytes | str, filename: str = "", known_flats=(), fy=None, as_on=None):
     """Read an .xlsx or .csv of receivables.
 
     `data` may be raw bytes (decoded already) or a dcc.Upload data-URL string
@@ -277,6 +277,9 @@ def parse_upload(data: bytes | str, filename: str = "", known_flats=()):
 
     Returns ``(clean_rows, errors, info)``; raises UploadError when the file is unusable. `info` carries
     ``rows_read`` and the spreadsheet ``header_row``. Row numbers in errors are spreadsheet rows.
+
+    When ``fy`` is given, the sheet titled ``str(fy)`` is used (else the first sheet). When ``as_on`` is
+    given and the file has an ``as_on_date`` column, every non-blank value must equal it.
     """
     import base64
     if isinstance(data, str):
@@ -290,7 +293,7 @@ def parse_upload(data: bytes | str, filename: str = "", known_flats=()):
     if len(data) > MAX_BYTES:
         raise UploadError("The file is larger than 2 MB.")
     name = (filename or "").lower()
-    grid = _grid_from_csv(data) if name.endswith(".csv") else _grid_from_xlsx(data)
+    grid = _grid_from_csv(data) if name.endswith(".csv") else _grid_from_xlsx(data, sheet=str(fy) if fy else None)
 
     header_idx, colmap = None, {}
     for i, row in enumerate(grid[:10]):                         # tolerate a title line above the headers
@@ -299,6 +302,9 @@ def parse_upload(data: bytes | str, filename: str = "", known_flats=()):
             canon = _canonical_header(cell)
             if canon and canon not in m:
                 m[canon] = j
+            key = re.sub(r"\s+", " ", str(cell or "")).strip().lower().replace("-", "_")
+            if key == "as_on_date" and "as_on_date" not in m:
+                m["as_on_date"] = j
         if "flat_number" in m and "amount" in m:
             header_idx, colmap = i, m
             break
@@ -306,20 +312,36 @@ def parse_upload(data: bytes | str, filename: str = "", known_flats=()):
         raise UploadError("Could not find the header row. The first row must contain 'flat_number' and 'amount' "
                           "(optionally 'overdue_days' and 'remarks'). Download the template to start from.")
 
+    # Sheet named str(fy) when fy is given and present; else the first sheet.
     raw = []
     for row in grid[header_idx + 1:]:
         raw.append({f: (row[colmap[f]] if f in colmap and colmap[f] < len(row) else None) for f in FIELDS})
     if len(raw) > MAX_ROWS:
         raise UploadError(f"More than {MAX_ROWS} rows; split the file.")
     clean, errors = clean_rows(raw, known_flats, first_row_number=header_idx + 2)
+
+    # as_on_date column, when present, must match the wizard As-on date on every non-blank row.
+    if as_on is not None and "as_on_date" in colmap:
+        j = colmap["as_on_date"]
+        for i, row in enumerate(grid[header_idx + 1:]):
+            n = header_idx + 2 + i
+            v = row[j] if j < len(row) else None
+            if not _blank(v) and str(v).strip() != as_on:
+                errors.append(f"Row {n}: as_on_date must be {as_on}.")
+
     return clean, errors, {"rows_read": sum(1 for r in raw if not all(_blank(v) for v in r.values())),
                            "header_row": header_idx + 1}
 
 
-def build_template(rows=(), known_flats=()):
-    """Template workbook: a 'Receivables' sheet (text-formatted flat column so Excel keeps '101' and '07'),
-    plus Instructions and, when flats are already registered, a reference list.
-    One row per known flat when no explicit rows are given."""
+def build_template(rows=(), known_flats=(), fy=None, as_on=None):
+    """Apt-Arrears template.
+
+    When ``fy`` is given: one sheet titled ``str(fy)`` with header
+    ``flat_no, amount, due_days, remarks, as_on_date``; flat column text-formatted;
+    ``as_on_date`` prefilled. One row per known flat when no explicit rows are given.
+    When ``fy`` is None: legacy mode (sheet "Receivables", legacy columns) kept for the
+    per-account ledger template download.
+    """
     from openpyxl import Workbook
     from openpyxl.styles import Font
     from openpyxl.worksheet.datavalidation import DataValidation
@@ -328,13 +350,24 @@ def build_template(rows=(), known_flats=()):
                 for f in known_flats]
     wb = Workbook()
     ws = wb.active
-    ws.title = "Receivables"
-    ws.append(list(FIELDS))
-    for c in range(1, 5):
+    if fy is not None:
+        ws.title = str(fy)[:31]
+        header = ["flat_no", "amount", "due_days", "remarks", "as_on_date"]
+    else:
+        ws.title = "Receivables"
+        header = list(FIELDS)
+    ws.append(header)
+    for c in range(1, len(header) + 1):
         ws.cell(row=1, column=c).font = Font(bold=True)
     for item in rows or []:
-        ws.append([normalise_flat(item.get("flat_number")), _num(item.get("amount")),
-                   _num(item.get("overdue_days")), "" if _blank(item.get("remarks")) else str(item["remarks"])])
+        flat = normalise_flat(item.get("flat_number"))
+        amount = _num(item.get("amount"))
+        days = _num(item.get("overdue_days"))
+        remarks = "" if _blank(item.get("remarks")) else str(item.get("remarks") or "")
+        if fy is not None:
+            ws.append([flat, amount, days, remarks, as_on or ""])
+        else:
+            ws.append([flat, amount, days, remarks])
     for r in range(2, MAX_ROWS + 2):
         ws.cell(row=r, column=1).number_format = "@"
         ws.cell(row=r, column=2).number_format = "#,##0.00"
@@ -348,22 +381,26 @@ def build_template(rows=(), known_flats=()):
     ws.column_dimensions["B"].width = 18
     ws.column_dimensions["C"].width = 14
     ws.column_dimensions["D"].width = 40
+    if fy is not None:
+        ws.column_dimensions["E"].width = 14
     ws.freeze_panes = "A2"
-    wi = wb.create_sheet("Instructions")
-    for line in ("Opening receivables by apartment",
-                 "One row per flat. flat_number and amount are required.",
-                 "amount: arrears carried forward, greater than 0, at most 2 decimals.",
-                 "overdue_days: whole number of days, blank allowed.",
-                 "Each flat may appear only once.",
-                 "The total must equal the Sundry Debtors balance entered in Brought Forward."):
-        wi.append([line])
-    wi["A1"].font = Font(bold=True)
-    wi.column_dimensions["A"].width = 80
-    if known_flats:
-        wk = wb.create_sheet("Registered flats")
-        wk.append(["flat_number"])
-        for f in sorted({normalise_flat(x) for x in known_flats if not _blank(x)}):
-            wk.append([f])
+    if fy is not None:
+        wi = wb.create_sheet("Instructions")
+        for line in ("Opening receivables by apartment",
+                     "One row per flat. flat_no and amount are required.",
+                     "amount: arrears carried forward, greater than 0, at most 2 decimals.",
+                     "overdue_days: whole number of days, blank allowed.",
+                     "as_on_date: must match the wizard As-on date.",
+                     "Each flat may appear only once.",
+                     "The total must equal the Sundry Debtors balance entered in Brought Forward."):
+            wi.append([line])
+        wi["A1"].font = Font(bold=True)
+        wi.column_dimensions["A"].width = 80
+        if known_flats:
+            wk = wb.create_sheet("Registered flats")
+            wk.append(["flat_no"])
+            for f in sorted({normalise_flat(x) for x in known_flats if not _blank(x)}):
+                wk.append([f])
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

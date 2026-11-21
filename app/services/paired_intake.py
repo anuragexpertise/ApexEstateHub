@@ -427,7 +427,10 @@ def apply_pending_receivables(society_id: int, actor_id: int, xlsx_name: str, xl
         raise ob.OnboardingError("The annexes are sealed, so pending receivables can no longer change here.")
     # Known flats for canonical flat-name resolution.
     known_flats = ob.known_flat_numbers(society_id)
-    clean, errors, info = pr.parse_upload(xlsx, xlsx_name or "", known_flats=known_flats)
+    draft = ob.declaration(society_id) or {}
+    bf = ((draft.get("draft") or {}).get("brought_forward")) or {}
+    clean, errors, info = pr.parse_upload(xlsx, xlsx_name or "", known_flats=known_flats,
+                                          fy=bf.get("fy"), as_on=bf.get("as_on_date"))
     if errors:
         raise ob.OnboardingError(" ".join(errors))
     if not clean:

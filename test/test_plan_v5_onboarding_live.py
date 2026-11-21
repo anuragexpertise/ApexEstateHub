@@ -146,13 +146,24 @@ def test_06_wizard_draft_posts_nothing(world):
 
 # ── V5.5 annexes ──────────────────────────────────────────────────────────────────────────────────────────────────
 def test_07_failing_control_blocks_sealing(world):
-    ob, sid = world["ob"], world["sid"]
-    ob.save_annex_inputs(sid, "", False, None, None)                       # bank not attested
-    ob.build_annexes(sid, world["admin"])
-    c = world["db"]._execute("SELECT blocking, controls_json FROM onboarding_annexes WHERE society_id=%s AND annex_code='C'", (sid,), fetch_one=True)
-    assert c["blocking"] and not c["controls_json"]["bank_agrees"]["passed"]
-    with pytest.raises(ob.OnboardingError, match="Fix the failing controls"):
-        ob.seal_annexes(sid, world["admin"])
+    ob, sid, db = world["ob"], world["sid"], world["db"]
+    # The deleted save_annex_inputs / bank_agrees path is gone: bank backing is now the funds_backed control.
+    # Make funds_backed fail (bank below the fund) so a failing control blocks sealing, then restore.
+    original = ob.declaration(sid)
+    try:
+        d = json.loads(json.dumps(original))
+        d["bf"]["rows"][0]["bf_amount"] = "0"                         # bank to zero: bank < fund
+        db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s",
+                    (json.dumps(d), sid))
+        ob.build_annexes(sid, world["admin"])
+        c = db._execute("SELECT blocking, controls_json FROM onboarding_annexes WHERE society_id=%s AND annex_code='C'", (sid,), fetch_one=True)
+        assert c["blocking"] and not c["controls_json"]["funds_backed"]["passed"]
+        with pytest.raises(ob.OnboardingError, match="Fix the failing controls"):
+            ob.seal_annexes(sid, world["admin"])
+    finally:
+        db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s",
+                    (json.dumps(original), sid))
+        ob.build_annexes(sid, world["admin"])
 
 
 def test_08_unbalanced_or_unbacked_opening_is_caught(world):
@@ -178,7 +189,7 @@ def test_09_agreement_cannot_be_signed_before_annexes_are_sealed(world):
 
 def test_10_seal_annexes_puts_their_hashes_in_the_agreement(world):
     ob, sid, db = world["ob"], world["sid"], world["db"]
-    ob.save_annex_inputs(sid, "", True, None, None)
+    # bank attestation (save_annex_inputs) was replaced by the funds_backed control, which passes with the test data.
     ob.set_grievance_officer(sid, "G. Officer", "grievance@example.com", None)    # Annex D needs one
     db._execute("INSERT INTO onboarding_evidence (society_id, purpose, filename, stored_name, sha256, size_bytes, uploaded_by) "
                 "VALUES (%s,'registration_certificate','reg.pdf','x.pdf',%s,10,%s)", (sid, "e" * 64, world["admin"]))   # Annex E blocks without it
