@@ -360,6 +360,7 @@ CREATE TABLE accounts (
         drcr_account IN ('Dr', 'Cr')
         OR drcr_account IS NULL
     ),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     has_bf BOOLEAN DEFAULT FALSE,
     depreciation_percent NUMERIC(5, 2) DEFAULT 100.00,
     is_depreciable BOOLEAN DEFAULT FALSE,
@@ -412,6 +413,135 @@ CREATE TABLE accounts (
         ) >= 5
     )
 );
+
+-- ═════════════════════════════════════════════════════════════════════════════════
+-- C4: account guard, audit trail and active-account posting gate
+-- ═════════════════════════════════════════════════════════════════════════════════
+-- trg_accounts_guard — refuse deleting, or re-keying, an account that the
+-- ledger or brought-forward already references. id, drcr_account and
+-- parent_account_id are protected once referenced; is_active / name / header /
+-- depreciation_percent / has_bf / tds_section / mutuality_nature / updated_at
+-- are always writable (seed_accounts and the Setup Wizard edit only those).
+CREATE OR REPLACE FUNCTION trg_accounts_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_referenced BOOLEAN;
+BEGIN
+    SELECT (EXISTS (
+        SELECT 1 FROM transactions t
+        WHERE t.society_id = COALESCE(NEW.society_id, OLD.society_id)
+          AND t.acc_id = COALESCE(NEW.id, OLD.id)
+    )
+    OR EXISTS (
+        SELECT 1 FROM brought_forward b
+        WHERE b.society_id = COALESCE(NEW.society_id, OLD.society_id)
+          AND b.acc_id = COALESCE(NEW.id, OLD.id)
+    )) INTO v_referenced;
+
+    IF TG_OP = 'DELETE' THEN
+        IF v_referenced THEN
+            RAISE EXCEPTION
+                'refusing to delete account %/% — it is referenced by the ledger or brought-forward',
+                OLD.society_id, OLD.id
+                USING ERRCODE = 'check_violation';
+        END IF;
+        RETURN OLD;
+    END IF;
+
+    -- UPDATE: protect the posting-relevant keys only when referenced.
+    IF v_referenced AND (
+        NEW.id IS DISTINCT FROM OLD.id
+        OR NEW.drcr_account IS DISTINCT FROM OLD.drcr_account
+        OR NEW.parent_account_id IS DISTINCT FROM OLD.parent_account_id
+    ) THEN
+        RAISE EXCEPTION
+            'refusing to change id/drcr_account/parent_account_id of referenced account %/%',
+            OLD.society_id, OLD.id
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_accounts_guard
+BEFORE UPDATE OR DELETE ON accounts
+FOR EACH ROW EXECUTE FUNCTION trg_accounts_guard();
+
+-- trg_accounts_audit — append one audit_events row per accounts write, with
+-- before/after values and the server-resolved actor. The actor is read from a
+-- session variable (app.actor_id / app.actor_role) that the app sets per
+-- request; it falls back to NULL when no actor is bound (e.g. seed).
+CREATE OR REPLACE FUNCTION trg_accounts_audit() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_actor_id INT;
+    v_actor_role TEXT;
+BEGIN
+    v_actor_id := COALESCE(NULLIF(current_setting('app.actor_id', TRUE), '')::INT, NULL);
+    v_actor_role := current_setting('app.actor_role', TRUE);
+
+    INSERT INTO audit_events (
+        society_id, actor_id, actor_role, action, resource_type, resource_id,
+        before_value, after_value, reason, source
+    ) VALUES (
+        COALESCE(NEW.society_id, OLD.society_id),
+        v_actor_id,
+        v_actor_role,
+        CASE TG_OP
+            WHEN 'INSERT' THEN 'ACCOUNT_CREATED'
+            WHEN 'UPDATE' THEN 'ACCOUNT_UPDATED'
+            ELSE 'ACCOUNT_DELETED'
+        END,
+        'account',
+        COALESCE(NEW.id, OLD.id)::TEXT,
+        CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE to_jsonb(OLD) END,
+        CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE to_jsonb(NEW) END,
+        TG_OP || ' on account ' || COALESCE(NEW.id, OLD.id)::TEXT,
+        'sql'
+    );
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_accounts_audit
+AFTER INSERT OR UPDATE OR DELETE ON accounts
+FOR EACH ROW EXECUTE FUNCTION trg_accounts_audit();
+
+-- trg_transactions_active_account — never post to an inactive account.
+-- Headers / hybrids are not rejected: only is_active = FALSE is, and FY
+-- closure is deliberately not consulted here.
+CREATE OR REPLACE FUNCTION trg_transactions_active_account() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_active BOOLEAN;
+BEGIN
+    IF NEW.acc_id IS NOT NULL THEN
+        SELECT is_active INTO v_active
+        FROM accounts
+        WHERE id = NEW.acc_id AND society_id = NEW.society_id;
+
+        IF v_active IS NULL THEN
+            -- account does not exist; let the FK raise its own error
+            RETURN NEW;
+        END IF;
+
+        IF NOT v_active THEN
+            RAISE EXCEPTION
+                'refusing to post to inactive account %/%',
+                NEW.society_id, NEW.acc_id
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_transactions_active_account
+BEFORE INSERT ON transactions
+FOR EACH ROW EXECUTE FUNCTION trg_transactions_active_account();
+
 
 CREATE TABLE apartments (
     id SERIAL PRIMARY KEY,
@@ -8785,13 +8915,13 @@ END;
 $$;
 
 -- ── Resolve the P&L contra account used for the appropriation ─────────────
--- The debit side of the year-end journal is the "Income Expenditure A/c"
--- (tab_name 'InExp', id 5100 in the seeded chart), a Cr-natured node under
--- the Expenses block that exists precisely to accumulate P&L transfers —
--- the depreciation journal already posts "Dr InExp / Cr Depreciation"
--- against it (see the seed's year-end transfer journal). Reusing it means
--- the appropriation lands in the same accumulator the closing report
--- already understands, rather than inventing a new balancing account.
+-- C5 / F-12: the debit side of the year-end reserve appropriation is the
+-- Accumulated Surplus / Deficit account (tab_name 'ACS', id 3300 in the
+-- seeded chart), a Cr-natured node under Equity. The appropriation reduces
+-- accumulated surplus and credits the Reserve Fund, so the books still
+-- balance. (Previously this debited the Income & Expenditure accumulator
+-- 5100 / tab 'InExp'; that let the P&L surplus absorb the transfer instead of
+-- equity, which misstated the reserve movement.)
 -- Name fallback covers a chart where tab_name was renamed.
 
 CREATE OR REPLACE FUNCTION fn_resolve_inexp_appropriation_account(p_society_id INT)
@@ -8800,15 +8930,20 @@ LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_acc_id INT;
 BEGIN
+    -- C5 / F-12: the reserve appropriation is debited against Accumulated
+    -- Surplus / Deficit (3300, tab ACS), not the Income & Expenditure
+    -- accumulator (5100, tab InExp). Resolve ACS so fn_fy_close_preview's
+    -- contra_acc_id and fn_fy_close_reserve_appropriation's Dr leg both land
+    -- on 3300.
     SELECT id INTO v_acc_id
     FROM accounts
-    WHERE society_id = p_society_id AND tab_name = 'InExp'
+    WHERE society_id = p_society_id AND tab_name = 'ACS'
     LIMIT 1;
 
     IF v_acc_id IS NULL THEN
         SELECT id INTO v_acc_id
         FROM accounts
-        WHERE society_id = p_society_id AND name ILIKE 'Income Expenditure%'
+        WHERE society_id = p_society_id AND name ILIKE 'Accumulated Surplus%'
         LIMIT 1;
     END IF;
 
@@ -8926,7 +9061,7 @@ BEGIN
     END IF;
     IF v_transfer > 0 AND v_contra_id IS NULL THEN
         v_blockers := v_blockers ||
-            'No Income Expenditure A/c (tab_name ''InExp'') found to debit the appropriation against. Add it to the chart of accounts first. ';
+            'No Accumulated Surplus / Deficit account (tab_name ''ACS'') found to debit the appropriation against. Map one, or this appropriation cannot be posted. ';
     END IF;
 
     fy                := p_fy;
@@ -9126,7 +9261,7 @@ BEGIN
     END IF;
     IF v_contra_id IS NULL THEN
         RAISE EXCEPTION
-            'FY %s cannot be closed: no Income Expenditure A/c (tab_name ''InExp'') found to debit the appropriation against.', p_fy;
+            'FY %s cannot be closed: no Accumulated Surplus / Deficit account (tab_name ''ACS'') found to debit the appropriation against.', p_fy;
     END IF;
 
     v_journal_id := NEXTVAL('seq_transaction_number');
@@ -9138,7 +9273,7 @@ BEGIN
     -- opens is what makes "post nothing if we lose the race" true rather than
     -- aspirational.
     BEGIN
-        -- Dr Income Expenditure A/c / Cr Reserve Fund.
+        -- Dr Accumulated Surplus / Deficit (ACS) / Cr Reserve Fund.
         -- mode='journal': a pure book entry, no cash or bank leg (the same
         -- convention as the seed's Dr Dep / Cr Asset year-end journal, and the
         -- reason these rows stay out of the cashbook while still counting in
@@ -9162,7 +9297,7 @@ BEGIN
             transaction_number
         ) VALUES (
             p_society_id, v_journal_id, v_reserve_id, 'Cr', v_fy_end, v_transfer,
-            format('Transfer from Income & Expenditure A/c — statutory reserve appropriation (FY %s)', p_fy),
+            format('Transfer from Accumulated Surplus — statutory reserve appropriation (FY %s)', p_fy),
             'journal', 'paid', 'fy_close', NULL, p_created_by, format('%s-B', v_tn)
         );
 
@@ -11492,133 +11627,6 @@ BEGIN
 END;
 $$;
 
--- fn_cash_flow_fy
--- ===============
--- Cash Flow Statement for a given FY (indirect method variant: cash-basis
--- classification of every paid transaction into Operating / Investing /
--- Financing activities).
--- Returns: activity_category ('Operating'|'Investing'|'Financing'),
--- account_code, account_name, inflow, outflow (NUMERIC(15,2)).
--- Only non-journal, paid, cash/bank-mode transactions are included.
--- Opening and closing cash & bank balances are shown as memo lines.
-CREATE OR REPLACE FUNCTION fn_cash_flow_fy(
-    p_society_id INT,
-    p_fy         INT
-)
-RETURNS TABLE (
-    activity_category VARCHAR,
-    account_code      INT,
-    account_name      VARCHAR,
-    inflow            NUMERIC(15,2),
-    outflow           NUMERIC(15,2)
-)
-LANGUAGE plpgsql STABLE AS $$
-DECLARE
-    v_fy_start DATE := MAKE_DATE(p_fy, 4, 1);
-    v_fy_end   DATE := MAKE_DATE(p_fy + 1, 3, 31);
-BEGIN
-    RETURN QUERY
-    WITH closing AS (
-        SELECT * FROM fn_fy_closing_report(p_society_id, p_fy)
-    ),
-    bkac_base AS (
-        SELECT sort_path FROM closing WHERE tab_name = 'BkAc' LIMIT 1
-    ),
-    cash_bank_accs AS (
-        SELECT c.account_id
-        FROM closing c
-        CROSS JOIN bkac_base b
-        WHERE c.tab_name = 'CiH'
-           OR (b.sort_path IS NOT NULL AND c.sort_path LIKE b.sort_path || '.%')
-    ),
-    pl_roots AS (
-        SELECT sort_path FROM closing WHERE tab_name IN ('Inc', 'Exp')
-    ),
-    classified AS (
-        SELECT
-            t.id,
-            t.acc_id,
-            a.name AS account_name,
-            a.tab_name,
-            a.drcr_account,
-            t.amount,
-            t.entry_side,
-            t.mode,
-            CASE
-                -- Financing: capital, loans, funds, deposits received
-                WHEN c2.tab_name IN ('CapAc', 'Res', 'Eq', 'NCL', 'CL') THEN 'Financing'
-                -- Investing: fixed assets, investments
-                WHEN c2.tab_name IN ('FA', 'Inv') THEN 'Investing'
-                -- Operating: income and expense
-                WHEN c2.tab_name IN ('Inc', 'Exp') THEN 'Operating'
-                -- Cash & bank legs are excluded (they are the medium, not the activity)
-                ELSE NULL
-            END AS activity_category
-        FROM transactions t
-        JOIN accounts a ON a.id = t.acc_id AND a.society_id = p_society_id
-        LEFT JOIN closing c2 ON c2.account_id = t.acc_id
-        WHERE t.society_id = p_society_id
-          AND t.status = 'paid'
-          AND t.trx_date BETWEEN v_fy_start AND v_fy_end
-          AND t.mode IN ('cash', 'cheque', 'upi', 'card', 'bank', 'crypto')
-          AND t.entry_side IN ('Dr', 'Cr')
-          AND t.acc_id NOT IN (SELECT account_id FROM cash_bank_accs)
-    ),
-    operating AS (
-        SELECT 'Operating'::VARCHAR AS activity_category,
-               ca.acc_id::INT AS account_code,
-               ca.account_name::VARCHAR AS account_name,
-               COALESCE(SUM(CASE WHEN ca.entry_side = 'Cr' THEN ca.amount ELSE 0 END), 0)::NUMERIC(15,2) AS inflow,
-               COALESCE(SUM(CASE WHEN ca.entry_side = 'Dr' THEN ca.amount ELSE 0 END), 0)::NUMERIC(15,2) AS outflow
-        FROM classified ca
-        WHERE ca.activity_category = 'Operating'
-        GROUP BY ca.acc_id, ca.account_name
-    ),
-    investing AS (
-        SELECT 'Investing'::VARCHAR AS activity_category,
-               ca.acc_id::INT AS account_code,
-               ca.account_name::VARCHAR AS account_name,
-               COALESCE(SUM(CASE WHEN ca.entry_side = 'Cr' THEN ca.amount ELSE 0 END), 0)::NUMERIC(15,2) AS inflow,
-               COALESCE(SUM(CASE WHEN ca.entry_side = 'Dr' THEN ca.amount ELSE 0 END), 0)::NUMERIC(15,2) AS outflow
-        FROM classified ca
-        WHERE ca.activity_category = 'Investing'
-        GROUP BY ca.acc_id, ca.account_name
-    ),
-    financing AS (
-        SELECT 'Financing'::VARCHAR AS activity_category,
-               ca.acc_id::INT AS account_code,
-               ca.account_name::VARCHAR AS account_name,
-               COALESCE(SUM(CASE WHEN ca.entry_side = 'Cr' THEN ca.amount ELSE 0 END), 0)::NUMERIC(15,2) AS inflow,
-               COALESCE(SUM(CASE WHEN ca.entry_side = 'Dr' THEN ca.amount ELSE 0 END), 0)::NUMERIC(15,2) AS outflow
-        FROM classified ca
-        WHERE ca.activity_category = 'Financing'
-        GROUP BY ca.acc_id, ca.account_name
-    ),
-    cb AS (
-        SELECT
-            COALESCE(SUM(CASE WHEN c.total_closing < 0 THEN ABS(c.total_closing) ELSE 0 END), 0) AS dr_balance,
-            COALESCE(SUM(CASE WHEN c.total_closing >= 0 THEN c.total_closing ELSE 0 END), 0) AS cr_balance
-        FROM closing c
-        WHERE c.account_id IN (SELECT account_id FROM cash_bank_accs)
-    )
-    SELECT o.activity_category, o.account_code, o.account_name, o.inflow, o.outflow
-    FROM (
-        SELECT 1 AS sort_order, * FROM operating
-        UNION ALL
-        SELECT 2, * FROM investing
-        UNION ALL
-        SELECT 3, * FROM financing
-        UNION ALL
-        SELECT 4, 'Memo'::VARCHAR, NULL::INT, 'Cash & Bank Balances c/f (Dr)'::VARCHAR,
-               dr_balance::NUMERIC(15,2), 0::NUMERIC(15,2) FROM cb WHERE dr_balance > 0
-        UNION ALL
-        SELECT 5, 'Memo'::VARCHAR, NULL::INT, 'Cash & Bank Balances c/f (Cr)'::VARCHAR,
-               0::NUMERIC(15,2), cr_balance::NUMERIC(15,2) FROM cb WHERE cr_balance > 0
-    ) o
-    ORDER BY o.sort_order, o.account_name;
-END;
-$$;
-
 -- fn_income_expenditure_fy
 -- ========================
 -- Income & Expenditure Account (Accrual Basis) for a given FY.
@@ -11755,6 +11763,9 @@ BEGIN
     cap_ac AS (
         SELECT sort_path FROM closing WHERE tab_name = 'CapAc' LIMIT 1
     ),
+    asset_root AS (
+        SELECT sort_path FROM closing WHERE tab_name = 'As' LIMIT 1
+    ),
     pl_roots AS (
         SELECT sort_path FROM closing WHERE tab_name IN ('Inc', 'Exp')
     ),
@@ -11774,17 +11785,23 @@ BEGIN
           )
     ),
     asset_accs AS (
-        -- Fixed alongside the above: the previous "ABS if negative, else
-        -- pass through" logic assumed a Dr-natured account can only ever
-        -- have a normal (negative-total_closing) balance. Cash-in-Hand
-        -- proved that wrong live: when cash-mode outflows exceed inflows
-        -- for the year, its own_closing goes positive (a genuine net cash
-        -- shortfall), and the old logic passed that through as a false
-        -- positive asset instead of the true negative position — silently
-        -- overstating Assets by double the shortfall. Unconditionally
-        -- negating own_closing is correct for both the normal and
-        -- shortfall cases, and shows a real deficit honestly as negative
+        -- The "ABS if negative, else pass through" logic assumed a Dr-natured
+        -- account can only ever have a normal (negative-total_closing)
+        -- balance. Cash-in-Hand proved that wrong live: when cash-mode
+        -- outflows exceed inflows for the year, its own_closing goes positive
+        -- (a genuine net cash shortfall), and the old logic passed that
+        -- through as a false positive asset instead of the true negative
+        -- position — silently overstating Assets by double the shortfall.
+        -- Unconditionally negating own_closing is correct for both the normal
+        -- and shortfall cases, and shows a real deficit honestly as negative
         -- rather than hiding it.
+        --
+        -- Contra (Cr-natured) accounts that sit under the Assets root —
+        -- Accumulated Depreciation (1190) under Fixed Assets and Provision
+        -- for Doubtful Debts (1530) under Sundry Debtors — belong in the
+        -- Assets section shown as a negative amount, directly under their
+        -- group. Without this they were misclassified as Liabilities because
+        -- they are Cr-natured under a Dr root (defect E2 / finding F-09).
         SELECT 'Assets'::VARCHAR AS statement_section,
                ba.account_id::INT AS account_code,
                ba.account_name::VARCHAR AS account_name,
@@ -11795,7 +11812,11 @@ BEGIN
                ba.statutory_statement_section,
                ba.statutory_display_order
         FROM bs_accs ba
+        LEFT JOIN asset_root ar ON TRUE
         WHERE ba.drcr_account = 'Dr'
+           OR (ba.drcr_account = 'Cr'
+               AND ar.sort_path IS NOT NULL
+               AND (ba.sort_path LIKE ar.sort_path || '.%' OR ba.sort_path = ar.sort_path))
     ),
     liability_accs AS (
         SELECT 'Liabilities'::VARCHAR AS statement_section,
@@ -11808,7 +11829,10 @@ BEGIN
                ba.statutory_statement_section,
                ba.statutory_display_order
         FROM bs_accs ba
+        LEFT JOIN asset_root ar ON TRUE
         WHERE ba.drcr_account = 'Cr'
+          AND NOT (ar.sort_path IS NOT NULL
+                   AND (ba.sort_path LIKE ar.sort_path || '.%' OR ba.sort_path = ar.sort_path))
     ),
     ie_surplus AS (
         SELECT COALESCE(SUM(c.own_closing), 0) AS surplus
@@ -16898,143 +16922,37 @@ BEGIN
     RETURN NEXT; RETURN;
 END $$;
 
--- fn_account_guard
--- ================
--- Account guard: returns whether a posting to the given account is allowed.
--- Returns: (allowed BOOLEAN, reason TEXT).
--- Blocks posting when the account does not exist, is a root/group node
--- (has no direct postings in this engine), or is locked by a closed FY.
-CREATE OR REPLACE FUNCTION fn_account_guard(p_society_id INT, p_acc_id INT)
-RETURNS TABLE (allowed BOOLEAN, reason TEXT)
-LANGUAGE plpgsql AS $$
-DECLARE
-    v_acc accounts%ROWTYPE;
-    v_closed INT;
-BEGIN
-    SELECT * INTO v_acc
-    FROM accounts
-    WHERE id = p_acc_id AND society_id = p_society_id;
-
-    IF NOT FOUND THEN
-        allowed := FALSE;
-        reason := format('Account %s does not exist in society %s', p_acc_id, p_society_id);
-        RETURN NEXT; RETURN;
-    END IF;
-
-    -- Root and header nodes (parent NULL or top-level roots) are not postable.
-    IF v_acc.parent_account_id IS NULL AND v_acc.id IN (1000, 2000, 3000, 4000, 5000) THEN
-        allowed := FALSE;
-        reason := format('Account %s (%s) is a root node — postings go to leaf accounts only', p_acc_id, v_acc.name);
-        RETURN NEXT; RETURN;
-    END IF;
-
-    -- Group nodes that carry no direct transactions are not postable.
-    -- A node is a group if some other account lists it as parent.
-    IF EXISTS (
-        SELECT 1 FROM accounts a2
-        WHERE a2.society_id = p_society_id AND a2.parent_account_id = p_acc_id
-    ) THEN
-        allowed := FALSE;
-        reason := format('Account %s (%s) is a group/header node — postings go to leaf accounts only', p_acc_id, v_acc.name);
-        RETURN NEXT; RETURN;
-    END IF;
-
-    -- Block posting if any FY for this society is closed and not reversed.
-    SELECT COUNT(*) INTO v_closed
-    FROM fy_closures c
-    WHERE c.society_id = p_society_id AND c.status <> 'reversed';
-
-    IF v_closed > 0 THEN
-        allowed := FALSE;
-        reason := format('Account %s (%s) is locked — at least one FY is closed for this society', p_acc_id, v_acc.name);
-        RETURN NEXT; RETURN;
-    END IF;
-
-    allowed := TRUE;
-    reason := format('OK: posting to %s (%s) is allowed', p_acc_id, v_acc.name);
-    RETURN NEXT; RETURN;
-END $$;
-
--- fn_drift_check
--- =============
--- Drift check: compares the sum of all transaction Dr/Cr per account against
--- fn_trial_balance_fy's closing_dr / closing_cr. Returns any accounts where
--- the two disagree, plus an overall balanced flag.
--- Returns: (account_id INT, account_name TEXT, ledger_dr NUMERIC, ledger_cr NUMERIC,
---           trial_dr NUMERIC, trial_cr NUMERIC, drift BOOLEAN, msg TEXT)
-CREATE OR REPLACE FUNCTION fn_drift_check(p_society_id INT, p_fy INT)
+-- fn_trial_balance_check
+-- ======================
+-- Whole-ledger trial-balance check for a society / FY, built on
+-- fn_trial_balance_fy. Returns one row: total_dr, total_cr, diff, balanced.
+-- The per-account drift idea moves to app/services/chart_drift.py (C4).
+CREATE OR REPLACE FUNCTION fn_trial_balance_check(p_society_id INT, p_fy INT)
 RETURNS TABLE (
-    account_id    INT,
-    account_name  TEXT,
-    ledger_dr     NUMERIC(15,2),
-    ledger_cr     NUMERIC(15,2),
-    trial_dr      NUMERIC(15,2),
-    trial_cr      NUMERIC(15,2),
-    drift         BOOLEAN,
-    msg           TEXT
+    total_dr  NUMERIC(15,2),
+    total_cr  NUMERIC(15,2),
+    diff      NUMERIC(15,2),
+    balanced  BOOLEAN
 )
 LANGUAGE plpgsql STABLE AS $$
+#variable_conflict use_column
 DECLARE
-    v_root_diff NUMERIC(15,2);
+    v_total_dr NUMERIC(15,2) := 0;
+    v_total_cr NUMERIC(15,2) := 0;
 BEGIN
-    -- Overall whole-ledger identity: root account total must be ~0.
-    SELECT COALESCE(MAX(ABS(c.total_closing)), 0) INTO v_root_diff
-    FROM fn_fy_closing_report(p_society_id, p_fy) c
-    WHERE c.parent_account_id IS NULL;
+    SELECT COALESCE(SUM(c.closing_dr), 0),
+           COALESCE(SUM(c.closing_cr), 0)
+    INTO v_total_dr, v_total_cr
+    FROM fn_trial_balance_fy(p_society_id, p_fy) c;
 
-    RETURN QUERY
-    WITH ledger AS (
-        SELECT
-            t.acc_id AS account_id,
-            COALESCE(SUM(CASE WHEN t.entry_side = 'Dr' THEN t.amount ELSE 0 END), 0) AS ledger_dr,
-            COALESCE(SUM(CASE WHEN t.entry_side = 'Cr' THEN t.amount ELSE 0 END), 0) AS ledger_cr
-        FROM transactions t
-        WHERE t.society_id = p_society_id
-          AND t.status = 'paid'
-          AND t.trx_date BETWEEN MAKE_DATE(p_fy, 4, 1) AND MAKE_DATE(p_fy + 1, 3, 31)
-        GROUP BY t.acc_id
-    ),
-    trial AS (
-        SELECT account_id, closing_dr, closing_cr
-        FROM fn_trial_balance_fy(p_society_id, p_fy)
-    )
-    SELECT
-        COALESCE(l.account_id, t.account_id) AS account_id,
-        a.name AS account_name,
-        COALESCE(l.ledger_dr, 0) AS ledger_dr,
-        COALESCE(l.ledger_cr, 0) AS ledger_cr,
-        COALESCE(t.closing_dr, 0) AS trial_dr,
-        COALESCE(t.closing_cr, 0) AS trial_cr,
-        (ABS(COALESCE(l.ledger_dr, 0) - COALESCE(t.closing_dr, 0)) > 0.01
-         OR ABS(COALESCE(l.ledger_cr, 0) - COALESCE(t.closing_cr, 0)) > 0.01) AS drift,
-        CASE
-            WHEN ABS(COALESCE(l.ledger_dr, 0) - COALESCE(t.closing_dr, 0)) > 0.01
-              OR ABS(COALESCE(l.ledger_cr, 0) - COALESCE(t.closing_cr, 0)) > 0.01
-            THEN format('Drift on account %s: ledger Dr=%s Cr=%s vs trial Dr=%s Cr=%s',
-                        COALESCE(l.account_id, t.account_id),
-                        trim(to_char(COALESCE(l.ledger_dr, 0), 'FM999,999,990.00')),
-                        trim(to_char(COALESCE(l.ledger_cr, 0), 'FM999,999,990.00')),
-                        trim(to_char(COALESCE(t.closing_dr, 0), 'FM999,999,990.00')),
-                        trim(to_char(COALESCE(t.closing_cr, 0), 'FM999,999,990.00')))
-            ELSE 'OK'
-        END AS msg
-    FROM ledger l
-    FULL OUTER JOIN trial t ON l.account_id = t.account_id
-    LEFT JOIN accounts a ON a.id = COALESCE(l.account_id, t.account_id)
-    WHERE (ABS(COALESCE(l.ledger_dr, 0) - COALESCE(t.closing_dr, 0)) > 0.01
-           OR ABS(COALESCE(l.ledger_cr, 0) - COALESCE(t.closing_cr, 0)) > 0.01)
-       OR v_root_diff > 0.01;
-
-    -- If no drift rows and root is balanced, return a single OK row.
-    IF NOT FOUND AND v_root_diff <= 0.01 THEN
-        account_id := NULL; account_name := NULL;
-        ledger_dr := 0; ledger_cr := 0;
-        trial_dr := 0; trial_cr := 0;
-        drift := FALSE;
-        msg := 'OK: No drift — trial balance matches ledger for all accounts';
-        RETURN NEXT;
-    END IF;
-END $$;
+    total_dr := v_total_dr;
+    total_cr := v_total_cr;
+    diff := v_total_dr - v_total_cr;
+    balanced := ABS(v_total_dr - v_total_cr) <= 0.01;
+    RETURN NEXT;
+    RETURN;
+END;
+$$;
 
 -- 5b. Publication of Accounts (bye-law 50)
 -- ───────────────────────────────────────────────────────────────────────────────

@@ -4,6 +4,13 @@ The register holds the data (status, parameters, account routes, billing channel
 screens need: the legacy UP_AOA_FUNDS shape, badge specs, and the Brought Forward row labels that show only the
 funds a society holds - every prescribed fund, plus an optional fund only once the society opts in.
 """
+from database.chart_ids import (
+    CORPUS_FUND,
+    DEPRECIATION_FUND,
+    MAJOR_REPAIR_FUND_TRANSFER_FEE,
+    REPAIR_MAINTENANCE_FUND_RESERVE,
+    SINKING_FUND_RESERVE,
+)
 from schemes.fund_register import (  # noqa: F401
     BILLING_CHANNELS,
     FUND_ORDER,
@@ -35,11 +42,11 @@ for _k in FUND_ORDER:
 BF_FUND_ACCOUNTS = dict(_BF_ACCOUNT_FUNDS)
 
 _BF_LABEL = {
-    3210: "Sinking Fund Reserve (UP AOA)",
-    3220: {"reserve": "Reserve Fund", "both": "Reserve Fund / Repair & Maintenance Fund Reserve"},
-    3230: "Corpus Fund (IFMS) (UP AOA)",
-    3270: "Major Repair Fund (UP AOA)",
-    3280: "Depreciation Fund (Society Policy / as applicable)",
+    SINKING_FUND_RESERVE: "Sinking Fund Reserve (UP AOA)",
+    REPAIR_MAINTENANCE_FUND_RESERVE: {"reserve": "Reserve Fund", "both": "Reserve Fund / Repair & Maintenance Fund Reserve"},
+    CORPUS_FUND: "Corpus Fund (IFMS) (UP AOA)",
+    MAJOR_REPAIR_FUND_TRANSFER_FEE: "Major Repair Fund (UP AOA)",
+    DEPRECIATION_FUND: "Depreciation Fund (Society Policy / as applicable)",
 }
 
 

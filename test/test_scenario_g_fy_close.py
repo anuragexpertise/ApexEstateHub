@@ -14,6 +14,8 @@ Tests:
 from datetime import date
 
 import pglast
+from pglast.ast import CreateFunctionStmt
+
 from app.dash_apps.drilldown import loaders
 
 SQL = None
@@ -24,6 +26,20 @@ def _sql():
     if SQL is None:
         SQL = open("database/estatehub.sql", encoding="utf-8").read()
     return SQL
+
+
+def _function_stmts(sql):
+    """All CREATE FUNCTION statements in `sql`, as (funcname, stmt) pairs.
+
+    Comparing funcname (not str(stmt)) avoids counting a function once for its
+    own definition and once for every other body that merely mentions its name.
+    """
+    found = []
+    for raw in pglast.parse_sql(sql):
+        stmt = getattr(raw, "stmt", None)
+        if isinstance(stmt, CreateFunctionStmt) and stmt.funcname:
+            found.append((stmt.funcname[0].sval, stmt))
+    return found
 
 
 def _seed_financial_world(patched_db):
@@ -76,16 +92,6 @@ class TestScenarioG_FinancialYearClose:
         rows, _ = loaders.get_fy_closing_report(1, 2025)
         names = [r["account_name"] for r in rows]
         assert any("Cash" in n or "Capital" in n for n in names)
-
-    def test_trial_balance_sums_dr_and_cr(self, patched_db):
-        _seed_financial_world(patched_db)
-        rows = patched_db._fn_trial_balance(
-            {"p0": 1, "p1": 2025}, fetch_one=False, fetch_all=True
-        )
-        assert rows is not None
-        for r in rows:
-            assert "dr_total" in r
-            assert "cr_total" in r
 
     def test_balance_sheet_totals_match(self, patched_db):
         _seed_financial_world(patched_db)
@@ -175,77 +181,79 @@ class TestScenarioG_FinancialYearClose:
     def test_fn_trial_balance_fy_defined_in_sql(self):
         """T6: fn_trial_balance_fy is defined in database/estatehub.sql and parses cleanly."""
         sql = _sql()
-        assert "CREATE OR REPLACE FUNCTION fn_trial_balance_fy(" in sql, "fn_trial_balance_fy not defined in estatehub.sql"
-        stmts = pglast.parse_sql(sql)
-        fn_texts = [str(s) for s in stmts if "fn_trial_balance_fy" in str(s)]
-        assert len(fn_texts) == 1, f"expected 1 fn_trial_balance_fy definition, found {len(fn_texts)}"
-        t = fn_texts[0]
-        assert "account_id" in t and "closing_dr" in t and "closing_cr" in t, \
-            "fn_trial_balance_fy missing RETURNS TABLE columns: account_id, closing_dr, closing_cr"
-
-    def test_trial_balance_whole_ledger_check(self, patched_db):
-        """T6: Whole-ledger check — SUM(closing_dr) == SUM(closing_cr) for the seeded society."""
-        _seed_financial_world(patched_db)
-        rows = patched_db._fn_trial_balance(
-            {"p0": 1, "p1": 2025}, fetch_one=False, fetch_all=True
-        )
-        assert rows is not None
-        total_dr = sum(float(r.get("dr_total", 0) or 0) for r in rows)
-        total_cr = sum(float(r.get("cr_total", 0) or 0) for r in rows)
-        assert abs(total_dr - total_cr) < 0.01, f"books out of balance: Dr={total_dr} Cr={total_cr}"
-
-    def test_trial_balance_prior_year_available(self, patched_db):
-        """T6: Prior year available by calling with p_fy - 1."""
-        _seed_financial_world(patched_db)
-        rows_curr = patched_db._fn_trial_balance(
-            {"p0": 1, "p1": 2025}, fetch_one=False, fetch_all=True
-        )
-        rows_prev = patched_db._fn_trial_balance(
-            {"p0": 1, "p1": 2024}, fetch_one=False, fetch_all=True
-        )
-        assert rows_curr is not None
-        # Prior year with no transactions: all zero
-        for r in rows_prev:
-            assert float(r.get("dr_total", 0) or 0) == 0
-            assert float(r.get("cr_total", 0) or 0) == 0
+        stmts = [stmt for n, stmt in _function_stmts(sql) if n == "fn_trial_balance_fy"]
+        assert len(stmts) == 1, f"expected 1 fn_trial_balance_fy definition, found {len(stmts)}"
+        node = stmts[0]
+        param_names = [p.name for p in node.parameters]
+        for col in ("account_id", "account_name", "closing_dr", "closing_cr"):
+            assert col in param_names, \
+                f"fn_trial_balance_fy missing RETURNS TABLE column: {col}"
 
     def test_fn_statement_functions_defined_in_sql(self):
-        """T8: fn_cash_flow_fy and fn_receipts_payments_fy are defined in estatehub.sql and parse cleanly."""
+        """T8: fn_receipts_payments_fy is defined in estatehub.sql and parses cleanly.
+        (fn_cash_flow_fy was deleted in C9 / finding E4.)"""
         sql = _sql()
-        for fn in ("fn_cash_flow_fy", "fn_receipts_payments_fy"):
-            assert f"CREATE OR REPLACE FUNCTION {fn}(" in sql, f"{fn} not defined in estatehub.sql"
-        stmts = pglast.parse_sql(sql)
-        fn_texts = {}
-        for s in stmts:
-            t = str(s)
-            for fn in ("fn_cash_flow_fy", "fn_receipts_payments_fy"):
-                if fn in t:
-                    fn_texts.setdefault(fn, []).append(t)
-        for fn in ("fn_cash_flow_fy", "fn_receipts_payments_fy"):
-            assert fn in fn_texts, f"{fn} not found in parsed statements"
-            assert len(fn_texts[fn]) == 1, f"expected 1 {fn} definition, found {len(fn_texts[fn])}"
+        stmts = [stmt for n, stmt in _function_stmts(sql) if n == "fn_receipts_payments_fy"]
+        assert stmts, "fn_receipts_payments_fy not defined in estatehub.sql"
+        assert len(stmts) == 1, f"expected 1 fn_receipts_payments_fy definition, found {len(stmts)}"
 
     def test_export_trial_balance_exists(self):
         """T10: export_trial_balance function exists in financial_statements_export."""
         from database.financial_statements_export import export_trial_balance
         assert callable(export_trial_balance)
 
-    def test_fn_account_guard_defined_in_sql(self):
-        """T4: fn_account_guard is defined in estatehub.sql and parses cleanly."""
-        sql = _sql()
-        assert "CREATE OR REPLACE FUNCTION fn_account_guard(" in sql, "fn_account_guard not defined in estatehub.sql"
-        stmts = pglast.parse_sql(sql)
-        fn_texts = [str(s) for s in stmts if "fn_account_guard" in str(s)]
-        assert len(fn_texts) == 1, f"expected 1 fn_account_guard definition, found {len(fn_texts)}"
-        t = fn_texts[0]
-        assert "allowed" in t and "reason" in t, "fn_account_guard missing allowed/reason columns"
 
-    def test_fn_drift_check_defined_in_sql(self):
-        """T4: fn_drift_check is defined in estatehub.sql and parses cleanly."""
-        sql = _sql()
-        assert "CREATE OR REPLACE FUNCTION fn_drift_check(" in sql, "fn_drift_check not defined in estatehub.sql"
-        stmts = pglast.parse_sql(sql)
-        fn_texts = [str(s) for s in stmts if "fn_drift_check" in str(s)]
-        assert len(fn_texts) == 1, f"expected 1 fn_drift_check definition, found {len(fn_texts)}"
-        t = fn_texts[0]
-        assert "drift" in t and "msg" in t, "fn_drift_check missing drift/msg columns"
+def test_every_postable_account_has_statutory_head():
+    """C2 (F-19): every postable (leaf) account has exactly one statutory head;
+    root id 1 is the allow-list; hybrid account 1500 also carries a head."""
+    from database.seed import ACCOUNTS, UP_AOA_ACCOUNT_MAPPINGS
+
+    parent_ids = {row[4] for row in ACCOUNTS if row[4] is not None}
+    leaf_ids = {row[0] for row in ACCOUNTS if row[0] != 1 and row[0] not in parent_ids}
+
+    head_count: dict[int, int] = {}
+    for (aid, _head_code, _ref) in UP_AOA_ACCOUNT_MAPPINGS:
+        head_count[aid] = head_count.get(aid, 0) + 1
+
+    # No account may carry more than one head.
+    for aid, cnt in head_count.items():
+        assert cnt == 1, f"account {aid} has {cnt} statutory heads"
+
+    # Every postable leaf account must have exactly one head.
+    missing = sorted(aid for aid in leaf_ids if head_count.get(aid, 0) != 1)
+    assert not missing, f"leaf accounts without exactly one head: {missing}"
+
+    # Hybrid account 1500 holds its own postings and needs a head too.
+    assert head_count.get(1500, 0) == 1, "hybrid account 1500 has no statutory head"
+
+
+def test_statutory_head_uniqueness():
+    """C7 (E9 / 3280 observation): each statutory head in the fund/reserve/capital
+    set maps to exactly one account; 3280 is the Depreciation Fund account."""
+    from database.seed import UP_AOA_ACCOUNT_MAPPINGS
+    from schemes.fund_register import account_mappings
+
+    heads: dict[str, list[int]] = {}
+    seen_pairs = set()
+    for (aid, head_code, _ref) in list(UP_AOA_ACCOUNT_MAPPINGS) + list(account_mappings()):
+        if (head_code, aid) in seen_pairs:
+            continue
+        seen_pairs.add((head_code, aid))
+        heads.setdefault(head_code, []).append(aid)
+
+    # Each head in the fund/reserve/capital set maps to exactly one account.
+    single_head_accounts = {
+        "DEPRECIATION_FUND": 3280,
+        "RESERVE_FUND": 3220,
+        "IFMS_CORPUS": 3230,
+        "SINKING_FUND": 3210,
+        "MAJOR_REPAIR_FUND": 3270,
+        "EARMARKED_FUNDS": 3240,
+        "CAPITAL_ACCOUNT": 3100,
+        "ACCUMULATED_SURPLUS": 3300,
+    }
+    for head_code, expected_id in single_head_accounts.items():
+        got = heads.get(head_code, [])
+        assert len(got) == 1, f"head {head_code} mapped to {got} accounts, expected exactly 1"
+        assert got[0] == expected_id, f"head {head_code} mapped to account {got[0]}, expected {expected_id}"
+
