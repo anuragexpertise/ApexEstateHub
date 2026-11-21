@@ -142,7 +142,7 @@ def test_unusable_files(data, name, frag):
 
 def test_template_round_trip_keeps_leading_zero_flats():
     rows = [{"flat_number": "07", "amount": "100.50", "overdue_days": 4, "remarks": "x"}]
-    back, errs, _ = pr.parse_upload(pr.build_template(rows, known_flats=["07", "08"]), "t.xlsx")
+    back, errs, _ = pr.parse_upload(pr.build_template(fy="2026", rows=rows, known_flats=["07", "08"]), "t.xlsx")
     assert errs == [] and back == [{"flat_number": "07", "amount": "100.50", "overdue_days": 4, "remarks": "x"}]
 
 
