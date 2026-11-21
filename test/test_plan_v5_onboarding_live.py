@@ -190,7 +190,7 @@ def test_09_agreement_cannot_be_signed_before_annexes_are_sealed(world):
 def test_10_seal_annexes_puts_their_hashes_in_the_agreement(world):
     ob, sid, db = world["ob"], world["sid"], world["db"]
     # bank attestation (save_annex_inputs) was replaced by the funds_backed control, which passes with the test data.
-    ob.set_grievance_officer(sid, "G. Officer", "grievance@example.com", None)    # Annex D needs one
+    ob.set_grievance_officer(sid, "G. Officer", "grievance@example.com", None, actor_id=world["admin"])    # Annex D needs one
     db._execute("INSERT INTO onboarding_evidence (society_id, purpose, filename, stored_name, sha256, size_bytes, uploaded_by) "
                 "VALUES (%s,'registration_certificate','reg.pdf','x.pdf',%s,10,%s)", (sid, "e" * 64, world["admin"]))   # Annex E blocks without it
     ob.confirm_operator(sid, world["admin"], "EstateHub LLP", "Agra, UP, India")      # sealing is gated on this since dcc5dd9

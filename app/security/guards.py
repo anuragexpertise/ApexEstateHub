@@ -45,6 +45,7 @@ enforces that every other callback has it.
 
 from __future__ import annotations
 
+import time
 from functools import wraps
 
 from dash.exceptions import PreventUpdate
@@ -81,7 +82,18 @@ _SETUP_EXEMPT_MODULES = frozenset({
 _SETUP_EXEMPT_FUNCTIONS = frozenset({
     ("drilldown_callbacks", "handle_image_upload"),
 })
-_SETUP_DONE: set = set()      # a society that finished setup never goes back, so cache only "done"
+# society id -> time (monotonic) until which "setup is done" may be trusted. A society CAN leave 'active' (it can be
+# suspended), so "done" is cached only briefly: a suspension takes effect in every worker within _SETUP_DONE_TTL seconds.
+_SETUP_DONE: dict = {}
+_SETUP_DONE_TTL = 30.0
+
+
+def forget_setup_done(society_id=None) -> None:
+    """Drop the cached "done" verdict for one society (or all). Call it when a society is suspended."""
+    if society_id is None:
+        _SETUP_DONE.clear()
+    else:
+        _SETUP_DONE.pop(society_id, None)
 
 
 def allow_during_setup(f):
@@ -102,11 +114,15 @@ def _setup_blocks_callback() -> bool:
     if get_current_user_role() in (None, "master"):
         return False
     sid = get_current_society_id()
-    if not sid or sid in _SETUP_DONE:
+    if not sid:
         return False
+    now = time.monotonic()
+    if _SETUP_DONE.get(sid, 0.0) > now:
+        return False
+    _SETUP_DONE.pop(sid, None)
     if society_setup_incomplete(sid):      # fails closed: a database error raises and the callback does not run
         return True
-    _SETUP_DONE.add(sid)
+    _SETUP_DONE[sid] = now + _SETUP_DONE_TTL
     return False
 
 

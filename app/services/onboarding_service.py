@@ -425,7 +425,8 @@ def update_seated_officer(actor_id: int, society_id: int, office_code: str, phon
     return f"{OFFICE_LABEL[office_code]} details updated."
 
 
-def set_grievance_officer(society_id: int, name: str, email: str, phone: str | None) -> None:
+def set_grievance_officer(society_id: int, name: str, email: str, phone: str | None, *, actor_id: int | None) -> None:
+    _assert_admin(society_id, actor_id)
     from app.services import committee_service as cs
     name = (name or "").strip()
     e = cs.clean_email(email)
@@ -947,6 +948,15 @@ def finalize_draft(society_id: int, actor_id: int, admin_password: str) -> str:
 def _committee_complete(society_id: int) -> bool:
     officers = seated_officers(society_id)
     return all(_officer_complete(officers.get(o)) for o in CORE_OFFICES)
+
+
+def _assert_admin(society_id: int, actor_id: int | None) -> None:
+    """Defence in depth: the Dash callbacks already require the admin role, but these services change a society's
+    onboarding record, so they refuse any actor who is not an admin of THIS society, whoever calls them."""
+    ok = actor_id is not None and _row("SELECT 1 AS x FROM users WHERE id=%s AND society_id=%s AND role='admin'",
+                                       (actor_id, society_id))
+    if not ok:
+        raise OnboardingError("Only the society's administrator can do that.")
 
 
 def _audit(society_id: int, actor_id: int, action: str, resource_type: str, resource_id: int | None,
@@ -2062,6 +2072,7 @@ def _write_agreement_on(cur, society_id: int, ag: dict) -> str:
 def seal_annexes(society_id: int, actor_id: int) -> dict:
     """Seal A, B, C, D, E (refused while any control blocks) and write the Agreement text with their hashes into it,
     all in ONE transaction: on any failure the annexes stay unsealed and nothing is committed."""
+    _assert_admin(society_id, actor_id)
     if state_of(society_id) != "setup draft":
         raise OnboardingError("Submit the Setup Wizard before sealing the annexes.")
     drafts = {r["annex_code"]: r for r in _rows(
@@ -2105,6 +2116,7 @@ def seal_annexes(society_id: int, actor_id: int) -> dict:
 def reissue_agreement(society_id: int, actor_id: int) -> dict:
     """Rewrite the Agreement body_text from the sealed annexes. Refused once any agreement signature exists, so
     existing signatures are never voided silently."""
+    _assert_admin(society_id, actor_id)
     from app.dash_apps.callbacks.drilldown_callbacks import _get_or_create_agreement
     ag = _get_or_create_agreement(db, society_id)
     if _row("SELECT 1 AS x FROM signed_records WHERE subject_kind='agreement' AND subject_id=%s AND status='valid'", (ag["id"],)):
@@ -2156,6 +2168,7 @@ def operator_confirmed(society_id: int) -> bool:
 def confirm_operator(society_id: int, actor_id: int, name: str, address: str) -> str:
     """Record the operator's legal name and address for this society and mark it confirmed. Refused once any
     agreement signature exists (the name is baked into the signed text, so changing it later would void signatures)."""
+    _assert_admin(society_id, actor_id)
     name = (name or "").strip()
     address = (address or "").strip()
     if not name:
@@ -2314,6 +2327,7 @@ def appoint_adviser(actor_id: int, society_id: int, kind: str, name: str, firm: 
 
 def revoke_adviser(society_id: int, actor_id: int, adviser_id: int, reason: str | None) -> str:
     """End an adviser's appointment and switch off their login."""
+    _assert_admin(society_id, actor_id)
     if len((reason or "").strip()) < 5:
         raise OnboardingError("Say why the appointment is being revoked.")
     row = _row("SELECT id, active, login_user_id FROM adviser_appointments WHERE id=%s AND society_id=%s",
@@ -2361,6 +2375,7 @@ def import_legacy_resolution(society_id: int, actor_id: int, held_on, meeting_ty
     minutes said happened goes in legacy_outcome. Because it is not passed it can never satisfy a majority check or
     authorise a document; the society must pass a fresh resolution for that.
     """
+    _assert_admin(society_id, actor_id)
     body = (body or "").strip()
     if not body:
         raise OnboardingError("The resolution text is required.")
@@ -3081,6 +3096,7 @@ def seal_supplementary_annex(society_id: int, code: str, actor_id: int) -> dict:
 
 def advance_phase(society_id: int, actor_id: int, to_phase: str) -> str:
     """Stages 6 and 7 are never blocking: 'Mark done' or 'Do later' both just move on."""
+    _assert_admin(society_id, actor_id)
     order = {"adoption": "advisers", "advisers": "complete"}
     cur = society_phase(society_id)
     if cur not in order or order[cur] != to_phase:

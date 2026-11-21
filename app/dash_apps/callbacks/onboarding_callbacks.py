@@ -387,7 +387,7 @@ def register_onboarding_callbacks(app):
         if role != "admin" or not sid:
             return _alert("Only the society's administrator can name the grievance officer.", False), no_update, no_update
         try:
-            ob.set_grievance_officer(sid, name, email, phone)
+            ob.set_grievance_officer(sid, name, email, phone, actor_id=uid)
         except ob.OnboardingError as exc:
             return _alert(str(exc), False), no_update, no_update
         view = _committee_view(sid)               # stay here so the "Continue to society setup" button is visible

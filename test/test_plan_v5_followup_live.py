@@ -133,9 +133,12 @@ def test_08_stale_esign_requests_expire(w):
 def test_09_legacy_resolution_is_stored_as_inert_evidence(w):
     ob, db, sid = w["ob"], w["db"], w["sid"]
     dt = db._execute("SELECT id FROM decision_types ORDER BY id LIMIT 1", fetch_one=True)["id"]
-    assert "SHA-256" in refused(ob.import_legacy_resolution, sid, MASTER_ID, "2024-05-01", "GBM", dt, "Approved the budget", "m.pdf", "")
-    assert "past" in refused(ob.import_legacy_resolution, sid, MASTER_ID, str(date.today() + timedelta(days=3)), "GBM", dt, "x", "m.pdf", "a" * 64)
-    msg = ob.import_legacy_resolution(sid, MASTER_ID, "2024-05-01", "GBM", dt, "Approved the budget", "m.pdf", "a" * 64, "passed")
+    # import_legacy_resolution now accepts only an admin of this society as the actor.
+    adm = db._execute("INSERT INTO users (society_id, email, password_hash, role, name) VALUES (%s,%s,'x','admin','A') RETURNING id",
+                      (sid, f"legacy-adm{PID}@v5follow.example"), fetch_one=True)["id"]
+    assert "SHA-256" in refused(ob.import_legacy_resolution, sid, adm, "2024-05-01", "GBM", dt, "Approved the budget", "m.pdf", "")
+    assert "past" in refused(ob.import_legacy_resolution, sid, adm, str(date.today() + timedelta(days=3)), "GBM", dt, "x", "m.pdf", "a" * 64)
+    msg = ob.import_legacy_resolution(sid, adm, "2024-05-01", "GBM", dt, "Approved the budget", "m.pdf", "a" * 64, "passed")
     assert "evidence" in msg.lower()
     r = db._execute("SELECT r.passed, r.status, r.legacy, r.legacy_outcome FROM resolutions r JOIN meetings m ON m.id=r.meeting_id WHERE m.society_id=%s AND r.legacy", (sid,), fetch_one=True)
     assert r["legacy"] and not r["passed"] and r["status"] == "draft" and r["legacy_outcome"] == "passed"
