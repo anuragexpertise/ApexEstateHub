@@ -262,7 +262,11 @@ def eligible_accounts() -> list[dict]:
     out = []
     for aid in ids:
         a = by_id[aid]
-        out.append({"id": a[0], "name": a[3] or f"Account {a[0]}", "tab": a[2], "side": a[5]})
+        name = a[3] or f"Account {a[0]}"
+        # id/name/tab are the grid and importer keys; account_id/account_tab/account_name are the statement template's
+        # column names (build_bf_statement_template reads those). Both spellings carry the same values.
+        out.append({"id": a[0], "name": name, "tab": a[2], "side": a[5],
+                    "account_id": a[0], "account_name": name, "account_tab": a[2]})
     return out
 
 
