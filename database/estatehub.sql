@@ -538,9 +538,6 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER trg_transactions_active_account
-BEFORE INSERT ON transactions
-FOR EACH ROW EXECUTE FUNCTION trg_transactions_active_account();
 
 
 CREATE TABLE apartments (
@@ -1999,6 +1996,10 @@ CREATE TABLE transactions (
         )
     )
 );
+
+CREATE TRIGGER trg_transactions_active_account
+BEFORE INSERT ON transactions
+FOR EACH ROW EXECUTE FUNCTION trg_transactions_active_account();
 
 CREATE UNIQUE INDEX uq_transactions_one_reversal_per_leg ON transactions (reverses_id)
 WHERE
