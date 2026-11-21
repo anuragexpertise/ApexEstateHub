@@ -227,6 +227,13 @@ def _wire(monkeypatch, tables):
 
 # ── T3: atomic seal + rollback ───────────────────────────────────────────────
 
+
+@pytest.fixture(autouse=True)
+def _admin_actor(monkeypatch):
+    """These tests use a fake database with no users table: treat the actor as the society's admin
+    (the admin check itself is tested in test_onboarding_admin_assert.py)."""
+    monkeypatch.setattr(ob, "_assert_admin", lambda society_id, actor_id: None)
+
 def test_seal_annexes_is_atomic_and_writes_agreement_in_same_transaction(monkeypatch):
     tables = {
         "societies": [_society(operator_confirmed="2026-11-20T00:00:00+05:30")],

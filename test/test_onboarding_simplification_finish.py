@@ -12,6 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 # ── Annex E indexes the election minutes ──────────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _admin_actor(monkeypatch):
+    """These tests use a fake database with no users table: treat the actor as the society's admin
+    (the admin check itself is tested in test_onboarding_admin_assert.py)."""
+    monkeypatch.setattr(ob, "_assert_admin", lambda society_id, actor_id: None)
+
 def test_annex_e_indexes_election_minutes_once(monkeypatch):
     def fake_rows(sql, params=None):
         if "FROM onboarding_evidence" in sql:
