@@ -2,92 +2,73 @@
 
 Generated from the ICAI3 corrective plan (on top of commit `6b3c6bd`, "icai v2").
 All SQL verified against a live local PostgreSQL 16 scratch instance (never
-Aiven/Render). Schema installs from scratch (exit 0) and seeds.
+Aiven/Render). Schema installs from scratch (exit 0) and seeds. One commit
+per finding/task, message `G<n>: <summary>`.
 
-## 1. Install & schema (G1, G2)
+## Findings F-02 to F-25 (one line each: status, commit, test / live check)
 
-- `CREATE TRIGGER trg_transactions_active_account` moved to directly after
-  `CREATE TABLE transactions` so the schema installs on a fresh database
-  (was rolled back: relation `transactions` did not exist).
-- `test/test_schema_order.py`: pglast file-order walk asserting every
-  trigger / index / ALTER / FK target table was created earlier in the file.
-  Fails on the unfixed file, passes after the fix. 0 forward references;
-  pglast clean (875 statements).
+| Finding | Severity | Status | Commit | Evidence / check |
+|---------|----------|--------|--------|------------------|
+| F-02 Nature consistency violated | Blocker | fixed | `80d89ca` (G5/G8) | `test_I1_nature_agrees_with_root`, contra allow-list {1190,1530} |
+| F-03 Id range vs root; five-digit ids | Blocker | fixed | `80d89ca` (G5/G8) | `test_I2_id_range_and_four_digits` |
+| F-09 No accumulated depreciation account | Blocker | fixed | prior T2 / `80d89ca` | 1190 credits 1,650 (live `fn_balance_sheet_fy`) |
+| F-13 5220 Income Tax mapped to TAX_PAYABLE | Blocker | fixed | `80d89ca` (G5/G8) | `test_statutory_head_mappings_section_3_1` (INCOME_TAX_EXPENSE) |
+| F-14 2290 TDS to IT mapped to FINANCE_COSTS | Blocker | fixed | `80d89ca` (G5/G8) | `test_statutory_head_mappings_section_3_1` (TAX_PAYABLE) |
+| F-17 3240 Earmarked Gifts Fund mapped to OTHER_LIABILITIES | Blocker | fixed | `80d89ca` (G5/G8) | `test_statutory_head_mappings_section_3_1` (EARMARKED_FUNDS) |
+| F-06 has_bf incomplete on balance-sheet leaves | Major | fixed | prior T2 | `bf_layout.py` has_bf for all balance-sheet leaves |
+| F-11 Hard-coded depreciation rates; no useful-life basis | Major | fixed | `7c0f479` (G6) | removed `INSTRUMENT_FULL_RATE`, uses `accounts.depreciation_percent` |
+| F-16 3250 Provisions mapped to STAFF_BENEFITS_PAYABLE | Major | fixed | prior T2 | 3250 → 2250 Current Liabilities |
+| F-18 Group accounts mapped alongside leaves | Major | fixed | `80d89ca` (G5/G8) | `test_I3_no_group_account_mapped` |
+| F-20 No immutability guard; no active/inactive flag | Major | fixed | prior T4 | `trg_accounts_guard`, `trg_transactions_active_account` (live C4) |
+| F-23 No creditors_tie control (Sundry Creditors to vendors) | Major | open | — | `fn_creditors_split` not built; mark todo |
+| F-24 No whole-ledger trial-balance check | Major | fixed | prior T6 / `7c0f479` | `fn_trial_balance_check` balanced (live) + `export_gate` |
+| F-25 No MSME/other creditors split | Major | open | — | `fn_creditors_split` not built; mark todo |
+| F-04 four-digit vs five-digit ids | Minor | fixed | prior T2 | renumbered 51100–51200 → 5101–5196 |
+| F-05 Duplicate header labels 1400/1410 | Minor | fixed | prior T2 | distinct labels |
+| F-07 Depreciation-percent semantics | Minor | fixed | `7c0f479` (G6) | `depreciation_percent` per account (1130 → 15) |
+| F-08 TDS section tags completeness | Minor | open | — | not fully traced |
+| F-10 3280 Depreciation Fund may be credited instead of 5110 | Minor | fixed | `7c0f479` (G6) | `trg_3280_guard` (live C6) |
+| F-12 5100 surplus/deficit landing not traced | Minor | fixed | prior T6 | close lands on 3300 ACS (live C5) |
+| F-15 5170/5180/5190/51100 all mapped to REPAIR_MAINTENANCE | Minor | fixed | prior T3 | distinct statutory heads |
+| F-19 Statutory head catalog gaps | Minor | fixed | `80d89ca` (G5/G8) | `test_statutory_head_mappings_section_3_1` |
+| F-21 No centralized COA audit trigger | Minor | open | — | not built; mark todo |
+| F-22 No per-society chart-drift check | Minor | open | — | `fn_drift_check` removed (ICAI3 confirmed-working); mark todo |
 
-## 2. Live-check harness (G3, G4)
+## Corrective items G1 to G12 (one line each)
 
-- `test/live_icai_checks.sql` line 5 `#` → `--` so psql accepts it (G3).
-- Added C4 triggers (delete/re-key refused, rename writes one audit row,
-  posting to inactive account refused), C5 year-end appropriation (surplus
-  unchanged, balance sheet balanced, 3220 credit +117,675, 3300 debit
-  117,675, 5100 zero), C1 contra (1190 in Assets −1,650; net fixed assets =
-  gross − 1,650), I5/I7 invariants. All writes run inside BEGIN/ROLLBACK so
-  they are transient. Proved C4 catches trigger removal.
-- `test/test_icai_live.py` runs the file when `ESTATEHUB_LIVE_TESTS=1`.
+| Item | Status | Commit | Evidence / check |
+|------|--------|--------|------------------|
+| G1 Schema install blocker | fixed | `b8a079d` (H1) | trigger moved after `CREATE TABLE transactions`; clean install+seed exit 0 |
+| G2 Schema-order unit test | fixed | `b8a079d` (H1) | `test/test_schema_order.py` (pglast file-order walk) |
+| G3 live check line-5 `#` | fixed | `80a0235` (H2) | `#` → `--`; `psql -f live_icai_checks.sql` exit 0 |
+| G4 live checks C4/C5/C1/I5-I7 | fixed | `80a0235` (H2) | `test/live_icai_checks.sql` exit 0; C4 proved by dropping trigger |
+| G5 invariants run | fixed | `80d89ca` (H3) | `test_I1/I2/I3` module level; `pytest -v` lists them |
+| G6 depreciation for real | fixed | `7c0f479` (H4) | 1190 credited once; `fixed_asset_tie`; `trg_3280_guard` |
+| G7 stale id 51110 | fixed | `41ca2ca` (H5) | → 5102; cash-limit live tests pass |
+| G8 resolver rename | fixed | `80d89ca` (H3) | `fn_resolve_surplus_appropriation_account`; grep old name empty |
+| G9 render.yaml for Aiven + Render | fixed | `6dfa747` (H6) | no `databases:`/`fromDatabase`; `SECRET_VAULT_KEY` added |
+| G10 MSME in the application | fixed | `58170d9` (H7) | `app/services/msme_service.py`; `/api/msme/compliance`; 3 tests pass |
+| G11 ICAI statements engine | fixed | `0987415` (H8) | `chart_mapping.py`, `icai_statements.py`, export routes; BS balanced, surplus 470,700 |
+| G12 final report / honest status | in progress | `docs/icai_build/FINAL_REPORT.md`, `PROGRESS.md` | this report + PROGRESS.md rewrite |
 
-## 3. Invariants & resolver rename (G5, G8)
+## Open (todo / blocked)
 
-- `test_I1`/`test_I2`/`test_I3` dedented to module level so they execute;
-  I1 contra allow-list {1190, 1530} plus an exactness test.
-- `fn_resolve_inexp_appropriation_account` →
-  `fn_resolve_surplus_appropriation_account` (resolves 3300 ACS, not 5100
-  InExp); all callers updated (database/estatehub.sql ×3, test/fake_db.py).
-  grep for old name: empty.
+- F-23 creditors_tie control / `fn_creditors_split` — not built.
+- F-25 MSME/other creditors split — not built.
+- F-08 TDS tags completeness — not fully traced.
+- F-21 centralized COA audit trigger — not built.
+- F-22 per-society chart-drift check — not built (`fn_drift_check` removed).
+- H9.1 accounting-policies notes pages — not built (UI).
+- H9.2 Dash "ICAI Financial Statements" tile + recording-fake-app callback test — not built (UI).
+- H10.1 chart_ids grep — done (no raw account-id literals in setup wizard/onboarding).
 
-## 4. Depreciation & 3280 guard (G6)
+## Verification on final commit (society 1, FY 2026)
 
-- Removed `INSTRUMENT_FULL_RATE`; seed now uses account 1130's
-  `depreciation_percent` (15). Depreciation still credits 1190 once
-  (live: 5110 Dr 1,650 / 1190 Cr 1,650).
-- Added `fixed_asset_tie` control to `app/services/bf_controls.py` (register
-  gross cost == asset-class sum; accumulated depreciation == 1190 balance)
-  with unit test (two asset classes).
-- Added `trg_3280_guard`: 3280 Depreciation Fund may only be credited by the
-  statutory reserve appropriation (source_table `fy_close`); direct credits
-  refused (live check C6).
-- 3280 Dr 79,525 on master is pre-existing (absent at commit 530c6c7) — not
-  caused by this work; the guard prevents future direct credits.
-
-## 5. Stale id (G7)
-
-- `test/test_up_aoa_compliance_live.py` inserted expense with acc_id `51110`
-  (5-digit id renumbered in the chart rebuild). Replaced with `5102`
-  "Repair and Maintenance" (postable Dr expense under 5100). Cash-limit live
-  tests pass.
-
-## 6. Deployment (G9)
-
-- `render.yaml`: removed the Render-managed PostgreSQL (`databases:` block)
-  — the database is Aiven; `DATABASE_URL` is now a plain operator-set
-  envVar. Removed the mis-shaped redis entry (`fromService type: redis`
-  under `databases:`); `REDIS_URL` is a plain optional envVar and the app
-  degrades gracefully without Redis. Added required `SECRET_VAULT_KEY`
-  envVar (operator-provided, must match the seed's key).
-
-## 7. MSME in the application (G10)
-
-- `app/services/msme_service.py`: pure service layer wrapping
-  `fn_vendor_outstanding`, `fn_vendor_aging`, `fn_msme_payment_compliance`
-  (s.15/s.16 MSMED Act 2006).
-- `GET /api/msme/compliance` route (auth-gated) in `app/routes/api.py`.
-- `test/test_msme_service.py`: 3 tests wiring the service to the scratch DB.
-
-## 8. ICAI statements engine (G11)
-
-- `database/chart_mapping.py`: pure account → ICAI statement-section
-  mapping (Assets/Liabilities/Equity/Income/Expenditure).
-- `app/services/icai_statements.py`: trial balance, balance sheet,
-  income & expenditure, receipts & payments from the SQL functions.
-  Verified live: balance sheet balanced (Assets = Liabilities + Equity =
-  1,391,175.00), income & expenditure surplus 470,700.00.
-- `GET /api/statements` and `GET /api/statements/trial-balance/export`
-  (XLSX via `export_trial_balance`) routes in `app/routes/api.py`.
-- `export_trial_balance` (database/financial_statements_export.py) now
-  called from app/.
-
-## 9. Verification
-
-- pglast clean: 875 statements, 0 forward references; schema + seed exit 0.
-- Ruff F/E9 clean on all changed files.
-- Live checks (`test/live_icai_checks.sql`): exit 0 against scratch DB.
-- New unit tests pass; no existing tests regressed.
+- `fn_balance_sheet_fy(1,2026)` where account_code=1190 → Assets \| 1190 \| -1650.00
+- `fn_trial_balance_check(1,2026)` → balanced = t (also FY 2025)
+- `contra_acc_id` from `fn_fy_close_preview(1,2026)` → 3300
+- Balance sheet: Assets = Liabilities + Equity = 1,391,175.00
+- Income & Expenditure surplus = 470,700.00
+- `psql -f test/live_icai_checks.sql` → exit 0
+- pglast clean: 875 statements, 0 forward references
+- Ruff F/E9 clean on all changed files; unit suite: 0 new failures
