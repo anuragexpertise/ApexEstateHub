@@ -1,9 +1,11 @@
 # ICAI4 Final Report — ApexEstateHub
 
-ICAI4 corrective work on top of the ICAI3 baseline. Every change below is in
-the working tree (uncommitted). SQL verified against a live local PostgreSQL 16
-scratch instance via `pgserver` (never Aiven/Render): schema installs from
-scratch (exit 0), seeds, and `test/live_icai_checks.sql` exits 0.
+**SUPERSEDED** by `docs/icai_build/FINAL_REPORT_ICAI5.md`. This report describes
+ICAI4 (commit `4287db3`) and is kept for history only; the ICAI5 report is the
+single authoritative final report and marks which ICAI4 items were re-graded in
+ICAI5.
+
+ICAI4 corrective work on top of the ICAI3 baseline.
 
 ## Scope — tasks I1 to I10
 

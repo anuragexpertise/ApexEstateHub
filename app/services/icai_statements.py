@@ -36,7 +36,7 @@ from database.chart_mapping import (
     section_for_account,
 )
 from database.db_manager import db
-from database.money import D
+from database.money import D, money
 
 ZERO = D(0)
 
@@ -115,6 +115,16 @@ def balance_sheet(society_id: int, fy: int) -> dict:
 
     assets = totals["Assets"]
     lieq = totals["Liabilities"] + totals["Equity"]
+
+    # ── Creditors split: MSE vs others (fn_creditors_split) ─────────────
+    # Shown as an informational group; the Sundry Creditors (2240) line stays
+    # in Liabilities with its full balance, so section totals are unchanged.
+    split_row = _first_row(db.execute(
+        "SELECT * FROM fn_creditors_split(%s,%s)", (society_id, fy), fetch_one=True))
+    mse_dues = D(split_row.get("mse_dues") or 0)
+    other_dues = D(split_row.get("other_dues") or 0)
+    split_total = mse_dues + other_dues
+
     return {
         "sections": sections,
         "totals": {k: str(v) for k, v in totals.items()},
@@ -131,6 +141,11 @@ def balance_sheet(society_id: int, fy: int) -> dict:
                 "gross": str(recv_gross),
                 "less_provision_for_doubtful_debts": str(provision),
                 "net": str(recv_net),
+            },
+            "creditors": {
+                "mse": str(mse_dues),
+                "other": str(other_dues),
+                "total": str(split_total),
             },
         },
         "fy": fy,
@@ -219,13 +234,65 @@ def receipts_payments(society_id: int, fy: int) -> dict:
     }
 
 
+def _first_row(result) -> dict:
+    """Normalise a db.execute result to a single row dict.
+
+    Some test doubles return a list for every query; a real cursor returns a
+    dict (or None) for fetch_one. Treat a non-empty list as its first row.
+    """
+    if isinstance(result, list):
+        return result[0] if result else {}
+    if isinstance(result, dict):
+        return result
+    return {}
+
+
+def declared_arrears_total(society_id: int, fy: int) -> Decimal | None:
+    """Declared Apt-Arrears total for the FY, from the sealed Annex C.
+
+    Annex C (onboarding_annexes, annex_code='C', status='sealed') carries
+    ``arrears_by_flat``: [{flat_number, amount, overdue_days, remarks}]. The
+    declared total is the sum of those amounts for the annex whose
+    financial_year matches `fy`.
+
+    Returns None when no sealed Annex C exists for this society/FY — the
+    figure is unreadable and the gate must say cannot_verify, never substitute 0.
+    Returns 0 when the annex exists but declares no arrears.
+    """
+    row = db.execute(
+        "SELECT content FROM onboarding_annexes "
+        "WHERE society_id=%s AND annex_code='C' AND status='sealed' "
+        "AND (content->>'financial_year')::INT=%s",
+        (society_id, fy), fetch_one=True)
+    if row is None:
+        return None
+    arrears = (row.get("content") or {}).get("arrears_by_flat") or []
+    total = ZERO
+    for item in arrears or []:
+        try:
+            total += money(item.get("amount"))
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
 def export_gate(society_id: int, fy: int) -> dict:
     """Gate an export / FY close: refuse when the trial balance is unbalanced,
     the FY is locked (fn_fy_lock_preview can_lock is false), or any
     bf_controls control (balanced / funds_backed / arrears_tie) fails.
 
-    Returns {"allowed": bool, "reason": str, "trial_balance_balanced": bool,
-    "fy_locked": bool, "controls": {...}}.
+    Returns {"allowed": bool, "status": "ok"|"refused"|"cannot_verify",
+    "reason": str, "trial_balance_balanced": bool,
+    "locked": bool, "can_lock": bool, "blockers": [str], "controls": {...}}.
+
+    `locked` is True when a fy_locks row exists for this society/FY.
+    `can_lock` is True when the preview has no blockers. `blockers` is the
+    list of blocker messages. The two are independent: a year can be locked
+    yet still preview-clear, or unlocked yet blocked.
+
+    `arrears_tie` uses the society's declared Apt-Arrears total for the FY
+    (from the sealed Annex C). When that figure cannot be read, the gate
+    returns cannot_verify: it neither passes nor substitutes 0 (ICAI5 A1).
     """
     tb = db.execute("SELECT * FROM fn_trial_balance_check(%s,%s)",
                     (society_id, fy), fetch_one=True)
@@ -233,9 +300,11 @@ def export_gate(society_id: int, fy: int) -> dict:
 
     lock = db.execute("SELECT * FROM fn_fy_lock_preview(%s,%s)",
                       (society_id, fy), fetch_one=True) or {}
-    fy_locked = not bool(lock.get("can_lock"))
-    lock_blockers = lock.get("blockers") or ""
-
+    already_locked = bool(lock.get("already_locked"))
+    can_lock = bool(lock.get("can_lock"))
+    lock_blockers_text = lock.get("blockers") or ""
+    blockers = [b for b in lock_blockers_text.split("; ") if b]
+    fy_locked = not can_lock
     bf_rows = db.execute(
         "SELECT acc_id, drcr_bf AS drcr_account, bf_amount FROM brought_forward "
         "WHERE society_id=%s AND financial_year=%s",
@@ -249,16 +318,49 @@ def export_gate(society_id: int, fy: int) -> dict:
     totals = bc.totals(
         [{"acc_id": r["acc_id"], "bf_amount": str(r["bf_amount"])} for r in bf_rows],
         accs)
-    controls = bc.three_controls(totals, Decimal(0))
-    # arrears_tie is now a hard refusal gate (ICAI4 I6), not advisory only.
+
+    declared_arrears = declared_arrears_total(society_id, fy)
+    if declared_arrears is None:
+        return {
+            "allowed": False,
+            "status": "cannot_verify",
+            "reason": "declared arrears cannot be read: no sealed Annex C for society "
+                      + str(society_id) + " FY " + str(fy),
+            "trial_balance_balanced": tb_balanced,
+            "locked": already_locked,
+            "can_lock": can_lock,
+            "blockers": blockers,
+            "controls": {},
+        }
+
+    controls = bc.three_controls(totals, declared_arrears)
+
+    # Creditors tie (ICAI5 A4): creditors split total (MSE + others) must equal
+    # the Sundry Creditors (2240) balance on the balance sheet.
+    split_row = db.execute(
+        "SELECT * FROM fn_creditors_split(%s,%s)", (society_id, fy), fetch_one=True) or {}
+    split_total = D(split_row.get("total_dues") or 0)
+    sundry_row = _first_row(db.execute(
+        "SELECT amount FROM fn_balance_sheet_fy(%s,%s) "
+        "WHERE account_code=%s AND statement_section='Liabilities'",
+        (society_id, fy, 2240), fetch_one=True))
+    sundry_creditors = D(sundry_row.get("amount") or 0)
+    controls["creditors_tie"] = bc.creditors_tie(split_total, sundry_creditors)
+
+    # arrears_tie and creditors_tie are hard refusal gates (ICAI4 I6 / ICAI5 A4),
+    # not advisory only.
     controls_pass = (controls["balanced"]["passed"]
                      and controls["funds_backed"]["passed"]
-                     and controls["arrears_tie"]["passed"])
+                     and controls["arrears_tie"]["passed"]
+                     and controls["creditors_tie"]["passed"])
 
-    allowed = tb_balanced and not fy_locked and controls_pass
+    allowed = tb_balanced and not fy_locked and not already_locked and controls_pass
+    status = "ok" if allowed else "refused"
     reasons = []
     if fy_locked:
-        reasons.append("FY is locked: " + lock_blockers)
+        reasons.append("FY cannot be locked: " + lock_blockers_text)
+    if already_locked:
+        reasons.append("FY is already locked")
     if not tb_balanced:
         reasons.append("trial balance is unbalanced")
     if not controls["balanced"]["passed"]:
@@ -267,13 +369,18 @@ def export_gate(society_id: int, fy: int) -> dict:
         reasons.append("declared funds exceed bank, cash and deposits")
     if not controls["arrears_tie"]["passed"]:
         reasons.append("receivables control does not tie to declared arrears")
+    if not controls["creditors_tie"]["passed"]:
+        reasons.append("creditors split does not tie to Sundry Creditors")
     reason = "; ".join(reasons) if reasons else "ok"
 
     return {
         "allowed": allowed,
+        "status": status,
         "reason": reason,
         "trial_balance_balanced": tb_balanced,
-        "fy_locked": fy_locked,
+        "locked": already_locked,
+        "can_lock": can_lock,
+        "blockers": blockers,
         "controls": {k: {"passed": c["passed"], "reason": c["reason"]}
                      for k, c in controls.items()},
     }

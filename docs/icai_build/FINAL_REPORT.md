@@ -1,9 +1,10 @@
 # ICAI Final Report — ApexEstateHub
 
-Generated from the ICAI3 corrective plan (on top of commit `6b3c6bd`, "icai v2").
-All SQL verified against a live local PostgreSQL 16 scratch instance (never
-Aiven/Render). Schema installs from scratch (exit 0) and seeds. One commit
-per finding/task, message `G<n>: <summary>`.
+**SUPERSEDED** by `docs/icai_build/FINAL_REPORT_ICAI5.md`. This report describes
+the ICAI3 corrective plan (on top of commit `6b3c6bd`) and is kept for history
+only; the ICAI5 report is the single authoritative final report.
+
+Generated from the ICAI3 corrective plan.
 
 ## Findings F-02 to F-25 (one line each: status, commit, test / live check)
 

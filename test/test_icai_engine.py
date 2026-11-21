@@ -46,7 +46,8 @@ def test_r1_line_delete_one_id_fails():
 
 
 def _patch_rows(monkeypatch, rows):
-    monkeypatch.setattr(st.db, "execute", lambda sql, params, fetch_all=True: rows)
+    monkeypatch.setattr(st.db, "execute",
+                        lambda sql, params=None, fetch_one=False, fetch_all=True: rows)
 
 
 def test_fixture_balance_sheet_contra_netting(monkeypatch):

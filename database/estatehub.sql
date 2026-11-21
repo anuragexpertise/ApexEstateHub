@@ -11316,20 +11316,43 @@ $$;
 -- Income & Expenditure and Capital Account are still reached purely via
 -- the parent_account_id hierarchy walk below, not by name at all.
 
--- Resolves a society's 'Dep' (Depreciation) account by name, same ILIKE
--- convention as fn_resolve_cash_account. No dedicated societies column
--- needed — a name lookup keeps the Depreciation account's home in the
--- chart of accounts instead of in societies.
+-- Resolves a society's Depreciation EXPENSE account (5110, tab 'Dep') — the
+-- account depreciation is debited to. Resolved by the account's tab mapping
+-- (tab_name='Dep'), not by name, so the lookup can never match the
+-- "Depreciation Fund" (3280, tab 'DepFund') and dump depreciation onto it
+-- (the ICAI5 C1 / 3280 regression). ORDER BY id makes the result deterministic
+-- when more than one 'Dep' account exists.
 CREATE OR REPLACE FUNCTION fn_resolve_depreciation_account(p_society_id INT)
 RETURNS INT LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_acc_id INT;
 BEGIN
-    SELECT id INTO v_acc_id FROM accounts
-    WHERE society_id = p_society_id AND name ILIKE 'Depreciation%'
+    SELECT id INTO v_acc_id
+    FROM accounts
+    WHERE society_id = p_society_id AND tab_name = 'Dep'
+    ORDER BY id
     LIMIT 1;
 
     RETURN v_acc_id;
+END;
+$$;
+
+-- Check query: lists any depreciation posting that landed on a fund account
+-- (Depreciation Fund 3280 or any other fund tab). Empty once fn_resolve_depreciation_account
+-- resolves depreciation to the 'Dep' expense account and the historical debit
+-- has been reversed. Used to confirm the ICAI5 C1 fix on a live society.
+CREATE OR REPLACE FUNCTION fn_check_depreciation_on_fund_accounts(p_society_id INT)
+RETURNS TABLE (transaction_id INT, trx_date DATE, acc_id INT, account_name TEXT, tab_name TEXT,
+               amount NUMERIC(15,2), entry_side TEXT, acc_particulars TEXT)
+LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN QUERY
+    SELECT t.id, t.trx_date, t.acc_id, a.name, a.tab_name, t.amount, t.entry_side, t.acc_particulars
+    FROM transactions t
+    JOIN accounts a ON a.id = t.acc_id AND a.society_id = t.society_id
+    WHERE t.society_id = p_society_id
+      AND a.tab_name IN ('DepFund','SinkFund','RepFund','CorpusFund','MajRepFund','Gifts')
+      AND t.acc_particulars ILIKE '%depreciation%';
 END;
 $$;
 

@@ -29,6 +29,7 @@ from datetime import date
 import psycopg2
 
 from app.dash_apps.drilldown import curated as _cur
+from app.services.icai_statements import export_gate
 from app.utils import today_ist
 from database.db_manager import db
 from database.money import D
@@ -827,7 +828,22 @@ def close_fy_with_reserve_appropriation(society_id: int, fy: int,
     the SQL exception text, which is already written to be human-readable
     (e.g. the statutory-lock message from fn_process_fund_utilization, or the
     unbalanced-books message).
+
+    The shared export/FY-close gate runs first so no entry path skips the
+    close controls (ICAI5 A3): a blocked close returns the list of failed
+    controls and posts nothing.
     """
+    # Shared gate: books balance, ledger chain verifies, arrears tie, and
+    # creditors tie must all pass before the year may be closed.
+    gate = export_gate(society_id, fy)
+    if not gate["allowed"]:
+        failed = [name for name, c in (gate.get("controls") or {}).items()
+                  if not c.get("passed")]
+        detail = gate.get("reason") or "controls failed"
+        if failed:
+            detail += "; failed controls: " + ", ".join(failed)
+        return None, detail
+
     try:
         row = db._execute(
             "SELECT * FROM fn_fy_close_reserve_appropriation(%s,%s,%s,%s)",
