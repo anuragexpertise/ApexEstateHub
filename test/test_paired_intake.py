@@ -228,18 +228,86 @@ def test_ca_template_round_trip():
     assert queries == [q for _, q, _, _ in xt.CA_QUESTIONS]
 
 
-def test_balances_template_round_trip():
-    accounts = [{"id": 1311, "name": "SBI", "tab": "SBI", "side": "Dr"},
-                {"id": 1510, "name": "SDrDig", "tab": "SDrDig", "side": "Dr"}]
-    data = xt.build_balances_template(accounts, "2026-09-30")
-    res = xt.parse_bytes(data, "b.xlsx", "Assets (Dr)",
-                         ["account_id", "account_name", "tab", "side", "label", "as_on_date", "amount"])
+def test_bf_statement_template_round_trip():
+    accounts = [{"account_id": 1311, "account_tab": "SBI", "account_name": "SBI", "side": "Dr"},
+                {"account_id": 3100, "account_tab": "CapAc", "account_name": "Capital Account", "side": "Cr"}]
+    data = xt.build_bf_statement_template(accounts, 2026, "2026-09-30")
+    res = xt.parse_bytes(data, "b.xlsx", "2026",
+                         ["account_id", "account_tab", "account_name", "label", "side", "amount", "as_on_date"])
     assert res.errors == [], res.errors
-    ids = [r["account_id"] for r in res.rows]
-    assert 1311 in ids and 1510 in ids
-    sbi = next(r for r in res.rows if r["account_id"] == 1311)
-    assert sbi["as_on_date"] == "2026-09-30"
-    assert sbi["side"] == "Dr"
+    assert [r["account_id"] for r in res.rows] == [1311, 3100]
+    assert all(r["as_on_date"] == "2026-09-30" for r in res.rows)
+    assert all(r["amount"] in (None, "") for r in res.rows)
+    assert all(r["label"] in (None, "") for r in res.rows)
+
+
+def _statement_xlsx(fy, rows):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = str(fy)
+    ws.append(["account_id", "account_tab", "account_name", "label", "side", "amount", "as_on_date"])
+    for r in rows:
+        ws.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_read_statement_rows_happy():
+    xlsx = _statement_xlsx(2026, [[1311, "SBI", "SBI", "", "Dr", "100.00", "2026-09-30"],
+                                  [3100, "CapAc", "Capital Account", "", "Cr", "200.00", "2026-09-30"]])
+    rows, errors = pi.read_statement_rows(xlsx, 2026, as_on="2026-09-30")
+    assert errors == [], errors
+    assert len(rows) == 2
+
+
+def test_read_statement_rows_unknown_account():
+    xlsx = _statement_xlsx(2026, [[9999, "SBI", "X", "", "Dr", "10.00", "2026-09-30"]])
+    _, errors = pi.read_statement_rows(xlsx, 2026, as_on="2026-09-30")
+    assert any("unknown account" in e for e in errors), errors
+
+
+def test_read_statement_rows_side_tab_mismatch():
+    xlsx = _statement_xlsx(2026, [[1311, "SBI", "SBI", "", "Cr", "10.00", "2026-09-30"]])
+    _, errors = pi.read_statement_rows(xlsx, 2026, as_on="2026-09-30")
+    assert any("side/tab do not match" in e for e in errors), errors
+
+
+def test_read_statement_rows_negative_amount():
+    xlsx = _statement_xlsx(2026, [[1311, "SBI", "SBI", "", "Dr", "-5.00", "2026-09-30"]])
+    _, errors = pi.read_statement_rows(xlsx, 2026, as_on="2026-09-30")
+    assert any("0 or more" in e for e in errors), errors
+
+
+def test_read_statement_rows_deposit_label_required():
+    xlsx = _statement_xlsx(2026, [[1320, "Dp", "Deposits", "", "Dr", "50.00", "2026-09-30"]])
+    _, errors = pi.read_statement_rows(xlsx, 2026, as_on="2026-09-30")
+    assert any("label (FD number) is required" in e for e in errors), errors
+
+
+def test_read_statement_rows_receivables_label_forbidden():
+    xlsx = _statement_xlsx(2026, [[1510, "SDrDig", "Sundry Debtors Digital", "L1", "Dr", "10.00", "2026-09-30"]])
+    _, errors = pi.read_statement_rows(xlsx, 2026, as_on="2026-09-30")
+    assert any("blank label" in e for e in errors), errors
+
+
+def test_read_statement_rows_duplicate():
+    xlsx = _statement_xlsx(2026, [[1311, "SBI", "SBI", "L1", "Dr", "10.00", "2026-09-30"],
+                                  [1311, "SBI", "SBI", "L1", "Dr", "10.00", "2026-09-30"]])
+    _, errors = pi.read_statement_rows(xlsx, 2026, as_on="2026-09-30")
+    assert any("duplicate" in e for e in errors), errors
+
+
+def test_read_statement_rows_as_on_mismatch():
+    xlsx = _statement_xlsx(2026, [[1311, "SBI", "SBI", "", "Dr", "10.00", "2026-10-01"]])
+    _, errors = pi.read_statement_rows(xlsx, 2026, as_on="2026-09-30")
+    assert any("does not match" in e for e in errors), errors
+
+
+def test_read_statement_rows_wizard_as_on_unset():
+    xlsx = _statement_xlsx(2026, [[1311, "SBI", "SBI", "", "Dr", "10.00", "2026-09-30"]])
+    _, errors = pi.read_statement_rows(xlsx, 2026, as_on=None)
+    assert any("As-on date for Brought Forward first" in e for e in errors), errors
 
 
 def test_ca_questions_keys_unique():
@@ -453,56 +521,25 @@ def test_check_ca_rows_happy_and_errors():
     assert any("must be a date" in e for e in errors2)
 
 
-def test_check_balance_rows_as_on_and_rules(monkeypatch):
-    tables = _bf_tables(as_on="2026-09-30")
-    _wire(monkeypatch, tables)
-    rows = [
-        {"account_id": 1311, "account_name": "SBI", "tab": "SBI", "label": "", "as_on_date": "2026-09-30", "amount": "100.00"},
-        {"account_id": 9999, "account_name": "X", "tab": "SBI", "label": "", "as_on_date": "2026-09-30", "amount": "10.00"},
-        {"account_id": 1320, "account_name": "Dp", "tab": "Dp", "label": "", "as_on_date": "2026-09-30", "amount": "50.00"},
-        {"account_id": 1311, "account_name": "SBI", "tab": "SBI", "label": "", "as_on_date": "2026-09-30", "amount": "-5.00"},
-        {"account_id": 1311, "account_name": "SBI", "tab": "SBI", "label": "L2", "as_on_date": "2026-10-01", "amount": "10.00"},
-        {"account_id": 1311, "account_name": "SBI", "tab": "SBI", "label": "L1", "as_on_date": "2026-09-30", "amount": "10.00"},
-        {"account_id": 1311, "account_name": "SBI", "tab": "SBI", "label": "L1", "as_on_date": "2026-09-30", "amount": "10.00"},
-    ]
-    clean, _, errors = pi.check_balance_rows(1, rows)
-    assert any("unknown account" in e for e in errors), errors
-    assert any("label is required" in e for e in errors), errors
-    assert any("0 or more" in e for e in errors), errors
-    assert any("does not match" in e for e in errors), errors
-    assert any("duplicate" in e for e in errors), errors
-    assert len(clean) == 2, clean
-
-
-def test_check_balance_rows_missing_as_on(monkeypatch):
-    tables = _bf_tables(as_on=None)
-    _wire(monkeypatch, tables)
-    rows = [{"account_id": 1311, "account_name": "SBI", "tab": "SBI", "label": "", "as_on_date": "2026-09-30", "amount": "100.00"}]
-    _, _, errors = pi.check_balance_rows(1, rows)
-    assert any("As-on date for Brought Forward first" in e for e in errors), errors
-
-
 def test_apply_balances_refused_when_sealed(monkeypatch, tmp_path):
     tables = {"societies": [_society()], "onboarding_evidence": [], "onboarding_annexes": [{"society_id": 1, "status": "sealed"}]}
     _wire(monkeypatch, tables)
     monkeypatch.setattr(ob, "evidence_folder", lambda sid: tmp_path / "evidence")
-    xlsx = _tiny_xlsx("Assets (Dr)", ["account_id", "account_name", "tab", "side", "label", "as_on_date", "amount"],
-                      [[1311, "SBI", "SBI", "Dr", "", "2026-09-30", "100.00"]])
+    xlsx = _statement_xlsx(2026, [[1311, "SBI", "SBI", "", "Dr", "100.00", "2026-09-30"]])
     pdf = b"%PDF-1.4 stmt"
     with pytest.raises(ob.OnboardingError, match="sealed"):
         pi.apply_balances(1, 1, "b.xlsx", xlsx, "b.pdf", pdf)
 
 
-def test_apply_balances_merges_and_leaves_others(monkeypatch, tmp_path):
-    tables = _bf_tables(rows=[{
+def test_apply_balances_replaces_rows(monkeypatch, tmp_path):
+    tables = _bf_tables(as_on="2026-09-30", rows=[{
         "acc_id": 1312, "tab": "ICICI", "side": "Dr", "bf_amount": "500.00",
         "remarks": "existing", "evidence_id": 9, "sha256": "oldsha", "filename": "old.pdf",
     }])
     fake = _wire(monkeypatch, tables)
     monkeypatch.setattr(ob, "evidence_folder", lambda sid: tmp_path / "evidence")
-    xlsx = _tiny_xlsx("Assets (Dr)", ["account_id", "account_name", "tab", "side", "label", "as_on_date", "amount"],
-                      [[1311, "SBI", "SBI", "Dr", "", "2026-09-30", "100.00"],
-                       [1311, "SBI", "SBI", "Dr", "L1", "2026-09-30", "50.00"]])
+    xlsx = _statement_xlsx(2026, [[1311, "SBI", "SBI", "", "Dr", "100.00", "2026-09-30"],
+                                  [1311, "SBI", "SBI", "L1", "Dr", "50.00", "2026-09-30"]])
     pdf = b"%PDF-1.4 stmt"
     msg = pi.apply_balances(1, 1, "b.xlsx", xlsx, "b.pdf", pdf)
     assert "2 row(s)" in msg and "1 account(s)" in msg
@@ -510,8 +547,8 @@ def test_apply_balances_merges_and_leaves_others(monkeypatch, tmp_path):
     d = json.loads(last["declaration_json"])
     rows = (d.get("draft") or {}).get("brought_forward", {}).get("rows", [])
     by_id = {r["acc_id"]: r for r in rows}
-    assert 1312 in by_id
-    assert by_id[1312]["bf_amount"] == "500.00"
+    # replace: old 1312 is gone, 1311 present with summed 150.00 and one ledger row
+    assert 1312 not in by_id
     assert by_id[1311]["bf_amount"] == "150.00"
     assert len(by_id[1311].get("ledger_rows", [])) == 1
     assert by_id[1311]["sha256"] == ob._sha(pdf)

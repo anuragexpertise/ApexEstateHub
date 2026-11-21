@@ -77,7 +77,7 @@ IDs are used in reports. "Master" means the platform master admin.
 
 ### B. Setup Wizard, "Brought Forward"
 
-- **B1** Provide an xlsx **template** for upload with sections **Assets (Dr)** and **Liabilities & Equity (Cr)**. Show **every account where `account.has_bf = True`**.
+- **B1** Provide an xlsx **template** for upload with ONE sheet named by the financial year (e.g. `2026`) and columns `account_id, account_tab, account_name, label, side, amount, as_on_date`. Show **every account where `account.has_bf = True`**.
 - **B2** Fix the receivables upload error: `a bytes-like object is required, not 'str'` (see section 2, Uploads; almost certainly a base64 string or text passed to a bytes API, or `StringIO` vs `BytesIO`). Find the real line from the traceback or by reproducing it.
 - **B3** If Sundry Debtors > 0, show a **warning symbol** when "Ledger-rows" are not filled. Ledger-rows are **mandatory** (warning must clear only when filled) for: Fixed Assets, Investments, Current Assets, Loans & Advances Given, Sundry Debtors (digital and cash, separately), and **Reserves and Funds as a separate group**.
 - **B4** "Gifts Given" is on the **Dr** side.

@@ -143,7 +143,7 @@ def test_depreciation_fund_has_its_own_account_not_the_expense_or_gifts():
     assert acc["id"] == 3280 and acc["id"] not in (5110, 3240)
     row = by_id[3280]
     assert row[1] == "Depreciation Fund" and row[2] == "DepFund" and row[4] == 3200 and row[5] == "Cr" and row[6]
-    assert by_id[5110][1] == "Depreciation" and by_id[3240][1] == "Gifts Received"      # untouched
+    assert by_id[5110][1] == "Depreciation" and by_id[3240][1] == "Earmarked Gifts Fund"
     assert (3280, "DEPRECIATION_FUND") in {(a, h) for a, h, _ in seed.UP_AOA_ACCOUNT_MAPPINGS}
     assert any(h[1] == "DEPRECIATION_FUND" for h in seed.STATUTORY_HEADS_UP_AOA)         # the head the mapping needs exists
 

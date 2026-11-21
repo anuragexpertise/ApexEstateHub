@@ -238,11 +238,11 @@ def test_audit_reports_the_gaps(cur):
 
 # ── Depreciation Fund: its own account ──────────────────────────────────────────────────────────────────────────────
 def test_depreciation_fund_account_is_3280_not_gifts_not_the_expense(cur):
-    assert one(cur, "SELECT name FROM accounts WHERE society_id=%s AND id=3240", SID) == "Gifts Received"
+    assert one(cur, "SELECT name FROM accounts WHERE society_id=%s AND id=3240", SID) == "Earmarked Gifts Fund"
     assert one(cur, "SELECT name FROM accounts WHERE society_id=%s AND id=5110", SID) == "Depreciation"
     assert one(cur, "SELECT fn_ensure_depreciation_fund(%s)", SID) == 3280
     assert one(cur, "SELECT name||'|'||tab_name FROM accounts WHERE society_id=%s AND id=3280", SID) == "Depreciation Fund|DepFund"
-    assert one(cur, "SELECT name FROM accounts WHERE society_id=%s AND id=3240", SID) == "Gifts Received"      # untouched
+    assert one(cur, "SELECT name FROM accounts WHERE society_id=%s AND id=3240", SID) == "Earmarked Gifts Fund"
     assert one(cur, """SELECT count(*) FROM account_statutory_mappings WHERE society_id=%s AND account_id=3280
                        AND head_code='DEPRECIATION_FUND'""", SID) == 1
     assert one(cur, "SELECT count(*) FROM account_statutory_mappings WHERE society_id=%s AND account_id=3240 AND head_code='DEPRECIATION_FUND'", SID) == 0

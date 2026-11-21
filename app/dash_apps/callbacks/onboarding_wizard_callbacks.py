@@ -12,7 +12,7 @@ step lives in the onb-setup-step store (mirrored to the session onb-wizard-step 
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import dash_bootstrap_components as dbc
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
@@ -37,11 +37,12 @@ from app.services import onboarding_service as ob
 from app.services import paired_intake as pi
 from app.services import regime_rules_admin as rra
 from app.services.xlsx_templates import (
-    build_balances_template,
+    build_bf_statement_template,
     build_tds_template,
     parse_upload,
 )
 from app.utils.fiscal import fy_start_date as _fy_start_date
+from app.utils.fiscal import fy_start_year
 
 P = op.P
 NCAT = len(CATEGORIES)
@@ -260,8 +261,10 @@ def _raw_step_values(step_key, form):
         v = {"calc_start": _iso(form.get("sw-calc-start-date")) or str(_fy_start_date()),
              "pay_qr": _uploaded(form, "pay_qr")}
     elif step_key == "brought_forward":
+        grid = form.get("sw-bf-arrears-grid") or []
+        receivables = [r for r in grid if str(r.get("flat_number") or "").strip()]
         v = {"fy": form.get("sw-bf-fy"), "as_on_date": _iso(form.get("sw-bf-as-on")),
-             "rows": _bf_rows(form)}
+             "rows": _bf_rows(form), "receivables": receivables}
     return v
 
 
@@ -283,23 +286,6 @@ def _rail_item_styles(statuses, current):
 
 def _step_styles(current):
     return [{"display": "block" if i == current else "none"} for i in range(NCAT)]
-
-
-def _rec_status(st: dict, rec: dict):
-    """One line under a reconciliation card: what is still missing, or that it is done."""
-    bits = []
-    if not st["has_statement"]:
-        bits.append(html.Span("Enter the statement / cash-count balance.", className="text-muted"))
-    elif st["agrees"]:
-        bits.append(html.Span("Agrees to the books.", className="text-success"))
-    else:
-        bits.append(html.Span(f"Differs by ₹{st['diff']}: correct the book balance or the statement figure.", className="text-danger"))
-    if st["evidenced"]:
-        bits.append(html.Span(f" · scan {rec.get('filename') or ''} attached (SHA-256 {str(rec.get('sha256'))[:12]}…)", className="text-success"))
-    elif st["has_statement"]:
-        bits.append(html.Span(" · attach the scan.", className="text-warning"))
-    return bits
-
 
 def _finalize_style(n):
     return {"fontSize": "12px", "display": "inline-block" if n == LAST else "none"}
@@ -341,8 +327,11 @@ def register_onboarding_wizard_callbacks(app):
         if CATEGORIES[idx] != "Brought Forward":
             return no_update
         draft = ob.load_draft(s[0])
-        as_on = (draft.get("draft") or {}).get("brought_forward", {}).get("as_on_date")
-        return dcc.send_bytes(build_balances_template(pi.eligible_accounts(), as_on), "Account Balances.xlsx")
+        bf = (draft.get("draft") or {}).get("brought_forward", {})
+        fy = bf.get("fy") or fy_start_year()
+        as_on = bf.get("as_on_date")
+        return dcc.send_bytes(build_bf_statement_template(pi.eligible_accounts(), fy, as_on),
+                              f"Statement {fy}.xlsx")
 
     @app.callback(
         Output("sw-bf-status", "children"),
@@ -371,6 +360,73 @@ def register_onboarding_wizard_callbacks(app):
             return _alert(str(exc), False), no_update, no_update, no_update
         body, mk = op.hub_body(role, sid, uid), op.marker(sid)
         return _alert(msg, True), f"Template: {xlsx_n or 'not chosen'}    Statement: {pdf_n or 'not chosen'}", body, mk
+
+    # ── Brought Forward rollup: group totals + three controls (read-only, no DB write) ─────
+    @app.callback(
+        Output({"type": "sw-bf-total", "node": ALL}, "children"),
+        Output("sw-bf-side-total-cr", "children"),
+        Output("sw-bf-side-total-dr", "children"),
+        Output("sw-bf-controls", "children"),
+        Input({"type": "sw-bf-amt", "acc_id": ALL}, "value"),
+        Input("sw-bf-arrears-grid", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def sw_bf_rollup(amt_values, arrears_data):
+        s = _session()
+        if not s or not s[0]:
+            return no_update, no_update, no_update, no_update
+        sid, uid, role = s
+        amounts = {}
+        for iid, val in (ctx.inputs_list[0] or []):
+            if iid is None or val in (None, ""):
+                continue
+            aid = iid.get("acc_id") if isinstance(iid, dict) else None
+            if aid is None:
+                continue
+            try:
+                amounts[int(aid)] = Decimal(str(val))
+            except (ValueError, ArithmeticError, InvalidOperation):
+                continue
+        from app.services import bf_controls as bc
+        from app.services import bf_layout as bl
+        cr_nodes = bl.side_nodes("Cr", lambda acc_id: False)
+        dr_nodes = bl.side_nodes("Dr", lambda acc_id: False)
+        cr = bl.roll_up(cr_nodes, amounts)
+        dr = bl.roll_up(dr_nodes, amounts)
+        # per-node totals in render order: Dr side groups, then Cr side groups
+        node_totals = []
+        for side_nodes_list in (dr_nodes, cr_nodes):
+            for node in side_nodes_list:
+                if isinstance(node, int):
+                    continue
+                key = node["key"]
+                node_totals.append(f"₹{dr.get(key, cr.get(key, Decimal(0))):,.2f}")
+        known = ob.known_flat_numbers(sid)
+        arrears_total = Decimal(0)
+        bad_flats = []
+        for r in (arrears_data or []):
+            flat = str(r.get("flat_number") or "").strip()
+            if not flat:
+                continue
+            if known and flat not in known:
+                bad_flats.append(flat)
+            try:
+                arrears_total += Decimal(str(r.get("amount") or 0))
+            except (ValueError, ArithmeticError, InvalidOperation):
+                pass
+        c3 = bc.three_controls({"dr": dr["_total"], "cr": cr["_total"], "n": len(amounts),
+                                "fund_cr": cr["fund_cr"], "bank_dr": dr["bank_dr"], "debtors_dr": dr["debtors_dr"]},
+                               arrears_total)
+        kids = [
+            html.Div(f"balanced: {'OK' if c3['balanced']['passed'] else 'FAIL'} — {c3['balanced']['reason']}"),
+            html.Div(f"funds_backed: {'OK' if c3['funds_backed']['passed'] else 'FAIL'} — {c3['funds_backed']['reason']}"),
+            html.Div(f"arrears_tie: {'OK' if c3['arrears_tie']['passed'] else 'FAIL'} — {c3['arrears_tie']['reason']}"),
+        ]
+        if bad_flats:
+            kids.append(html.Div("Unknown flat(s): " + ", ".join(bad_flats), className="text-danger"))
+        controls = html.Div(kids, className="small")
+        return node_totals, f"₹{cr['_total']:,.2f}", f"₹{dr['_total']:,.2f}", controls
 
     # ── Intake 5: pending receivables template download ────────────────────────────────────
     @app.callback(
@@ -456,6 +512,7 @@ def register_onboarding_wizard_callbacks(app):
         State({"type": "tds-agg-bill", "index": ALL}, "value"),
         State("sw-tds-row-eff", "data"),
         State({"type": "sw-bf-amt", "acc_id": ALL}, "value"), State({"type": "sw-bf-remarks", "acc_id": ALL}, "value"),
+        State("sw-bf-arrears-grid", "data"),
         # saved filenames of the logo / login background / payment QR uploads (hidden inputs, keyed by field)
         State({"type": "form-field-hidden", "entity": "society", "field": ALL}, "value"),
         prevent_initial_call=True,
@@ -963,7 +1020,7 @@ def _register_xlsx_callbacks(app):
                         bf.setdefault("rows", []).append(br)
                     br["ledger_rows"] = merged
                     ob._save_declaration(s[0], d, s[1])
-                except Exception:                                              # noqa: BLE001
+                except Exception:
                     log.exception("could not save ledger rows for society %s account %s", s[0], acc_id)
                     save_failed.append(True)
             return merged
@@ -1081,7 +1138,7 @@ def _register_xlsx_callbacks(app):
                 br.update({"evidence_id": ev["id"], "sha256": ev["sha256"],
                            "filename": ev["filename"], "purpose": "brought_forward"})
                 ob._save_declaration(sid, d, uid)
-            except Exception:                                              # noqa: BLE001
+            except Exception:
                 log.exception("evidence %s stored but not linked to the draft (society %s, account %s)", ev["id"], sid, acc_id)
                 return html.Div(f"{ev['filename']} was stored but could not be linked to this account. Attach it again.",
                                 className="text-danger")

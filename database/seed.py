@@ -288,7 +288,7 @@ ACCOUNTS = [
     (1150,  "Car",                        "Car",        "Car",                      1100, "Dr", True,   15, None, None),
     (1160,  "Computers",                  "Comp",       "Computers",                1100, "Dr", True,   40, None, None),
     (1170, "Generator",                   "Gen",        "Generator",                1100, "Dr", False,  15, None, None),
-    (1200,  "Investments",                "Inv",        "Investments",              1000, "Dr", True,  100, None, None),
+    (1200,  "Non-Current Investments", "Inv",        "Non-Current Investments",   1000, "Dr", True,  100, None, None),
     (1300,  "Current Assets",             "CA",         "Current Assets",           1000, "Dr", False, 100, None, None),
     (1310,  "Bank Accounts",              "BkAc",       "Bank Accounts",            1300, "Dr", False, 100, None, None),
     (1311,  "SBI A/c - Society",          "SBI",        "SBI A/c - Society",        1310, "Dr", True,  100, None, None),
@@ -324,9 +324,8 @@ ACCOUNTS = [
     (3230,  "Corpus Fund",                "CorpusFund", "Corpus Fund",              3200, "Cr", True,  100, None, None),
     (3270,  "Major Repair Fund (Transfer Fee)", "MajRepFund", "Major Repair Fund",       3200, "Cr", True,  100, None, None),
     (3280,  "Depreciation Fund",          "DepFund",    "Depreciation Fund",        3200, "Cr", True,  100, None, None),
-    (3240,  "Gifts Received",             "Gifts",      "Gifts Received",           3000, "Cr", True,  100, None, None),
-    (3250,  "Provisions",                 "Prov",       "Provisions",               3000, "Cr", True,  100, None, None),
-    (3260,  "Gifts Given",                "GiftGiven",  "Gifts Given",              3000, "Dr", True,  100, None, None),
+    (3240,  "Earmarked Gifts Fund", "Gifts",      "Gifts Received (Earmarked Fund)", 3200, "Cr", True,  100, None, None),
+    (3250,  "Provisions",                 "Prov",       "Provisions",               2200, "Cr", True,  100, None, None),
 
     # ── 4000 Income ──────────────────────────────────────────────────────
     # mutuality_nature ('mutual'/'non_mutual') now sits directly on each
@@ -344,6 +343,7 @@ ACCOUNTS = [
     (4116,  "Interest on Owner Loans",    "IntOwnLn",   "Interest on Owner Loans",  4110, "Cr", False, 100, "mutual", None),
     (4120,  "Selling Asset",              "SellAs",     "Selling Asset",            4100, "Cr", False, 100, "non_mutual", None),
     (4130,  "Property Income",            "PropInc",    "Property Income",          4100, "Cr", False, 100, "non_mutual", None),
+    (4140,  "Donations & Gifts Received", "DonInc",     "Donations & Gifts Received (General)", 4100, "Cr", False, 100, "non_mutual", None),
     (4200,  "Member Contributions",       "MemCon",     "Member Contributions",     4000, "Cr", False, 100, None, None),
     (4210,  "Society Maintenance Charge", "SocM",       "Society Maintenance Charge", 4200, "Cr", False, 100, "mutual", None),
     (4220,  "Society Fine",               "SocF",       "Society Fine Charge",      4200, "Cr", False, 100, "mutual", None),
@@ -379,6 +379,7 @@ ACCOUNTS = [
     (51170, "Intercom AMC",               "IntercomAMC","Intercom AMC",             5100, "Dr", False, 100, None, "194C"),
     (51180, "CCTV AMC",                   "CCTVAMC",    "CCTV AMC",                 5100, "Dr", False, 100, None, "194C"),
     (51190, "GST on Asset Disposal",      "GSTDisp",    "GST on Asset Disposal (sec 18(6)/Rule 44(6))", 5100, "Dr", False, 100, None, None),
+    (51200, "Gifts Given",                "GiftGiven",  "Gifts & Donations Given",   5100, "Dr", False, 100, None, None),
     (5200,  "Duties Paid",                "DutyP",      "Duties Paid",              5000, "Dr", False, 100, None, None),
     (5210,  "Taxes Paid",                 "TaxP",       "Taxes Paid",               5000, "Dr", False, 100, None, None),
     (5220,  "Income Tax",                 "ITax",       "Income Tax",               5000, "Dr", False, 100, None, None),
@@ -1315,6 +1316,7 @@ UP_AOA_ACCOUNT_MAPPINGS = [
     (2240, "SUNDRY_CREDITORS", "Sundry Creditors"),
     (2110, "LOANS_TAKEN", "Loans & Advances Taken"),
     (3250, "STAFF_BENEFITS_PAYABLE", "Provisions for staff benefits"),
+    (3240, "OTHER_LIABILITIES", "Earmarked gifts fund"),
     (5220, "TAX_PAYABLE", "Income Tax payable"),
     # Equity
     (3100, "CAPITAL_ACCOUNT", "Capital Account"),
@@ -1322,7 +1324,7 @@ UP_AOA_ACCOUNT_MAPPINGS = [
     (1110, "FIXED_ASSETS", "Immovable Assets"),
     (1100, "FIXED_ASSETS", "Fixed Assets"),
     (1120, "FIXED_ASSETS", "Furniture"),
-    (1200, "INVESTMENTS", "Investments"),
+    (1200, "INVESTMENTS", "Non-Current Investments"),
     (1300, "CASH_BANK", "Current Assets parent"),
     (1310, "CASH_BANK", "Bank Accounts"),
     (1340, "OTHER_ASSETS", "Input Tax Credit (RCM) - recoverable"),
@@ -1344,6 +1346,7 @@ UP_AOA_ACCOUNT_MAPPINGS = [
     (4110, "INTEREST_INCOME", "Interest Income"),
     (4111, "INTEREST_INCOME", "Bank Interest"),
     (4114, "OTHER_INCOME", "Exempt Income"),
+    (4140, "OTHER_INCOME", "Donations & Gifts Received"),
     (4130, "COMMON_PROFITS", "Property Income (common area commercial)"),
     (4120, "OTHER_INCOME", "Selling Asset"),
     # Expenditure
@@ -1356,6 +1359,7 @@ UP_AOA_ACCOUNT_MAPPINGS = [
     (51170, "REPAIR_MAINTENANCE_EXP", "Intercom AMC"),
     (51180, "REPAIR_MAINTENANCE_EXP", "CCTV AMC"),
     (51190, "FINANCE_COSTS", "GST on Asset Disposal"),
+    (51200, "OTHER_EXPENSES", "Gifts & Donations Given"),
     (5150, "STAFF_EXPENSES", "Salary"),
     (5160, "ADMIN_EXPENSES", "Phone Charges"),
     (5170, "REPAIR_MAINTENANCE_EXP", "Electricity"),
@@ -2385,7 +2389,7 @@ def seed_asset_disposals(cur, conn, society_id: int, admin_uid: int):
 #   2317 -> 4220 (SocF)
 #   21111 -> 4112 (IntSav)
 #   23192 -> 4242 (DiwaliT)
-#   22   -> 3240 (Gifts)
+#   22   -> 4140 (DonInc)
 RECEIPT_TYPES = [
     ("2026-04-01", 4210, "Apartment Maintenance - Annual Bulk Payment A-201", 120000.00,
      "owner2", "apartment", "neft", "NEFT20260401A201"),
@@ -2401,7 +2405,7 @@ RECEIPT_TYPES = [
      None, "other", "bank", "INT0720SBI"),
     ("2026-09-05", 4242, "Diwali Mela Stall Booking Fee", 4000.00,
      "vendor1", "vendor", "neft", "NEFT0905DIWALI"),
-    ("2026-09-22", 3240, "Corporate Sponsorship Gift - Winter Fete", 2500.00,
+    ("2026-09-22", 4140, "Corporate Sponsorship Gift - Winter Fete", 2500.00,
      "vendor2", "vendor", "cheque", "000512"),
     ("2026-09-27", 4230, "Community Event Ticket Sales", 1200.00,
      None, "other", "upi", "UPI0214TICKET"),

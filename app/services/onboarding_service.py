@@ -28,6 +28,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from app.dash_apps.pages.wizard_registry import DEPENDS, SKIPPED_WHEN
+from app.services import bf_controls
 from app.services import pending_receivables as pr
 from app.utils import now_ist, today_ist
 from database.db_manager import db
@@ -47,9 +48,8 @@ CORE_OFFICES = ("president", "secretary", "treasurer")
 OFFICE_LABEL = {"president": "President", "secretary": "Secretary", "treasurer": "Treasurer"}
 OPTIONAL_DOCS = (("cash_count", "Cash-count certificate"), ("audited_report", "Audited statements"),
                  ("review_letter", "CA review letter"), ("ca_rates_letter", "CA letter on TDS / GST rates"))
-FUND_TABS = ("SinkFund", "RepFund", "CorpusFund", "MajRepFund", "DepFund")
-BANK_TABS = ("BkAc", "SBI", "ICICI", "CiH", "Dp")
-RECEIVABLE_TABS = ("SDr", "SDrCash", "SDrDig")
+from app.services.bf_controls import BANK_TABS, FUND_TABS, RECEIVABLE_TABS
+
 # Operator defaults used in the Agreement text when the environment is not set. OPERATOR_LEGAL_NAME /
 # OPERATOR_ADDRESS from the environment override them; a deployment that sets them is asserting a real operator
 # and confirm_operator() must be run before signing. OPERATOR_PLACEHOLDER names the unconfirmed state.
@@ -895,7 +895,6 @@ def validate_step(step_key: str, draft: dict, society_id: int) -> list[str]:
         recs = step.get("receivables") or []
         if recs:
             errors.extend(pr.validation_errors(recs, pr.sdr_total(rows), known_flats=known_flat_numbers(society_id)))
-        errors.extend(stale_statement_errors(step.get("as_on_date"), step.get("reconciliation")))
 
     return errors
 
@@ -1143,37 +1142,6 @@ def _submit_from_draft(society_id: int, actor_id: int, draft: dict) -> None:
             raise OnboardingError(_res or "Setup could not be saved — please try again.")
         _apply_tds_row_dates(cur, society_id, _setup_params["tds_effective_date"], tds_rows)
 
-
-def save_annex_inputs(society_id: int, arrears_text: str, bank_agrees: bool, audited_hash: str | None, ca_review_ref: str | None) -> dict:
-    """What the wizard does not capture: arrears by flat, the bank tie-out attestation, last audited statements, CA review."""
-    arrears = []
-    for ln, line in enumerate((arrears_text or "").splitlines(), start=1):
-        if not line.strip():
-            continue
-        parts = [x.strip() for x in re.split(r"[,\t;]", line)]
-        try:
-            if len(parts) < 2 or not parts[0]:
-                raise ValueError
-            amt = money(parts[1])
-            if amt <= 0:
-                raise ValueError
-            days = int(parts[2]) if len(parts) > 2 and parts[2] else None
-        except (ValueError, ArithmeticError):
-            raise OnboardingError(f"Arrears line {ln}: write 'flat number, amount, days overdue' (days optional).")
-        arrears.append({"flat_number": parts[0], "amount": str(amt), "overdue_days": days})
-    ah = (audited_hash or "").strip().lower()
-    if ah and not re.fullmatch(r"[0-9a-f]{64}", ah):
-        raise OnboardingError("The audited statements' SHA-256 must be 64 hexadecimal characters (or left blank).")
-    inputs = {"arrears_by_flat": arrears, "bank_agrees": bool(bank_agrees), "audited_hash": ah or None,
-              "ca_review_ref": (ca_review_ref or "").strip()[:200] or None}
-    d = declaration(society_id)
-    if d is None:
-        raise OnboardingError("Submit the Setup Wizard first; its draft is what the annexes are built from.")
-    d["annex_c_inputs"] = inputs
-    db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s", (json.dumps(d), society_id))
-    return inputs
-
-
 # ── item 10: pending receivables by flat ─────────────────────────────────────────
 def get_receivables(society_id: int) -> list[dict]:
     """Read receivables from the draft (brought_forward.receivables), [] if none."""
@@ -1264,29 +1232,6 @@ def void_pending_receivable(society_id: int, actor_id: int, flat_number: str, re
            {"flat_number": flat_number, "reason": reason})
 
 
-# ── item 11: bank / cash reconciliation & evidence ───────────────────────────────
-def get_bank_reconciliation(society_id: int) -> dict:
-    """Read reconciliation & evidence from draft.brought_forward.reconciliation."""
-    d = declaration(society_id) or {}
-    bf = (d.get("draft") or {}).get("brought_forward") or {}
-    return bf.get("reconciliation") or {}
-
-
-def save_bank_reconciliation(society_id: int, actor_id: int, values: dict) -> dict:
-    """Save reconciliation & evidence into draft.brought_forward.reconciliation."""
-    d = declaration(society_id) or {}
-    draft = d.setdefault("draft", {})
-    bf = draft.setdefault("brought_forward", {})
-    rec = bf.setdefault("reconciliation", {})
-    rec.update(values)
-    bf["reconciliation"] = rec
-    steps = d.setdefault("steps", {})
-    steps["brought_forward"] = {"status": "done", "saved_at": today_ist().isoformat()}
-    db._execute("UPDATE onboarding_declarations SET declaration_json=%s::jsonb WHERE society_id=%s",
-                (json.dumps(d), society_id))
-    return {"ok": True}
-
-
 def _iso_day(v) -> str | None:
     """Cell / picker value -> 'YYYY-MM-DD' or None when blank; ValueError when it is not a date."""
     if v is None or str(v).strip() == "":
@@ -1335,34 +1280,6 @@ def validate_statement_header(rec: dict, acc_id: int, bf_as_on) -> tuple[dict | 
     if bal < 0:
         return None, "Rejected: closing_balance must be 0 or more."
     return {"as_on_date": st_day, "closing_balance": str(bal)}, None
-
-
-def stale_statement_errors(bf_as_on, reconciliation: dict | None) -> list[str]:
-    """Statements/scans recorded against an As-on date that is no longer the Brought Forward As-on date."""
-    try:
-        bf_day = _iso_day(bf_as_on)
-    except ValueError:
-        return []
-    out = []
-    for key, item in (reconciliation or {}).items():
-        on = (item or {}).get("as_on_date")
-        if bf_day and on and str(on)[:10] != bf_day:
-            out.append(f"Account {str(key).replace('bank_', '')}: its statement is as on {str(on)[:10]} but Brought Forward is as on "
-                       f"{bf_day}. Attach a statement as on {bf_day}.")
-    return out
-
-
-def reconciliation_state(book, rec: dict | None) -> dict:
-    """Pure: where one bank/cash account stands. 'agrees' needs a statement balance equal to the book balance;
-    'evidenced' needs a stored scan (the server's SHA-256, never typed)."""
-    rec = rec or {}
-    raw = rec.get("statement_balance")
-    has = raw not in (None, "")
-    diff = (money(book) - money(raw)) if has else None
-    return {"has_statement": has, "diff": diff, "agrees": bool(has and diff == 0),
-            "evidenced": bool(rec.get("sha256"))}
-
-
 EVIDENCE_PURPOSES = {
     "bank_statement","cash_count","audited_report","review_letter","paper_signature",
     "pending_receivables","tds_rates","declaration_undivided_interest","brought_forward",
@@ -1923,8 +1840,9 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
             cr += amt
             if a["tab_name"] in FUND_TABS:
                 fund_cr += amt
-    draft_bf = ((decl.get("draft") or {}).get("brought_forward")) or {}
-    recon = draft_bf.get("reconciliation") or {}
+    # Single source of truth for the three Annex C controls.
+    t = bf_controls.totals([{"acc_id": int(r["acc_id"]), "bf_amount": r.get("bf_amount")} for r in (bf.get("rows") or [])], accs)
+    dr, cr, fund_cr, bank_dr, debtors_dr = t["dr"], t["cr"], t["fund_cr"], t["bank_dr"], t["debtors_dr"]
     # Arrears come from the Brought Forward step's receivables table; the old typed-inputs form is only a fallback.
     _arrears, _ = pr.clean_rows(draft_bf.get("receivables") or [], known_flat_numbers(society_id))
     arrears = [{"flat_number": r["flat_number"], "amount": r["amount"], "overdue_days": r["overdue_days"],
@@ -1936,39 +1854,20 @@ def _annex_c(society_id: int, decl: dict | None) -> tuple[dict, dict]:
         except Exception:  # noqa: BLE001
             arrears = []
     arrears_total = sum((money(x["amount"]) for x in arrears), Decimal(0))
-    bank_lines = [(l, accs[l["acc_id"]]) for l in lines if accs[l["acc_id"]]["tab_name"] in BANK_TABS and money(l["amount"]) > 0
-                  and accs[l["acc_id"]]["drcr_account"] != "Cr"]
-    bank_rec, unreconciled = {}, []
-    for l, a in bank_lines:
-        r = recon.get(f"bank_{a['id']}") or {}
-        st = reconciliation_state(l["amount"], r)
-        bank_rec[str(a["id"])] = {"account": a["name"], "book": l["amount"], "statement_balance": r.get("statement_balance"),
-                                  "evidence_sha256": r.get("sha256")}
-        if not (st["agrees"] and st["evidenced"]):
-            unreconciled.append(a["name"] + (" (differs by Rs {})".format(st["diff"]) if st["diff"] else
-                                             " (no statement balance)" if not st["has_statement"] else " (no scan attached)"))
-    audited = recon.get("audited_sha256") or inputs.get("audited_hash")
     as_on = draft_bf.get("as_on_date") or str(date(fy, 4, 1))
+    audited = inputs.get("audited_hash")
     content = {"financial_year": fy, "as_at_date": as_on, "opening_balances": lines,
                "total_debits": str(dr), "total_credits": str(cr), "fund_balances": str(fund_cr), "bank_and_deposit_balances": str(bank_dr),
                "receivables_control": str(debtors_dr), "arrears_by_flat": arrears,
-               "bank_agrees_to_statement": (not unreconciled) if recon else bool(inputs.get("bank_agrees")),
-               "bank_reconciliation": bank_rec, "last_audited_statements_sha256": audited,
+               "last_audited_statements_sha256": audited,
                "ca_review": inputs.get("ca_review_ref") or "none obtained", "ca_reviewed": bool(inputs.get("ca_review_ref")),
                "year_to_date_carry_ins": "not captured at setup; the CA to confirm TDS, GST and s.44AB carry-ins"}
+    c3 = bf_controls.three_controls(t, arrears_total)
     controls = {
-        "balanced": _ctl(dr == cr and bool(lines), f"Debits Rs {dr} equal credits Rs {cr}." if dr == cr and lines else
-                         (f"Debits Rs {dr} and credits Rs {cr} differ." if lines else "No opening balances are declared.")),
+        "balanced": c3["balanced"],
         "accounts_known": _ctl(not bad, "Every account belongs to this society." if not bad else "Unknown account id(s): " + ", ".join(bad)),
-        "funds_backed": _ctl(fund_cr <= bank_dr, f"Funds Rs {fund_cr} are covered by bank, cash and deposits Rs {bank_dr}." if fund_cr <= bank_dr else
-                             f"Funds of Rs {fund_cr} exceed bank, cash and deposits of Rs {bank_dr}: an unbacked fund would let general money be spent."),
-        "arrears_tie": _ctl(arrears_total == debtors_dr, f"Arrears by flat (Rs {arrears_total}) tie to the receivables control (Rs {debtors_dr})." if arrears_total == debtors_dr else
-                            f"Arrears by flat total Rs {arrears_total} but the receivables control is Rs {debtors_dr}."),
-        "bank_agrees": (_ctl(not unreconciled, "Every bank and cash balance agrees to its statement, with a scan attached." if not unreconciled
-                             else "Not reconciled: " + "; ".join(unreconciled) + ". Fix in Brought Forward.")
-                        if recon else
-                        _ctl(bool(inputs.get("bank_agrees")) or bank_dr == 0, "Bank balances are attested as agreeing to the statement." if inputs.get("bank_agrees") else
-                             ("No bank balance is declared." if bank_dr == 0 else "Reconcile each bank and cash account in the Brought Forward step."))),
+        "funds_backed": c3["funds_backed"],
+        "arrears_tie": c3["arrears_tie"],
         "audited_statements": _ctl(True, "Last audited statements are attached by SHA-256." if audited else
                                    "No audited statements attached; the opening position is labelled unaudited.", False),
         "ca_review": _ctl(True, "A CA has reviewed this annex." if inputs.get("ca_review_ref") else
@@ -1986,7 +1885,7 @@ CONTROL_FIX = {
     ("B", "wizard_submitted"): "Instructions", ("B", "committee_seated"): "committee", ("B", "officers_complete"): "committee", ("B", "grievance_officer"): "committee",
     ("B", "rates_pending_ca"): "TAN & TDS Rates",
     ("C", "balanced"): "Brought Forward", ("C", "accounts_known"): "Brought Forward", ("C", "funds_backed"): "Brought Forward",
-    ("C", "arrears_tie"): "Brought Forward", ("C", "bank_agrees"): "Brought Forward",
+    ("C", "arrears_tie"): "Brought Forward",
     ("D", "grievance_officer"): "committee", ("D", "grievance_contact"): "committee", ("D", "stepup_set"): "Administrator",
     ("E", "registration_certificate"): "committee", ("E", "index_complete"): "committee",
 }
