@@ -864,6 +864,13 @@ def _write_balance_sheet_hierarchical(
 
         for kid in kids:
             kamt = D(kid.get("display_amount") or 0)
+            if kid.get("drcr_account") == "Cr":
+                # Contra asset (e.g. Accumulated Depreciation 1190 under Fixed
+                # Assets, Provision for Doubtful Debts 1530 under Sundry
+                # Debtors): shown as a negative amount so the Assets section
+                # reads gross, less accumulated depreciation / provisions, net
+                # (C1 / finding F-09).
+                kamt = -kamt
             if kamt == 0:
                 continue
             ws.cell(row=r, column=8, value=kid.get("account_name", "")).font = _FONT_BODY

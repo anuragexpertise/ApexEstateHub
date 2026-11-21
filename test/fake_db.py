@@ -1243,15 +1243,11 @@ class FakeDB:
 
     def _fn_trial_balance(self, p, fetch_one, fetch_all):
         sid = p.get("p0") or p.get("society_id")
-        fy = p.get("p1") or p.get("fy")
-        fy_start = f"{fy:04d}-04-01"
-        fy_end = f"{fy + 1:04d}-03-31"
         accounts = [r for r in self.tables.get("accounts", []) if r.get("society_id") == sid]
         rows = []
         for a in accounts:
             txs = [r for r in self.tables.get("transactions", [])
-                   if r.get("society_id") == sid and r.get("acc_id") == a.get("id")
-                   and fy_start <= (r.get("trx_date") or "") <= fy_end]
+                   if r.get("society_id") == sid and r.get("acc_id") == a.get("id")]
             dr = sum(float(r.get("amount", 0)) for r in txs if r.get("entry_side") == "Dr")
             cr = sum(float(r.get("amount", 0)) for r in txs if r.get("entry_side") == "Cr")
             rows.append({

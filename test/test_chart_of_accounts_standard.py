@@ -136,7 +136,7 @@ def test_statutory_head_mappings_section_3_1():
         2290: "TAX_PAYABLE",      # F-14: TDS Payable
         2255: "TAX_PAYABLE",      # Provision for Income Tax
         5220: "INCOME_TAX_EXPENSE",  # F-13: Income Tax expense head
-        3240: "ACCUMULATED_SURPLUS",  # F-17: Earmarked Gifts Fund → funds/equity head
+        3240: "EARMARKED_FUNDS",     # C2/F-17: Earmarked Gifts Fund → its own Equity head
         5170: "OTHER_EXPENSES",   # F-15: Electricity
         5180: "OTHER_EXPENSES",   # F-15: Water Tax
         5190: "OTHER_EXPENSES",   # F-15: House Tax
