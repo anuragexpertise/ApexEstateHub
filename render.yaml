@@ -11,29 +11,24 @@ services:
         value: "3.11"
       - key: FLASK_CONFIG
         value: production
+      # DATABASE_URL points at the Aiven database (external to Render).
+      # Set this in the Render dashboard to the Aiven connection string;
+      # do NOT provision a Render PostgreSQL for it.
       - key: DATABASE_URL
-        fromDatabase:
-          name: estatehub-db
-          property: connectionString
+        sync: false
       - key: SECRET_KEY
         generateValue: true
       - key: JWT_SECRET_KEY
         generateValue: true
+      # SECRET_VAULT_KEY wraps each society's signing keys at rest
+      # (app/services/secret_vault.py). Operator-provided; must match the key
+      # the database was seeded with.
+      - key: SECRET_VAULT_KEY
+        sync: false
+      # Optional: point at a Render Redis service (type: redis, added as a
+      # separate service) or an external Redis for push/pub-sub. The app degrades
+      # gracefully when unset (app/services/redis_broker.py).
       - key: REDIS_URL
-        fromService:
-          type: redis
-          name: estatehub-redis
-          property: connectionString
+        sync: false
       - key: PGSSLMODE
         value: require
-
-databases:
-  - name: estatehub-db
-    plan: starter
-    region: frankfurt
-    ipAllowList: []
-
-  - name: estatehub-redis
-    plan: starter
-    region: frankfurt
-    ipAllowList: []
