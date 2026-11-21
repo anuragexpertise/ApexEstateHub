@@ -14,6 +14,7 @@ Tests:
 from datetime import date
 
 import pglast
+import re
 from pglast.ast import CreateFunctionStmt
 
 from app.dash_apps.drilldown import loaders
@@ -256,4 +257,31 @@ def test_statutory_head_uniqueness():
         got = heads.get(head_code, [])
         assert len(got) == 1, f"head {head_code} mapped to {got} accounts, expected exactly 1"
         assert got[0] == expected_id, f"head {head_code} mapped to account {got[0]}, expected {expected_id}"
+
+
+def test_fn_msme_creditor_controls_defined_in_sql():
+    """T7: fn_vendor_outstanding, fn_vendor_aging, fn_msme_payment_compliance
+    are defined in estatehub.sql and parse cleanly."""
+    sql = _sql()
+    for fn in ("fn_vendor_outstanding", "fn_vendor_aging", "fn_msme_payment_compliance"):
+        assert f"CREATE OR REPLACE FUNCTION {fn}(" in sql, f"{fn} not defined in estatehub.sql"
+    stmts = pglast.parse_sql(sql)
+    found = set()
+    for s in stmts:
+        t = str(s)
+        for fn in ("fn_vendor_outstanding", "fn_vendor_aging", "fn_msme_payment_compliance"):
+            if fn in t:
+                found.add(fn)
+    assert found == {"fn_vendor_outstanding", "fn_vendor_aging", "fn_msme_payment_compliance"}, \
+        f"missing T7 functions: {sorted({'fn_vendor_outstanding', 'fn_vendor_aging', 'fn_msme_payment_compliance'} - found)}"
+
+def test_vendor_table_has_msme_columns():
+    """T7: vendors table has msme_registered and msme_udyam_number columns."""
+    sql = _sql()
+    # vendors table definition
+    m = re.search(r"CREATE TABLE vendors\s*\((.*?)\);", sql, flags=re.DOTALL)
+    assert m, "vendors table not found in estatehub.sql"
+    vendors_ddl = m.group(1)
+    assert "msme_registered" in vendors_ddl, "vendors.msme_registered column missing"
+    assert "msme_udyam_number" in vendors_ddl, "vendors.msme_udyam_number column missing"
 
