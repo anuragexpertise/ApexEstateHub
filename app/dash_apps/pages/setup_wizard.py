@@ -13,22 +13,36 @@ from database.money import (  # noqa: F401  (Plan v4 C.9: rupee amounts are Deci
     rupee,
 )
 
-# Accounts whose brought-forward balance requires ledger rows (B3). If the balance is > 0 and no
-# ledger rows are recorded, a warning symbol is shown; it clears when ledger rows are filled.
-BF_LEDGER_MANDATORY_ACCOUNTS = frozenset({
-    # Fixed Assets children
-    1120, 1130, 1140, 1150, 1160,
-    # Investments
-    1200,
-    # Current Assets children
-    1311, 1312, 1320, 1330,
-    # Loans & Advances Given children
-    1410,
-    # Sundry Debtors (digital and cash, separately)
-    1510, 1520,
-    # Reserves & Funds children
-    3210, 3220, 3230, 3270, 3280,
+# Ledger rows (the per-party list behind a brought-forward balance) make sense only where the balance is owed
+# BY a party (Sundry Debtors, cash and digital) or TO a party (Sundry Creditors). Every other account (bank,
+# cash, assets, investments, deposits, funds, capital) is a single figure, so it gets no "+ Ledger-rows" button and the
+# server refuses ledger rows for it.
+BF_LEDGER_ACCOUNTS = frozenset({
+    1510,   # Sundry Debtors (Digital)
+    1520,   # Sundry Debtors (Cash)
+    2240,   # Sundry Creditors
 })
+# Column captions for the ledger grid: debtors are listed by flat, creditors by vendor / party.
+BF_LEDGER_COLUMNS = {
+    "debtor":   ("Flat no.", "Value receivable (₹)"),
+    "creditor": ("Vendor / party", "Amount payable (₹)"),
+}
+
+
+def bf_ledger_kind(acc_id) -> str | None:
+    """'debtor' | 'creditor' for an account that may carry ledger rows, else None."""
+    try:
+        acc_id = int(acc_id)
+    except (TypeError, ValueError):
+        return None
+    if acc_id not in BF_LEDGER_ACCOUNTS:
+        return None
+    return "creditor" if acc_id == 2240 else "debtor"
+
+
+# Of those, the accounts whose balance MUST be backed by ledger rows (B3). If the balance is > 0 and no ledger
+# rows are recorded, a warning symbol is shown; it clears when ledger rows are filled.
+BF_LEDGER_MANDATORY_ACCOUNTS = frozenset({1510, 1520})
 
 # ── Defaults requested for first-time setup ────────────────────────────────
 # Sinking and Repair & Maintenance Fund rates have NO default and NO cap: the figure is whatever the society's General
@@ -2112,19 +2126,21 @@ def render_category_content(category, society_id=None, state=None, constitution=
             except (TypeError, ValueError):
                 _bf_amt = 0.0
             _has_ledger = bool(saved.get("ledger_rows"))
+            _ledger_kind = bf_ledger_kind(acc_id)          # None: a single-figure account, no ledger rows
             _warn = (acc_id in BF_LEDGER_MANDATORY_ACCOUNTS and _bf_amt > 0 and not _has_ledger)
+            _party_col, _amount_col = BF_LEDGER_COLUMNS.get(_ledger_kind or "debtor")
             _name_el = [html.Small(name, className="fw-bold")]
             if _warn:
                 _name_el.append(html.Span(" ⚠ ledger rows required",
                                           style={"color": "#b26a00", "fontWeight": "600",
                                                  "fontSize": "11px", "marginLeft": "6px"}))
-            ledger_modal = dbc.Modal([
+            ledger_modal = None if _ledger_kind is None else dbc.Modal([
                 dbc.ModalHeader(dbc.ModalTitle(f"Ledger rows — {name}")),
                 dbc.ModalBody([
                     dash_table.DataTable(
                         id={"type": "sw-bf-ledger-grid", "acc_id": acc_id},
-                        columns=[{"id": "flat_number", "name": "Flat no.", "type": "text"},
-                                 {"id": "amount", "name": "Value receivable (₹)", "type": "numeric"},
+                        columns=[{"id": "flat_number", "name": _party_col, "type": "text"},
+                                 {"id": "amount", "name": _amount_col, "type": "numeric"},
                                  {"id": "overdue_days", "name": "Days overdue", "type": "numeric"},
                                  {"id": "remarks", "name": "Remarks", "type": "text"}],
                         data=saved.get("ledger_rows") or [{"flat_number": "", "amount": None,
@@ -2175,7 +2191,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
                                       value=saved.get("bf_amount"), step=0.01, min=0, size="sm",
                                       className="sw-bf-val"), md=2),
                     dbc.Col(dbc.Button("+ Ledger-rows", id={"type": "sw-bf-ledger", "acc_id": acc_id},
-                                       color="secondary", size="sm", outline=True, n_clicks=0), md=2),
+                                       color="secondary", size="sm", outline=True, n_clicks=0)
+                            if _ledger_kind else None, md=2),
                     dbc.Col(dbc.Input(id={"type": "sw-bf-remarks", "acc_id": acc_id}, type="text",
                                       placeholder="Remarks...", value=saved.get("remarks"), size="sm",
                                       className="sw-bf-remarks"), md=3),
@@ -2188,7 +2205,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                          style={"fontSize": "12.5px", "marginTop": "4px"}),
                 html.Small("Admin: attachment verified to match the entered value for the account/label.",
                            className="text-muted d-block mt-1 mb-3", style={"fontSize": "11px"}),
-                ledger_modal,
+                *([ledger_modal] if ledger_modal is not None else []),
             ], className="sw-bf-account-row border rounded p-2 mb-2", style={"background": "#fff", **indent})
 
         def _bf_side(side):

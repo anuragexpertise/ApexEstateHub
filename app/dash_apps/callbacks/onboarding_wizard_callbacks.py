@@ -19,6 +19,7 @@ from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 
 from app.dash_apps.pages import onboarding_page as op
 from app.dash_apps.pages.setup_wizard import (
+    bf_ledger_kind,
     CATEGORIES,
     legal_hierarchy_rows,
     legal_regime_live,
@@ -1028,6 +1029,10 @@ def _register_xlsx_callbacks(app):
         trig = ctx.triggered_id
         rows = rows or [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}]
         acc_id = int(trig["acc_id"]) if isinstance(trig, dict) else None
+        if acc_id is not None and bf_ledger_kind(acc_id) is None:
+            # The page draws no ledger grid for this account; a forged request must not create ledger rows either.
+            return no_update, _alert("Ledger rows are kept only for Sundry Debtors (Cash), Sundry Debtors (Digital) "
+                                     "and Sundry Creditors.", ok=False)
 
         blocked = _draft_edit_block(s) if isinstance(trig, dict) else None
         if blocked:
@@ -1072,8 +1077,10 @@ def _register_xlsx_callbacks(app):
                 incoming = []
                 for r in head.rows or []:
                     incoming.append({
-                        "flat_number": r.get("flat_number") or r.get("flat no.") or r.get("account") or "",
-                        "amount": r.get("amount") or r.get("value") or r.get("value receivable") or None,
+                        "flat_number": (r.get("flat_number") or r.get("flat no.") or r.get("vendor")
+                                        or r.get("party") or r.get("account") or ""),
+                        "amount": (r.get("amount") or r.get("value") or r.get("value receivable")
+                                   or r.get("amount payable") or None),
                         "overdue_days": r.get("overdue_days") or r.get("days overdue") or None,
                         "remarks": r.get("remarks") or r.get("remark") or "",
                     })

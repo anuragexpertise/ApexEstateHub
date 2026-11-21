@@ -385,3 +385,65 @@ def test_statement_download_works_with_the_real_account_list(callbacks, monkeypa
     assert accounts and ws.max_row == len(accounts) + 1
     assert [ws.cell(row=r, column=1).value for r in range(2, ws.max_row + 1)] == [a["id"] for a in accounts]
     assert ws["C2"].value == accounts[0]["name"] and ws["B2"].value == accounts[0]["tab"]
+
+
+# ── ledger rows exist only for Sundry Debtors (Cash / Digital) and Sundry Creditors ───────────────────────
+
+LEDGER_ACCOUNTS = (1510, 1520, 2240)
+
+
+def test_ledger_rows_button_and_modal_only_for_debtors_and_creditors(monkeypatch):
+    _saved_draft(monkeypatch, [])
+    body = _render()
+    for acc in LEDGER_ACCOUNTS:
+        assert _find(body, {"type": "sw-bf-ledger", "acc_id": acc}) is not None, acc
+        assert _find(body, {"type": "sw-bf-ledger-modal", "acc_id": acc}) is not None, acc
+        assert _find(body, {"type": "sw-bf-ledger-add", "acc_id": acc}) is not None, acc
+    others = [a for a in _all_acc_ids() if a not in LEDGER_ACCOUNTS]
+    assert others, "the layout should hold other accounts too"
+    assert any(_find(body, {"type": "sw-bf-amt", "acc_id": a}) is not None for a in others)   # amount boxes remain
+    for acc in others:                                   # (some funds are hidden per society, so no per-account check)
+        assert _find(body, {"type": "sw-bf-ledger", "acc_id": acc}) is None, acc
+        assert _find(body, {"type": "sw-bf-ledger-modal", "acc_id": acc}) is None, acc
+
+
+def test_creditor_grid_is_captioned_for_vendors(monkeypatch):
+    _saved_draft(monkeypatch, [])
+    body = _render()
+    cr = _find(body, {"type": "sw-bf-ledger-grid", "acc_id": 2240})
+    dr = _find(body, {"type": "sw-bf-ledger-grid", "acc_id": 1510})
+    assert [c["name"] for c in cr.columns][:2] == ["Vendor / party", "Amount payable (₹)"]
+    assert [c["name"] for c in dr.columns][:2] == ["Flat no.", "Value receivable (₹)"]
+
+
+def test_ledger_kind_and_mandatory_set():
+    assert sw.bf_ledger_kind(1510) == sw.bf_ledger_kind("1520") == "debtor"
+    assert sw.bf_ledger_kind(2240) == "creditor"
+    for acc in (1311, 1320, 1200, 3210, 3100, None, "x"):
+        assert sw.bf_ledger_kind(acc) is None, acc
+    assert sw.BF_LEDGER_MANDATORY_ACCOUNTS <= sw.BF_LEDGER_ACCOUNTS
+
+
+def test_no_ledger_warning_for_accounts_without_ledger_rows(monkeypatch):
+    """Deposits / bank etc. used to nag "ledger rows required"; they have no ledger rows now, so no warning."""
+    monkeypatch.setattr(ob, "load_draft", lambda sid: {"brought_forward": {"as_on_date": "2026-09-30", "rows": [
+        {"acc_id": 1311, "tab": "SBI", "side": "Dr", "bf_amount": "50000.00", "remarks": ""},
+        {"acc_id": 1320, "tab": "Dp", "side": "Dr", "bf_amount": "20000.00", "remarks": ""}]}})
+    monkeypatch.setattr(sw.db, "_execute", lambda *a, **k: None)
+    assert "ledger rows required" not in " ".join(_texts(_render()))
+
+
+def test_ledger_grid_callback_refuses_other_accounts(callbacks, monkeypatch):
+    saved = []
+    monkeypatch.setattr(ob, "_save_declaration", lambda *a, **k: saved.append(a))
+    monkeypatch.setattr(ob, "declaration", lambda sid: {})
+    monkeypatch.setattr(cb, "_draft_edit_block", lambda s: None)
+    row = [{"flat_number": "", "amount": None, "overdue_days": None, "remarks": ""}]
+    for acc, allowed in ((1311, False), (1320, False), (2240, True), (1520, True)):
+        monkeypatch.setattr(cb, "ctx", type("C", (), {"triggered_id": {"type": "sw-bf-ledger-add", "acc_id": acc}})())
+        data, msg = callbacks["bf_ledger_grid"](1, None, None, None, "add", row)
+        if allowed:
+            assert len(data) == 2, acc
+        else:
+            assert "Ledger rows are kept only for" in str(msg.children) and acc not in [a for a in saved], acc
+    assert len(saved) == 2                                   # only the two allowed accounts were written
