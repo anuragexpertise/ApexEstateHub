@@ -287,6 +287,64 @@ EXCEPTION WHEN OTHERS THEN
     RAISE EXCEPTION 'C6: appropriation-path credit to 3280 was refused: %', SQLERRM;
 END $$;
 
+
+-- ============================================================================
+-- I3 / H7: MSME creditors split + 45-day compliance (live, rolled back)
+-- ============================================================================
+
+-- I3: one MSME-flagged vendor and one unflagged vendor, each with a bill;
+-- fn_creditors_split splits correctly and mse_dues + other_dues = total_dues.
+DO $$
+DECLARE
+    v_mse NUMERIC; v_oth NUMERIC; v_tot NUMERIC;
+    v_mse_vid INT; v_oth_vid INT;
+BEGIN
+    INSERT INTO vendors (society_id, business_name, name, service_type, mobile, payee_type, msme_registered, msme_udyam_number)
+    VALUES (1, 'MSE Vendor', 'MSE Vendor', 'Plumbing', '9000000001', 'individual', TRUE, 'UDYAM-MH-00-0000001'),
+           (1, 'Other Vendor', 'Other Vendor', 'Gardening', '9000000002', 'individual', FALSE, NULL);
+
+    SELECT id INTO v_mse_vid FROM vendors WHERE business_name = 'MSE Vendor' AND society_id = 1;
+    SELECT id INTO v_oth_vid FROM vendors WHERE business_name = 'Other Vendor' AND society_id = 1;
+
+    INSERT INTO payables (society_id, entity_id, role, acc_id, amount, mode, status, shift_date, due_date, description)
+    VALUES (1, v_mse_vid, 'vendor', 2240, 5000.00, 'bank', 'pending', '2026-04-01', '2026-05-15', 'MSE bill'),
+           (1, v_oth_vid, 'vendor', 2240, 10000.00, 'bank', 'pending', '2026-04-01', '2026-05-15', 'Other bill');
+
+    SELECT mse_dues, other_dues, total_dues INTO v_mse, v_oth, v_tot FROM fn_creditors_split(1, 2026);
+    IF v_mse IS NULL OR v_oth IS NULL OR v_tot IS NULL THEN
+        RAISE EXCEPTION 'I3: fn_creditors_split returned NULL';
+    END IF;
+    IF ABS(v_mse - 5000.00) > 0.01 THEN
+        RAISE EXCEPTION 'I3: mse_dues % expected 5000', v_mse;
+    END IF;
+    IF ABS(v_oth - 10000.00) > 0.01 THEN
+        RAISE EXCEPTION 'I3: other_dues % expected 10000', v_oth;
+    END IF;
+    IF ABS(v_tot - 15000.00) > 0.01 THEN
+        RAISE EXCEPTION 'I3: total_dues % expected 15000', v_tot;
+    END IF;
+    IF ABS(v_mse + v_oth - v_tot) > 0.01 THEN
+        RAISE EXCEPTION 'I3: mse % + other % != total %', v_mse, v_oth, v_tot;
+    END IF;
+END $$;
+
+-- fn_msme_payment_compliance: flags an invoice older than 45 days, does not
+-- flag a 10-day-old one (MSE Vendor bill shift_date 2026-04-01).
+DO $$
+DECLARE v_comp BOOLEAN;
+BEGIN
+    SELECT compliant INTO v_comp
+    FROM fn_msme_payment_compliance(1, (SELECT id FROM vendors WHERE business_name = 'MSE Vendor' AND society_id = 1), '2026-05-17');
+    IF v_comp IS NOT FALSE THEN
+        RAISE EXCEPTION 'I3: 46-day-old MSME bill should be non-compliant, got %', v_comp;
+    END IF;
+    SELECT compliant INTO v_comp
+    FROM fn_msme_payment_compliance(1, (SELECT id FROM vendors WHERE business_name = 'MSE Vendor' AND society_id = 1), '2026-04-11');
+    IF v_comp IS NOT TRUE THEN
+        RAISE EXCEPTION 'I3: 10-day-old MSME bill should be compliant, got %', v_comp;
+    END IF;
+END $$;
+
 ROLLBACK;
 
 -- ============================================================================

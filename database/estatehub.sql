@@ -13233,6 +13233,52 @@ BEGIN
 END;
 $$;
 
+-- fn_creditors_split: dues to micro & small enterprises versus dues to
+-- others, as at the end of financial year p_fy. Computed from the ledger
+-- (vendor payables bills less confirmed payments) and the vendor's
+-- msme_registered flag (not a stored column). mse_dues + other_dues =
+-- total_dues, which ties to the Sundry Creditors balance on the balance sheet.
+CREATE OR REPLACE FUNCTION fn_creditors_split(p_society_id INT, p_fy INT)
+RETURNS TABLE (
+    mse_dues NUMERIC(15,2),
+    other_dues NUMERIC(15,2),
+    total_dues NUMERIC(15,2)
+)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_asof DATE := MAKE_DATE(p_fy + 1, 3, 31);
+BEGIN
+    RETURN QUERY
+    SELECT
+        COALESCE(SUM(CASE WHEN v.msme_registered THEN o.net_due ELSE 0 END), 0)::NUMERIC(15,2),
+        COALESCE(SUM(CASE WHEN NOT v.msme_registered THEN o.net_due ELSE 0 END), 0)::NUMERIC(15,2),
+        COALESCE(SUM(o.net_due), 0)::NUMERIC(15,2)
+    FROM vendors v
+    LEFT JOIN LATERAL (
+        SELECT greatest(COALESCE(b.bills, 0) - COALESCE(p.payments, 0), 0)::NUMERIC(15,2) AS net_due
+        FROM (
+            SELECT COALESCE(SUM(amount), 0) AS bills
+            FROM payables
+            WHERE society_id = p_society_id
+              AND role = 'vendor'
+              AND status IN ('pending', 'verified')
+              AND shift_date <= v_asof
+              AND entity_id = v.id
+        ) b
+        CROSS JOIN LATERAL (
+            SELECT COALESCE(SUM(amount), 0) AS payments
+            FROM expenses
+            WHERE society_id = p_society_id
+              AND role = 'vendor'
+              AND status = 'confirmed'
+              AND expense_date <= v_asof
+              AND entity_id = v.id
+        ) p
+    ) o ON TRUE
+    WHERE v.society_id = p_society_id;
+END;
+$$;
+
 -- SECTION 23: DATA INTEGRITY VALIDATION FUNCTIONS
 -- Each returns zero or more problem rows describing the anomaly.
 -- ════════════════════════════════════════════════════════════════

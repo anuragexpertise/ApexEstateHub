@@ -82,3 +82,16 @@ def fixed_asset_tie(register_gross, register_accum_dep, chart_gross, chart_accum
                   f"vs chart gross Rs {chart_gross}; register accumulated depreciation Rs {register_accum_dep} "
                   f"vs chart Rs {chart_accum_dep}.")
     return _ctl(passed, reason, blocking=True)
+
+
+def creditors_tie(split_total, sundry_creditors):
+    """creditors_tie (F-23): the creditors split total (MSE + others from
+    ``fn_creditors_split``) must equal the Sundry Creditors balance on the
+    balance sheet. Returns a control dict like the Annex C controls."""
+    passed = split_total == sundry_creditors
+    if passed:
+        reason = f"Creditors split total Rs {split_total} ties to Sundry Creditors Rs {sundry_creditors}."
+    else:
+        reason = (f"Creditors split total Rs {split_total} does not tie to Sundry Creditors "
+                  f"Rs {sundry_creditors}: the MSE/other split does not reconcile to the ledger.")
+    return _ctl(passed, reason, blocking=True)

@@ -84,3 +84,18 @@ def test_fixed_asset_tie_dep_mismatch_fails():
         register_gross=Decimal(15000), register_accum_dep=Decimal(2001),
         chart_gross=Decimal(15000), chart_accum_dep=Decimal(2000))
     assert not c["passed"]
+
+
+def test_creditors_tie_passes():
+    # One flagged (MSE) vendor owed Rs 5,000 and one unflagged vendor owed
+    # Rs 10,000: split total Rs 15,000 ties to Sundry Creditors Rs 15,000.
+    c = bc.creditors_tie(split_total=Decimal(15000), sundry_creditors=Decimal(15000))
+    assert c["passed"]
+    assert c["blocking"]
+
+
+def test_creditors_tie_fails_on_mismatch():
+    # Split total Rs 15,000 vs Sundry Creditors Rs 14,000: does not tie.
+    c = bc.creditors_tie(split_total=Decimal(15000), sundry_creditors=Decimal(14000))
+    assert not c["passed"]
+    assert c["blocking"]
