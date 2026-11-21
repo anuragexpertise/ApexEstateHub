@@ -12,15 +12,16 @@ from database.money import (  # noqa: F401  (Plan v4 C.9: rupee amounts are Deci
     money,
     rupee,
 )
+from database import chart_ids
 
 # Ledger rows (the per-party list behind a brought-forward balance) make sense only where the balance is owed
 # BY a party (Sundry Debtors, cash and digital) or TO a party (Sundry Creditors). Every other account (bank,
 # cash, assets, investments, deposits, funds, capital) is a single figure, so it gets no "+ Ledger-rows" button and the
 # server refuses ledger rows for it.
 BF_LEDGER_ACCOUNTS = frozenset({
-    1510,   # Sundry Debtors (Digital)
-    1520,   # Sundry Debtors (Cash)
-    2240,   # Sundry Creditors
+    chart_ids.SUNDRY_DEBTORS_DIGITAL,   # Sundry Debtors (Digital)
+    chart_ids.SUNDRY_DEBTORS_CASH,      # Sundry Debtors (Cash)
+    chart_ids.SUNDRY_CREDITORS,         # Sundry Creditors
 })
 # Column captions for the ledger grid: debtors are listed by flat, creditors by vendor / party.
 BF_LEDGER_COLUMNS = {
@@ -37,12 +38,12 @@ def bf_ledger_kind(acc_id) -> str | None:
         return None
     if acc_id not in BF_LEDGER_ACCOUNTS:
         return None
-    return "creditor" if acc_id == 2240 else "debtor"
+    return "creditor" if acc_id == chart_ids.SUNDRY_CREDITORS else "debtor"
 
 
 # Of those, the accounts whose balance MUST be backed by ledger rows (B3). If the balance is > 0 and no ledger
 # rows are recorded, a warning symbol is shown; it clears when ledger rows are filled.
-BF_LEDGER_MANDATORY_ACCOUNTS = frozenset({1510, 1520})
+BF_LEDGER_MANDATORY_ACCOUNTS = frozenset({chart_ids.SUNDRY_DEBTORS_DIGITAL, chart_ids.SUNDRY_DEBTORS_CASH})
 
 # ── Defaults requested for first-time setup ────────────────────────────────
 # Sinking and Repair & Maintenance Fund rates have NO default and NO cap: the figure is whatever the society's General
@@ -2051,9 +2052,9 @@ def render_category_content(category, society_id=None, state=None, constitution=
         # UP AOA labels for the equity / fund accounts. The fund rows come from the shared fund catalogue
         # (status, rate and applicability); the rest are plain accounts with a fixed label.
         UP_AOA_FUND_LABELS = {
-            3100: "Capital Account / Share Capital (entrance fee \u20b91,000 + share)",
-            3240: "Gifts Received (Earmarked Fund)",
-            3250: "Provisions",
+            chart_ids.CAPITAL_ACCOUNT: "Capital Account / Share Capital (entrance fee \u20b91,000 + share)",
+            chart_ids.EARMARKED_GIFTS_FUND: "Gifts Received (Earmarked Fund)",
+            chart_ids.PROVISIONS: "Provisions",
         }
         from app.services.up_aoa_fund_catalog import active_keys as _active_keys
         if is_current:

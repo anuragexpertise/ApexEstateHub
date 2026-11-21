@@ -24,7 +24,7 @@ def _accounts(monkeypatch):
         {"id": 3270, "name": "Major Repair Fund", "tab_name": "MajRepFund", "drcr_account": "Cr"},
         {"id": 3220, "name": "Repair Fund Reserve", "tab_name": "RepFund", "drcr_account": "Cr"},
         {"id": 3240, "name": "Earmarked Gifts Fund", "tab_name": "Gifts", "drcr_account": "Cr"},
-        {"id": 3250, "name": "Provisions", "tab_name": "CL", "drcr_account": "Cr"},
+        {"id": 2250, "name": "Provisions", "tab_name": "CL", "drcr_account": "Cr"},
         {"id": 2110, "name": "Secured Loan", "tab_name": "NCL", "drcr_account": "Cr"},
         {"id": 2240, "name": "Sundry Creditors", "tab_name": "CL", "drcr_account": "Cr"},
         {"id": 1110, "name": "Building", "tab_name": "FA", "drcr_account": "Dr"},
@@ -53,7 +53,7 @@ def _accounts(monkeypatch):
 
 
 FIXTURE = {  # section 10
-    "Cr": {3100: "500000", 3230: "100000", 3270: "50000", 3220: "50000", 3240: "10000", 3250: "20000", 2110: "30000", 2240: "40000"},
+    "Cr": {3100: "500000", 3230: "100000", 3270: "50000", 3220: "50000", 3240: "10000", 2250: "20000", 2110: "30000", 2240: "40000"},
     "Dr": {1110: "200000", 1120: "50000", 1200: "100000", 1311: "120000", 1312: "80000", 1320: "100000", 1330: "55000", 1400: "20000", 1510: "40000", 1520: "35000"},
 }
 AS_ON = "2026-09-30"
