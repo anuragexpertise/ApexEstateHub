@@ -947,9 +947,9 @@ class FakeDB:
                     if "reserve fund" in (a.get("name") or "").lower()]
         return _rank(fallback)[0] if fallback else None
 
-    def _resolve_inexp_appropriation_account(self, society_id):
-        """Mirror fn_resolve_inexp_appropriation_account: the tab_name='InExp'
-        account the appropriation is debited against."""
+    def _resolve_surplus_appropriation_account(self, society_id):
+        """Mirror fn_resolve_surplus_appropriation_account: resolves the
+        appropriation contra account for this fake's society."""
         for a in self.tables.get("accounts", []):
             if a.get("society_id") == society_id and a.get("tab_name") == "InExp":
                 return a
@@ -1003,7 +1003,7 @@ class FakeDB:
         surplus, balanced = self._fy_close_figures(sid, int(fy))
         transfer = round(max(surplus, 0.0) * pct / 100, 2)
         reserve = self._resolve_reserve_account(sid)
-        contra = self._resolve_inexp_appropriation_account(sid)
+        contra = self._resolve_surplus_appropriation_account(sid)
 
         closure = next(
             (c for c in self.tables.get("fy_closures", [])
@@ -1083,7 +1083,7 @@ class FakeDB:
 
         transfer = round(max(surplus, 0.0) * pct / 100, 2)
         reserve = self._resolve_reserve_account(sid)
-        contra = self._resolve_inexp_appropriation_account(sid)
+        contra = self._resolve_surplus_appropriation_account(sid)
         if transfer > 0 and (reserve is None or contra is None):
             return {
                 "status": "blocked_no_accounts",

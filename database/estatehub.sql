@@ -8930,7 +8930,7 @@ $$;
 -- equity, which misstated the reserve movement.)
 -- Name fallback covers a chart where tab_name was renamed.
 
-CREATE OR REPLACE FUNCTION fn_resolve_inexp_appropriation_account(p_society_id INT)
+CREATE OR REPLACE FUNCTION fn_resolve_surplus_appropriation_account(p_society_id INT)
 RETURNS INT
 LANGUAGE plpgsql STABLE AS $$
 DECLARE
@@ -9022,7 +9022,7 @@ BEGIN
       );
 
     v_reserve_id := fn_resolve_reserve_account(p_society_id);
-    v_contra_id  := fn_resolve_inexp_appropriation_account(p_society_id);
+    v_contra_id  := fn_resolve_surplus_appropriation_account(p_society_id);
     v_transfer   := GREATEST(ROUND(GREATEST(v_surplus, 0) * v_pct / 100, 2), 0);
 
     SELECT c.id, c.status, c.closed_at INTO v_closure
@@ -9226,7 +9226,7 @@ BEGIN
       );
 
     v_reserve_id := fn_resolve_reserve_account(p_society_id);
-    v_contra_id  := fn_resolve_inexp_appropriation_account(p_society_id);
+    v_contra_id  := fn_resolve_surplus_appropriation_account(p_society_id);
     v_transfer   := GREATEST(ROUND(GREATEST(v_surplus, 0) * v_pct / 100, 2), 0);
 
     SELECT name INTO v_name FROM accounts

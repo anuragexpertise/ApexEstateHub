@@ -5,6 +5,9 @@ Pure: imports database.seed.ACCOUNTS and UP_AOA_ACCOUNT_MAPPINGS only; no databa
 from database.seed import ACCOUNTS, UP_AOA_ACCOUNT_MAPPINGS
 
 ROOTS = {1000: "Dr", 2000: "Cr", 3000: "Cr", 4000: "Cr", 5000: "Dr"}
+# I1 contra allow-list: contra (Cr) accounts that legitimately sit under a Dr
+# root (accumulated depreciation, provision for doubtful debts). Exempt from
+# the nature-agrees-with-root check; a second test asserts this set is exact.
 CONTRA_ACCOUNTS = {1190, 1530}
 
 
@@ -24,6 +27,10 @@ def _by_id():
         assert aid not in by_id, f"duplicate account id {aid}"
         by_id[aid] = row
     return by_id
+
+
+def _mapping():
+    return {aid: head for aid, head, _ in UP_AOA_ACCOUNT_MAPPINGS}
 
 
 def _ancestors(aid, by_id):
@@ -91,40 +98,53 @@ def test_chart_of_accounts_standard():
     for aid, _, _ in UP_AOA_ACCOUNT_MAPPINGS:
         assert aid in by_id, f"mapping for unknown account {aid}"
 
-    # ══════════════════════════════════════════════════════════════════════════════
-    # Section 6 invariants I1-I6
-    # ══════════════════════════════════════════════════════════════════════════════
 
-    def test_I1_nature_agrees_with_root():
-        for aid, row in by_id.items():
-            root = _root_of(aid, by_id)
-            if root is None or row[5] is None or aid in CONTRA_ACCOUNTS:
-                continue
-            assert row[5] == ROOTS[root], f"account {aid} ({row[1]}) is {row[5]} under root {root} ({ROOTS[root]})"
+# Section 6 invariants — I1/I2/I3 now run as module-level tests
+# (test/test_chart_of_accounts_standard.py); I5/I6 are covered by the live
+# SQL file (test/live_icai_checks.sql). I4/I7 are live checks too.
 
-    def test_I2_id_range_and_four_digits():
-        for aid, row in by_id.items():
-            root = _root_of(aid, by_id)
-            if root is None:
-                continue
-            assert (aid // 1000) == (root // 1000), f"account {aid} not in root {root}\'s thousand-range"
-            assert 1000 <= aid <= 9999, f"account {aid} is not four digits"
 
-    def test_I3_no_group_account_mapped():
-        # F-18: group accounts 1100 and 1300 carry no statutory head
-        assert 1100 not in mapped, "group account 1100 (Fixed Assets) has a statutory head mapping"
-        assert 1300 not in mapped, "group account 1300 (Current Assets) has a statutory head mapping"
+def test_I1_nature_agrees_with_root():
+    """I1: every account's Dr/Cr nature agrees with its root, except the
+    commented contra allow-list {1190, 1530}."""
+    by_id = _by_id()
+    for aid, row in by_id.items():
+        root = _root_of(aid, by_id)
+        if root is None or row[5] is None or aid in CONTRA_ACCOUNTS:
+            continue
+        assert row[5] == ROOTS[root], \
+            f"account {aid} ({row[1]}) is {row[5]} under root {root} ({ROOTS[root]})"
 
-    def test_I5_assets_equal_equity_liabilities():
-        for aid in by_id:
-            if by_id[aid][4] is None:
-                continue
-            roots = {x for x in _ancestors(aid, by_id) if x in ROOTS}
-            assert len(roots) == 1, f"account {aid} resolves to roots {sorted(roots)}"
 
-    def test_I6_debits_equal_credits():
-        for aid, row in by_id.items():
-            assert row[5] in ("Dr", "Cr"), f"account {aid} ({row[1]}) has no drcr: {row[5]}"
+def test_I1_contra_accounts_under_dr_root_exact():
+    """I1 second test: the set of Cr accounts under the Dr root is exactly the
+    contra allow-list {1190, 1530}."""
+    by_id = _by_id()
+    cr_under_dr = {
+        aid for aid, row in by_id.items()
+        if row[5] == "Cr" and _root_of(aid, by_id) == 1000
+    }
+    assert cr_under_dr == CONTRA_ACCOUNTS, \
+        f"Cr accounts under Dr root: {sorted(cr_under_dr)}, expected {sorted(CONTRA_ACCOUNTS)}"
+
+
+def test_I2_id_range_and_four_digits():
+    """I2: every id sits in its root's thousand-range; all ids are four digits."""
+    by_id = _by_id()
+    for aid, row in by_id.items():
+        root = _root_of(aid, by_id)
+        if root is None:
+            continue
+        assert (aid // 1000) == (root // 1000), \
+            f"account {aid} not in root {root}\'s thousand-range"
+        assert 1000 <= aid <= 9999, f"account {aid} is not four digits"
+
+
+def test_I3_no_group_account_mapped():
+    """I3/F-18: no group account carries a statutory head."""
+    mapping = _mapping()
+    assert 1100 not in mapping, "group account 1100 (Fixed Assets) has a statutory head mapping"
+    assert 1300 not in mapping, "group account 1300 (Current Assets) has a statutory head mapping"
 
 
 def test_statutory_head_mappings_section_3_1():
@@ -158,6 +178,8 @@ def test_statutory_head_mappings_section_3_1():
     for aid, head, _ in UP_AOA_ACCOUNT_MAPPINGS:
         assert aid in by_id, f"mapping for unknown account {aid}"
         assert by_id[aid][4] is not None, f"root account {aid} ({by_id[aid][1]}) has a mapping"
+
+
 def test_no_account_has_duplicate_id():
     by_id = _by_id()
     assert len(by_id) == len(ACCOUNTS)
