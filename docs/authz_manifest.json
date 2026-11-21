@@ -820,6 +820,14 @@
     "callback:onboarding_wizard_callbacks.py::legal_regime_refresh": {
       "classification": "legacy-gated"
     },
+    "callback:onboarding_wizard_callbacks.py::sw_bf_arrears_add": {
+      "classification": "exempt",
+      "reason": "Pure UI state (appends a blank arrears row to the client grid); reads and writes no server data (reviewed Nemotron BF corrective plan)."
+    },
+    "callback:onboarding_wizard_callbacks.py::sw_bf_arrears_total": {
+      "classification": "exempt",
+      "reason": "Pure UI state (recomputes the arrears total from the client grid); reads and writes no server data (reviewed Nemotron BF corrective plan)."
+    },
     "callback:onboarding_wizard_callbacks.py::sw_bf_file": {
       "classification": "legacy-gated"
     },

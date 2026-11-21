@@ -1,6 +1,6 @@
 import logging
 import os
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import dash_bootstrap_components as dbc
 from dash import dash_table, dcc, html
@@ -1447,6 +1447,47 @@ def legal_regime_live(society_id=None, state=None, constitution=None):
     ]
 
 
+def _bf_controls_panel(amounts, receivables, sid):
+    """Annex C controls panel from live/saved amounts plus the receivables (arrears) rows.
+
+    Used both when the Brought Forward stage is first rendered (Task 2) and by the
+    ``sw_bf_rollup`` callback, so the initial panel and every later update are computed by
+    the same function and can never disagree.
+    """
+    from app.services import bf_controls as bc
+    from app.services import bf_layout as bl
+    from app.services import onboarding_service as ob
+
+    cr_nodes = bl.side_nodes("Cr", lambda acc_id: False)
+    dr_nodes = bl.side_nodes("Dr", lambda acc_id: False)
+    cr = bl.roll_up(cr_nodes, amounts, "Cr")
+    dr = bl.roll_up(dr_nodes, amounts, "Dr")
+    arrears_total = Decimal(0)
+    bad_flats = []
+    known = ob.known_flat_numbers(sid)
+    for r in (receivables or []):
+        flat = str(r.get("flat_number") or "").strip()
+        if not flat:
+            continue
+        if known and flat not in known:
+            bad_flats.append(flat)
+        try:
+            arrears_total += Decimal(str(r.get("amount") or 0))
+        except (ValueError, ArithmeticError, InvalidOperation):
+            pass
+    t = {"dr": dr["dr"], "cr": cr["cr"], "n": cr["n"] + dr["n"],
+         "fund_cr": cr["fund_cr"], "bank_dr": dr["bank_dr"], "debtors_dr": dr["debtors_dr"]}
+    c3 = bc.three_controls(t, arrears_total)
+    kids = [
+        html.Div(f"balanced: {'OK' if c3['balanced']['passed'] else 'FAIL'} — {c3['balanced']['reason']}"),
+        html.Div(f"funds_backed: {'OK' if c3['funds_backed']['passed'] else 'FAIL'} — {c3['funds_backed']['reason']}"),
+        html.Div(f"arrears_tie: {'OK' if c3['arrears_tie']['passed'] else 'FAIL'} — {c3['arrears_tie']['reason']}"),
+    ]
+    if bad_flats:
+        kids.append(html.Div("Unknown flat(s): " + ", ".join(bad_flats), className="text-danger"))
+    return html.Div(kids, className="small")
+
+
 def render_category_content(category, society_id=None, state=None, constitution=None, is_current=False):
     """
     Step body for one wizard category.
@@ -1972,6 +2013,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
         # Values already saved in the wizard draft: the inputs below must show them, otherwise revisiting this step
         # shows zeros and the next Next/Previous saves an empty row list over the saved Brought Forward.
         _saved_bf = {}
+        _bf_draft = {}
         if is_current and society_id:
             try:
                 from app.services import onboarding_service as _ob_bf
@@ -1989,6 +2031,8 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 return 0.0
         from database.seed import ACCOUNTS
         ACCOUNTS_BY_ID = {a[0]: a for a in ACCOUNTS}
+        _bf_amounts = {aid: Decimal(str((_saved_bf.get(aid) or {}).get("bf_amount") or 0)) for aid in _saved_bf}
+        _bf_receivables = _bf_draft.get("receivables") or []
 
         # UP AOA labels for the equity / fund accounts. The fund rows come from the shared fund catalogue
         # (status, rate and applicability); the rest are plain accounts with a fixed label.
@@ -2148,18 +2192,17 @@ def render_category_content(category, society_id=None, state=None, constitution=
             ], className="sw-bf-account-row border rounded p-2 mb-2", style={"background": "#fff", **indent})
 
         def _bf_side(side):
-            """Render one side (Cr / Dr) from bf_layout: group headers, account rows, a group-total
-            cell per group (sw-bf-total node=<key>) and the side total (sw-bf-side-total-<side>)."""
+            """Render one side (Cr / Dr) from bf_layout: every group (top-level and nested) is its
+            own heading with a total cell (id sw-bf-total node=<key>), followed by its account rows
+            and sub-groups; the side total is sw-bf-side-total-<side>."""
             from app.services import bf_layout as bl
             is_hidden = lambda acc_id: bool((_bf_fund_info(acc_id, _held, _up) or {}).get("hidden"))
-            els = []
-            side_total = Decimal(0)
-            for node in bl.side_nodes(side, is_hidden):
-                if isinstance(node, int):
-                    continue
+
+            def _bf_group(node, depth):
                 key = node["key"]
                 label = node["label"]
-                # depth-first collect of postable account ids in this group
+                acc = node.get("acc")
+                kids = node.get("children") or []
                 accs = []
 
                 def collect(n, out):
@@ -2172,62 +2215,61 @@ def render_category_content(category, society_id=None, state=None, constitution=
 
                 collect(node, accs)
                 group_total = Decimal(0)
-                rows = []
-                for acc_id in accs:
-                    acc = ACCOUNTS_BY_ID[acc_id]
-                    rows.append(_bf_acc_row(acc, 1))
-                    saved = (_saved_bf.get(acc_id) or {})
+                for aid in accs:
+                    saved = (_saved_bf.get(aid) or {})
                     try:
                         group_total += Decimal(str(saved.get("bf_amount") or 0))
                     except (TypeError, ValueError, ArithmeticError):
                         pass
-                side_total += group_total
-                els.append(html.Div([
-                    html.Div([
-                        html.Strong(label, className="text-primary"),
-                        html.Span(f"  ₹{group_total:,.2f}", id={"type": "sw-bf-total", "node": key},
-                                  className="ms-3 fw-bold text-muted"),
-                    ], className="sw-bf-group-head mb-2"),
-                    *rows,
-                ], className="sw-bf-group", style={"paddingLeft": "4px"}))
+                indent = {"paddingLeft": f"{depth * 14}px"} if depth > 0 else {}
+                els = [html.Div([
+                    html.Strong(label, className="text-primary"),
+                    html.Span(f"₹{group_total:,.2f}", id={"type": "sw-bf-total", "node": key},
+                              className="ms-3 fw-bold text-muted"),
+                ], className="sw-bf-group-head mb-2", style=indent)]
+                if acc is not None:
+                    els.append(_bf_acc_row(ACCOUNTS_BY_ID[acc], depth + 1))
+                for k in kids:
+                    if isinstance(k, int):
+                        els.append(_bf_acc_row(ACCOUNTS_BY_ID[k], depth + 1))
+                    else:
+                        els.append(_bf_group(k, depth + 1))
+                return html.Div(els, className="sw-bf-group", style={"paddingLeft": "4px", **indent})
+
+            els = []
+            side_total = Decimal(0)
+            for node in bl.side_nodes(side, is_hidden):
+                group_el = _bf_group(node, 0)
+                els.append(group_el)
+                # side total from saved amounts of every postable account under this group
+                accs = []
+                _collect_accs(node, accs)
+                for aid in accs:
+                    saved = (_saved_bf.get(aid) or {})
+                    try:
+                        side_total += Decimal(str(saved.get("bf_amount") or 0))
+                    except (TypeError, ValueError, ArithmeticError):
+                        pass
             els.append(html.Div(f"₹{side_total:,.2f}", id=f"sw-bf-side-total-{side}", className="fw-bold text-primary"))
             return html.Div(els, className="sw-bf-side")
+
+        def _collect_accs(node, out):
+            if isinstance(node, int):
+                out.append(node); return
+            if node.get("acc") is not None:
+                out.append(node["acc"])
+            for c in node.get("children") or []:
+                _collect_accs(c, out)
 
         _bf_up_style = {"padding": "5px 8px", "border": "1px dashed #b8c2cf", "borderRadius": "6px", "display": "inline-block", "marginRight": "8px"}
         inputs = [
             _render_banner("Brought Forward", "Enter brought forward (opening balance) amounts for accounts. You may start mid-year using an As-on date (not necessarily the start of the financial year)."),
+            # R1: Financial year / As-on date pickers
             dbc.Row([
                 dbc.Col([_label("Financial Year (Start Year)"), dbc.Input(id="sw-bf-fy", type="number", value=s_fy, step=1, className="mb-3")], md=4),
                 dbc.Col([_label("As-on date (opening balances)"), html.Div(dcc.DatePickerSingle(id="sw-bf-as-on", date=str(_bf_as_on), display_format="YYYY-MM-DD"), className="mb-3")], md=4),
             ]),
-            # ── Intake 4: account / label balances (paired statements) ─────────────────────
-            dbc.Row([
-                dbc.Col(dbc.Button("Download the statement template", id="sw-bf-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
-                dbc.Col(dcc.Upload(id="sw-bf-xlsx", accept=".xlsx", multiple=False, style=_bf_up_style,
-                                   children=html.Span("Choose the filled statement template (.xlsx)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
-                dbc.Col(dcc.Upload(id="sw-bf-pdf", accept=".pdf", multiple=False, style=_bf_up_style,
-                                   children=html.Span("Choose the signed statement (.pdf)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
-                dbc.Col(dbc.Button("File statements", id="sw-bf-file", color="primary", size="sm", n_clicks=0), md=2),
-            ], className="g-2 mt-1 align-items-center"),
-            html.Div(id="sw-bf-files", style={"fontSize": "12px", "color": "#667", "marginTop": "4px"}),
-            html.Div(id="sw-bf-status", style={"fontSize": "12.5px", "marginTop": "4px"}),
-            dcc.Download(id="sw-bf-tpl-dl"),
-            # ── Intake 5: pending receivables (arrears pair) ─────────────────────────────
-            html.H6("Pending Receivables (Arrears)", className="mt-4 mb-2 text-primary"),
-            html.P("Upload the Pending Receivables.xlsx (flat → arrears amount) together with the signed arrears statement (PDF). "
-                   "The total must tie to the Sundry Debtors balance entered in Brought Forward.",
-                   className="text-muted small mb-3"),
-            dbc.Row([
-                dbc.Col(dbc.Button("Download template", id="sw-bf-pr-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
-                dbc.Col(dcc.Upload(id="sw-bf-pr-xlsx", accept=".xlsx", multiple=False, style=_bf_up_style,
-                                   children=html.Span("Choose Pending Receivables.xlsx", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
-                dbc.Col(dcc.Upload(id="sw-bf-pr-pdf", accept=".pdf", multiple=False, style=_bf_up_style,
-                                   children=html.Span("Choose signed arrears statement (.pdf)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
-                dbc.Col(dbc.Button("File receivables", id="sw-bf-pr-file", color="primary", size="sm", n_clicks=0), md=2),
-            ], className="g-2 mt-1 align-items-center"),
-            html.Div(id="sw-bf-pr-files", style={"fontSize": "12px", "color": "#667", "marginTop": "4px"}),
-            html.Div(id="sw-bf-pr-status", style={"fontSize": "12.5px", "marginTop": "4px"}),
-            dcc.Download(id="sw-bf-pr-tpl-dl"),
+            # R2: Funds selected for this society
             dbc.Card(dbc.CardBody([
                 html.Div([html.I(className="fas fa-piggy-bank me-2 text-primary"),
                           html.Strong("Funds selected for this society")], className="mb-2"),
@@ -2235,27 +2277,31 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 html.Small("Not selected: " + ", ".join(_not_opted) + ". Opt in on the Funds step to carry their opening balances.",
                            className="text-muted d-block mt-1") if _not_opted else None,
             ], className="py-2"), className="mb-3", style={"border": "1px solid #d7deea", "background": "#f8faff"}),
-            html.H6("Brought Forward Accounts", className="mt-4 mb-2 text-primary"),
-            html.Div([
-                html.P("Enter one row per account that carries a brought-forward (opening) balance. For each account enter the "
-                       "label, value and remarks, add ledger sub-rows if needed, and attach the supporting statement. Admin "
-                       "verifies that each attachment matches the entered value for the account/label.",
-                       className="text-muted small mb-3"),
-                html.Div([
-                    html.Div([
-                        html.H6("Liabilities & Equity (Cr)", className="text-primary mb-2", style={"fontSize": "13px"}),
-                        _bf_side("Cr"),
-                    ], className="sw-bf-side"),
-                    html.Div([
-                        html.H6("Assets (Dr)", className="text-primary mb-2", style={"fontSize": "13px"}),
-                        _bf_side("Dr"),
-                    ], className="sw-bf-side"),
-                ], className="sw-bf-grid"),
-            ], className="mb-3"),
-            # ── Apt-Arrears grid (persisted into draft.brought_forward.receivables on Next) ─────
+            # R3: Statement block — download template, upload statement + signed PDF, fill the BF grid
+            dbc.Row([
+                dbc.Col(dbc.Button("Download 'Statement' template", id="sw-bf-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(dcc.Upload(id="sw-bf-xlsx", accept=".xlsx", multiple=False, style=_bf_up_style,
+                                   children=html.Span("Choose the filled statement template (.xlsx)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
+                dbc.Col(dcc.Upload(id="sw-bf-pdf", accept=".pdf", multiple=False, style=_bf_up_style,
+                                   children=html.Span("Choose the signed statement (.pdf)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
+                dbc.Col(dbc.Button("Fill 'Brought Forward' Grid", id="sw-bf-file", color="primary", size="sm", n_clicks=0), md=2),
+            ], className="g-2 mt-1 align-items-center"),
+            html.Div(id="sw-bf-files", style={"fontSize": "12px", "color": "#667", "marginTop": "4px"}),
+            html.Div(id="sw-bf-status", style={"fontSize": "12.5px", "marginTop": "4px"}),
+            dcc.Download(id="sw-bf-tpl-dl"),
+            # R4: Apt-Arrears block — template, uploads, fill the arrears grid, then the grid itself
             html.H6("Apt-Arrears (Sundry Debtors detail)", className="mt-4 mb-2 text-primary"),
-            html.P("One row per flat. The total ties to the Sundry Debtors balance and feeds the arrears_tie control.",
-                   className="text-muted small mb-2"),
+            html.P("Upload the Pending Receivables.xlsx (flat → arrears amount) together with the signed arrears statement (PDF). "
+                   "The total ties to the Sundry Debtors balance entered in Brought Forward and feeds the arrears_tie control.",
+                   className="text-muted small mb-3"),
+            dbc.Row([
+                dbc.Col(dbc.Button("Download 'Apt-Arrears' template", id="sw-bf-pr-tpl", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
+                dbc.Col(dcc.Upload(id="sw-bf-pr-xlsx", accept=".xlsx", multiple=False, style=_bf_up_style,
+                                   children=html.Span("Choose Pending Receivables.xlsx", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
+                dbc.Col(dcc.Upload(id="sw-bf-pr-pdf", accept=".pdf", multiple=False, style=_bf_up_style,
+                                   children=html.Span("Choose signed arrears statement (.pdf)", style={"fontSize": "12px", "textDecoration": "underline", "cursor": "pointer"})), md=4),
+                dbc.Col(dbc.Button("Fill 'Apt-Arrears' Grid", id="sw-bf-pr-file", color="primary", size="sm", n_clicks=0), md=2),
+            ], className="g-2 mt-1 align-items-center"),
             dash_table.DataTable(
                 id="sw-bf-arrears-grid",
                 columns=[
@@ -2264,7 +2310,7 @@ def render_category_content(category, society_id=None, state=None, constitution=
                     {"id": "overdue_days", "name": "due_days", "type": "numeric"},
                     {"id": "remarks", "name": "remarks"},
                 ],
-                data=[], editable=True, row_deletable=True, page_size=25,
+                data=_bf_receivables, editable=True, row_deletable=True, page_size=25,
                 style_cell={"fontSize": "12px", "padding": "4px 6px"},
                 style_header={"fontWeight": "700"},
             ),
@@ -2272,8 +2318,28 @@ def render_category_content(category, society_id=None, state=None, constitution=
                 dbc.Col(dbc.Button("+ Add row", id="sw-bf-arrears-add", color="secondary", size="sm", outline=True, n_clicks=0), md="auto"),
                 dbc.Col(html.Div(id="sw-bf-arrears-total", className="fw-bold", style={"fontSize": "12.5px"}), md="auto"),
             ], className="g-2 mt-1 align-items-center"),
-            # ── controls panel (computed server-side at render, refreshed by sw_bf_rollup) ─────
-            html.Div(id="sw-bf-controls", className="mt-3"),
+            html.Div(id="sw-bf-pr-files", style={"fontSize": "12px", "color": "#667", "marginTop": "4px"}),
+            html.Div(id="sw-bf-pr-status", style={"fontSize": "12.5px", "marginTop": "4px"}),
+            dcc.Download(id="sw-bf-pr-tpl-dl"),
+            # R5: Annex C controls panel (computed server-side at render from saved data, refreshed by sw_bf_rollup)
+            html.Div(id="sw-bf-controls", className="mt-3",
+                     children=_bf_controls_panel(_bf_amounts, _bf_receivables, society_id)),
+            # R6: Brought Forward account grid
+            html.H6("Brought Forward Accounts", className="mt-4 mb-2 text-primary"),
+            html.P("Enter one row per account that carries a brought-forward (opening) balance. For each account enter the "
+                   "label, value and remarks, add ledger sub-rows if needed, and attach the supporting statement. Admin "
+                   "verifies that each attachment matches the entered value for the account/label.",
+                   className="text-muted small mb-3"),
+            html.Div([
+                html.Div([
+                    html.H6("Liabilities & Equity (Cr)", className="text-primary mb-2", style={"fontSize": "13px"}),
+                    _bf_side("Cr"),
+                ], className="sw-bf-side"),
+                html.Div([
+                    html.H6("Assets (Dr)", className="text-primary mb-2", style={"fontSize": "13px"}),
+                    _bf_side("Dr"),
+                ], className="sw-bf-side"),
+            ], className="sw-bf-grid"),
         ]
         return elements + [html.Div(inputs, style={"paddingRight": "5px"})]
     elif category == "Administrator":

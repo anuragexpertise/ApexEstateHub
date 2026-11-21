@@ -11,6 +11,9 @@ headers. Leaves are plain ints.
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from typing import TypedDict
+
+from app.services import bf_controls as _bc
 
 LAYOUT = {
     "Cr": [   # LEFT column, titled "Liabilities & Equity (Cr)"
@@ -32,6 +35,28 @@ LAYOUT = {
 }
 
 _SIDES = ("Cr", "Dr")
+
+
+class RollUpResult(TypedDict, total=False):
+    """Shape returned by :func:`roll_up`.
+
+    Group totals keyed by node ``key`` (nested headers included), the side grand total under
+    ``"_total"``, and the Annex C control inputs for that side: ``dr``, ``cr``, ``n`` (postable
+    accounts the user gave a value for), ``fund_cr``, ``bank_dr``, ``debtors_dr``.
+    """
+    _total: Decimal
+    dr: Decimal
+    cr: Decimal
+    n: int
+    fund_cr: Decimal
+    bank_dr: Decimal
+    debtors_dr: Decimal
+
+
+def _seed_meta():
+    """id -> {tab, drcr} for every ``has_bf`` account, from the seed chart."""
+    from database.seed import ACCOUNTS as _accts
+    return {r[0]: {"tab": r[2], "drcr": r[5]} for r in _accts if r[6]}
 
 
 def _filter_node(node, is_hidden):
@@ -95,29 +120,63 @@ def _amount(v):
         return Decimal(0)
 
 
-def roll_up(side_nodes_list, amounts: dict) -> dict:
-    """Totals keyed by node ``key`` (nested headers included) plus the side total under ``"_total"``.
+def roll_up(side_nodes_list, amounts: dict, side: str | None = None) -> dict:
+    """Roll up one side of the BF grid.
 
-    ``amounts`` maps acc_id -> Decimal (blank means 0). Each account's amount counts
-    exactly once toward ``_total`` (its own amount if it is an ``acc`` node, otherwise
-    its leaf amount).
+    Returns a :class:`RollUpResult`: totals keyed by node ``key`` (nested headers included),
+    the side grand total under ``"_total"``, and the Annex C control inputs for that side
+    (``dr``, ``cr``, ``n``, ``fund_cr``, ``bank_dr``, ``debtors_dr``).
+
+    ``amounts`` maps acc_id -> Decimal (blank means 0 / absent). Each postable account's amount
+    counts exactly once toward ``_total`` (its own amount if it is an ``acc`` node, otherwise its
+    leaf amount).
     """
-    totals = {}
+    meta = _seed_meta()
+    totals: dict = {}
     amount_ids = []
+    dr = cr = fund_cr = bank_dr = debtors_dr = Decimal(0)
+    n = 0
+
+    def _account(acc_id):
+        nonlocal dr, cr, fund_cr, bank_dr, debtors_dr, n
+        if acc_id not in amounts:
+            return
+        n += 1
+        amt = _amount(amounts.get(acc_id))
+        m = meta.get(acc_id) or {}
+        drcr = m.get("drcr") or (side or "Dr")
+        if drcr == "Dr":
+            dr += amt
+            if m.get("tab") in _bc.BANK_TABS:
+                bank_dr += amt
+            if m.get("tab") in _bc.RECEIVABLE_TABS:
+                debtors_dr += amt
+        else:
+            cr += amt
+            if m.get("tab") in _bc.FUND_TABS:
+                fund_cr += amt
 
     def _walk(nodes):
         for node in nodes:
             if isinstance(node, int):
                 amount_ids.append(node)
+                _account(node)
                 continue
             acc = node.get("acc")
             if acc is not None:
                 amount_ids.append(acc)
+                _account(acc)
             totals[node["key"]] = _node_total(node, amounts)
             _walk(node.get("children") or [])
 
     _walk(side_nodes_list)
     totals["_total"] = sum((_amount(amounts.get(i)) for i in amount_ids), Decimal(0))
+    totals["dr"] = dr
+    totals["cr"] = cr
+    totals["n"] = n
+    totals["fund_cr"] = fund_cr
+    totals["bank_dr"] = bank_dr
+    totals["debtors_dr"] = debtors_dr
     return totals
 
 

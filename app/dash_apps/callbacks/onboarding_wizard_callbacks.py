@@ -24,6 +24,7 @@ from app.dash_apps.pages.setup_wizard import (
     legal_regime_live,
     render_review,
     step_label,
+    _bf_controls_panel,
 )
 from app.dash_apps.pages.wizard_registry import draft_key as _draft_key
 from app.dash_apps.pages.wizard_registry import status_of as _status_of
@@ -114,6 +115,17 @@ def _gather(states_list):
         iid = item.get("id")
         if iid is not None and not isinstance(iid, dict):
             out[iid] = item.get("value")
+    return out
+
+
+def _group_nodes(nodes):
+    """Every group node (top-level and nested) under ``nodes``, depth-first; plain int leaves skipped."""
+    out = []
+    for node in nodes:
+        if isinstance(node, int):
+            continue
+        out.append(node)
+        out.extend(_group_nodes(node.get("children") or []))
     return out
 
 
@@ -388,45 +400,51 @@ def register_onboarding_wizard_callbacks(app):
                 amounts[int(aid)] = Decimal(str(val))
             except (ValueError, ArithmeticError, InvalidOperation):
                 continue
-        from app.services import bf_controls as bc
         from app.services import bf_layout as bl
         cr_nodes = bl.side_nodes("Cr", lambda acc_id: False)
         dr_nodes = bl.side_nodes("Dr", lambda acc_id: False)
-        cr = bl.roll_up(cr_nodes, amounts)
-        dr = bl.roll_up(dr_nodes, amounts)
-        # per-node totals in render order: Dr side groups, then Cr side groups
-        node_totals = []
-        for side_nodes_list in (dr_nodes, cr_nodes):
-            for node in side_nodes_list:
-                if isinstance(node, int):
-                    continue
-                key = node["key"]
-                node_totals.append(f"₹{dr.get(key, cr.get(key, Decimal(0))):,.2f}")
-        known = ob.known_flat_numbers(sid)
-        arrears_total = Decimal(0)
-        bad_flats = []
-        for r in (arrears_data or []):
-            flat = str(r.get("flat_number") or "").strip()
-            if not flat:
-                continue
-            if known and flat not in known:
-                bad_flats.append(flat)
-            try:
-                arrears_total += Decimal(str(r.get("amount") or 0))
-            except (ValueError, ArithmeticError, InvalidOperation):
-                pass
-        c3 = bc.three_controls({"dr": dr["_total"], "cr": cr["_total"], "n": len(amounts),
-                                "fund_cr": cr["fund_cr"], "bank_dr": dr["bank_dr"], "debtors_dr": dr["debtors_dr"]},
-                               arrears_total)
-        kids = [
-            html.Div(f"balanced: {'OK' if c3['balanced']['passed'] else 'FAIL'} — {c3['balanced']['reason']}"),
-            html.Div(f"funds_backed: {'OK' if c3['funds_backed']['passed'] else 'FAIL'} — {c3['funds_backed']['reason']}"),
-            html.Div(f"arrears_tie: {'OK' if c3['arrears_tie']['passed'] else 'FAIL'} — {c3['arrears_tie']['reason']}"),
-        ]
-        if bad_flats:
-            kids.append(html.Div("Unknown flat(s): " + ", ".join(bad_flats), className="text-danger"))
-        controls = html.Div(kids, className="small")
+        cr = bl.roll_up(cr_nodes, amounts, "Cr")
+        dr = bl.roll_up(dr_nodes, amounts, "Dr")
+
+        # Group totals keyed by node key (never by position). Match them to the rendered
+        # ``sw-bf-total`` outputs through ctx.outputs_list so a total always lands on the
+        # heading that owns it, whatever the render order.
+        by_key = {}
+        for totals, side_nodes_list in ((cr, cr_nodes), (dr, dr_nodes)):
+            for node in _group_nodes(side_nodes_list):
+                by_key[node["key"]] = totals.get(node["key"], Decimal(0))
+        outputs = ctx.outputs_list[0] or []
+        node_totals = [f"₹{by_key.get((o.get('id') or {}).get('node'), Decimal(0)):,.2f}" for o in outputs]
+
+        # Same function used at first render, so the initial panel and every later update agree.
+        controls = _bf_controls_panel(amounts, arrears_data, sid)
         return node_totals, f"₹{cr['_total']:,.2f}", f"₹{dr['_total']:,.2f}", controls
+
+    # ── Arrears grid: "+ Add row" appends a blank row ──────────────────────────────────────
+    @app.callback(
+        Output("sw-bf-arrears-grid", "data"),
+        Input("sw-bf-arrears-add", "n_clicks"),
+        State("sw-bf-arrears-grid", "data"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def sw_bf_arrears_add(n, data):
+        s = _session()
+        if not s or not s[0]:
+            return no_update
+        rows = list(data or [])
+        rows.append({"flat_number": "", "amount": "", "overdue_days": "", "remarks": ""})
+        return rows
+
+    # ── Arrears grid: recompute the total on every edit / add / delete ─────────────────────
+    @app.callback(
+        Output("sw-bf-arrears-total", "children"),
+        Input("sw-bf-arrears-grid", "data"),
+    )
+    @require_session
+    def sw_bf_arrears_total(data):
+        from app.services import pending_receivables as pr
+        return f"₹{pr.total(list(data or [])):,.2f}"
 
     # ── Intake 5: pending receivables template download ────────────────────────────────────
     @app.callback(
@@ -441,7 +459,12 @@ def register_onboarding_wizard_callbacks(app):
             return no_update
         sid, uid, role = s
         known = ob.known_flat_numbers(sid)
-        return dcc.send_bytes(pi.pr.build_template(known_flats=known), "Pending Receivables.xlsx")
+        draft = ob.load_draft(sid)
+        bf = (draft.get("draft") or {}).get("brought_forward") or {}
+        fy = bf.get("fy") or fy_start_year()
+        as_on = bf.get("as_on_date")
+        return dcc.send_bytes(pi.pr.build_template(known_flats=known, fy=fy, as_on=as_on),
+                              f"Apt-Arrears {fy}.xlsx")
 
     # ── Intake 5: pending receivables file upload ──────────────────────────────────────────
     @app.callback(

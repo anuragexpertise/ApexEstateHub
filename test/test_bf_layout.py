@@ -69,6 +69,19 @@ def test_roll_up_blank_means_zero():
     assert bl.roll_up(bl.side_nodes("Cr", lambda a: False), {})["_total"] == Decimal(0)
 
 
+def test_roll_up_returns_annex_c_control_inputs():
+    amounts = _amounts()
+    cr = bl.roll_up(bl.side_nodes("Cr", lambda a: False), amounts, "Cr")
+    assert cr["dr"] == Decimal(0) and cr["cr"] == Decimal(800000) and cr["n"] == 8
+    assert cr["fund_cr"] == Decimal(210000)   # sinking+majrep+repair+gifts
+    assert cr["bank_dr"] == Decimal(0) and cr["debtors_dr"] == Decimal(0)
+    dr = bl.roll_up(bl.side_nodes("Dr", lambda a: False), amounts, "Dr")
+    assert dr["dr"] == Decimal(800000) and dr["cr"] == Decimal(0) and dr["n"] == 10
+    assert dr["bank_dr"] == Decimal(355000)   # SBI+ICICI+CiH+Dp
+    assert dr["debtors_dr"] == Decimal(75000)  # 1510+1520
+    assert dr["fund_cr"] == Decimal(0)
+
+
 def test_hidden_fund_removed_and_empty_group_dropped():
     from app.services.up_aoa_fund_catalog import active_keys, bf_info
     held = active_keys({"sinking": "none", "repair": "none"})
@@ -81,7 +94,6 @@ def test_hidden_fund_removed_and_empty_group_dropped():
     assert 3280 not in bl.ordered_account_ids(is_hidden)
     # the Reserves & Funds group still renders because other funds are visible
     assert "res" in keys
-
 
 def test_bad_id_raises_at_import(monkeypatch):
     from database import seed as seed_mod

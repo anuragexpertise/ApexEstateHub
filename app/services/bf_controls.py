@@ -63,7 +63,7 @@ def three_controls(t, arrears_total) -> dict:
     )
     arrears_tie = _ctl(
         t["debtors_dr"] == arrears_total,
-        f"Arrears by flat (Rs {arrears_total}) tie to the receivables control (Rs {t['debtors_dr']})." if t["debtors_dr"] == arrears_total else
-        f"Arrears by flat total Rs {arrears_total} but the receivables control is Rs {t['debtors_dr']}.",
+        f"Apt-Arrears total (Rs {arrears_total}) does not match Brought Forward receivables (Rs {t['debtors_dr']})." if t["debtors_dr"] != arrears_total else
+        f"Arrears by flat (Rs {arrears_total}) tie to the receivables control (Rs {t['debtors_dr']}).",
     )
     return {"balanced": balanced, "funds_backed": funds_backed, "arrears_tie": arrears_tie}
