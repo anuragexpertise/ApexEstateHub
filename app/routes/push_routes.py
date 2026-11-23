@@ -72,7 +72,11 @@ def send_test():
         user_id, _auth_err = _bearer_user_id()
         if _auth_err:
             return _auth_err
-        
+
+        from app.utils.rate_limit import rate_ok
+        if not rate_ok(f"push-test:{user_id}", 5, 60.0):
+            return jsonify({'success': False, 'message': 'Too many requests'}), 429
+
         success, message = send_push_notification(
             user_id,
             title="🔔 Test Notification from EstateHub",
@@ -87,8 +91,8 @@ def send_test():
             return jsonify({'success': False, 'message': message}), 500
             
     except Exception as e:  # noqa: BLE001
-        logger.error(f"Send test error: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        logger.exception("Push send-test error")
+        return jsonify({'success': False, 'message': 'Notification failed'}), 500
 
 @push_bp.route('/api/push/subscription', methods=['DELETE'])
 def delete_subscription():
