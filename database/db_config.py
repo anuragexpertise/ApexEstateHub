@@ -56,7 +56,16 @@ def pg_vars_complete() -> bool:
 
 
 def connection_params() -> dict:
-    """psycopg2.connect(**params) kwargs for the resolved target."""
+    """psycopg2.connect(**params) kwargs for the resolved target.
+
+    DATABASE_URL wins over PG* vars so the web app (database/db_manager.py)
+    and the CLI (migrate.py / seed.py / reset_database.py) resolve the same
+    target database.
+    """
+    raw = _env("DATABASE_URL")
+    if raw:
+        return {"dsn": raw.replace("postgres://", "postgresql://", 1)}
+
     if pg_vars_complete():
         v = pg_vars()
         params = {
@@ -71,11 +80,8 @@ def connection_params() -> dict:
             params["sslrootcert"] = v["sslrootcert"]
         return params
 
-    raw = _env("DATABASE_URL")
-    if not raw:
-        print("❌  Set PGHOST/PGDATABASE/PGUSER  or  DATABASE_URL")
-        sys.exit(1)
-    return {"dsn": raw.replace("postgres://", "postgresql://", 1)}
+    print("❌  Set PGHOST/PGDATABASE/PGUSER  or  DATABASE_URL")
+    sys.exit(1)
 
 
 def dsn() -> str:

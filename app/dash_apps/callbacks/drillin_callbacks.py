@@ -58,6 +58,10 @@ from database.money import (  # noqa: F401  (Plan v4 C.9: rupee amounts are Deci
     rupee,
 )
 
+# Whitelist of tables the drill-in picker may read — prevents SQL
+# injection via a client-supplied target_table (audit finding C6-01).
+_ALLOWED_TABLES = set(ENTITY_TABLE_MAP.values())
+
 
 def _physical_table(entity: str) -> str:
     """Map a form's singular entity key (e.g. 'receipt') to the physical
@@ -407,7 +411,11 @@ def register_drillin_callbacks(app):
             label = drillin_label_for(target_table, item_id, society_id)
             if cfg.get("value_col") or cfg.get("fill_fields"):
                 try:
-                    row = db._execute(f"SELECT * FROM {target_table} WHERE id=%s AND society_id=%s", (item_id, society_id), fetch_one=True)
+                    if target_table not in _ALLOWED_TABLES:
+                        print(f"⚠️  drillin_select_item: blocked unexpected table '{target_table}'")
+                        row = None
+                    else:
+                        row = db._execute(f"SELECT * FROM {target_table} WHERE id=%s AND society_id=%s", (item_id, society_id), fetch_one=True)
                     if row and cfg.get("value_col"):
                         val_col = cfg["value_col"]
                         if cfg.get("value_col_no_pan"):
