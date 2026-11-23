@@ -223,7 +223,14 @@ class DatabaseManager:
                 print(f"    ↳ getconn() took {_get_elapsed:.2f}s (new/blocked connection)")
             try:
                 yield conn
-                conn.commit()
+                try:
+                    conn.commit()
+                except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+                    # The connection dropped while COMMIT was in flight: the server
+                    # may or may not have committed. execute() must NOT re-run the
+                    # statement (a ledger posting or insert would be applied twice).
+                    exc.commit_outcome_unknown = True
+                    raise
             except Exception as exc:
                 broken = isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError))
                 try:
@@ -288,6 +295,9 @@ class DatabaseManager:
 
             except psycopg2.OperationalError as exc:
                 _elapsed = time.monotonic() - _t0
+                if getattr(exc, "commit_outcome_unknown", False):
+                    log.error("DB connection lost during COMMIT; outcome unknown, not retrying: %s", exc)
+                    raise
                 # Stale connection: _conn() already discarded it, so the retry gets a fresh one. The pool is NOT torn down
                 # (that orphaned every in-flight connection and made other threads' putconn() fail).
                 if attempt < retries:

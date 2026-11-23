@@ -50,3 +50,61 @@ services:
       # Keep that below the Aiven plan's connection limit.
       - key: DB_POOL_MAX
         value: "10"
+
+  # ── Scheduled jobs (docs/SCHEDULER.md) ────────────────────────────────
+  # One Render Cron Job per job, so a job never runs inside (or doubles up
+  # across) the web workers. Schedules are UTC. All read the env group
+  # "estatehub-jobs", which you create once in the Render dashboard
+  # (Environment > Env Groups) with: DATABASE_URL (the restricted
+  # estatehub_login, NOT the owner), SECRET_VAULT_KEY, VAPID_PUBLIC,
+  # VAPID_PRIVATE, VAPID_EMAIL, PGSSLMODE=require, FLASK_CONFIG=production.
+  - type: cron
+    name: estatehub-job-anchors
+    env: python
+    plan: starter
+    region: frankfurt
+    schedule: "0 21 * * *"        # daily 02:30 IST
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python scripts/run_job.py anchors"
+    envVars:
+      - fromGroup: estatehub-jobs
+  - type: cron
+    name: estatehub-job-patrol
+    env: python
+    plan: starter
+    region: frankfurt
+    schedule: "5 * * * *"        # hourly
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python scripts/run_job.py patrol"
+    envVars:
+      - fromGroup: estatehub-jobs
+  - type: cron
+    name: estatehub-job-ratification
+    env: python
+    plan: starter
+    region: frankfurt
+    schedule: "30 21 * * *"        # daily 03:00 IST
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python scripts/run_job.py ratification"
+    envVars:
+      - fromGroup: estatehub-jobs
+  - type: cron
+    name: estatehub-job-expiry
+    env: python
+    plan: starter
+    region: frankfurt
+    schedule: "45 21 * * *"        # daily 03:15 IST
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python scripts/run_job.py expiry"
+    envVars:
+      - fromGroup: estatehub-jobs
+  - type: cron
+    name: estatehub-job-watchdog
+    env: python
+    plan: starter
+    region: frankfurt
+    schedule: "35 * * * *"        # hourly
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python scripts/run_job.py watchdog"
+    envVars:
+      - fromGroup: estatehub-jobs

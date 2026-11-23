@@ -66,3 +66,33 @@ def test_sse_caps_and_release():
     for _ in range(2):
         sse._sse_release(1)
     assert sse._sse_total == 0 and sse._sse_per_user == {}
+
+
+def test_poll_reminder_is_claimed_once_across_workers(monkeypatch):
+    """Two workers see the same poll; only the one that wins the atomic
+    UPDATE ... WHERE reminder_sent_at IS NULL may send the push."""
+    sch = pytest.importorskip("app.services.scheduler")
+    claimed_ids = set()
+    sent = []
+
+    def fake_execute(sql, params=None, fetch_one=False, fetch_all=False):
+        if "FROM societies" in sql:
+            return [{"id": 1}]
+        if "fn_get_polls_ending_soon" in sql:
+            return [{"id": 42, "title": "P", "ends_at": "soon"}]
+        if "fn_declare_expired_polls" in sql:
+            return []
+        if "SET reminder_sent_at" in sql:
+            pid = params[0]
+            if pid in claimed_ids:
+                return None
+            claimed_ids.add(pid)
+            return {"id": pid}
+        return None
+
+    monkeypatch.setattr(sch.db, "_execute", fake_execute)
+    monkeypatch.setattr(sch.PushService, "get_notification_targets", lambda *a, **k: [1, 2])
+    monkeypatch.setattr(sch.PushService, "send_bulk_push", lambda *a, **k: sent.append(a))
+    sch._run_poll_expiry()      # worker A
+    sch._run_poll_expiry()      # worker B sees the same poll
+    assert len(sent) == 1

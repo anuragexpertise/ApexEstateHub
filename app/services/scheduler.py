@@ -139,14 +139,20 @@ def _run_poll_expiry():
                 targets = PushService.get_notification_targets(society_id, roles=["apartment"])
                 if targets:
                     for soon in soon_rows:
+                        # Claim the reminder atomically BEFORE sending. Every gunicorn
+                        # worker runs this loop (and the Redis lock is optional), so
+                        # without the claim each worker sends its own copy.
+                        claimed = db._execute(
+                            "UPDATE polls SET reminder_sent_at = NOW() "
+                            "WHERE id = %s AND reminder_sent_at IS NULL RETURNING id",
+                            (soon["id"],), fetch_one=True,
+                        )
+                        if not claimed:
+                            continue
                         PushService.send_bulk_push(
                             targets, "⏰ Poll Ending Soon",
                             f"Poll '{soon['title']}' ends at {soon['ends_at']}",
                             url="/dashboard/polls", society_id=society_id,
-                        )
-                        db._execute(
-                            "UPDATE polls SET reminder_sent_at = NOW() WHERE id = %s",
-                            (soon["id"],),
                         )
     except Exception:
         logger.exception("poll reminder job failed")
