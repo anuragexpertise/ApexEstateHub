@@ -1,5 +1,5 @@
 """
-Scheduled jobs (Gold-Standard Plan v3, task 1.4). Host-neutral: any scheduler (ApexWeave, Render cron, cron) runs
+Scheduled jobs (Gold-Standard Plan v3, task 1.4). Host-neutral: any scheduler (Render Cron Jobs, cron) runs
 
     python scripts/run_job.py <job>
 

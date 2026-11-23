@@ -9,7 +9,7 @@ Status as of 25 Oct 2026. Tasks 0.3 to 0.6 need people or systems outside this r
 | 0.3 | Each society's adviser gives opinions; Secretary and Treasurer approve with the PDF | Open (needs the screen and the societies) | Recorded in `society_decision_types` and `rule_parameter_defs` |
 | 0.4 | Retention: 5-year default, configurable per society; CA to say whether any applicable Act needs longer | Open (external) | Answer below |
 | 0.5 | Read UP RERA notification 7098 of 13.07.2026 for the IFMS units | Open (needs the notification text; not read here) | Answer below |
-| 0.6 | Check ApexWeave scheduled jobs | Open (needs the host dashboard) | Questions below |
+| 0.6 | Check Render cron jobs | Open (needs the Render dashboard) | Questions below |
 
 ## 0.4 Retention: question for the CA
 
@@ -25,7 +25,7 @@ Answer / date / who: ____________________
 
 ## 0.6 Scheduled jobs on Render.com (feeds task 1.4)
 
-Estatehub runs on Render.com with an Aiven PostgreSQL database; the plan's "ApexWeave" is replaced by Render cron jobs. `Procfile` has only a `web` process, and `scripts/anchor_ledgers.py` and `scripts/patrol_cron.py` are not scheduled anywhere. Plan task 1.4 needs: anchors daily with verify, patrol hourly, ratification expiry daily.
+Estatehub runs on Render.com with an Aiven PostgreSQL database; scheduled work runs as Render Cron Jobs (`render.yaml`, `docs/SCHEDULER.md`). `Procfile` has only a `web` process, and `scripts/anchor_ledgers.py` and `scripts/patrol_cron.py` are not scheduled anywhere. Plan task 1.4 needs: anchors daily with verify, patrol hourly, ratification expiry daily.
 
 | Question | Answer |
 |---|---|

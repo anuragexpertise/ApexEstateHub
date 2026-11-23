@@ -1,5 +1,5 @@
 -- IST alignment: the app writes IST (today_ist()/now_ist()), so SQL that reads "today" must not depend on the session
--- timezone, which is UTC behind a connection pooler (Neon "-pooler" hosts reject the options=-c timezone startup setting).
+-- timezone, which is UTC behind a connection pooler (a pooler such as Aiven's PgBouncer can reject the options=-c timezone startup setting).
 -- Upgrade script only: database/estatehub.sql already declares all of this, so on a fresh install this file changes nothing
 -- (test_migrations_are_folded_live). Keep this file and the matching blocks in estatehub.sql identical.
 

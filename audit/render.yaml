@@ -1,0 +1,130 @@
+services:
+  - type: web
+    name: estatehub
+    env: python
+    plan: standard
+    healthCheckPath: /healthz
+    region: frankfurt
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn wsgi:server --workers 2 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"   # matches CI (3.12)
+      - key: FLASK_CONFIG
+        value: production
+      # DATABASE_URL points at the Aiven database (external to Render).
+      # Set this in the Render dashboard to the Aiven connection string;
+      # do NOT provision a Render PostgreSQL for it.
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      # SECRET_VAULT_KEY wraps each society's signing keys at rest
+      # (app/services/secret_vault.py). Operator-provided; must match the key
+      # the database was seeded with.
+      - key: SECRET_VAULT_KEY
+        sync: false
+      # Optional: point at a Render Redis service (type: redis, added as a
+      # separate service) or an external Redis for push/pub-sub. The app degrades
+      # gracefully when unset (app/services/redis_broker.py).
+      - key: REDIS_URL
+        sync: false
+      - key: PGSSLMODE
+        value: require
+      # Stronger TLS: set PGSSLMODE=verify-full and PGSSLROOTCERT to a path holding the Aiven CA
+      # (download from the Aiven console; keep it out of git).
+      # If DATABASE_URL uses Aiven's PgBouncer pooler port, also set PG_SKIP_STARTUP_OPTIONS=1
+      # and run once: ALTER DATABASE <db> SET timezone = 'Asia/Kolkata';
+      - key: PG_SKIP_STARTUP_OPTIONS
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: VAPID_PUBLIC
+        sync: false
+      - key: VAPID_PRIVATE
+        sync: false
+      - key: VAPID_EMAIL
+        sync: false
+      # Password reset delivers its token by email only; without SMTP no reset can complete.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: ESIGN_CALLBACK_SECRET
+        sync: false
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+      # Comma-separated allowed cross-origin sites. Leave empty for same-origin only.
+      - key: CORS_ORIGINS
+        sync: false
+      # Worst-case DB connections = workers x DB_POOL_MAX (2 x 10 = 20 here).
+      # Keep that below the Aiven plan's connection limit.
+      - key: DB_POOL_MAX
+        value: "10"
+
+  # ── Scheduled jobs (docs/SCHEDULER.md) ────────────────────────────────
+  # One Render Cron Job per job, so a job never runs inside (or doubles up
+  # across) the web workers. Schedules are UTC. All read the env group
+  # "estatehub-jobs", which you create once in the Render dashboard
+  # (Environment > Env Groups) with: DATABASE_URL (the restricted
+  # estatehub_login, NOT the owner), SECRET_VAULT_KEY, VAPID_PUBLIC,
+  # VAPID_PRIVATE, VAPID_EMAIL, PGSSLMODE=require, FLASK_CONFIG=production,
+  # DB_POOL_MIN=1, DB_POOL_MAX=2 (a job needs one connection; the default pool opens 4).
+  - type: cron
+    name: estatehub-job-anchors
+    env: python
+    plan: starter
+    region: frankfurt
+    schedule: "0 21 * * *"        # daily 02:30 IST
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python scripts/run_job.py anchors"
+    envVars:
+      - fromGroup: estatehub-jobs
+  - type: cron
+    name: estatehub-job-patrol
+    env: python
+    plan: starter
+    region: frankfurt
+    schedule: "5 * * * *"        # hourly
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python scripts/run_job.py patrol"
+    envVars:
+      - fromGroup: estatehub-jobs
+  - type: cron
+    name: estatehub-job-ratification
+    env: python
+    plan: starter
+    region: frankfurt
+    schedule: "30 21 * * *"        # daily 03:00 IST
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python scripts/run_job.py ratification"
+    envVars:
+      - fromGroup: estatehub-jobs
+  - type: cron
+    name: estatehub-job-expiry
+    env: python
+    plan: starter
+    region: frankfurt
+    schedule: "45 21 * * *"        # daily 03:15 IST
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python scripts/run_job.py expiry"
+    envVars:
+      - fromGroup: estatehub-jobs
+  - type: cron
+    name: estatehub-job-watchdog
+    env: python
+    plan: starter
+    region: frankfurt
+    schedule: "35 * * * *"        # hourly
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python scripts/run_job.py watchdog"
+    envVars:
+      - fromGroup: estatehub-jobs

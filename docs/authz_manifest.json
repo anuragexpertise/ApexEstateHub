@@ -754,10 +754,6 @@
       "classification": "exempt",
       "reason": "Session-guarded UI toggle: returns only the poller's disabled flag, derived from the caller's own society state in the server session; reads and writes no society data."
     },
-    "callback:onboarding_callbacks.py::onb_seat_poll": {
-      "classification": "exempt",
-      "reason": "Session-guarded read-only poll of the caller's OWN society's seat-all background job (society from the server session); writes nothing."
-    },
     "callback:onboarding_callbacks.py::onb_prepare": {
       "classification": "legacy-gated"
     },
@@ -776,6 +772,10 @@
     "callback:onboarding_callbacks.py::onb_seat_all_files": {
       "classification": "exempt",
       "reason": "Pure UI state: echoes the chosen file names back into the form. Reads and writes no server data (the files are only used by onb_seat_all, which checks the admin role)."
+    },
+    "callback:onboarding_callbacks.py::onb_seat_poll": {
+      "classification": "exempt",
+      "reason": "Session-guarded read-only poll of the caller's OWN society's seat-all background job (society from the server session); writes nothing."
     },
     "callback:onboarding_callbacks.py::onb_sig_preview": {
       "classification": "legacy-gated"
@@ -837,10 +837,10 @@
     "callback:onboarding_wizard_callbacks.py::sw_bf_pr_tpl": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_wizard_callbacks.py::sw_bf_template": {
+    "callback:onboarding_wizard_callbacks.py::sw_bf_rollup": {
       "classification": "legacy-gated"
     },
-    "callback:onboarding_wizard_callbacks.py::sw_bf_rollup": {
+    "callback:onboarding_wizard_callbacks.py::sw_bf_template": {
       "classification": "legacy-gated"
     },
     "callback:onboarding_wizard_callbacks.py::tds_apply": {
@@ -1187,8 +1187,17 @@
     "callback:up_compliance_callbacks.py::start_s22": {
       "classification": "unclassified"
     },
+    "route:api.py::export_icai_trial_balance": {
+      "classification": "legacy-gated"
+    },
+    "route:api.py::get_icai_statements": {
+      "classification": "legacy-gated"
+    },
     "route:api.py::get_kpis": {
       "classification": "unclassified"
+    },
+    "route:api.py::get_msme_compliance": {
+      "classification": "legacy-gated"
     },
     "route:api.py::get_societies": {
       "classification": "unclassified"

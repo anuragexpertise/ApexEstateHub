@@ -16,6 +16,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from database.db_manager import db
 from app.services.push_service import send_push_notification
+from app.utils import now_ist
+
+
+def _ist_naive_now():
+    """Wall-clock IST without tzinfo: patrol_scans.scanned_at is a naive TIMESTAMP written in IST,
+    and a Render host runs in UTC, so datetime.now() would be 5.5 h behind."""
+    return now_ist().replace(tzinfo=None)
 
 def init_db():
     db._execute("""
@@ -93,13 +100,13 @@ def assign_random_patrols():
         for loc in locations:
             last_scan = db._execute("SELECT scanned_at FROM patrol_scans WHERE location_id = %s ORDER BY scanned_at DESC LIMIT 1", (loc["id"],), fetch_one=True)
             interval = loc.get("scan_interval") or 120
-            if not last_scan or (datetime.now() - last_scan["scanned_at"]).total_seconds() > (interval * 60):
+            if not last_scan or (_ist_naive_now() - last_scan["scanned_at"]).total_seconds() > (interval * 60):
                 overdue_locations.append(loc)
                 
         # Prefer overdue locations, fallback to any active location
         pool = overdue_locations if overdue_locations else locations
         loc = secrets.choice(pool)
-        expires_at = datetime.now() + timedelta(minutes=15)
+        expires_at = _ist_naive_now() + timedelta(minutes=15)
         
         db._execute("""
             INSERT INTO patrol_tasks (society_id, security_user_id, location_id, assigned_at, expires_at, status)

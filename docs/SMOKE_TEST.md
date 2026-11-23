@@ -30,5 +30,7 @@ Run after every production deploy. `$URL` = your `https://…onrender.com` (or c
     repeated scan within a few seconds does not create duplicates.
 11. **Persistence** — upload a document/photo, trigger a redeploy, and confirm it is still there
     (see `docs/DEPLOYMENT_STORAGE.md`; local-disk uploads will NOT survive).
-12. **Jobs** — confirm each Render Cron Job (`scripts/run_job.py`) ran at its last scheduled time and
-    exited 0.
+12. **Jobs** - trigger each of the five Render Cron Jobs once (**Trigger Run**) and confirm exit 0 and a fresh row for
+    each in `job_runs`: `SELECT job_name, status, finished_at FROM job_runs ORDER BY started_at DESC LIMIT 10;`.
+    Then set a wrong `SECRET_VAULT_KEY` on the `estatehub-jobs` group, run `anchors`, and confirm the master receives
+    "Scheduled job failed: anchors"; restore the key. See `docs/SCHEDULER.md`.

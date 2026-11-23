@@ -57,3 +57,6 @@ gunicorn==26.2.0
 pytest==9.1.1
 sqlparse==0.6.0
 Markdown==3.11
+
+# Test-only: parses database/estatehub.sql in test_schema_order / test_scenario_g / test_scenario_4
+pglast==8.9

@@ -2,7 +2,7 @@
 ### The Complete Society Management Platform
 
 > **Multi-tenant · Role-aware · Real-time · Zero-reload**
-> Python 3.12 (CI; also run on 3.13) · Dash 2.14 + Flask 2.2 · PostgreSQL 16 · gunicorn · deployed on ApexWeave + NeonDB (per `docs/SCHEDULER.md`)
+> Python 3.12 (CI; also run on 3.13) · Dash 2.14 + Flask 2.2 · PostgreSQL 16 · gunicorn · deployed on Render + Aiven PostgreSQL (see `render.yaml`, `docs/SCHEDULER.md`)
 
 > ⚖️ **Secretaries, auditors, CAs, tax officers:** start at [At a glance](#at-a-glance-for-secretaries-auditors-cas-and-tax-officers) — what is enforced, how to check it yourself, and what is *not* claimed. Detail: [Statutory Compliance & Audit Assurance](#statutory-compliance--audit-assurance).
 
@@ -432,7 +432,7 @@ Status marks: ✅ built, 🟡 partly built, ⬜ planned (Gold-Standard Plan v3, 
 
 | Gap | Why it matters | Planned |
 |---|---|---|
-| **Switch on** the schedule in `docs/SCHEDULER.md` on the production host, and run it as the restricted `estatehub_app` login | The jobs (`anchors` daily with verify, `patrol` hourly, `ratification` daily, and an hourly `watchdog` that alerts when one has not run), the run log and the failure alert are built, and `run_job.py` refuses to run as the owner. Creating the scheduled tasks on the host is the owner's step; the repo cannot do it, and a week of logged runs can only be shown there. | Create four scheduled tasks on the host (Decision 1: ApexWeave or Render), then read `job_runs` after a week |
+| **Switch on** the schedule in `docs/SCHEDULER.md` on the production host, and run it as the restricted `estatehub_app` login | The jobs (`anchors` daily with verify, `patrol` hourly, `ratification` daily, `expiry` daily, and an hourly `watchdog` that alerts when one has not run), the run log and the failure alert are built, and `run_job.py` refuses to run as the owner. Creating the scheduled tasks on the host is the owner's step; the repo cannot do it, and a week of logged runs can only be shown there. | Deploy the five Render Cron Jobs from `render.yaml`, then read `job_runs` after a week |
 | The *year close* (reserve appropriation) button checks the base role `admin`, not a capability | It contradicts the model in which the admin holds no finance powers; the admin can post the year-end journal that the Treasurer then locks | Gate it on a finance capability (maker: accountant, checker: treasurer) |
 | Screen to record the cash counted when the cash book is signed | The physical control exists in the database and `sign_cashbook`, but nothing in the UI calls it | Add a closing-cash field to the daily cash-book signing step |
 | Guard `payables` / `receivables` against edits | A remaining way to alter history | Extend the immutability trigger |
@@ -1978,7 +1978,7 @@ Versions are the pins in `requirements.txt`.
 | Backend | Flask 2.2.5 / Werkzeug 2.2.3 | Flask app hosts the Dash app (`dash_app.server`) plus the blueprints in `app/routes/` |
 | Server | gunicorn 26 (Procfile: 2 workers, 8 threads, 120 s timeout) | `wsgi:server` is the production entry point; `run.py` is for development |
 | Auth | Werkzeug password/PIN/pattern hashes, Flask-Login session, PyJWT 2.15 | Access and refresh tokens; server session is the source of truth |
-| Database | PostgreSQL 16 + `pgcrypto` | Managed Postgres (Aiven historically, NeonDB per `docs/SCHEDULER.md`); schema is PostgreSQL-specific |
+| Database | PostgreSQL 16 + `pgcrypto` | Aiven for PostgreSQL 16 (managed, TLS required); schema is PostgreSQL-specific |
 | DB driver | psycopg2-binary 2.9.13 with `ThreadedConnectionPool` | `db._execute()` accepts both `:name` dict params and positional `%s`; no SQLAlchemy ORM is in use (the SQLAlchemy imports were removed) |
 | Models | Python dataclasses (`app/models/`) | `User`, `Poll` and helpers — not ORM entities |
 | Money | `database/money.py` | `Decimal` to the paisa; `D` / `money` / `rupee`; float is forbidden on money paths (see `docs/FLOAT_AUDIT.md`) |
@@ -3131,8 +3131,8 @@ unless `JOB_ALLOW_OWNER_LOGIN=1` (development only).
 | `expiry` | daily | Ends adviser appointments past their term and expires stale eSign requests. |
 | `watchdog` | hourly | Alerts masters when `anchors`/`ratification`/`expiry` has no successful run in 26 hours or `patrol` in 2.5 hours — this is what catches a scheduler that never fired. |
 
-`docs/SCHEDULER.md` documents the host setup (currently ApexWeave + NeonDB, per
-that file; the code is host-neutral). Run the jobs with the same environment as
+`docs/SCHEDULER.md` documents the host setup (Render Cron Jobs + Aiven PostgreSQL; the
+code itself is host-neutral). Run the jobs with the same environment as
 the web service except the database login: use `estatehub_app`, not the owner.
 The signing key must not sit on the database host.
 
@@ -3240,7 +3240,7 @@ open items are stated as open.
 - **Cash-in-Hand leg:** deferred; stays in risks.
 - **Interest wording:** "Simple Interest - Bye-law 46(a) - Rate <rate> via Resolution by GBM" (task 1.9).
 - **Approval ladder:** optional with UI; default ₹20,000 (bye-law 49) for Secretary/Treasurer, unlimited for Committee and General Body (task 2.5).
-- **Scheduler and keys:** ApexWeave scheduled jobs; four keys per society; `SECRET_VAULT_KEY` in host `.env`; `SECRET_MASTER_KEY` held offline (tasks 1.2–1.4, 4.5). Dropped: news feature and monthly bill job.
+- **Scheduler and keys:** Render Cron Jobs; four keys per society; `SECRET_VAULT_KEY` in the Render environment group; `SECRET_MASTER_KEY` held offline (tasks 1.2–1.4, 4.5). Dropped: news feature and monthly bill job.
 - **Advisers and retention:** Treasurer/Auditor files advocate opinions and CA sign-offs; 5-year default retention (tasks 0.3, 0.4, 2.7, 4.4).
 
 Provisional figures needing an opinion: 2/3 policy and 1/2 resolution majorities, cash ceiling, bye-law 46(d) depreciation-fund label, bye-law 7 year basis, poll majority basis (task 0.2). Retention default 5 years, configurable per society, subject to CA confirmation on longer periods required by any applicable Act (task 0.4).

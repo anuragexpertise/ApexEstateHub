@@ -29,12 +29,18 @@ ordering is exercised the way it is in production.
 
 import pytest
 
+from test.live_db_gate import LIVE_DB_REASON, live_db_enabled
+
 from app.dash_apps.drilldown import loaders
 from app.dash_apps.drilldown.renderers import (
     render_fy_closing_card,
     render_reserve_appropriation_panel,
 )
 
+
+
+# Needs a real PostgreSQL (SQL functions the fake cannot run); CI runs it in the postgres job.
+pytestmark = [pytest.mark.skipif(not live_db_enabled(), reason=LIVE_DB_REASON), pytest.mark.postgres_integration]
 
 def _seed_surplus_world(patched_db, income=100000.0, expense=40000.0):
     """A society with a full year's books: net surplus = income - expense."""

@@ -5,13 +5,14 @@ Run one scheduled job and log it in job_runs (see app/services/job_runner.py).
     python scripts/run_job.py anchors        # daily:  anchor every society, then verify every signature
     python scripts/run_job.py patrol         # hourly
     python scripts/run_job.py ratification   # daily
+    python scripts/run_job.py expiry         # daily:  end adviser terms, expire stale eSign requests
     python scripts/run_job.py watchdog       # hourly: alerts when a job above has not run on time
 
 The jobs refuse to run as the database owner or a superuser (set JOB_ALLOW_OWNER_LOGIN=1 only on a development machine).
 See docs/SCHEDULER.md for the schedule, the login and how to read the run log.
 
-Suggested schedule (hosts differ; check yours in task 0.6): anchors 0 21 * * * UTC (02:30 IST), patrol 0 * * * *,
-ratification 30 21 * * * UTC. The scheduler's own environment needs the database login and SECRET_VAULT_KEY.
+Schedule (Render Cron Jobs, UTC; see render.yaml): anchors 0 21 * * * (02:30 IST), patrol 5 * * * *,
+ratification 30 21 * * *, expiry 45 21 * * *, watchdog 35 * * * *. The scheduler's own environment needs the database login and SECRET_VAULT_KEY.
 Exit status is 1 when the job failed.
 """
 import os

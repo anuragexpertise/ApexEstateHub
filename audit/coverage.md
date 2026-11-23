@@ -20,7 +20,7 @@ Per-slice procedure: read coverage → list files → read in ranges → run gre
 | C6–C9 | Dash callbacks | remaining `app/dash_apps/callbacks/*.py` | same probes; one batch per slice, in registration order | complete | 5 | C6-01 SQLi whitelist; C6-03 rate_limit.py helper added |
 | C10 | Drilldown loaders | `app/dash_apps/drilldown/loaders.py`, `registry.py`, `profile_actions.py` | every query filtered by session society, entity-id collisions across `role` | complete | 3 | |
 | C11 | Unclassified endpoints | `docs/authz_manifest.json` | review legacy unclassified entries one by one | complete | 1 | 126 unclassified + legacy-gated entries tracked; several reviewed in C3/C4 |
-| D1 | DB driver | `database/db_manager.py`, `database/db_config.py` | pool sizing vs Aiven plan limit, SSL idle-drop retry, `PG_SKIP_STARTUP_OPTIONS`, timeouts, CA handling, DSN precedence (web vs CLI) | complete | 5 | DSN precedence fixed (D1-01: db_config.py now DATABASE_URL-first, matching db_manager.py) |
+| D1 | DB driver | `database/db_manager.py`, `database/db_config.py` | pool sizing vs Aiven plan limit, SSL idle-drop retry, `PG_SKIP_STARTUP_OPTIONS`, timeouts, CA handling, DSN precedence (web vs CLI) | complete | 5 | D1-01 withdrawn: db_config.py stays PG*-first (tested design) |
 | D2 | Money and posting | `database/money.py`, receipt/expense/pay-dues code in `loaders.py` | float vs Decimal, retries, idempotency, double-submit | complete | 1 | money.py Decimal-only (Verified OK) |
 | D3 | Schema (a) | `database/estatehub.sql` posting, billing, receipt functions | `FOR UPDATE`, triggers, deferred balance constraint, SECURITY DEFINER | complete | 3 | FOR UPDATE + ON CONFLICT + immutability triggers + cash limit (Verified OK); no SECURITY DEFINER |
 | D4 | Schema (b) | `database/estatehub.sql` tables and indexes | indexes on `society_id` and every foreign key, timestamps and time zone | complete | 1 | society_id indexes on all tables + ledger_seq unique (Verified OK) |
@@ -31,10 +31,10 @@ Per-slice procedure: read coverage → list files → read in ranges → run gre
 | F1 | Gate and QR | `app/services/qr_service.py`, scan route, `employee_attendance.py` | idempotent re-scans, timeouts, replay, rate limits, offline behaviour | complete | 6 | C4-02 scan rate limit |
 | F2 | Patrol and visitors | patrol and visitor code, `scripts/patrol_cron.py` | duplicate writes, geofence/speed checks, midnight rollover | complete | 2 | F2-02 patrol_cron.py IST TODO |
 | G1 | Local-disk writes | whole repo | every write to local disk (uploads, WebP assets, PDFs, logs, temp files); what is lost on a Render redeploy; durable-storage options | complete | 5 | G1-01 docs/DEPLOYMENT_STORAGE.md added |
-| H1 | Secrets | whole repo and git history | hardcoded keys/passwords, tracked cert/key files, seed passwords, step-up default | complete | 4 | ca.pem/service.cert/service.key/setup_aiven_db.sh scrubbed from git history (H1-01); .gitignore already covers *.pem/*.crt/*.cert/*.key/setup_aiven_db.sh |
+| H1 | Secrets | whole repo and git history | hardcoded keys/passwords, tracked cert/key files, seed passwords, step-up default | complete | 4 | H1-01 REOPENED: key files gone from master but still on 15 origin/* branches; .gitignore already covers *.pem/*.crt/*.cert/*.key/setup_aiven_db.sh |
 | H2 | Dependencies | `requirements.txt`, `.github/workflows/tests.yml` | stale pins, which ignored CVEs are reachable | complete | 2 | H2-01 docs/DEPENDENCY_REMEDIATION.md added |
 | I1 | Journeys | services and pages for onboarding, billing/receipts, visitor approval, concerns, exports | None crashes, IST/FY boundary bugs, empty-state failures | complete | 4 | |
-| J1 | Synthesis | `audit/` | merge, dedupe, rank, verify citations, write the report | complete | 1 | audit/REPORT.md written (108 findings); 22 patches in audit/patches/; 24 findings resolved this session |
+| J1 | Synthesis | `audit/` | merge, dedupe, rank, verify citations, write the report | complete | 1 | audit/AUDIT_REPORT.md rewritten after re-verification; no patch files (fixes applied directly) |
 
 ## Ground rules (from Audit.md)
 

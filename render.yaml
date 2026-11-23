@@ -9,7 +9,7 @@ services:
     startCommand: "gunicorn wsgi:server --workers 2 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT"
     envVars:
       - key: PYTHON_VERSION
-        value: "3.11.4"
+        value: "3.12.8"   # matches CI (3.12)
       - key: FLASK_CONFIG
         value: production
       # DATABASE_URL points at the Aiven database (external to Render).
@@ -33,6 +33,12 @@ services:
         sync: false
       - key: PGSSLMODE
         value: require
+      # Stronger TLS: set PGSSLMODE=verify-full and PGSSLROOTCERT to a path holding the Aiven CA
+      # (download from the Aiven console; keep it out of git).
+      # If DATABASE_URL uses Aiven's PgBouncer pooler port, also set PG_SKIP_STARTUP_OPTIONS=1
+      # and run once: ALTER DATABASE <db> SET timezone = 'Asia/Kolkata';
+      - key: PG_SKIP_STARTUP_OPTIONS
+        sync: false
       - key: FRONTEND_URL
         sync: false
       - key: VAPID_PUBLIC
@@ -40,6 +46,19 @@ services:
       - key: VAPID_PRIVATE
         sync: false
       - key: VAPID_EMAIL
+        sync: false
+      # Password reset delivers its token by email only; without SMTP no reset can complete.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: ESIGN_CALLBACK_SECRET
         sync: false
       - key: TRUSTED_PROXY_HOPS
         value: "1"
@@ -57,7 +76,8 @@ services:
   # "estatehub-jobs", which you create once in the Render dashboard
   # (Environment > Env Groups) with: DATABASE_URL (the restricted
   # estatehub_login, NOT the owner), SECRET_VAULT_KEY, VAPID_PUBLIC,
-  # VAPID_PRIVATE, VAPID_EMAIL, PGSSLMODE=require, FLASK_CONFIG=production.
+  # VAPID_PRIVATE, VAPID_EMAIL, PGSSLMODE=require, FLASK_CONFIG=production,
+  # DB_POOL_MIN=1, DB_POOL_MAX=2 (a job needs one connection; the default pool opens 4).
   - type: cron
     name: estatehub-job-anchors
     env: python

@@ -89,7 +89,7 @@ class DatabaseManager:
             # (usually UTC). CURRENT_DATE then lagged today_ist() between 00:00 and 05:30 IST, and freshly seated
             # office-bearers (term_start = today_ist()) were invisible until the date rolled over in UTC.
             # Not applied when the URL already sets options, when PG_SKIP_STARTUP_OPTIONS=1, or for a host with
-            # "-pooler" in its name. Connection poolers (PgBouncer on Aiven, Neon's pooler) can reject startup
+            # "-pooler" in its name. Connection poolers (PgBouncer on Aiven) can reject startup
             # options: behind one, set PG_SKIP_STARTUP_OPTIONS=1 and run
             #   ALTER DATABASE <db> SET timezone = 'Asia/Kolkata';
             # once instead, which applies whatever the connection path.
@@ -162,8 +162,7 @@ class DatabaseManager:
             dsn = self._dsn()
             # psycopg2 CLOSES every returned connection once `minconn` idle ones are already held, and getconn() holds
             # a lock while it opens a new TLS connection. With minconn=1 any concurrent Dash callbacks therefore
-            # reconnect on nearly every query, one at a time (the "getconn() took 0.8s, 1.6s, 2.4s" log pattern on
-            # Neon). Default to 4 idle connections; lower DB_POOL_MIN only if the database's connection limit
+            # reconnect on nearly every query, one at a time (the "getconn() took 0.8s, 1.6s, 2.4s" log pattern). Default to 4 idle connections; lower DB_POOL_MIN only if the database's connection limit
             # demands it. maxconn must stay >= minconn.
             _min = max(1, int(os.getenv("DB_POOL_MIN", "4")))
             _max = max(_min, int(os.getenv("DB_POOL_MAX", "10")))
