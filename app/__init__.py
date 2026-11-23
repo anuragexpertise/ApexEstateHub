@@ -162,9 +162,22 @@ def create_app(config_name: str | None = None) -> Flask:
     from app.config import config as config_map
     app.config.from_object(config_map[config_name])
 
+    # Render terminates TLS and forwards X-Forwarded-*. Trust exactly one proxy
+    # hop so request.is_secure, url_for(_external) and remote_addr (rate
+    # limiting, audit log) reflect the real client. Set TRUSTED_PROXY_HOPS=0
+    # to disable when running without a proxy.
+    _hops = int(os.getenv("TRUSTED_PROXY_HOPS", "1"))
+    if _hops > 0:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=_hops, x_proto=_hops, x_host=_hops)
+
     # Extensions
     login_manager.init_app(app)
-    CORS(app)
+    # CORS: the app is same-origin (Dash + Flask). Cross-origin access is
+    # opt-in via CORS_ORIGINS (comma-separated); default is no CORS headers.
+    _origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+    if _origins:
+        CORS(app, origins=_origins, supports_credentials=True)
     _register_error_handlers(app)
 
     # Offline/local runs: when the database is unreachable at startup, boot in

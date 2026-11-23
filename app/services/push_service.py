@@ -18,6 +18,13 @@ VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC') or os.getenv('VAPID_PUBLIC_KEY')
 VAPID_CLAIM_EMAIL = os.getenv('VAPID_EMAIL') or os.getenv('VAPID_CLAIM_EMAIL', 'master@estatehub.com')
 FCM_SERVER_KEY = os.getenv('FCM_SERVER_KEY', '')
 
+# (connect, read) seconds for the push-service HTTP call. Without this a dead
+# endpoint can pin a gunicorn thread until the worker timeout.
+WEBPUSH_TIMEOUT = (
+    float(os.getenv('WEBPUSH_CONNECT_TIMEOUT', '3')),
+    float(os.getenv('WEBPUSH_READ_TIMEOUT', '8')),
+)
+
 
 def _send_fcm(fcm_token, title, body, data=None):
     """Send a mobile push notification via Firebase Cloud Messaging.
@@ -154,6 +161,7 @@ def send_push_notification(user_id, title, body, icon=None, url=None, society_id
                 data=json.dumps(notification_data),
                 vapid_private_key=VAPID_PRIVATE_KEY,
                 vapid_claims={'sub': f'mailto:{VAPID_CLAIM_EMAIL}'},
+                timeout=WEBPUSH_TIMEOUT,
             )
             success_count += 1
             db._execute(
@@ -162,10 +170,15 @@ def send_push_notification(user_id, title, body, icon=None, url=None, society_id
             )
         except WebPushException as e:
             logger.error(f"WebPush error for user {user_id} sub {sub['id']}: {e}")
-            if hasattr(e, 'response') and e.response:
-                logger.error(f"Response: {e.response.read()}")
+            resp = getattr(e, 'response', None)
+            # requests.Response has no .read(); calling it raised AttributeError
+            # out of this handler, so expired subscriptions were never purged
+            # and the remaining subscriptions for the user were skipped.
+            status = getattr(resp, 'status_code', None)
+            if resp is not None:
+                logger.error(f"Push service responded {status}: {(getattr(resp, 'text', '') or '')[:200]}")
             last_error = str(e)
-            if e.response and e.response.status_code in (404, 410):
+            if status in (404, 410):
                 db._execute("DELETE FROM push_subscriptions WHERE id = %s", (sub["id"],))
         except Exception as e:  # noqa: BLE001
             logger.error(f"Push notification error for user {user_id} sub {sub['id']}: {e}")

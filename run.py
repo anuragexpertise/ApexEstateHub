@@ -9,7 +9,7 @@ from app import create_app, create_dash_app
 
 # Configuration
 FLASK_CONFIG = os.getenv('FLASK_CONFIG', 'development')
-FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'true').lower() == 'true'
+FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
 PORT = int(os.getenv('PORT', 8050))
 HOST = os.getenv('HOST', '0.0.0.0')
 
@@ -35,5 +35,5 @@ if __name__ == '__main__':
         port=PORT,
         debug=FLASK_DEBUG,
         use_reloader=False,      # ✅ Auto-reload on code changes
-        use_debugger=True,       # ✅ Debugger enabled
+        use_debugger=FLASK_DEBUG,  # Werkzeug debugger allows remote code execution; opt-in only
     )

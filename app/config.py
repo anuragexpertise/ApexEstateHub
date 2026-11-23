@@ -105,6 +105,16 @@ class Config:
     SESSION_PERMANENT        = False
     REMEMBER_COOKIE_DURATION = 30 * 24 * 3600   # 30 days
 
+    # Cookie hardening. Secure is on for production (see ProductionConfig);
+    # HttpOnly and SameSite=Lax apply everywhere.
+    SESSION_COOKIE_HTTPONLY   = True
+    SESSION_COOKIE_SAMESITE   = 'Lax'
+    SESSION_COOKIE_SECURE     = False
+    REMEMBER_COOKIE_HTTPONLY  = True
+    REMEMBER_COOKIE_SAMESITE  = 'Lax'
+    REMEMBER_COOKIE_SECURE    = False
+    PREFERRED_URL_SCHEME      = 'http'
+
     # Uploads
     UPLOAD_FOLDER      = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), 'static', 'uploads'
@@ -154,6 +164,9 @@ class DevelopmentConfig(Config):
 class ProductionConfig(Config):
     DEBUG   = False
     TESTING = False
+    SESSION_COOKIE_SECURE    = True
+    REMEMBER_COOKIE_SECURE   = True
+    PREFERRED_URL_SCHEME     = 'https'
 
 
 class TestingConfig(Config):

@@ -255,8 +255,8 @@ def request_password_reset(email: str,
         if send_email(email, "EstateHub password reset", body):
             return True, RESET_REQUEST_MESSAGE, plain
         log.warning("Password reset token for user_id=%s could not be emailed "
-                    "(SMTP not configured or send failed); token: %s",
-                    user["id"], plain)
+                    "(SMTP not configured or send failed); token omitted from log",
+                    user["id"])
         # Same message as every other outcome: do not reveal that the account exists.
         return True, RESET_REQUEST_MESSAGE, plain
     except Exception:

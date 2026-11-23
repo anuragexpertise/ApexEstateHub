@@ -33,6 +33,6 @@ if __name__ == '__main__':
     server.run(
         host='0.0.0.0',
         port=port,
-        debug=True,           # ✅ No debug in production
+        debug=False,          # never run the debugger from the production entry point
         use_reloader=False,    # ✅ No reload with gunicorn
     )

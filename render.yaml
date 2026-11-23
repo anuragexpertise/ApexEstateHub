@@ -3,6 +3,7 @@ services:
     name: estatehub
     env: python
     plan: standard
+    healthCheckPath: /healthz
     region: frankfurt
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn wsgi:server --workers 2 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT"
@@ -32,3 +33,20 @@ services:
         sync: false
       - key: PGSSLMODE
         value: require
+      - key: FRONTEND_URL
+        sync: false
+      - key: VAPID_PUBLIC
+        sync: false
+      - key: VAPID_PRIVATE
+        sync: false
+      - key: VAPID_EMAIL
+        sync: false
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+      # Comma-separated allowed cross-origin sites. Leave empty for same-origin only.
+      - key: CORS_ORIGINS
+        sync: false
+      # Worst-case DB connections = workers x DB_POOL_MAX (2 x 10 = 20 here).
+      # Keep that below the Aiven plan's connection limit.
+      - key: DB_POOL_MAX
+        value: "10"

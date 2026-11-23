@@ -40,6 +40,10 @@ def scan_qr():
     # Same-origin fetches from the scanner UI carry the session cookie.
     if not current_user.is_authenticated:
         return jsonify({"status": "error", "message": "Authentication required"}), 401
+    # OpenCV decoding is CPU-heavy: 30 scans/minute/user is far above real use.
+    from app.utils.rate_limit import rate_ok
+    if not rate_ok(f"scan:{current_user.get_id()}", 30, 60.0):
+        return jsonify({"status": "error", "message": "Too many scans, slow down"}), 429
     if not request.is_json:
         return jsonify({"status": "error", "message": "Expected JSON"}), 400
 
