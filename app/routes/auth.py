@@ -33,6 +33,9 @@ def login():
     pattern    = data.get('pattern')
     society_id = data.get('society_id')
     method     = data.get('method', 'password')
+    # PIN / pattern only work from a trusted device: the token comes in the JSON body (native clients) or from the
+    # httpOnly "eh_device" cookie (browsers). It is issued after a PASSWORD login with "remember_device": true.
+    device_token = data.get('device_token') or None
 
     user_dict = None
 
@@ -42,10 +45,10 @@ def login():
             user_dict = authenticate_user(email, password, society_id)
         elif method == 'pin' and pin:
             from app.services.auth_service import authenticate_pin
-            user_dict = authenticate_pin(email, pin, society_id)
+            user_dict = authenticate_pin(email, pin, society_id, device_token)
         elif method == 'pattern' and pattern:
             from app.services.auth_service import authenticate_pattern
-            user_dict = authenticate_pattern(email, pattern, society_id)
+            user_dict = authenticate_pattern(email, pattern, society_id, device_token)
         else:
             return jsonify({'success': False, 'message': 'Invalid authentication method'}), 400
     except Exception:
@@ -78,17 +81,27 @@ def login():
     )
     login_user(user_obj, remember=data.get('remember', False))
 
+    from app.services import device_service
+    issued_device_token = None
+    if method == 'password':
+        issued_device_token = device_service.after_password_login(user_obj.id, bool(data.get('remember_device')))
+    else:
+        device_service.after_quick_login()
+
     access_token, refresh_token = generate_tokens(
         user_obj.id, user_obj.email, user_obj.role, user_obj.society_id
     )
 
-    return jsonify({
+    body = {
         'success':       True,
         'access_token':  access_token,
         'refresh_token': refresh_token,
         'user':          user_obj.to_dict(),
         'redirect':      _redirect_url(user_obj.role, user_obj.society_id),
-    })
+    }
+    if issued_device_token:
+        body['device_token'] = issued_device_token     # for clients that cannot keep the cookie; shown once
+    return jsonify(body)
 
 
 # ── Token refresh ─────────────────────────────────────────────
@@ -135,6 +148,8 @@ def refresh_token():
 @auth_bp.route('/logout', methods=['POST'])
 @login_required
 def logout():
+    from app.services import device_service
+    device_service.sign_out_this_device((request.get_json(silent=True) or {}).get('device_token'))  # this device needs the password next time
     logout_user()
     session.clear()
     return jsonify({'success': True, 'message': 'Logged out'})

@@ -5220,12 +5220,17 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                     set_parts.append("email=%s"); params.append(email)
                 if pw:
                     set_parts.append("password_hash=%s"); params.append(generate_password_hash(pw))
+                    set_parts += ["pin_hash=NULL", "pattern_hash=NULL"]      # a new password voids quick sign-in
                 params += [pk, sid]
                 db._execute(
                     f"UPDATE users SET {', '.join(set_parts)} "
                     "WHERE linked_id=%s AND role='apartment' AND society_id=%s AND user_type='owner'",
                     params,
                 )
+                if pw:
+                    from app.services import device_service
+                    device_service.revoke_for_users_where(
+                        "linked_id=%s AND role='apartment' AND society_id=%s AND user_type='owner'", [pk, sid])
             # Coerce boolean string from dropdown
             apt_active = d.get("active", True)
             if isinstance(apt_active, str):
@@ -5338,12 +5343,16 @@ def _save_user_entity(db, d, sid, role, is_edit, pk):
                 set_parts.append("email=%s"); params.append(email)
             if pw:
                 set_parts.append("password_hash=%s"); params.append(generate_password_hash(pw))
+                set_parts += ["pin_hash=NULL", "pattern_hash=NULL"]          # a new password voids quick sign-in
             params += [pk, role, sid]
             db._execute(
                 f"UPDATE users SET {', '.join(set_parts)} "
                 "WHERE linked_id=%s AND role=%s AND society_id=%s",
                 params,
             )
+            if pw:
+                from app.services import device_service
+                device_service.revoke_for_users_where("linked_id=%s AND role=%s AND society_id=%s", [pk, role, sid])
         if role == "security":
             sec_active = d.get("active", True)
             if isinstance(sec_active, str):
@@ -5545,6 +5554,7 @@ def _save_apartment_user(db, d, sid, is_edit, pk):
                 return False, pw_err, None
             set_parts.append("password_hash=%s"); params.append(generate_password_hash(pw))
             set_parts.append("must_change_password=TRUE")
+            set_parts += ["pin_hash=NULL", "pattern_hash=NULL"]              # a new password voids quick sign-in
         if is_admin_actor:
             set_parts.append("linked_id=%s"); params.append(apt_id)
         params += [pk, sid]
@@ -5552,6 +5562,9 @@ def _save_apartment_user(db, d, sid, is_edit, pk):
             db._execute(f"UPDATE users SET {', '.join(set_parts)} WHERE id=%s AND society_id=%s AND role='apartment'", params)
         except Exception as e:  # noqa: BLE001
             return False, _friendly_member_error(e), None
+        if pw:
+            from app.services import device_service
+            device_service.revoke_for_users_where("id=%s AND society_id=%s AND role='apartment'", [pk, sid])
         return True, f"Member '{email}' updated", pk
 
     # ── create ──────────────────────────────────────────────────────────────

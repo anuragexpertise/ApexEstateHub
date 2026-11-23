@@ -161,9 +161,12 @@ def reset_password(actor_id, actor_role, society_id, user_id, new_password, acto
             cur = conn.cursor()
             cur.execute(
                 "UPDATE users SET password_hash = %s, must_change_password = TRUE, failed_login_attempts = 0, "
-                "       locked_until = NULL, reset_token = NULL, reset_token_expires = NULL "
+                "       locked_until = NULL, reset_token = NULL, reset_token_expires = NULL, "
+                "       pin_hash = NULL, pattern_hash = NULL "
                 " WHERE id = %s AND society_id = %s AND role = ANY(%s)",
                 (generate_password_hash(new_password), member["id"], int(society_id), list(ROLE_CODES)))
+            # A reset voids quick sign-in: the PIN/pattern are cleared above and every trusted device is untrusted.
+            cur.execute("DELETE FROM user_devices WHERE user_id = %s", (member["id"],))
             _audit(cur, "team.login.reset_password", member["id"], {"role": member["role"]})
     except Exception as exc:  # noqa: BLE001
         return False, _db_message(exc)
@@ -205,9 +208,11 @@ def update_member(actor_id, actor_role, society_id, user_id, name=None, active=N
             if pw:
                 cur.execute(
                     "UPDATE users SET password_hash = %s, must_change_password = TRUE, failed_login_attempts = 0, "
-                    "       locked_until = NULL, reset_token = NULL, reset_token_expires = NULL "
+                    "       locked_until = NULL, reset_token = NULL, reset_token_expires = NULL, "
+                    "       pin_hash = NULL, pattern_hash = NULL "
                     " WHERE id = %s AND society_id = %s AND role = ANY(%s)",
                     (generate_password_hash(pw), member["id"], int(society_id), list(ROLE_CODES)))
+                cur.execute("DELETE FROM user_devices WHERE user_id = %s", (member["id"],))
                 _audit(cur, "team.login.reset_password", member["id"], {"role": member["role"]})
     except Exception as exc:  # noqa: BLE001
         return False, _db_message(exc)

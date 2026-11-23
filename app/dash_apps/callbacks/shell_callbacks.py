@@ -904,7 +904,14 @@ def register_shell_callbacks(app):
         except Exception as e:                                              # noqa: BLE001  (a missing contact must never block login)
             print(f"⚠️  grievance contact lookup failed: {e}")
             grievance = None
-        return login_layout(society_name, grievance), logo_src, body_style
+        try:
+            # PIN / pattern tabs appear only when THIS browser holds a usable device token for an account of this society.
+            from app.services import device_service
+            device = device_service.trusted_user(sid)
+        except Exception as e:                                              # noqa: BLE001  (never block the password form)
+            print(f"⚠️  trusted-device lookup failed: {e}")
+            device = None
+        return login_layout(society_name, grievance, device), logo_src, body_style
 
     # ── 6. MASTER LOGIN TOGGLE ────────────────────────────────────────────────
     @app.callback(
@@ -931,6 +938,12 @@ def register_shell_callbacks(app):
         if not (n_sb or n_qr):
             raise PreventUpdate
         print("\n🚪 Logout")
+        try:
+            # Manual sign-out: this browser stops being a trusted device (server row + cookie). Other devices keep theirs.
+            from app.services import device_service
+            device_service.sign_out_this_device()
+        except Exception:  # noqa: BLE001, S110
+            pass
         try:
             from flask_login import logout_user
             logout_user()

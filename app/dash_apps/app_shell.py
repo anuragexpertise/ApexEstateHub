@@ -972,6 +972,40 @@ def _privacy_modals() -> list:
     ]
 
 
+def _quick_signin_section() -> html.Div:
+    """Set / remove the PIN and pattern. The CURRENT PASSWORD field above is the re-authentication for all three buttons."""
+    from app.dash_apps.pages.login_system import pattern_pad, pattern_value_input
+    return html.Div([
+        html.P("Quick sign-in on this device", className="mb-1",
+               style={"fontWeight": "600", "fontSize": "13px"}),
+        html.Small(
+            "Type your current password above, then set a PIN or pattern. This browser becomes a trusted device. "
+            "Other devices must sign in with the password once before they can use it.",
+            style={"color": "#7d8ea3", "display": "block", "marginBottom": "8px"},
+        ),
+        dbc.Label("PIN (4-6 digits)", size="sm"),
+        dbc.Input(id="qs-pin-input", type="password", inputMode="numeric", maxLength=6, className="mb-1",
+                  autoComplete="new-password"),
+        dbc.Input(id="qs-pin-confirm", type="password", inputMode="numeric", maxLength=6, placeholder="Repeat PIN",
+                  className="mb-2", autoComplete="new-password"),
+        dbc.Button("Save PIN", id="qs-save-pin-btn", n_clicks=0, color="success", size="sm", outline=True,
+                   className="mb-3"),
+        dbc.Label("Pattern (connect at least 4 dots, then draw it again to confirm)", size="sm", className="d-block"),
+        pattern_pad("qs-pattern-pad", "qs-pattern-input", "qs-pattern-clear-btn", "qs-pattern-preview",
+                    confirm_input_id="qs-pattern-confirm"),
+        html.Div("Draw a pattern", id="qs-pattern-preview", className="pattern-preview"),
+        pattern_value_input("qs-pattern-input"),
+        pattern_value_input("qs-pattern-confirm"),
+        html.Div([
+            dbc.Button("Clear", id="qs-pattern-clear-btn", n_clicks=0, color="secondary", size="sm", outline=True,
+                       className="me-2"),
+            dbc.Button("Save pattern", id="qs-save-pattern-btn", n_clicks=0, color="warning", size="sm", outline=True),
+        ], style={"display": "flex", "justifyContent": "center", "marginBottom": "10px"}),
+        dbc.Button("Remove PIN and pattern, and untrust all devices", id="qs-disable-btn", n_clicks=0,
+                   color="link", size="sm", className="p-0 text-danger"),
+    ])
+
+
 def _account_settings_modal() -> dbc.Modal:
     return dbc.Modal(
         [
@@ -999,6 +1033,8 @@ def _account_settings_modal() -> dbc.Modal:
                         style={"color": "#7d8ea3"},
                     ),
                     html.Hr(),
+                    _quick_signin_section(),
+                    html.Hr(),
                     dbc.Button([html.I(className="fas fa-user-shield me-2"), "Privacy & data rights"],
                                id="open-privacy-rights-btn", n_clicks=0, color="link", size="sm", className="p-0"),
                 ])
@@ -1011,7 +1047,7 @@ def _account_settings_modal() -> dbc.Modal:
             ]),
         ],
         id="account-settings-modal",
-        size="sm", is_open=False, centered=True,
+        size="sm", is_open=False, centered=True, scrollable=True,
         backdrop=True, keyboard=True,
         style={"zIndex": "20050"},
     )

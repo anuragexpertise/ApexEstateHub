@@ -50,6 +50,7 @@ def patched_db(fake_db):
     """Patch `database.db_manager.db` with the FakeDB singleton."""
     import database.db_manager as dbm
     import app.services.auth_service as auth_svc
+    import app.services.device_service as device_svc
     import app.services.society_service as soc_svc
     import app.services.push_service as push_svc
     import app.services.qr_service as qr_svc
@@ -63,6 +64,7 @@ def patched_db(fake_db):
     patches = [
         patch.object(dbm, "db", fake_db),
         patch.object(auth_svc, "db", fake_db),
+        patch.object(device_svc, "db", fake_db),
         patch.object(soc_svc, "db", fake_db),
         patch.object(push_svc, "db", fake_db),
         patch.object(qr_svc, "db", fake_db),

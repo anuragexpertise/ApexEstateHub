@@ -10,6 +10,7 @@ CRITICAL: seed.py and society_service.py both use generate_password_hash().
 """
 
 import logging
+import re
 import secrets
 from datetime import timedelta
 
@@ -18,6 +19,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from app.models.user import active_select
 from app.security.password_policy import validate_password
 from app.security.roles import resolve_role
+from app.services import device_service
 from app.utils import as_ist, now_ist
 from database.db_manager import db
 
@@ -162,43 +164,129 @@ def authenticate_user(email: str, password: str,
     return _build_auth(row)
 
 
-def authenticate_pin(email: str, pin: str,
-                       society_id: int | None = None) -> dict | None:
-    """Verify email + PIN (werkzeug hash in pin_hash column)."""
+# ── PIN / pattern: quick sign-in on a trusted device ───────────
+#
+# A PIN (4-6 digits) or pattern (>= 4 of 9 dots) is a short secret, so it is only ever checked on a device this
+# account already signed in on with its password (see device_service). Compared with the password path:
+#   * no usable device token for THIS account  -> refuse straight away. Nothing is counted, so a stranger who types
+#     someone's email into the PIN tab can neither guess the PIN nor lock the account out;
+#   * wrong PIN/pattern -> counted on that DEVICE (device_service.claim_attempt), not on the account; at
+#     MAX_DEVICE_FAILURES the device is untrusted and the password is needed again. The account's own lockout is still
+#     honoured (a locked account refuses quick sign-in too) but quick-sign-in mistakes do not feed it.
+
+_PIN_RE = re.compile(r"^\d{4,6}$")
+PIN_RULE_MESSAGE = "Use 4-6 digits that are not all the same or a simple run like 1234."
+
+
+def validate_pin(pin: str) -> str | None:
+    """None when acceptable, else the reason."""
+    pin = pin or ""
+    if not _PIN_RE.match(pin):
+        return "PIN must be 4-6 digits."
+    if len(set(pin)) == 1 or pin in "0123456789" or pin in "9876543210" or pin[: len(pin) // 2] * 2 == pin:
+        return PIN_RULE_MESSAGE
+    return None
+
+
+def normalize_pattern(pattern: str) -> str | None:
+    """Canonical "1-4-5-9" form of a drawn pattern, or None if it is not a valid one (4+ distinct dots, each 1-9)."""
+    dots = (pattern or "").strip().split("-")
+    if len(dots) < 4 or len(set(dots)) != len(dots) or not all(d in "123456789" and len(d) == 1 for d in dots):
+        return None
+    return "-".join(dots)
+
+
+def _authenticate_on_device(hash_column: str, secret: str, email: str, society_id: int | None,
+                            device_token: str | None) -> dict | None:
     row = _fetch_user(email, society_id)
     if not row:
         return None
     locked_until = row.get("locked_until")
     if locked_until and as_ist(locked_until) > now_ist():
-        log.warning("Locked account PIN attempt: %s until %s", email, locked_until)
+        log.warning("Locked account quick sign-in attempt: %s until %s", email, locked_until)
         return None
-    stored = row.get("pin_hash") or ""
-    if not stored or not check_password_hash(stored, pin):
-        _record_failed_attempt(row["id"])
+    stored = row.get(hash_column) or ""
+    if not stored or not secret:
+        return None                                       # nothing set (or nothing typed): not an attempt
+    token = device_token if device_token is not None else device_service.current_token()
+    device = device_service.claim_attempt(token, row["id"])
+    if not device:
+        log.warning("Quick sign-in refused (device not trusted for this account): %s", email)
         return None
-    _reset_failed_attempts(row["id"])
+    if not check_password_hash(stored, secret):
+        if device["failed_attempts"] >= device_service.MAX_DEVICE_FAILURES:
+            device_service.revoke_by_id(device["id"])
+            log.warning("Device untrusted after %s wrong quick sign-in tries: user_id=%s", device["failed_attempts"], row["id"])
+        return None
+    device_service.mark_success(device["id"])
     return _build_auth(row)
 
 
-def authenticate_pattern(email: str, pattern: str,
-                            society_id: int | None = None) -> dict | None:
-    """Verify email + pattern string (werkzeug hash in pattern_hash column)."""
-    row = _fetch_user(email, society_id)
-    if not row:
+def authenticate_pin(email: str, pin: str, society_id: int | None = None,
+                       device_token: str | None = None) -> dict | None:
+    """Verify email + PIN on a trusted device. ``device_token`` defaults to the request's ``eh_device`` cookie."""
+    if not _PIN_RE.match(pin or ""):
         return None
-    locked_until = row.get("locked_until")
-    if locked_until and as_ist(locked_until) > now_ist():
-        log.warning("Locked account pattern attempt: %s until %s", email, locked_until)
-        return None
-    stored = row.get("pattern_hash") or ""
-    if not stored or not check_password_hash(stored, pattern):
-        _record_failed_attempt(row["id"])
-        return None
-    _reset_failed_attempts(row["id"])
-    return _build_auth(row)
+    return _authenticate_on_device("pin_hash", pin, email, society_id, device_token)
 
 
-# ── Password reset ────────────────────────────────────────────
+def authenticate_pattern(email: str, pattern: str, society_id: int | None = None,
+                            device_token: str | None = None) -> dict | None:
+    """Verify email + pattern on a trusted device. ``device_token`` defaults to the request's ``eh_device`` cookie."""
+    canonical = normalize_pattern(pattern)
+    if not canonical:
+        return None
+    return _authenticate_on_device("pattern_hash", canonical, email, society_id, device_token)
+
+
+def set_pin(user_id: int, current_password: str, pin: str) -> tuple[bool, str]:
+    """Set / replace the account's PIN. Needs the current password (same lockout as login). user_id must come from the
+    server session, never from the client."""
+    ok, err = verify_password_with_lockout(user_id, current_password)
+    if not ok:
+        return False, err
+    reason = validate_pin(pin)
+    if reason:
+        return False, reason
+    try:
+        db._execute("UPDATE users SET pin_hash = :h WHERE id = :uid",
+                    {"h": generate_password_hash(pin), "uid": user_id})
+        return True, "PIN saved."
+    except Exception:
+        log.exception("set_pin error for user_id=%s", user_id)
+        return False, "Error saving the PIN."
+
+
+def set_pattern(user_id: int, current_password: str, pattern: str) -> tuple[bool, str]:
+    """Set / replace the account's pattern. Same rules as set_pin."""
+    ok, err = verify_password_with_lockout(user_id, current_password)
+    if not ok:
+        return False, err
+    canonical = normalize_pattern(pattern)
+    if not canonical:
+        return False, "Connect at least 4 different dots."
+    try:
+        db._execute("UPDATE users SET pattern_hash = :h WHERE id = :uid",
+                    {"h": generate_password_hash(canonical), "uid": user_id})
+        return True, "Pattern saved."
+    except Exception:
+        log.exception("set_pattern error for user_id=%s", user_id)
+        return False, "Error saving the pattern."
+
+
+def disable_quick_signin(user_id: int, current_password: str) -> tuple[bool, str]:
+    """Remove the PIN and pattern and untrust EVERY device of this account."""
+    ok, err = verify_password_with_lockout(user_id, current_password)
+    if not ok:
+        return False, err
+    try:
+        db._execute("UPDATE users SET pin_hash = NULL, pattern_hash = NULL WHERE id = :uid", {"uid": user_id})
+    except Exception:
+        log.exception("disable_quick_signin error for user_id=%s", user_id)
+        return False, "Error turning off quick sign-in."
+    device_service.revoke_all(user_id)
+    return True, "PIN and pattern removed; all devices now need your password."
+
 
 def request_password_reset(email: str,
                                  society_id: int | None = None) -> tuple[bool, str, str | None]:
@@ -287,10 +375,14 @@ def reset_password(plain_token: str, new_password: str) -> tuple[bool, str]:
             """UPDATE users
                SET password_hash = :ph, reset_token = NULL, reset_token_expires = NULL,
                    failed_login_attempts = 0, locked_until = NULL,
-                   must_change_password = FALSE
+                   must_change_password = FALSE,
+                   pin_hash = NULL, pattern_hash = NULL
                WHERE id = :uid""",
             {"ph": generate_password_hash(new_password), "uid": row["id"]},
         )
+        # A reset means the old credentials may be compromised: the PIN/pattern are gone (above) and every device that
+        # trusted them is untrusted too, so a token copied before the reset can never be paired with a new PIN.
+        device_service.revoke_all(row["id"])
         return True, "Password updated successfully."
     except Exception:
         log.exception("reset_password error")

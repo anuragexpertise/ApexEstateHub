@@ -10,10 +10,13 @@ from dash import Input, Output, State, no_update
 from dash.exceptions import PreventUpdate
 
 from app.security.roles import portal_home
+from app.services import device_service
 from app.services.auth_service import authenticate_user
 
 
-def _login_response(user: dict):
+def _login_response(user: dict, remember_device: bool = False, via_device: bool = False):
+    """Finish a successful sign-in. ``via_device`` = PIN/pattern (the browser's device token was already proven);
+    otherwise it was a password, which is where the device rules apply (see device_service.after_password_login)."""
     role       = user.get("role", "admin")
     society_id = user.get("society_id")
 
@@ -24,6 +27,10 @@ def _login_response(user: dict):
             return _login_error(PLAN_EXPIRED_MESSAGE)
 
     _establish_server_session(user)
+    if via_device:
+        device_service.after_quick_login()
+    else:
+        device_service.after_password_login(user.get("user_id") or user.get("id"), bool(remember_device))
     name       = user.get("email", "").split("@")[0]
 
     try:
@@ -129,10 +136,11 @@ def register_login_callbacks(app):
         Input("login-password", "n_submit"),
         State("login-email",    "value"),
         State("login-password", "value"),
+        State("remember-device-checkbox", "value"),
         State("auth-store",     "data"),
         prevent_initial_call=True,
     )
-    def handle_password_login(login_clicks, email_submit, password_submit, email, password, auth):
+    def handle_password_login(login_clicks, email_submit, password_submit, email, password, remember_device, auth):
         # Check which input triggered the callback
         ctx_local = dash.callback_context
         if not ctx_local.triggered:
@@ -160,7 +168,7 @@ def register_login_callbacks(app):
             print(f"❌ Password login failed: {email}")
             return _login_error("Invalid email or password")
         print(f"✅ Password login success: {email}")
-        return _login_response(user)
+        return _login_response(user, remember_device=bool(remember_device))
 
     # ── 2. PIN LOGIN ───────────────────────────────────────────────
     @app.callback(
@@ -203,9 +211,9 @@ def register_login_callbacks(app):
             return _login_error("No Database connection")
         if not user:
             print(f"❌ PIN login failed: {email}")
-            return _login_error("Invalid PIN — please try again")
+            return _login_error("Wrong PIN, or this device isn't set up for PIN sign-in — use your password")
         print(f"✅ PIN login success: {email}")
-        return _login_response(user)
+        return _login_response(user, via_device=True)
 
     # ── 3. PATTERN LOGIN ──────────────────────────────────────────
     @app.callback(
@@ -233,9 +241,9 @@ def register_login_callbacks(app):
             return _login_error("No Database connection")
         if not user:
             print(f"❌ Pattern login failed: {email}")
-            return _login_error("Pattern not recognised — please try again")
+            return _login_error("Wrong pattern, or this device isn't set up for pattern sign-in — use your password")
         print(f"✅ Pattern login success: {email}")
-        return _login_response(user)
+        return _login_response(user, via_device=True)
 
     # ── 4. MASTER ADMIN LOGIN ──────────────────────────────────────
     @app.callback(

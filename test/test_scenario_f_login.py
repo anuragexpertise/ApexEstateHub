@@ -9,6 +9,7 @@ Tests:
   5. Lockout expires after timeout → login succeeds again.
   6. Forgot-password reset token flow.
   7. Password change flow.
+  8. PIN / pattern sign-in, which only works on a trusted device.
 """
 
 import pytest
@@ -135,8 +136,18 @@ class TestScenarioF_LoginEdgeCases:
         assert not ok
         assert "incorrect" in msg.lower()
 
-    def test_pin_login_flow(self, patched_db):
-        pw_hash = generate_password_hash("1234")
+    @staticmethod
+    def _trust_device(monkeypatch, user_id):
+        """PIN / pattern are only checked on a trusted device (see device_service / test_device_binding*.py);
+        here token "trusted" is one for `user_id`."""
+        from app.services import device_service
+        monkeypatch.setattr(device_service, "claim_attempt",
+                            lambda token, uid: {"id": 1, "user_id": uid, "failed_attempts": 1}
+                            if (token == "trusted" and uid == user_id) else None)
+        monkeypatch.setattr(device_service, "mark_success", lambda _id: None)
+
+    def test_pin_login_flow(self, patched_db, monkeypatch):
+        pw_hash = generate_password_hash("7391")
         patched_db.tables.setdefault("users", []).append({
             "id": 20, "email": "pinuser@test.com", "role": "apartment", "society_id": 1,
             "linked_id": 200, "password_hash": None, "pin_hash": pw_hash,
@@ -146,12 +157,15 @@ class TestScenarioF_LoginEdgeCases:
             "id": 200, "society_id": 1, "flat_number": "B-202",
             "owner_name": "Pin User", "apartment_size": 800, "active": True,
         })
-        auth = auth_service.authenticate_pin("pinuser@test.com", "1234", society_id=1)
+        self._trust_device(monkeypatch, 20)
+        # a device that was never signed in with the password is refused even with the right PIN
+        assert auth_service.authenticate_pin("pinuser@test.com", "7391", society_id=1, device_token="stranger") is None
+        auth = auth_service.authenticate_pin("pinuser@test.com", "7391", society_id=1, device_token="trusted")
         assert auth is not None
         assert auth["role"] == "apartment"
 
-    def test_pattern_login_flow(self, patched_db):
-        pw_hash = generate_password_hash("pattern123")
+    def test_pattern_login_flow(self, patched_db, monkeypatch):
+        pw_hash = generate_password_hash("1-4-5-9")
         patched_db.tables.setdefault("users", []).append({
             "id": 21, "email": "patuser@test.com", "role": "apartment", "society_id": 1,
             "linked_id": 201, "password_hash": None, "pin_hash": None,
@@ -161,6 +175,8 @@ class TestScenarioF_LoginEdgeCases:
             "id": 201, "society_id": 1, "flat_number": "C-303",
             "owner_name": "Pat User", "apartment_size": 900, "active": True,
         })
-        auth = auth_service.authenticate_pattern("patuser@test.com", "pattern123", society_id=1)
+        self._trust_device(monkeypatch, 21)
+        assert auth_service.authenticate_pattern("patuser@test.com", "1-4-5-9", society_id=1, device_token="stranger") is None
+        auth = auth_service.authenticate_pattern("patuser@test.com", "1-4-5-9", society_id=1, device_token="trusted")
         assert auth is not None
         assert auth["role"] == "apartment"

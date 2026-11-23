@@ -125,4 +125,88 @@ def register_account_callbacks(app):
             "static", False, {"display": "none"},
         )
 
+    # ── 4. Quick sign-in: set a PIN / set a pattern / remove both ───
+    # All three re-authenticate with the CURRENT PASSWORD typed in the modal (same lockout as login), and take the user
+    # from the server session, never from auth-store. Setting one also trusts THIS browser (device_service) so the
+    # quick method works here straight away; other devices become trusted by a password sign-in with "Remember this device".
+    def _toast(ok: bool, msg: str) -> dict:
+        return {"type": "success" if ok else "error", "message": msg}
+
+    @app.callback(
+        Output("toast-store", "data", allow_duplicate=True),
+        Output("qs-pin-input", "value"),
+        Output("qs-pin-confirm", "value"),
+        Input("qs-save-pin-btn", "n_clicks"),
+        State("current-password-input", "value"),
+        State("qs-pin-input", "value"),
+        State("qs-pin-confirm", "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def handle_set_pin(n, current_pw, pin, confirm):
+        if not n:
+            raise PreventUpdate
+        user_id = get_current_user_id()
+        if not user_id:
+            return _toast(False, "Your session has expired — please log in again."), no_update, no_update
+        if not pin or pin != confirm:
+            return _toast(False, "PIN and confirmation don't match."), no_update, no_update
+        from app.services import device_service
+        from app.services.auth_service import set_pin
+        ok, msg = set_pin(user_id, current_pw or "", pin)
+        if ok:
+            device_service.after_password_login(user_id, remember=True)
+            msg += " This device can now sign in with it."
+        return _toast(ok, msg), ("" if ok else no_update), ("" if ok else no_update)
+
+    @app.callback(
+        Output("toast-store", "data", allow_duplicate=True),
+        Output("qs-pattern-input", "value"),
+        Output("qs-pattern-confirm", "value"),
+        Output("qs-pattern-preview", "children"),
+        Input("qs-save-pattern-btn", "n_clicks"),
+        State("current-password-input", "value"),
+        State("qs-pattern-input", "value"),
+        State("qs-pattern-confirm", "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def handle_set_pattern(n, current_pw, pattern, confirm):
+        if not n:
+            raise PreventUpdate
+        user_id = get_current_user_id()
+        if not user_id:
+            return _toast(False, "Your session has expired — please log in again."), no_update, no_update, no_update
+        if not pattern or not confirm:
+            return _toast(False, "Draw the pattern, then draw it again to confirm."), no_update, no_update, no_update
+        if pattern != confirm:
+            return _toast(False, "The two patterns don't match — clear and try again."), no_update, no_update, no_update
+        from app.services import device_service
+        from app.services.auth_service import set_pattern
+        ok, msg = set_pattern(user_id, current_pw or "", pattern)
+        if ok:
+            device_service.after_password_login(user_id, remember=True)
+            msg += " This device can now sign in with it."
+        return _toast(ok, msg), ("" if ok else no_update), ("" if ok else no_update), ("Pattern saved" if ok else no_update)
+
+    @app.callback(
+        Output("toast-store", "data", allow_duplicate=True),
+        Input("qs-disable-btn", "n_clicks"),
+        State("current-password-input", "value"),
+        prevent_initial_call=True,
+    )
+    @require_session
+    def handle_disable_quick_signin(n, current_pw):
+        if not n:
+            raise PreventUpdate
+        user_id = get_current_user_id()
+        if not user_id:
+            return _toast(False, "Your session has expired — please log in again.")
+        from app.services import device_service
+        from app.services.auth_service import disable_quick_signin
+        ok, msg = disable_quick_signin(user_id, current_pw or "")
+        if ok:
+            device_service.clear_cookie()
+        return _toast(ok, msg)
+
     print("  ✓ Account callbacks registered")

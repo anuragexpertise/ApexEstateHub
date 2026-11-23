@@ -111,9 +111,198 @@ def society_select_layout() -> list:
     ]
 
 
+# ── Pattern pad (shared by the sign-in tab and Account Settings) ──────────
+
+def pattern_pad(pad_id: str, input_id: str, clear_id: str, preview_id: str,
+                confirm_input_id: str | None = None) -> html.Div:
+    """A 3x3 dot pad driven by assets/pattern.js.
+
+    The script finds everything through these attributes and class names (it used to look for a canvas, ``.pattern-dot``
+    and ``data-dot-num`` that this layout did not render, so the pad never worked):
+      data-input-id    id of the text input that receives the drawn pattern, e.g. "1-4-5-9"
+      data-confirm-id  optional second input: the pad then asks for the pattern twice (used when SETTING one)
+      data-clear-id    id of the Clear button;  data-preview-id  id of the element that shows the drawn dots
+    """
+    attrs = {"data-input-id": input_id, "data-clear-id": clear_id, "data-preview-id": preview_id}
+    if confirm_input_id:
+        attrs["data-confirm-id"] = confirm_input_id
+    return html.Div(
+        [
+            html.Canvas(className="pattern-canvas"),
+            *[
+                html.Div(
+                    className="pattern-dot",
+                    role="button",
+                    tabIndex=0,
+                    **{"aria-label": f"Pattern point {i}", "data-dot-num": str(i)},
+                )
+                for i in range(1, 10)
+            ],
+        ],
+        id=pad_id,
+        className="pattern-pad",
+        role="grid",
+        **{"aria-label": "Pattern lock grid"},
+        **attrs,
+    )
+
+
+def pattern_value_input(input_id: str) -> dcc.Input:
+    # type="text" (hidden by CSS), NOT type="hidden": React does not fire onChange for hidden inputs, so a value
+    # written by pattern.js would never reach the Dash callback.
+    return dcc.Input(id=input_id, type="text", value="", autoComplete="off", style={"display": "none"})
+
+
 # ── Stage 2: Multi-method login ───────────────────────────────
 
-def _login_layout_body(society_name: str = "Society") -> list:
+_LABEL = {"fontSize": "12px", "marginBottom": "4px", "display": "block"}
+
+
+def _eye_button(button_id: str, label: str) -> html.Button:
+    return html.Button(
+        html.I(className="fas fa-eye"),
+        id=button_id,
+        type="button",
+        **{"aria-label": label},
+        style={
+            "position": "absolute", "right": "12px", "top": "50%", "transform": "translateY(-50%)",
+            "background": "none", "border": "none", "color": "#999", "cursor": "pointer", "padding": "4px",
+        },
+    )
+
+
+def _password_tab(email: str) -> dbc.Tab:
+    return dbc.Tab(
+        label="Password",
+        tab_id="tab-password",
+        children=html.Div(
+            [
+                dbc.Label("Email address", html_for="login-email", style=_LABEL),
+                dbc.Input(
+                    id="login-email", type="email", placeholder="Enter your email", value=email, n_submit=0,
+                    style={"fontSize": "13px", "marginBottom": "10px", "marginTop": "14px"},
+                ),
+                dbc.Label("Password", html_for="login-password", style=_LABEL),
+                html.Div(
+                    [
+                        dbc.Input(
+                            id="login-password", type="password", placeholder="Enter your password", n_submit=0,
+                            style={"fontSize": "13px", "marginBottom": "6px", "flex": "1"},
+                        ),
+                        _eye_button("toggle-login-password", "Show password"),
+                    ],
+                    style={"position": "relative"},
+                ),
+                html.Div(
+                    html.A(
+                        "Forgot password?", id="forgot-password-link", href="#", n_clicks=0,
+                        style={"fontSize": "12px", "color": "#667eea"},
+                    ),
+                    style={"textAlign": "right", "marginBottom": "10px"},
+                ),
+                # Off by default: a shared office PC or a guard-room tablet should not stay trusted unless someone chooses it.
+                dbc.Checkbox(
+                    id="remember-device-checkbox",
+                    label="Remember this device (lets you sign in here with a PIN or pattern)",
+                    value=False,
+                    style={"fontSize": "12px", "color": "#7d8ea3", "marginBottom": "14px"},
+                ),
+                dbc.Button(
+                    [html.I(className="fas fa-sign-in-alt me-2"), "Login"],
+                    id="login-btn", color="primary", className="w-100", n_clicks=0,
+                    style={"borderRadius": "10px", "fontWeight": "600"},
+                ),
+            ]
+        ),
+    )
+
+
+def _pin_tab(email: str) -> dbc.Tab:
+    return dbc.Tab(
+        label="PIN",
+        tab_id="tab-pin",
+        children=html.Div(
+            [
+                dbc.Label("Email address", html_for="login-email-pin", style=_LABEL),
+                dbc.Input(
+                    id="login-email-pin", type="email", placeholder="Enter your email", value=email,
+                    style={"fontSize": "13px", "marginBottom": "10px", "marginTop": "14px"},
+                ),
+                dbc.Label("PIN", html_for="login-pin", style=_LABEL),
+                html.Div(
+                    [
+                        dbc.Input(
+                            id="login-pin", type="password", placeholder="4-6 digit PIN", maxLength=6,
+                            inputMode="numeric", n_submit=0,
+                            style={"fontSize": "18px", "letterSpacing": "8px", "textAlign": "center",
+                                   "marginBottom": "14px", "flex": "1"},
+                        ),
+                        _eye_button("toggle-login-pin", "Show PIN"),
+                    ],
+                    style={"position": "relative"},
+                ),
+                dbc.Button(
+                    [html.I(className="fas fa-sign-in-alt me-2"), "Login with PIN"],
+                    id="login-pin-btn", color="success", className="w-100", n_clicks=0,
+                    style={"borderRadius": "10px", "fontWeight": "600"},
+                ),
+            ]
+        ),
+    )
+
+
+def _pattern_tab(email: str) -> dbc.Tab:
+    return dbc.Tab(
+        label="Pattern",
+        tab_id="tab-pattern",
+        children=html.Div(
+            [
+                dbc.Label("Email address", html_for="login-email-pattern", style=_LABEL),
+                dbc.Input(
+                    id="login-email-pattern", type="email", placeholder="Enter your email", value=email,
+                    style={"fontSize": "13px", "marginBottom": "12px", "marginTop": "14px"},
+                ),
+                html.P(
+                    "Draw your pattern to sign in",
+                    style={"fontSize": "12px", "color": "#7d8ea3", "textAlign": "center", "marginBottom": "8px"},
+                ),
+                pattern_pad("pattern-grid", "login-pattern", "pattern-clear-btn", "pattern-preview"),
+                html.Div("No pattern drawn", id="pattern-preview", className="pattern-preview"),
+                pattern_value_input("login-pattern"),
+                html.Div(
+                    [
+                        dbc.Button("Clear", id="pattern-clear-btn", color="secondary", size="sm", outline=True,
+                                   n_clicks=0, className="me-2"),
+                        dbc.Button(
+                            [html.I(className="fas fa-sign-in-alt me-2"), "Login with Pattern"],
+                            id="login-pattern-btn", color="warning", size="sm", n_clicks=0,
+                            style={"fontWeight": "600"},
+                        ),
+                    ],
+                    style={"display": "flex", "justifyContent": "center"},
+                ),
+            ]
+        ),
+    )
+
+
+def _login_layout_body(society_name: str = "Society", device: dict | None = None) -> list:
+    """``device`` is device_service.trusted_user(): set only when THIS browser holds a usable device token for an account
+    of this society. PIN / pattern tabs exist only then (the server refuses them anywhere else regardless); a new device
+    sees just the password form."""
+    device = device or {}
+    email = device.get("email") or ""
+    tabs = [_password_tab(email)]
+    active = "tab-password"
+    if device.get("has_pin"):
+        tabs.append(_pin_tab(email))
+        active = "tab-pin"
+    if device.get("has_pattern"):
+        tabs.append(_pattern_tab(email))
+        if active == "tab-password":
+            active = "tab-pattern"
+    # Quick methods first on a trusted device (that is the point of having one), the password tab last.
+    tabs.sort(key=lambda t: 1 if t.tab_id == "tab-password" else 0)
     return [
         html.Div(
             [
@@ -140,200 +329,7 @@ def _login_layout_body(society_name: str = "Society") -> list:
                     style={"display": "flex", "alignItems": "center",
                            "marginBottom": "18px"},
                 ),
-
-                dbc.Tabs(
-                    id="login-method-tabs",
-                    active_tab="tab-password",
-                    children=[
-                        # ── Password tab ──────────────────────────────
-                        dbc.Tab(
-                            label="Password",
-                            tab_id="tab-password",
-                            children=html.Div(
-                                [
-                                    dbc.Label("Email address", html_for="login-email", style={"fontSize": "12px", "marginBottom": "4px", "display": "block"}),
-                                    dbc.Input(
-                                        id="login-email",
-                                        type="email",
-                                        placeholder="Enter your email",
-                                        n_submit=0,
-                                        style={"fontSize": "13px", "marginBottom": "10px", "marginTop": "14px"},
-                                    ),
-                                    dbc.Label("Password", html_for="login-password", style={"fontSize": "12px", "marginBottom": "4px", "display": "block"}),
-                                    html.Div(
-                                        [
-                                            dbc.Input(
-                                                id="login-password",
-                                                type="password",
-                                                placeholder="Enter your password",
-                                                n_submit=0,
-                                                style={"fontSize": "13px", "marginBottom": "6px", "flex": "1"},
-                                            ),
-                                            html.Button(
-                                                html.I(className="fas fa-eye"),
-                                                id="toggle-login-password",
-                                                type="button",
-                                                **{"aria-label": "Show password"},
-                                                style={
-                                                    "position": "absolute", "right": "12px", "top": "50%", "transform": "translateY(-50%)",
-                                                    "background": "none", "border": "none", "color": "#999", "cursor": "pointer", "padding": "4px",
-                                                },
-                                            ),
-                                        ],
-                                        style={"position": "relative"},
-                                    ),
-                                    html.Div(
-                                        html.A(
-                                            "Forgot password?",
-                                            id="forgot-password-link",
-                                            href="#",
-                                            n_clicks=0,
-                                            style={"fontSize": "12px", "color": "#667eea"},
-                                        ),
-                                        style={"textAlign": "right", "marginBottom": "14px"},
-                                    ),
-                                    dbc.Button(
-                                        [html.I(className="fas fa-sign-in-alt me-2"), "Login"],
-                                        id="login-btn",
-                                        color="primary",
-                                        className="w-100",
-                                        n_clicks=0,
-                                        style={"borderRadius": "10px", "fontWeight": "600"},
-                                    ),
-                                ]
-                            ),
-                        ),
-
-                        # ── PIN tab ──────────────────────────────────
-                        dbc.Tab(
-                            label="PIN",
-                            tab_id="tab-pin",
-                            children=html.Div(
-                                [
-                                    dbc.Label("Email address", html_for="login-email-pin", style={"fontSize": "12px", "marginBottom": "4px", "display": "block"}),
-                                    dbc.Input(
-                                        id="login-email-pin",
-                                        type="email",
-                                        placeholder="Enter your email",
-                                        style={"fontSize": "13px", "marginBottom": "10px", "marginTop": "14px"},
-                                    ),
-                                    dbc.Label("PIN", html_for="login-pin", style={"fontSize": "12px", "marginBottom": "4px", "display": "block"}),
-                                    html.Div(
-                                        [
-                                            dbc.Input(
-                                                id="login-pin",
-                                                type="password",
-                                                placeholder="4-6 digit PIN",
-                                                maxLength=6,
-                                                style={"fontSize": "18px", "letterSpacing": "8px", "textAlign": "center", "marginBottom": "14px", "flex": "1"},
-                                            ),
-                                            html.Button(
-                                                html.I(className="fas fa-eye"),
-                                                id="toggle-login-pin",
-                                                type="button",
-                                                **{"aria-label": "Show PIN"},
-                                                style={
-                                                    "position": "absolute", "right": "12px", "top": "50%", "transform": "translateY(-50%)",
-                                                    "background": "none", "border": "none", "color": "#999", "cursor": "pointer", "padding": "4px",
-                                                },
-                                            ),
-                                        ],
-                                        style={"position": "relative"},
-                                    ),
-                                    dbc.Button(
-                                        [html.I(className="fas fa-sign-in-alt me-2"), "Login with PIN"],
-                                        id="login-pin-btn",
-                                        color="success",
-                                        className="w-100",
-                                        n_clicks=0,
-                                        style={"borderRadius": "10px", "fontWeight": "600"},
-                                    ),
-                                ]
-                            ),
-                        ),
-
-                        # ── Pattern tab ──────────────────────────────
-                        dbc.Tab(
-                            label="Pattern",
-                            tab_id="tab-pattern",
-                            children=html.Div(
-                                [
-                                    dbc.Label("Email address", html_for="login-email-pattern", style={"fontSize": "12px", "marginBottom": "4px", "display": "block"}),
-                                    dbc.Input(
-                                        id="login-email-pattern",
-                                        type="email",
-                                        placeholder="Enter your email",
-                                        style={"fontSize": "13px", "marginBottom": "12px", "marginTop": "14px"},
-                                    ),
-                                    html.P(
-                                        "Draw your pattern to sign in",
-                                        style={"fontSize": "12px", "color": "#7d8ea3", "textAlign": "center", "marginBottom": "8px"},
-                                    ),
-                                    html.Div(
-                                        id="pattern-grid",
-                                        style={
-                                            "display": "grid",
-                                            "gridTemplateColumns": "repeat(3, 40px)",
-                                            "gap": "20px",
-                                            "justifyContent": "center",
-                                            "margin": "0 auto 12px",
-                                            "padding": "16px",
-                                            "background": "#f8f9fa",
-                                            "borderRadius": "12px",
-                                            "userSelect": "none",
-                                        },
-                                        role="grid",
-                                        **{"aria-label": "Pattern lock grid"},
-                                        children=[
-                                            html.Div(
-                                                style={
-                                                    "width": "40px", "height": "40px",
-                                                    "borderRadius": "50%",
-                                                    "background": "#dee2e6",
-                                                    "cursor": "pointer",
-                                                    "border": "2px solid #adb5bd",
-                                                },
-                                                role="button",
-                                                tabIndex=0,
-                                                **{"aria-label": f"Pattern point {i}"},
-                                                **{"data-pos": str(i)},
-                                            )
-                                            for i in range(1, 10)
-                                        ],
-                                    ),
-                                    dcc.Input(
-                                        id="login-pattern",
-                                        type="hidden",
-                                        value="",
-                                    ),
-                                    html.Div(
-                                        [
-                                            dbc.Button(
-                                                "Clear",
-                                                id="pattern-clear-btn",
-                                                color="secondary",
-                                                size="sm",
-                                                outline=True,
-                                                n_clicks=0,
-                                                className="me-2",
-                                            ),
-                                            dbc.Button(
-                                                [html.I(className="fas fa-sign-in-alt me-2"),
-                                                 "Login with Pattern"],
-                                                id="login-pattern-btn",
-                                                color="warning",
-                                                size="sm",
-                                                n_clicks=0,
-                                                style={"fontWeight": "600"},
-                                            ),
-                                        ],
-                                        style={"display": "flex", "justifyContent": "center"},
-                                    ),
-                                ]
-                            ),
-                        ),
-                    ],
-                ),
+                dbc.Tabs(id="login-method-tabs", active_tab=active, children=tabs),
             ],
             style={"padding": "10px 5px"},
         )
@@ -389,9 +385,10 @@ def grievance_footer(contact: dict | None):
     )
 
 
-def login_layout(society_name: str = "Society", grievance: dict | None = None) -> list:
-    """Stage 2 of the login, with the society's grievance officer underneath when one is named."""
-    layout = _login_layout_body(society_name)
+def login_layout(society_name: str = "Society", grievance: dict | None = None, device: dict | None = None) -> list:
+    """Stage 2 of the login, with the society's grievance officer underneath when one is named. ``device`` (see
+    _login_layout_body) switches on the PIN / pattern tabs for a browser that is trusted for an account here."""
+    layout = _login_layout_body(society_name, device)
     footer = grievance_footer(grievance)
     if footer is not None:
         layout.append(footer)
