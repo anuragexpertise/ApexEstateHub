@@ -89,6 +89,10 @@ def register_account_callbacks(app):
         from app.services.auth_service import change_password, must_change_password
         was_forced = must_change_password(user_id)
         ok, msg = change_password(user_id, current_pw or "", new_pw)
+        if ok:
+            # change_password untrusted every device of this account; drop this browser's now-dead cookie too.
+            from app.services import device_service
+            device_service.clear_cookie()
 
         # Releases the Setup Wizard gate — only when this change was the
         # compulsory one, so a voluntary change mid-wizard never rebuilds it.

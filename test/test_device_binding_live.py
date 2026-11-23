@@ -270,3 +270,20 @@ def test_team_service_admin_set_password_voids_quick_signin(world, how):
     assert ok, msg
     row = world["db"]._execute("SELECT pin_hash, pattern_hash FROM users WHERE id = %s", (world["bob"],), fetch_one=True)
     assert row["pin_hash"] is None and row["pattern_hash"] is None and device_count(world, "bob") == 0
+
+
+def test_self_service_password_change_clears_pin_pattern_and_every_device(world):
+    from app.services import auth_service, device_service
+    phone, laptop = Browser(), Browser()
+    phone.request(lambda: device_service.after_password_login(world["alice"], remember=True))
+    laptop.request(lambda: device_service.after_password_login(world["alice"], remember=True))
+    assert device_count(world, "alice") == 2
+    ok, _ = auth_service.change_password(world["alice"], "wrong-password", "An0ther!Passw0rd")
+    assert not ok and device_count(world, "alice") == 2                       # a failed change touches nothing
+    ok, _ = auth_service.change_password(world["alice"], PASSWORD, "An0ther!Passw0rd")
+    assert ok
+    row = world["db"]._execute("SELECT pin_hash, pattern_hash FROM users WHERE id = %s", (world["alice"],), fetch_one=True)
+    assert row["pin_hash"] is None and row["pattern_hash"] is None and device_count(world, "alice") == 0
+    assert phone.request(lambda: auth_service.authenticate_pin(world["alice_email"], "7391", world["sid"])) is None
+    assert auth_service.authenticate_user(world["alice_email"], "An0ther!Passw0rd", world["sid"])
+    assert world["db"]._execute("SELECT pin_hash FROM users WHERE id = %s", (world["bob"],), fetch_one=True)["pin_hash"]   # bob unaffected

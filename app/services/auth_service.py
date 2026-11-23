@@ -418,10 +418,14 @@ def change_password(user_id: int, current_password: str, new_password: str) -> t
         db._execute(
             """UPDATE users
                SET password_hash = :ph, failed_login_attempts = 0, locked_until = NULL,
-                   must_change_password = FALSE
+                   must_change_password = FALSE,
+                   pin_hash = NULL, pattern_hash = NULL
                WHERE id = :uid""",
             {"ph": generate_password_hash(new_password), "uid": user_id},
         )
+        # A new password voids quick sign-in, as a reset does: PIN and pattern are cleared above and every trusted device
+        # (this one included) is untrusted, so the next sign-in anywhere uses the new password.
+        device_service.revoke_all(user_id)
         return True, "Password updated successfully."
     except Exception:
         log.exception("change_password error for user_id=%s", user_id)
