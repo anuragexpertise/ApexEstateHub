@@ -48,7 +48,7 @@ def main():
         ctx = browser.new_context()
         page = ctx.new_page()
         page.on("console", lambda m: print("  [console]", m.text[:180]))
-        login(page, "admin@sunriseresidency.com", "Admin@2024")
+        login(page, "admin@srr.com", "Admin@2024")
         page.goto(BASE + "/dashboard/admin-portal", wait_until="load")
         page.wait_for_timeout(3000)
         dump(page, "ADMIN PORTAL")

@@ -188,7 +188,7 @@ def test_a_taken_seat_is_refused_with_a_plain_message(svc):
 @live
 def test_the_holder_must_belong_to_the_flat(svc):
     aid, _uid, _n = b202(svc)
-    other = q(svc, "SELECT id FROM users WHERE email='owner1@sunriseresidency.com'")[0]["id"]
+    other = q(svc, "SELECT id FROM users WHERE email='owner1@srr.com'")[0]["id"]
     ok, msg = cs.appoint(admin_uid(svc), "admin", 1, aid, "treasurer", "Someone", other, actor_society_id=1)
     assert not ok and "different flat" in msg
 

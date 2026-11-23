@@ -65,13 +65,13 @@ def test_office_bearer_billing_starts_next_month():
     assert seed._next_month_start(date(2026, 10, 19)) == date(2026, 11, 1)
     assert seed._next_month_start(date(2026, 12, 31)) == date(2027, 1, 1)
     assert seed._calc_start(by(office="president")[0]) == seed._next_month_start()
-    assert seed._calc_start(by(email="owner1@sunriseresidency.com")[0]) == "2026-04-01"
-    assert seed._calc_start(by(email="owner4@sunriseresidency.com")[0]) == "2026-04-01"
+    assert seed._calc_start(by(email="owner1@srr.com")[0]) == "2026-04-01"
+    assert seed._calc_start(by(email="owner4@srr.com")[0]) == "2026-04-01"
 
 
 def test_owner_admissions_use_the_real_owner_names():
     owners = {u["email"]: u["name"] for u in seed.USERS}
-    assert owners["owner1@sunriseresidency.com"] == "Rajesh Sharma" and owners["owner3@sunriseresidency.com"] == "Priya Gupta"
+    assert owners["owner1@srr.com"] == "Rajesh Sharma" and owners["owner3@srr.com"] == "Priya Gupta"
 
 
 # ── what each seeded role may do (hermetic, pure policy) ──────────────────────────────────────────────────────
@@ -169,5 +169,5 @@ def test_receipt_chain_checks_run_after_the_ambiguity_fix(cur):
 
 @live
 def test_entrance_fee_due_runs(cur):
-    cur.execute("SELECT is_paid FROM fn_entrance_fee_due(1, (SELECT linked_id FROM users WHERE email='owner1@sunriseresidency.com'))")
+    cur.execute("SELECT is_paid FROM fn_entrance_fee_due(1, (SELECT linked_id FROM users WHERE email='owner1@srr.com'))")
     assert cur.fetchone()[0] is True

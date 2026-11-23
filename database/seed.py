@@ -436,11 +436,11 @@ SOCIETY = {
     "gstin":            "27AAAAA0000A1Z5",
     "address":          "12, MG Road, Sector 5, Agra, UP - 282001",
     "state":            "Uttar Pradesh",
-    "email":            "admin@sunriseresidency.com",
+    "email":            "admin@srr.com",
     "phone":            "9876543210",
     "secretary_name":   "Ramesh Kumar",
     "secretary_phone":  "9876543211",
-    "secretary_email":  "secretary@sunriseresidency.com",
+    "secretary_email":  "secretary@srr.com",
     "secretary_sign":   "signatures/ramesh_kumar.png",
     "plan":             "Free",
     "plan_validity":    "2027-12-31",
@@ -454,124 +454,124 @@ SOCIETY = {
 MASTER = {"email": "master@estatehub.com", "password": "Master@2024", "name": "Master Admin"}
 
 USERS = [
-    {"role": "admin",     "email": "admin@sunriseresidency.com",    "password": "Admin@2024",
+    {"role": "admin",     "email": "admin@srr.com",    "password": "Admin@2024",
      "name": "Society Admin"},
-    {"role": "apartment", "email": "owner1@sunriseresidency.com",   "password": "Owner1@2024",
+    {"role": "apartment", "email": "owner1@srr.com",   "password": "Owner1@2024",
      "name": "Rajesh Sharma",   "flat_number": "A-101", "apartment_size": 1200,
      "mobile": "9811111111", "alt_mobile": "9811111112",
      "alt_address": "123, Main Street, Agra, UP - 282001",
      "apt_calc_start_date": "2026-04-01"},
-    {"role": "apartment", "email": "owner2@sunriseresidency.com",   "password": "Owner2@2024",
+    {"role": "apartment", "email": "owner2@srr.com",   "password": "Owner2@2024",
      "name": "Rahul Dev",   "flat_number": "A-201", "apartment_size": 1200,
      "mobile": "9821111111", "alt_mobile": "9821111112",
      "alt_address": "12, Charles Street, Agra, UP - 282005",
      "apt_calc_start_date": "2026-05-01"},
-    {"role": "apartment", "email": "owner3@sunriseresidency.com",   "password": "Owner3@2024",
+    {"role": "apartment", "email": "owner3@srr.com",   "password": "Owner3@2024",
      "name": "Priya Gupta",     "flat_number": "B-202", "apartment_size": 950,
      "mobile": "9822222222", "alt_mobile": "9822222223",
      "alt_address": "456, Secondary Road, Agra, UP - 282001",
      "apt_calc_start_date": "2026-06-01"},
-    {"role": "vendor",    "email": "vendor1@sunriseresidency.com",  "password": "Vendor1@2024",
+    {"role": "vendor",    "email": "vendor1@srr.com",  "password": "Vendor1@2024",
       "business_name": "Speedy Plumbing", "name": "Raja bhaiyya", "service_type": "Plumbing",
       "mobile": "9833333333", "service_description": "Best plumber in town", "pan_number": "ABCDE1234F", "payee_type": "individual"},
-    {"role": "vendor",    "email": "vendor2@sunriseresidency.com",  "password": "Vendor2@2024",
+    {"role": "vendor",    "email": "vendor2@srr.com",  "password": "Vendor2@2024",
       "business_name": "Green Gardeners", "name": "Babloo", "service_type": "Gardening",
       "mobile": "9844444444", "service_description": "Best Gardener", "pan_number": "FGHIJ5678K", "payee_type": "individual"},
-    {"role": "security",  "email": "guard1@sunriseresidency.com",   "password": "Guard1@2024",
+    {"role": "security",  "email": "guard1@srr.com",   "password": "Guard1@2024",
      "name": "Ramu Singh",  "shift": "morning", "salary": 120, "mobile": "9855555555"},
-    {"role": "security",  "email": "guard2@sunriseresidency.com",   "password": "Guard2@2024",
+    {"role": "security",  "email": "guard2@srr.com",   "password": "Guard2@2024",
      "name": "Shyam Yadav", "shift": "night",   "salary": 130, "mobile": "9866666666"},
-    {"role": "apartment", "email": "owner4@sunriseresidency.com",   "password": "Owner4@2024",
+    {"role": "apartment", "email": "owner4@srr.com",   "password": "Owner4@2024",
      "name": "Anjali Verma",     "flat_number": "A-102", "apartment_size": 1100,
      "mobile": "9877000001", "alt_mobile": "9877000002",
      "alt_address": "18, Green Park, Agra, UP - 282001",
      "apt_calc_start_date": "2026-04-01"},
-    {"role": "apartment", "email": "owner5@sunriseresidency.com",   "password": "Owner5@2024",
+    {"role": "apartment", "email": "owner5@srr.com",   "password": "Owner5@2024",
      "name": "Vikram Singh",     "flat_number": "A-103", "apartment_size": 1250,
      "mobile": "9877000003", "alt_mobile": "9877000004",
      "alt_address": "22, Civil Lines, Agra, UP - 282002",
      "apt_calc_start_date": "2026-04-01"},
-    {"role": "apartment", "email": "owner6@sunriseresidency.com",   "password": "Owner6@2024",
+    {"role": "apartment", "email": "owner6@srr.com",   "password": "Owner6@2024",
      "name": "Neha Kapoor",      "flat_number": "A-202", "apartment_size": 900,
      "mobile": "9877000005", "alt_mobile": "9877000006",
      "alt_address": "5, Fatehabad Road, Agra, UP - 282001",
      "apt_calc_start_date": "2026-05-01"},
-    {"role": "apartment", "email": "owner7@sunriseresidency.com",   "password": "Owner7@2024",
+    {"role": "apartment", "email": "owner7@srr.com",   "password": "Owner7@2024",
      "name": "Suresh Iyer",      "flat_number": "A-203", "apartment_size": 1300,
      "mobile": "9877000007", "alt_mobile": "9877000008",
      "alt_address": "9, Shastripuram, Agra, UP - 282001",
      "apt_calc_start_date": "2026-05-01"},
-    {"role": "apartment", "email": "owner8@sunriseresidency.com",   "password": "Owner8@2024",
+    {"role": "apartment", "email": "owner8@srr.com",   "password": "Owner8@2024",
      "name": "Meera Nair",       "flat_number": "B-101", "apartment_size": 1000,
      "mobile": "9877000009", "alt_mobile": "9877000010",
      "alt_address": "31, Kamla Nagar, Agra, UP - 282005",
      "apt_calc_start_date": "2026-06-01"},
-    {"role": "apartment", "email": "owner9@sunriseresidency.com",   "password": "Owner9@2024",
+    {"role": "apartment", "email": "owner9@srr.com",   "password": "Owner9@2024",
      "name": "Arjun Mehta",      "flat_number": "B-102", "apartment_size": 1150,
      "mobile": "9877000011", "alt_mobile": "9877000012",
      "alt_address": "44, Sanjay Place, Agra, UP - 282002",
      "apt_calc_start_date": "2026-06-01"},
-    {"role": "apartment", "email": "family1@sunriseresidency.com", "password": "Family1@2024",
+    {"role": "apartment", "email": "family1@srr.com", "password": "Family1@2024",
      "name": "Arnav Sharma", "flat_number": "A-101", "user_type": "family", "mobile": "9811111121"},
-    {"role": "apartment", "email": "family2@sunriseresidency.com", "password": "Family2@2024",
+    {"role": "apartment", "email": "family2@srr.com", "password": "Family2@2024",
      "name": "Riya Sharma", "flat_number": "A-101", "user_type": "family", "mobile": "9811111122"},
-    {"role": "apartment", "email": "tenant1@sunriseresidency.com", "password": "Tenant1@2024",
+    {"role": "apartment", "email": "tenant1@srr.com", "password": "Tenant1@2024",
      "name": "Mohit Gupta", "flat_number": "A-201", "user_type": "tenant", "mobile": "9821111121"},
-    {"role": "apartment", "email": "tenant2@sunriseresidency.com", "password": "Tenant2@2024",
+    {"role": "apartment", "email": "tenant2@srr.com", "password": "Tenant2@2024",
      "name": "Pooja Gupta", "flat_number": "A-201", "user_type": "tenant", "mobile": "9821111122"},
-    {"role": "apartment", "email": "visitor1@sunriseresidency.com", "password": "Visitor1@2024",
+    {"role": "apartment", "email": "visitor1@srr.com", "password": "Visitor1@2024",
      "name": "Ajay Kumar", "flat_number": "B-202", "user_type": "visitor", "mobile": "9822222231"},
-    {"role": "apartment", "email": "visitor2@sunriseresidency.com", "password": "Visitor2@2024",
+    {"role": "apartment", "email": "visitor2@srr.com", "password": "Visitor2@2024",
      "name": "Sunita Kumar", "flat_number": "B-202", "user_type": "visitor", "mobile": "9822222232"},
-    {"role": "vendor",    "email": "vendor3@sunriseresidency.com",  "password": "Vendor3@2024",
+    {"role": "vendor",    "email": "vendor3@srr.com",  "password": "Vendor3@2024",
       "business_name": "Electrical Experts", "name": "Manoj Tiwari", "service_type": "Electrical",
       "mobile": "9877100001", "service_description": "Licensed electricians, 24x7 emergency call-out", "pan_number": "ELECP1234A", "payee_type": "firm"},
-    {"role": "vendor",    "email": "vendor4@sunriseresidency.com",  "password": "Vendor4@2024",
+    {"role": "vendor",    "email": "vendor4@srr.com",  "password": "Vendor4@2024",
       "business_name": "WoodCraft Carpentry", "name": "Suresh Thakur", "service_type": "Carpentry",
       "mobile": "9877100002", "service_description": "Custom furniture repair and fittings", "pan_number": "WOODC5678B", "payee_type": "firm"},
-    {"role": "vendor",    "email": "vendor5@sunriseresidency.com",  "password": "Vendor5@2024",
+    {"role": "vendor",    "email": "vendor5@srr.com",  "password": "Vendor5@2024",
       "business_name": "ColorMax Painters", "name": "Anil Rawat", "service_type": "Painting",
       "mobile": "9877100003", "service_description": "Interior and exterior painting specialists", "pan_number": "COLOR9012C", "payee_type": "firm"},
-    {"role": "vendor",    "email": "vendor6@sunriseresidency.com",  "password": "Vendor6@2024",
+    {"role": "vendor",    "email": "vendor6@srr.com",  "password": "Vendor6@2024",
       "business_name": "PestFree Solutions", "name": "Ravi Kumar", "service_type": "Pest Control",
       "mobile": "9877100004", "service_description": "Odourless, eco-friendly pest control", "pan_number": "PESTF3456D", "payee_type": "firm"},
-    {"role": "vendor",    "email": "vendor7@sunriseresidency.com",  "password": "Vendor7@2024",
+    {"role": "vendor",    "email": "vendor7@srr.com",  "password": "Vendor7@2024",
       "business_name": "SparkleClean Services", "name": "Geeta Devi", "service_type": "Housekeeping",
       "mobile": "9877100005", "service_description": "Deep cleaning and daily housekeeping staff", "pan_number": "SPARK7890E", "payee_type": "firm"},
-    {"role": "vendor",    "email": "vendor8@sunriseresidency.com",  "password": "Vendor8@2024",
+    {"role": "vendor",    "email": "vendor8@srr.com",  "password": "Vendor8@2024",
       "business_name": "SecureTech Systems", "name": "Vikas Sharma", "service_type": "CCTV & Security",
       "mobile": "9877100006", "service_description": "CCTV installation and access-control systems", "pan_number": "SECUR1234F", "payee_type": "company"},
-    {"role": "vendor",    "email": "vendor9@sunriseresidency.com",  "password": "Vendor9@2024",
+    {"role": "vendor",    "email": "vendor9@srr.com",  "password": "Vendor9@2024",
       "business_name": "CoolAir HVAC", "name": "Rakesh Yadav", "service_type": "AC Repair",
       "mobile": "9877100007", "service_description": "AC servicing, repair and installation", "payee_type": "firm"},
-    {"role": "vendor",    "email": "vendor10@sunriseresidency.com", "password": "Vendor10@2024",
+    {"role": "vendor",    "email": "vendor10@srr.com", "password": "Vendor10@2024",
       "business_name": "LiftCare Elevators", "name": "Prakash Jain", "service_type": "Elevator Maintenance",
       "mobile": "9877100008", "service_description": "AMC and breakdown support for society lifts", "payee_type": "company"},
-    {"role": "vendor",    "email": "vendor11@sunriseresidency.com", "password": "Vendor11@2024",
+    {"role": "vendor",    "email": "vendor11@srr.com", "password": "Vendor11@2024",
       "business_name": "Royal Caterers", "name": "Suman Bhatia", "service_type": "Catering",
       "mobile": "9877100009", "service_description": "Event and festival catering services", "payee_type": "firm"},
-    {"role": "vendor",    "email": "vendor12@sunriseresidency.com", "password": "Vendor12@2024",
+    {"role": "vendor",    "email": "vendor12@srr.com", "password": "Vendor12@2024",
       "business_name": "GreenScape Landscaping", "name": "Vijay Rathi", "service_type": "Landscaping",
       "mobile": "9877100010", "service_description": "Garden upkeep and landscaping design", "payee_type": "firm"},
-    {"role": "security",  "email": "guard3@sunriseresidency.com",   "password": "Guard3@2024",
+    {"role": "security",  "email": "guard3@srr.com",   "password": "Guard3@2024",
      "name": "Mahesh Chand",  "shift": "evening", "salary": 125, "mobile": "9877200001"},
-    {"role": "security",  "email": "guard4@sunriseresidency.com",   "password": "Guard4@2024",
+    {"role": "security",  "email": "guard4@srr.com",   "password": "Guard4@2024",
      "name": "Devendra Kumar", "shift": "morning", "salary": 120, "mobile": "9877200002"},
-    {"role": "security",  "email": "guard5@sunriseresidency.com",   "password": "Guard5@2024",
+    {"role": "security",  "email": "guard5@srr.com",   "password": "Guard5@2024",
      "name": "Suraj Pal",     "shift": "night",   "salary": 135, "mobile": "9877200003"},
-    {"role": "security",  "email": "guard6@sunriseresidency.com",   "password": "Guard6@2024",
+    {"role": "security",  "email": "guard6@srr.com",   "password": "Guard6@2024",
      "name": "Naresh Kumar",  "shift": "evening", "salary": 128, "mobile": "9877200004"},
-    {"role": "security",  "email": "guard7@sunriseresidency.com",   "password": "Guard7@2024",
+    {"role": "security",  "email": "guard7@srr.com",   "password": "Guard7@2024",
      "name": "Bhola Nath",    "shift": "morning", "salary": 122, "mobile": "9877200005"},
-    {"role": "security",  "email": "guard8@sunriseresidency.com",   "password": "Guard8@2024",
+    {"role": "security",  "email": "guard8@srr.com",   "password": "Guard8@2024",
      "name": "Chandan Singh", "shift": "night",   "salary": 140, "mobile": "9877200006"},
-    {"role": "security",  "email": "guard9@sunriseresidency.com",   "password": "Guard9@2024",
+    {"role": "security",  "email": "guard9@srr.com",   "password": "Guard9@2024",
      "name": "Ajay Prasad",   "shift": "evening", "salary": 126, "mobile": "9877200007"},
-    {"role": "security",  "email": "guard10@sunriseresidency.com",  "password": "Guard10@2024",
+    {"role": "security",  "email": "guard10@srr.com",  "password": "Guard10@2024",
      "name": "Vinod Kumar",   "shift": "morning", "salary": 121, "mobile": "9877200008"},
-    {"role": "security",  "email": "guard11@sunriseresidency.com",  "password": "Guard11@2024",
+    {"role": "security",  "email": "guard11@srr.com",  "password": "Guard11@2024",
      "name": "Sanjay Tiwari", "shift": "night",   "salary": 138, "mobile": "9877200009"},
-    {"role": "security",  "email": "guard12@sunriseresidency.com",  "password": "Guard12@2024",
+    {"role": "security",  "email": "guard12@srr.com",  "password": "Guard12@2024",
      "name": "Om Prakash",    "shift": "evening", "salary": 124, "mobile": "9877200010"},
 ]
 
@@ -606,23 +606,23 @@ _COMMITTEE = [
 
 USERS += [
     # The Secretary is the person already named on the society record (SOCIETY["secretary_*"]).
-    _office_owner("president@sunriseresidency.com", "President@2024", "Dr. Anil Mathur", "C-101", 1400,
+    _office_owner("president@srr.com", "President@2024", "Dr. Anil Mathur", "C-101", 1400,
                   "9878000001", "president"),
     _office_owner(SOCIETY["secretary_email"], "Secretary@2024", SOCIETY["secretary_name"], "C-102", 1200,
                   "9878000002", "secretary"),
 ] + [
-    _office_owner(f"committee{i}@sunriseresidency.com", f"Committee{i}@2024", name, f"C-{102 + i}", size,
+    _office_owner(f"committee{i}@srr.com", f"Committee{i}@2024", name, f"C-{102 + i}", size,
                   str(9878000002 + i), "working_committee_member")
     for i, (name, size) in enumerate(_COMMITTEE, start=1)
 ] + [
     # Society employees: each logs in to its own portal (users.role). They are not residents, so no linked_id.
-    {"role": "accountant", "email": "accountant@sunriseresidency.com", "password": "Accountant@2024",
+    {"role": "accountant", "email": "accountant@srr.com", "password": "Accountant@2024",
      "name": "Sanjay Verma", "rbac_role": "accountant"},
-    {"role": "auditor",    "email": "auditor@sunriseresidency.com",    "password": "Auditor@2024",
+    {"role": "auditor",    "email": "auditor@srr.com",    "password": "Auditor@2024",
      "name": "CA Meenakshi Rao"},
-    {"role": "supervisor", "email": "supervisor@sunriseresidency.com", "password": "Supervisor@2024",
+    {"role": "supervisor", "email": "supervisor@srr.com", "password": "Supervisor@2024",
      "name": "Dinesh Pandey"},
-    {"role": "staff",      "email": "staff@sunriseresidency.com",      "password": "Staff@2024",
+    {"role": "staff",      "email": "staff@srr.com",      "password": "Staff@2024",
      "name": "Kamla Devi"},
 ]
 
@@ -877,8 +877,8 @@ POLLS = [
         "description": "Help the committee pick the best day for this year's Diwali stalls and rangoli competition.",
         "choices": ["Saturday", "Sunday", "A weekday evening"],
         "status": "active",
-        "voters": ["owner1@sunriseresidency.com", "owner2@sunriseresidency.com",
-                   "owner4@sunriseresidency.com"],
+        "voters": ["owner1@srr.com", "owner2@srr.com",
+                   "owner4@srr.com"],
         "vote_choices": [1, 2, 1],
     },
     {
@@ -886,9 +886,9 @@ POLLS = [
         "description": "Committee is evaluating a one-time capex against long-term electricity savings.",
         "choices": ["Yes", "No"],
         "status": "results_declared",
-        "voters": ["owner1@sunriseresidency.com", "owner2@sunriseresidency.com",
-                   "owner3@sunriseresidency.com", "owner4@sunriseresidency.com",
-                   "owner5@sunriseresidency.com"],
+        "voters": ["owner1@srr.com", "owner2@srr.com",
+                   "owner3@srr.com", "owner4@srr.com",
+                   "owner5@srr.com"],
         "vote_choices": [1, 1, 2, 1, 1],
     },
 ]
@@ -3069,18 +3069,18 @@ def _run_seed_unguarded(conn):
 
     seed_master_admin(cur, conn)
     users = seed_users(cur, conn, society_id)
-    seed_office_bearers(cur, conn, society_id, users, users["admin@sunriseresidency.com"]["user_id"])
+    seed_office_bearers(cur, conn, society_id, users, users["admin@srr.com"]["user_id"])
     seed_rbac_roles(cur, conn)
     cur.execute("SELECT fn_backfill_undivided_interest(%s)", (society_id,))   # Act s.5(2): area share until the Declaration % is entered
     conn.commit()
 
-    admin_uid = users["admin@sunriseresidency.com"]["user_id"]
-    apt1_id = users["owner1@sunriseresidency.com"]["linked_id"]
-    apt2_id = users["owner3@sunriseresidency.com"]["linked_id"]
-    security_uid_1 = users["guard1@sunriseresidency.com"]["user_id"]
-    security_lid_1 = users["guard1@sunriseresidency.com"]["linked_id"]
-    security_uid_2 = users["guard2@sunriseresidency.com"]["user_id"]
-    security_lid_2 = users["guard2@sunriseresidency.com"]["linked_id"]
+    admin_uid = users["admin@srr.com"]["user_id"]
+    apt1_id = users["owner1@srr.com"]["linked_id"]
+    apt2_id = users["owner3@srr.com"]["linked_id"]
+    security_uid_1 = users["guard1@srr.com"]["user_id"]
+    security_lid_1 = users["guard1@srr.com"]["linked_id"]
+    security_uid_2 = users["guard2@srr.com"]["user_id"]
+    security_lid_2 = users["guard2@srr.com"]["linked_id"]
 
     seed_brought_forward(cur, conn, society_id, admin_uid)
     seed_primary_bank_account(cur, conn, society_id)
@@ -3145,8 +3145,8 @@ def seed_up_aoa_compliance_data(cur, conn, society_id, admin_uid, apt1_id, apt2_
     # First two owners already admitted; mark their entrance fee and share capital as paid.
     # The names are those of the flats' actual owners in USERS (they were previously two unrelated names).
     _owner = {u["email"]: u["name"] for u in USERS}
-    for apt_id, owner_name in [(apt1_id, _owner["owner1@sunriseresidency.com"]),
-                               (apt2_id, _owner["owner3@sunriseresidency.com"])]:
+    for apt_id, owner_name in [(apt1_id, _owner["owner1@srr.com"]),
+                               (apt2_id, _owner["owner3@srr.com"])]:
         cur.execute(
             """INSERT INTO owner_admissions (society_id, apartment_id, admission_date, owner_name,
                entrance_fee, entrance_fee_paid, share_count, share_face_value, share_paid, created_by)

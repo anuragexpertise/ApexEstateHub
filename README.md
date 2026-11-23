@@ -140,16 +140,16 @@ gunicorn wsgi:server --workers 2 --threads 8 --timeout 120 --bind 0.0.0.0:8050
 | Login | Password | Lands on |
 |---|---|---|
 | `master@estatehub.com` | `Master@2024` | Master Admin |
-| `admin@sunriseresidency.com` | `Admin@2024` | Admin portal |
-| `owner1@sunriseresidency.com` | `Owner1@2024` | Owner portal |
-| `vendor1@sunriseresidency.com` | `Vendor1@2024` | Vendor portal |
-| `guard1@sunriseresidency.com` | `Guard1@2024` | Security portal |
-| `accountant@sunriseresidency.com` | `Accountant@2024` | Accountant portal |
-| `supervisor@sunriseresidency.com` | `Supervisor@2024` | Supervisor portal |
-| `staff@sunriseresidency.com` | `Staff@2024` | Staff portal |
-| `auditor@sunriseresidency.com` | `Auditor@2024` | Auditor portal |
-| `president@sunriseresidency.com` | `President@2024` | Owner portal + committee powers |
-| `secretary@sunriseresidency.com` | `Secretary@2024` | Owner portal + committee powers |
+| `admin@srr.com` | `Admin@2024` | Admin portal |
+| `owner1@srr.com` | `Owner1@2024` | Owner portal |
+| `vendor1@srr.com` | `Vendor1@2024` | Vendor portal |
+| `guard1@srr.com` | `Guard1@2024` | Security portal |
+| `accountant@srr.com` | `Accountant@2024` | Accountant portal |
+| `supervisor@srr.com` | `Supervisor@2024` | Supervisor portal |
+| `staff@srr.com` | `Staff@2024` | Staff portal |
+| `auditor@srr.com` | `Auditor@2024` | Auditor portal |
+| `president@srr.com` | `President@2024` | Owner portal + committee powers |
+| `secretary@srr.com` | `Secretary@2024` | Owner portal + committee powers |
 
 These are demo credentials for a seeded development database. Change or remove
 them before exposing any environment; the seed also uses `Setup@2024` as the
@@ -2672,7 +2672,7 @@ rather than duplicating them (and does **not** update rows that already exist).
 | Entity | Approx. count | Notes |
 |---|---|---|
 | Master admin | 1 | `master@estatehub.com` |
-| Society admin | 1 | `admin@sunriseresidency.com` |
+| Society admin | 1 | `admin@srr.com` |
 | Apartment owners | 21 | 9 original owners plus the 12 office-bearers' flats (C-101…C-112) |
 | Managing Committee | 12 | President, Secretary and 10 working members, each holding a flat via `committee_offices` and an RBAC role; the admin keeps the treasurer post until a Treasurer is elected |
 | Society employees | 4 | `accountant@`, `auditor@`, `supervisor@`, `staff@` — team logins, each routed to its portal |
