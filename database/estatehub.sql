@@ -6209,6 +6209,30 @@ BEGIN
     v_bank_acc := fn_resolve_bank_leg(v_society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
+    -- The receipt is the voucher's source document, so it has to exist BEFORE
+    -- any leg is posted. An all-cash voucher has no Cash-in-Hand leg, so the
+    -- ledger trigger (fn_journal_balance_problem) checks the cash that moved
+    -- against the amount on the document the legs cite. This function used to
+    -- cite the OLDEST bill settled (receivables.id) while posting the whole
+    -- payment under it: paying 8 bills of 3,600 in cash moved 28,800 against a
+    -- 3,600 document and the commit was refused. One receipt for the full
+    -- amount received is the document that actually matches the cash.
+    -- (Self-pay confirm passes the owner's pending receipt in as p_source_id.)
+    IF p_source_table = 'receipts' AND p_source_id IS NOT NULL THEN
+        v_receipt_id := p_source_id;
+    ELSE
+        INSERT INTO receipts (
+            society_id, user_id, entity_id, role, receipt_date, acc_id,
+            particulars, amount, mode, status, created_by, confirmed_by, confirmed_at
+        ) VALUES (
+            v_society_id, p_confirmed_by, p_apartment_id, 'apartment', CURRENT_DATE, NULL,
+            COALESCE(p_particulars, 'Maintenance Payment'),
+            p_amount, p_mode, 'confirmed', p_confirmed_by, p_confirmed_by, NOW()
+        ) RETURNING id INTO v_receipt_id;
+        p_source_table := 'receipts';   -- every leg below cites the receipt, not a bill
+        p_source_id    := v_receipt_id;
+    END IF;
+
     FOR rec IN
         SELECT id, amount, paid_amount, paid_principal, base_amount,
                interest_amount, interest_acc_id, acc_id, confirmed_by
@@ -6345,26 +6369,7 @@ BEGIN
         );
     END IF;
 
-    -- Receipt of record for this payment, for print/save/email. When
-    -- confirming a pre-existing self-reported receipt (p_source_table=
-    -- 'receipts', p_source_id set), that receipt already exists and the
-    -- caller (fn_confirm_apartment_self_payment) marks it confirmed itself
-    -- — don't create a duplicate. Otherwise (the admin-direct path, no
-    -- pre-existing receipt) create one now; this function previously never
-    -- created any receipts record for admin-direct FIFO payments, so there
-    -- was nothing to open/print/email afterward.
-    IF p_source_table = 'receipts' AND p_source_id IS NOT NULL THEN
-        v_receipt_id := p_source_id;
-    ELSE
-        INSERT INTO receipts (
-            society_id, user_id, entity_id, role, receipt_date, acc_id,
-            particulars, amount, mode, status, created_by, confirmed_by, confirmed_at
-        ) VALUES (
-            v_society_id, p_confirmed_by, p_apartment_id, 'apartment', CURRENT_DATE, NULL,
-            COALESCE(p_particulars, 'Maintenance Payment'),
-            p_amount, p_mode, 'confirmed', p_confirmed_by, p_confirmed_by, NOW()
-        ) RETURNING id INTO v_receipt_id;
-    END IF;
+    -- (The receipt of record was created before the legs, above: it is the voucher's source document.)
 
     RETURN QUERY SELECT v_first_trx_id,
         (p_amount - v_remaining)::NUMERIC(15,2),
@@ -6552,6 +6557,25 @@ BEGIN
     v_bank_acc := fn_resolve_bank_leg(v_society_id, p_mode);
     v_journal_id := NEXTVAL('seq_transaction_number');
 
+    -- Receipt first, as the voucher's source document — see the note in
+    -- fn_apply_apartment_dues_fifo_core. Citing the first selected bill made
+    -- any all-cash selective payment spanning more than one bill (or paying
+    -- more than the first bill) fail the cash-vs-document check at commit.
+    IF p_source_table = 'receipts' AND p_source_id IS NOT NULL THEN
+        v_receipt_id := p_source_id;
+    ELSE
+        INSERT INTO receipts (
+            society_id, user_id, entity_id, role, receipt_date, acc_id,
+            particulars, amount, mode, status, created_by, confirmed_by, confirmed_at
+        ) VALUES (
+            v_society_id, p_confirmed_by, p_apartment_id, 'apartment', CURRENT_DATE, NULL,
+            COALESCE(p_particulars, 'Selective Maintenance Payment'),
+            p_amount, p_mode, 'confirmed', p_confirmed_by, p_confirmed_by, NOW()
+        ) RETURNING id INTO v_receipt_id;
+        p_source_table := 'receipts';   -- every leg below cites the receipt, not a bill
+        p_source_id    := v_receipt_id;
+    END IF;
+
     FOR rec IN
         SELECT id, amount, paid_amount, paid_principal, base_amount,
                interest_amount, interest_acc_id, acc_id, confirmed_by
@@ -6664,19 +6688,6 @@ BEGIN
             'Advance Credit (Selective)', v_remaining, v_remaining, 0, 0,
             'credit', p_confirmed_by, NOW(), NOW()
         );
-    END IF;
-
-    IF p_source_table = 'receipts' AND p_source_id IS NOT NULL THEN
-        v_receipt_id := p_source_id;
-    ELSE
-        INSERT INTO receipts (
-            society_id, user_id, entity_id, role, receipt_date, acc_id,
-            particulars, amount, mode, status, created_by, confirmed_by, confirmed_at
-        ) VALUES (
-            v_society_id, p_confirmed_by, p_apartment_id, 'apartment', CURRENT_DATE, NULL,
-            COALESCE(p_particulars, 'Selective Maintenance Payment'),
-            p_amount, p_mode, 'confirmed', p_confirmed_by, p_confirmed_by, NOW()
-        ) RETURNING id INTO v_receipt_id;
     END IF;
 
     RETURN QUERY SELECT v_first_trx_id,

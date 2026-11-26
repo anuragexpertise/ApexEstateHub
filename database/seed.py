@@ -2567,10 +2567,17 @@ def _redate_postings_since(cur, conn, society_id: int, trx_mark: int, rcp_mark: 
         "UPDATE transactions SET trx_date = %s WHERE society_id = %s AND id > %s AND trx_date > %s",
         (SEED_CUTOFF_DATE, society_id, trx_mark, SEED_CUTOFF_DATE),
     )
-    cur.execute(
-        "UPDATE receipts SET receipt_date = %s WHERE society_id = %s AND id > %s AND receipt_date > %s",
-        (SEED_CUTOFF_DATE, society_id, rcp_mark, SEED_CUTOFF_DATE),
-    )
+    # The Pay Dues functions create the receipt BEFORE posting the legs (it is the
+    # voucher's source document), so by now trg_receipts_source_guard has frozen
+    # receipt_date. Demo data only: suspend that guard for this one backdating.
+    cur.execute("ALTER TABLE receipts DISABLE TRIGGER trg_receipts_source_guard")
+    try:
+        cur.execute(
+            "UPDATE receipts SET receipt_date = %s WHERE society_id = %s AND id > %s AND receipt_date > %s",
+            (SEED_CUTOFF_DATE, society_id, rcp_mark, SEED_CUTOFF_DATE),
+        )
+    finally:
+        cur.execute("ALTER TABLE receipts ENABLE TRIGGER trg_receipts_source_guard")
     conn.commit()
 
 
